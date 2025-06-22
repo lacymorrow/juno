@@ -4,11 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 
-use crate::agent::structs::{
-    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
-};
-use crate::agent::traits::AgentBrain;
 use crate::agent::providers::factory::model_ids;
+use crate::agent::structs::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::traits::AgentBrain;
 
 // --- OpenAI API Structs --- //
 
@@ -62,7 +60,7 @@ struct OpenAIToolFunction {
     parameters: Value,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct OpenAIResponse {
     #[allow(dead_code)]
     id: String,
@@ -76,7 +74,7 @@ struct OpenAIResponse {
     // usage: OpenAIUsage,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct OpenAIChoice {
     #[allow(dead_code)]
     index: u32,
@@ -102,6 +100,7 @@ pub struct OpenAIBrain {
 }
 
 impl OpenAIBrain {
+    /// Creates a new OpenAI brain with optional configuration.
     pub fn new(
         api_key: String,
         model: Option<String>,
@@ -119,14 +118,71 @@ impl OpenAIBrain {
 
     /// Creates a new OpenAIBrain using the API key from the environment variables.
     pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("OPENAI_API_KEY")
-            .map_err(|_| AgentError::ConfigurationError("OPENAI_API_KEY environment variable not set".to_string()))?;
+        let api_key = env::var("OPENAI_API_KEY").map_err(|_| {
+            AgentError::ConfigurationError(
+                "OPENAI_API_KEY environment variable not set".to_string(),
+            )
+        })?;
 
         let model = env::var("OPENAI_MODEL").ok();
-        let max_tokens = env::var("OPENAI_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-        let temperature = env::var("OPENAI_TEMPERATURE").ok().and_then(|s| s.parse::<f32>().ok());
+        let max_tokens = env::var("OPENAI_MAX_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok());
+        let temperature = env::var("OPENAI_TEMPERATURE")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok());
 
         Self::new(api_key, model, max_tokens, temperature)
+    }
+
+    /// Sanitize log content by removing or truncating base64 data to prevent console spam
+    fn sanitize_for_logging(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::String(s) => {
+                // Check if this looks like base64 data (long string with base64 characters)
+                if s.len() > 100
+                    && s.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+                {
+                    // Truncate base64 data and add indication it was truncated
+                    serde_json::Value::String(format!(
+                        "{}...[BASE64_DATA_TRUNCATED_{}bytes]",
+                        &s[..std::cmp::min(50, s.len())],
+                        s.len()
+                    ))
+                } else {
+                    serde_json::Value::String(s.clone())
+                }
+            }
+            serde_json::Value::Object(obj) => {
+                let mut sanitized = serde_json::Map::new();
+                for (key, val) in obj {
+                    sanitized.insert(key.clone(), Self::sanitize_for_logging(val));
+                }
+                serde_json::Value::Object(sanitized)
+            }
+            serde_json::Value::Array(arr) => {
+                let sanitized: Vec<_> = arr.iter().map(Self::sanitize_for_logging).collect();
+                serde_json::Value::Array(sanitized)
+            }
+            _ => value.clone(),
+        }
+    }
+
+    /// Sanitize API request/response structures for logging
+    fn sanitize_request_for_logging(request: &OpenAIRequest) -> serde_json::Value {
+        match serde_json::to_value(request) {
+            Ok(value) => Self::sanitize_for_logging(&value),
+            Err(_) => serde_json::Value::String("[SERIALIZATION_ERROR]".to_string()),
+        }
+    }
+
+    /// Sanitize API response structures for logging
+    fn sanitize_response_for_logging(response: &OpenAIResponse) -> serde_json::Value {
+        match serde_json::to_value(response) {
+            Ok(value) => Self::sanitize_for_logging(&value),
+            Err(_) => serde_json::Value::String("[SERIALIZATION_ERROR]".to_string()),
+        }
     }
 
     // Helper to convert our internal Message format to OpenAI's format
@@ -143,8 +199,9 @@ impl OpenAIBrain {
             let mut openai_calls = Vec::new();
             for call in calls {
                 // Convert input JSON to string for OpenAI
-                let arguments = serde_json::to_string(&call.input)
-                    .map_err(|e| AgentError::LlmError(format!("Failed to serialize tool call arguments: {}", e)))?;
+                let arguments = serde_json::to_string(&call.input).map_err(|e| {
+                    AgentError::LlmError(format!("Failed to serialize tool call arguments: {}", e))
+                })?;
 
                 openai_calls.push(OpenAIToolCall {
                     id: call.id.clone(),
@@ -162,7 +219,11 @@ impl OpenAIBrain {
 
         Ok(OpenAIMessage {
             role: role.to_string(),
-            content: if message.content.is_empty() { None } else { Some(message.content.clone()) },
+            content: if message.content.is_empty() {
+                None
+            } else {
+                Some(message.content.clone())
+            },
             tool_calls,
             tool_call_id: message.tool_call_id.clone(),
             name: message.name.clone(),
@@ -217,13 +278,14 @@ impl AgentBrain for OpenAIBrain {
         };
 
         // Log request for debugging
-        match serde_json::to_string_pretty(&request) {
+        match serde_json::to_string_pretty(&Self::sanitize_request_for_logging(&request)) {
             Ok(json) => log::debug!("OpenAI request: {}", json),
             Err(e) => log::error!("Failed to serialize OpenAI request: {}", e),
         }
 
         // Make the API call to OpenAI
-        let response = self.client
+        let response = self
+            .client
             .post(OPENAI_API_URL)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -235,12 +297,14 @@ impl AgentBrain for OpenAIBrain {
         // Check for HTTP errors
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
             log::error!("OpenAI API Error: Status {}, Body: {}", status, error_body);
             return Err(AgentError::LlmError(format!(
                 "OpenAI API returned error {}: {}",
-                status,
-                error_body
+                status, error_body
             )));
         }
 
@@ -250,10 +314,15 @@ impl AgentBrain for OpenAIBrain {
             .await
             .map_err(|e| AgentError::LlmError(format!("Failed to parse API response: {}", e)))?;
 
-        log::debug!("Received response from OpenAI: {:?}", response_body);
+        log::debug!(
+            "Received response from OpenAI: {:?}",
+            Self::sanitize_response_for_logging(&response_body)
+        );
 
         if response_body.choices.is_empty() {
-            return Err(AgentError::LlmError("OpenAI returned empty choices array".to_string()));
+            return Err(AgentError::LlmError(
+                "OpenAI returned empty choices array".to_string(),
+            ));
         }
 
         // Process the first choice (typically there's only one)
@@ -275,7 +344,11 @@ impl AgentBrain for OpenAIBrain {
                     let input: Value = match serde_json::from_str(&tool_call.function.arguments) {
                         Ok(json) => json,
                         Err(e) => {
-                            log::warn!("Failed to parse tool arguments: {}, args: {}", e, tool_call.function.arguments);
+                            log::warn!(
+                                "Failed to parse tool arguments: {}, args: {}",
+                                e,
+                                tool_call.function.arguments
+                            );
                             continue;
                         }
                     };
@@ -295,12 +368,12 @@ impl AgentBrain for OpenAIBrain {
 
         // If no tool calls, return the message content as a text response
         match &message.content {
-            Some(content) if !content.is_empty() => {
-                Ok(AgentAction::Finish(content.clone()))
-            }
+            Some(content) if !content.is_empty() => Ok(AgentAction::Finish(content.clone())),
             _ => {
                 log::warn!("OpenAI response had no content");
-                Err(AgentError::LlmError("OpenAI response had no content".to_string()))
+                Err(AgentError::LlmError(
+                    "OpenAI response had no content".to_string(),
+                ))
             }
         }
     }

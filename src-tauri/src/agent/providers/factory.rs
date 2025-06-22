@@ -461,7 +461,7 @@ impl BrainFactory {
                     memory_impl,
                     local_tool_provider,
                     brain,
-                    15, // max_steps
+                    crate::constants::agent::config::MAX_ITERATIONS, // max_steps
                     app_handle.ok_or("AppHandle required for single agent")?,
                 );
 

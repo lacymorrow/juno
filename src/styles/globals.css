@@ -587,3 +587,37 @@
 .panel-mode-transition * {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
+
+/* Agent continuation toast styling */
+.agent-continuation-toast {
+  @apply border-l-4 border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/20;
+  @apply shadow-lg ring-1 ring-yellow-200 dark:ring-yellow-800;
+}
+
+.agent-continuation-toast [data-title] {
+  @apply text-yellow-800 dark:text-yellow-200 font-semibold;
+}
+
+.agent-continuation-toast [data-description] {
+  @apply text-yellow-700 dark:text-yellow-300;
+}
+
+.agent-continuation-toast [data-button] {
+  @apply bg-yellow-600 hover:bg-yellow-700 text-white;
+  @apply transition-colors duration-200;
+}
+
+/* Thinking notification styling */
+.thinking-notification {
+  @apply border-l-4 border-l-blue-500 bg-blue-50 dark:bg-blue-900/20;
+}
+
+/* Screenshot notification styling */
+.screenshot-notification {
+  @apply border-l-4 border-l-green-500 bg-green-50 dark:bg-green-900/20;
+}
+
+/* Generic content notification styling */
+.generic-content-notification {
+  @apply border-l-4 border-l-gray-500 bg-gray-50 dark:bg-gray-900/20;
+}

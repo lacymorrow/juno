@@ -1,26 +1,29 @@
+use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex as TokioMutex, mpsc};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::{mpsc, Mutex as TokioMutex};
 use tokio::time;
-use tokio_tungstenite::{connect_async, WebSocketStream, MaybeTlsStream};
-use tokio_tungstenite::tungstenite::{Message, protocol::CloseFrame};
-use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::{protocol::CloseFrame, Message};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tracing::{debug, error, info, warn};
 use url::Url;
-use tracing::{info, warn, error, debug};
-use tauri::{AppHandle, Manager, Emitter};
 
-use super::types::{
-    CloudError, CloudCommand, DeviceResponse, DeviceStatus, AuthResponse,
-    WebSocketMessage, MessageType, ConnectionState, HardwareInfo, DeviceState, SystemInfo
-};
-use super::config::CloudConfig;
 use super::auth::DeviceAuth;
-use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
+use super::config::CloudConfig;
+use super::security::CloudSecurity;
+use super::types::{
+    AuthResponse, CloudCommand, CloudError, ConnectionState, DeviceResponse, DeviceState,
+    DeviceStatus, HardwareInfo, MessageType, SystemInfo, WebSocketMessage,
+};
 use crate::constants::permissions;
 
 #[allow(dead_code)]
-type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
+type WsSender = futures_util::stream::SplitSink<
+    WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    Message,
+>;
 
 /// Cloud client for WebSocket communication
 #[derive(Debug)]
@@ -111,15 +114,21 @@ impl CloudClient {
                 Ok(()) => {
                     info!("Cloud connection ended normally");
                     break;
-                },
+                }
                 Err(e) => {
                     error!("Cloud connection error: {}", e);
-                    self.set_connection_state(ConnectionState::Error(e.to_string())).await;
+                    self.set_connection_state(ConnectionState::Error(e.to_string()))
+                        .await;
 
                     // Exponential backoff with max limit
                     info!("Retrying connection in {:?}", retry_interval);
                     time::sleep(retry_interval).await;
-                    retry_interval = std::cmp::min(retry_interval * 2, Duration::from_secs(300));
+                    retry_interval = std::cmp::min(
+                        retry_interval * 2,
+                        Duration::from_secs(
+                            crate::constants::agent::config::DEFAULT_TASK_TIMEOUT_SECONDS,
+                        ),
+                    );
                 }
             }
         }
@@ -136,8 +145,9 @@ impl CloudClient {
             .map_err(|e| CloudError::ConfigError(format!("Invalid server URL: {}", e)))?;
 
         // Connect to WebSocket
-        let (ws_stream, _) = connect_async(&url).await
-            .map_err(|e| CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e)))?;
+        let (ws_stream, _) = connect_async(&url).await.map_err(|e| {
+            CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e))
+        })?;
 
         info!("WebSocket connected successfully");
         self.set_connection_state(ConnectionState::Connected).await;
@@ -147,7 +157,10 @@ impl CloudClient {
     }
 
     #[allow(dead_code)]
-    async fn handle_websocket(&self, ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Result<(), CloudError> {
+    async fn handle_websocket(
+        &self,
+        ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    ) -> Result<(), CloudError> {
         let (ws_sender, mut ws_receiver) = ws_stream.split();
         let ws_sender = Arc::new(TokioMutex::new(ws_sender));
 
@@ -161,7 +174,9 @@ impl CloudClient {
         let heartbeat_handle = {
             let sender = ws_sender.clone();
             tokio::spawn(async move {
-                let mut heartbeat_timer = time::interval(Duration::from_secs(30));
+                let mut heartbeat_timer = time::interval(Duration::from_secs(
+                    crate::constants::timeouts::CLOUD_HEARTBEAT_INTERVAL_SECONDS,
+                ));
                 loop {
                     heartbeat_timer.tick().await;
 
@@ -170,12 +185,19 @@ impl CloudClient {
                         data: serde_json::json!({
                             "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
                         }),
-                        timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        timestamp: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
                     };
 
                     if let Ok(message_json) = serde_json::to_string(&heartbeat) {
                         let mut sender_guard = sender.lock().await;
-                        if sender_guard.send(Message::Text(message_json)).await.is_err() {
+                        if sender_guard
+                            .send(Message::Text(message_json))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -188,7 +210,9 @@ impl CloudClient {
             let sender = ws_sender.clone();
             let client = self.clone_for_task();
             tokio::spawn(async move {
-                let mut status_timer = time::interval(Duration::from_secs(30));
+                let mut status_timer = time::interval(Duration::from_secs(
+                    crate::constants::timeouts::CLOUD_STATUS_INTERVAL_SECONDS,
+                ));
                 loop {
                     status_timer.tick().await;
 
@@ -196,12 +220,19 @@ impl CloudClient {
                         let status_message = WebSocketMessage {
                             message_type: MessageType::Status,
                             data: serde_json::to_value(status).unwrap_or_default(),
-                            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                            timestamp: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
                         };
 
                         if let Ok(message_json) = serde_json::to_string(&status_message) {
                             let mut sender_guard = sender.lock().await;
-                            if sender_guard.send(Message::Text(message_json)).await.is_err() {
+                            if sender_guard
+                                .send(Message::Text(message_json))
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -253,10 +284,14 @@ impl CloudClient {
         status_handle.abort();
 
         // Send close frame
-        let _ = ws_sender.lock().await.send(Message::Close(Some(CloseFrame {
-            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
-            reason: "Client shutdown".into(),
-        }))).await;
+        let _ = ws_sender
+            .lock()
+            .await
+            .send(Message::Close(Some(CloseFrame {
+                code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+                reason: "Client shutdown".into(),
+            })))
+            .await;
 
         Ok(())
     }
@@ -269,23 +304,33 @@ impl CloudClient {
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         };
 
         let message_json = serde_json::to_string(&auth_message)?;
-        ws_sender.send(Message::Text(message_json)).await
+        ws_sender
+            .send(Message::Text(message_json))
+            .await
             .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
 
         // Note: Auth response validation not implemented yet
         // For now, assume authentication succeeds
-        self.set_connection_state(ConnectionState::Authenticated).await;
+        self.set_connection_state(ConnectionState::Authenticated)
+            .await;
         info!("Authentication completed");
 
         Ok(())
     }
 
     #[allow(dead_code)]
-    async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
+    async fn handle_message(
+        &self,
+        text: String,
+        ws_sender: Arc<TokioMutex<WsSender>>,
+    ) -> Result<(), CloudError> {
         debug!("Received message: {}", text);
 
         let message: WebSocketMessage = serde_json::from_str(&text)?;
@@ -294,11 +339,11 @@ impl CloudClient {
             MessageType::Command => {
                 let command: CloudCommand = serde_json::from_value(message.data)?;
                 self.handle_command(command, ws_sender.clone()).await?;
-            },
+            }
             MessageType::Auth => {
                 let auth_response: AuthResponse = serde_json::from_value(message.data)?;
                 self.handle_auth_response(auth_response).await?;
-            },
+            }
             MessageType::Heartbeat => {
                 // Respond to heartbeat
                 let response = WebSocketMessage {
@@ -307,19 +352,33 @@ impl CloudClient {
                         "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                         "response": true
                     }),
-                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
                 };
 
                 let response_json = serde_json::to_string(&response)?;
-                ws_sender.lock().await.send(Message::Text(response_json)).await
-                    .map_err(|e| CloudError::NetworkError(format!("Failed to send heartbeat response: {}", e)))?;
-            },
+                ws_sender
+                    .lock()
+                    .await
+                    .send(Message::Text(response_json))
+                    .await
+                    .map_err(|e| {
+                        CloudError::NetworkError(format!(
+                            "Failed to send heartbeat response: {}",
+                            e
+                        ))
+                    })?;
+            }
             MessageType::Error => {
-                let error_msg = message.data.get("message")
+                let error_msg = message
+                    .data
+                    .get("message")
                     .and_then(|m| m.as_str())
                     .unwrap_or("Unknown error");
                 error!("Received error from server: {}", error_msg);
-            },
+            }
             _ => {
                 debug!("Unhandled message type: {:?}", message.message_type);
             }
@@ -329,7 +388,11 @@ impl CloudClient {
     }
 
     #[allow(dead_code)]
-    async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
+    async fn handle_command(
+        &self,
+        command: CloudCommand,
+        ws_sender: Arc<TokioMutex<WsSender>>,
+    ) -> Result<(), CloudError> {
         info!("Processing command from cloud: {}", command.id);
 
         // Process the command
@@ -339,11 +402,18 @@ impl CloudClient {
         let response_message = WebSocketMessage {
             message_type: MessageType::Response,
             data: serde_json::to_value(response)?,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         };
 
         let response_json = serde_json::to_string(&response_message)?;
-        ws_sender.lock().await.send(Message::Text(response_json)).await
+        ws_sender
+            .lock()
+            .await
+            .send(Message::Text(response_json))
+            .await
             .map_err(|e| CloudError::NetworkError(format!("Failed to send response: {}", e)))?;
 
         Ok(())
@@ -351,13 +421,19 @@ impl CloudClient {
 
     #[allow(dead_code)]
     async fn handle_auth_response(&self, response: AuthResponse) -> Result<(), CloudError> {
-        info!("Received authentication response: success={}", response.success);
+        info!(
+            "Received authentication response: success={}",
+            response.success
+        );
 
         if response.success {
-            self.set_connection_state(ConnectionState::Authenticated).await;
+            self.set_connection_state(ConnectionState::Authenticated)
+                .await;
             // Note: Auth credential storage not implemented yet
         } else {
-            let error_msg = response.error.unwrap_or_else(|| "Authentication failed".to_string());
+            let error_msg = response
+                .error
+                .unwrap_or_else(|| "Authentication failed".to_string());
             error!("Authentication failed: {}", error_msg);
             return Err(CloudError::AuthenticationFailed(error_msg));
         }
@@ -369,7 +445,9 @@ impl CloudClient {
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
         let _app_state = self.app_handle.state::<crate::state::AppState>();
 
-        let device_id = self.auth.get_credentials()
+        let device_id = self
+            .auth
+            .get_credentials()
             .map(|c| c.device_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -380,12 +458,18 @@ impl CloudClient {
             system_info: SystemInfo {
                 platform: std::env::consts::OS.to_string(),
                 permissions: self.get_permission_status().await,
-                agent_mode: format!("{:?}", crate::agent::providers::factory::BrainFactory::get_agent_mode()),
+                agent_mode: format!(
+                    "{:?}",
+                    crate::agent::providers::factory::BrainFactory::get_agent_mode()
+                ),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         };
 
         Ok(status)
@@ -458,7 +542,10 @@ impl CloudClient {
 
         log::debug!(
             "📊 Hardware metrics - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%, Screen: {:?}",
-            cpu_usage, memory_usage, disk_usage, screen_resolution
+            cpu_usage,
+            memory_usage,
+            disk_usage,
+            screen_resolution
         );
 
         HardwareInfo {
@@ -475,14 +562,11 @@ impl CloudClient {
         {
             use std::process::Command;
 
-            match Command::new("top")
-                .args(&["-l", "1", "-n", "0"])
-                .output()
-            {
+            match Command::new("top").args(&["-l", "1", "-n", "0"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
                     Self::parse_cpu_usage(&output_str)
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get CPU usage: {}", e);
                     None
@@ -502,7 +586,8 @@ impl CloudClient {
         use regex::Regex;
 
         // Example: "CPU usage: 15.38% user, 8.46% sys, 76.15% idle"
-        let cpu_regex = Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
+        let cpu_regex =
+            Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
 
         for line in output.lines() {
             if let Some(captures) = cpu_regex.captures(line) {
@@ -510,7 +595,12 @@ impl CloudClient {
                 let sys_cpu = captures.get(2)?.as_str().parse::<f32>().ok()?;
 
                 let total_cpu = user_cpu + sys_cpu;
-                log::debug!("Parsed CPU usage: {}% user + {}% sys = {}% total", user_cpu, sys_cpu, total_cpu);
+                log::debug!(
+                    "Parsed CPU usage: {}% user + {}% sys = {}% total",
+                    user_cpu,
+                    sys_cpu,
+                    total_cpu
+                );
 
                 return Some(total_cpu);
             }
@@ -538,28 +628,37 @@ impl CloudClient {
                     for line in output_str.lines() {
                         if line.contains("Pages free:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                free_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                free_pages =
+                                    num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
                             }
                         } else if line.contains("Pages active:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                active_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                active_pages =
+                                    num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
                             }
                         } else if line.contains("Pages inactive:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                inactive_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                inactive_pages =
+                                    num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
                             }
                         } else if line.contains("Pages speculative:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                speculative_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                speculative_pages =
+                                    num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
                             }
                         } else if line.contains("Pages wired down:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                wired_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                wired_pages =
+                                    num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
                             }
                         }
                     }
 
-                    let total_pages = free_pages + active_pages + inactive_pages + speculative_pages + wired_pages;
+                    let total_pages = free_pages
+                        + active_pages
+                        + inactive_pages
+                        + speculative_pages
+                        + wired_pages;
                     let used_pages = total_pages - free_pages;
 
                     if total_pages > 0 {
@@ -568,7 +667,7 @@ impl CloudClient {
                     } else {
                         None
                     }
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get memory usage: {}", e);
                     None
@@ -589,13 +688,11 @@ impl CloudClient {
         {
             use std::process::Command;
 
-            match Command::new("df")
-                .args(&["-h", "/"])
-                .output()
-            {
+            match Command::new("df").args(&["-h", "/"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    for line in output_str.lines().skip(1) { // Skip header
+                    for line in output_str.lines().skip(1) {
+                        // Skip header
                         let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 5 {
                             // Format: Filesystem Size Used Avail Capacity Mounted
@@ -610,7 +707,7 @@ impl CloudClient {
                         break; // Only process first (root) filesystem
                     }
                     None
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get disk usage: {}", e);
                     None
@@ -645,7 +742,7 @@ impl CloudClient {
                         }
                     }
                     None
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get screen resolution: {}", e);
                     None
@@ -734,7 +831,10 @@ impl CloudClientTask {
                 capabilities: vec![],
                 hardware_info: None,
             },
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         })
     }
 }

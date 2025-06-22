@@ -1,14 +1,14 @@
-use playwright::Playwright;
+use base64;
 use playwright::api::{Browser, BrowserContext, Page};
+use playwright::Playwright;
 use serde_json::Value;
+use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use base64;
-use std::path::PathBuf;
-use std::env;
 
 use crate::agent::structs::{AgentError, ToolResult};
-use crate::constants::{chrome_debug_urls, timeouts, files::shell_commands};
+use crate::constants::{chrome_debug_urls, files::shell_commands, timeouts};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -52,7 +52,9 @@ impl BrowserController {
     }
 
     /// Strategy 1: Try to connect to an existing browser instance via CDP
-    async fn try_connect_to_existing_browser(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+    async fn try_connect_to_existing_browser(
+        playwright: Arc<Playwright>,
+    ) -> ControllerResult<Self> {
         log::info!("Attempting to connect to existing browser via CDP...");
 
         // First check if Chrome is running and if remote debugging is enabled
@@ -63,7 +65,9 @@ impl BrowserController {
 
         if !Self::is_remote_debugging_enabled().await {
             log::info!("Chrome is running but remote debugging is not enabled");
-            return Err(AgentError::ToolError("Remote debugging not enabled".to_string()));
+            return Err(AgentError::ToolError(
+                "Remote debugging not enabled".to_string(),
+            ));
         }
 
         // Common CDP endpoints to try (using constants)
@@ -74,26 +78,39 @@ impl BrowserController {
 
             // Use a reasonable timeout for CDP connection attempts
             match tokio::time::timeout(
-                std::time::Duration::from_secs(8), // Increased timeout for more reliable connection
-                playwright.chromium().connect_over_cdp_builder(endpoint).connect_over_cdp()
-            ).await {
+                std::time::Duration::from_secs(
+                    crate::constants::timeouts::BROWSER_CONNECTION_TIMEOUT_SECONDS,
+                ), // Increased timeout for more reliable connection
+                playwright
+                    .chromium()
+                    .connect_over_cdp_builder(endpoint)
+                    .connect_over_cdp(),
+            )
+            .await
+            {
                 Ok(Ok(browser)) => {
                     log::info!("Successfully connected to existing browser at {}", endpoint);
 
                     // Create a new context since we can't clone existing ones
                     log::info!("Creating new context in existing browser");
-                    let context = browser.context_builder()
+                    let context = browser
+                        .context_builder()
                         .accept_downloads(true)
                         .build()
                         .await
-                        .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?;
+                        .map_err(|e| {
+                            AgentError::ToolError(format!(
+                                "Failed to create context in existing browser: {}",
+                                e
+                            ))
+                        })?;
 
                     // Get existing page or create new one
                     let page = match context.pages() {
                         Ok(pages) if !pages.is_empty() => {
                             log::info!("Using existing page from browser");
                             Some(pages[0].clone())
-                        },
+                        }
                         _ => {
                             log::info!("Creating new page in existing browser");
                             match context.new_page().await {
@@ -113,17 +130,19 @@ impl BrowserController {
                         page: Arc::new(Mutex::new(page)),
                         connection_method: format!("CDP:{}", endpoint),
                     });
-                },
+                }
                 Ok(Err(e)) => {
                     log::info!("CDP connection failed at {}: {}", endpoint, e);
-                },
+                }
                 Err(_) => {
                     log::info!("CDP connection timeout at {}", endpoint);
                 }
             }
         }
 
-        Err(AgentError::ToolError("No existing browser instance found via CDP".to_string()))
+        Err(AgentError::ToolError(
+            "No existing browser instance found via CDP".to_string(),
+        ))
     }
 
     /// Check if remote debugging is enabled on the running Chrome instance
@@ -134,35 +153,42 @@ impl BrowserController {
 
         match tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            reqwest::get(&version_url)
-        ).await {
+            reqwest::get(&version_url),
+        )
+        .await
+        {
             Ok(Ok(response)) => {
                 if response.status().is_success() {
                     log::info!("Remote debugging is enabled on {}", debug_url);
                     return true;
                 }
-            },
+            }
             Ok(Err(e)) => {
                 log::debug!("Failed to connect to remote debugging port: {}", e);
-            },
+            }
             Err(_) => {
                 log::debug!("Timeout connecting to remote debugging port");
             }
         }
 
         // Try alternative ports
-        for endpoint in [chrome_debug_urls::ALTERNATIVE_1, chrome_debug_urls::ALTERNATIVE_2] {
+        for endpoint in [
+            chrome_debug_urls::ALTERNATIVE_1,
+            chrome_debug_urls::ALTERNATIVE_2,
+        ] {
             let version_url = format!("{}/json/version", endpoint);
             match tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                reqwest::get(&version_url)
-            ).await {
+                reqwest::get(&version_url),
+            )
+            .await
+            {
                 Ok(Ok(response)) => {
                     if response.status().is_success() {
                         log::info!("Remote debugging is enabled on {}", endpoint);
                         return true;
                     }
-                },
+                }
                 _ => {} // Continue to next port
             }
         }
@@ -208,7 +234,8 @@ impl BrowserController {
             "--disable-component-update".to_string(), // Prevent update checks slowing startup
             "--remote-debugging-port=9222".to_string(), // Enable remote debugging for future CDP connections
         ];
-        let launcher = chromium.persistent_context_launcher(user_data_path)
+        let launcher = chromium
+            .persistent_context_launcher(user_data_path)
             .headless(false)
             .accept_downloads(true)
             .executable(&browser_info.1)
@@ -226,8 +253,17 @@ impl BrowserController {
                 // Get browser from context - may return None for persistent contexts
                 let browser = match context.browser() {
                     Ok(Some(browser)) => browser,
-                    Ok(None) => return Err(AgentError::ToolError("No browser available from persistent context".to_string())),
-                    Err(e) => return Err(AgentError::ToolError(format!("Failed to get browser from persistent context: {}", e))),
+                    Ok(None) => {
+                        return Err(AgentError::ToolError(
+                            "No browser available from persistent context".to_string(),
+                        ))
+                    }
+                    Err(e) => {
+                        return Err(AgentError::ToolError(format!(
+                            "Failed to get browser from persistent context: {}",
+                            e
+                        )))
+                    }
                 };
 
                 // Get existing page or create new one
@@ -235,7 +271,7 @@ impl BrowserController {
                     Ok(pages) if !pages.is_empty() => {
                         log::info!("Using existing page from persistent context");
                         Some(pages[0].clone())
-                    },
+                    }
                     _ => {
                         log::info!("Creating new page in persistent context");
                         match context.new_page().await {
@@ -255,15 +291,20 @@ impl BrowserController {
                     page: Arc::new(Mutex::new(page)),
                     connection_method: format!("Persistent:{}", user_data_dir),
                 })
-            },
+            }
             Err(e) => {
                 log::warn!("Failed to launch with user profile: {}", e);
                 // Check if this is a SingletonLock error and try temp profile
-                if e.to_string().contains("SingletonLock") || e.to_string().contains("profile directory") {
+                if e.to_string().contains("SingletonLock")
+                    || e.to_string().contains("profile directory")
+                {
                     log::info!("Profile conflict detected - trying temporary profile strategy");
                     return Self::try_launch_with_temp_profile(playwright).await;
                 }
-                Err(AgentError::ToolError(format!("Persistent profile launch failed: {}", e)))
+                Err(AgentError::ToolError(format!(
+                    "Persistent profile launch failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -279,7 +320,10 @@ impl BrowserController {
         // Create the temporary profile directory
         if let Err(e) = std::fs::create_dir_all(&temp_profile) {
             log::warn!("Failed to create temporary profile directory: {}", e);
-            return Err(AgentError::ToolError(format!("Failed to create temp profile: {}", e)));
+            return Err(AgentError::ToolError(format!(
+                "Failed to create temp profile: {}",
+                e
+            )));
         }
 
         log::info!("Using temporary profile directory: {:?}", temp_profile);
@@ -297,7 +341,8 @@ impl BrowserController {
             "--disable-component-update".to_string(),
             "--remote-debugging-port=9223".to_string(), // Use different port to avoid conflicts
         ];
-        let launcher = chromium.persistent_context_launcher(&temp_profile)
+        let launcher = chromium
+            .persistent_context_launcher(&temp_profile)
             .headless(false)
             .accept_downloads(true)
             .executable(&browser_info.1)
@@ -313,8 +358,17 @@ impl BrowserController {
                 // Get browser from context - may return None for persistent contexts
                 let browser = match context.browser() {
                     Ok(Some(browser)) => browser,
-                    Ok(None) => return Err(AgentError::ToolError("No browser available from temporary context".to_string())),
-                    Err(e) => return Err(AgentError::ToolError(format!("Failed to get browser from temporary context: {}", e))),
+                    Ok(None) => {
+                        return Err(AgentError::ToolError(
+                            "No browser available from temporary context".to_string(),
+                        ))
+                    }
+                    Err(e) => {
+                        return Err(AgentError::ToolError(format!(
+                            "Failed to get browser from temporary context: {}",
+                            e
+                        )))
+                    }
                 };
 
                 // Get existing page or create new one
@@ -322,7 +376,7 @@ impl BrowserController {
                     Ok(pages) if !pages.is_empty() => {
                         log::info!("Using existing page from temporary context");
                         Some(pages[0].clone())
-                    },
+                    }
                     _ => {
                         log::info!("Creating new page in temporary context");
                         match context.new_page().await {
@@ -342,14 +396,20 @@ impl BrowserController {
                     page: Arc::new(Mutex::new(page)),
                     connection_method: format!("TempProfile:{}", temp_profile.display()),
                 })
-            },
+            }
             Err(e) => {
                 log::warn!("Failed to launch with temporary profile: {}", e);
                 // Clean up the temporary directory if launch failed
                 if let Err(cleanup_err) = std::fs::remove_dir_all(&temp_profile) {
-                    log::warn!("Failed to clean up temporary profile directory: {}", cleanup_err);
+                    log::warn!(
+                        "Failed to clean up temporary profile directory: {}",
+                        cleanup_err
+                    );
                 }
-                Err(AgentError::ToolError(format!("Temporary profile launch failed: {}", e)))
+                Err(AgentError::ToolError(format!(
+                    "Temporary profile launch failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -492,14 +552,15 @@ impl BrowserController {
                     }
                 }
 
-                common_paths.iter()
-                    .map(PathBuf::from)
-                    .find(|p| p.exists())
+                common_paths.iter().map(PathBuf::from).find(|p| p.exists())
             });
 
         // Print system information for debugging
         log::info!("Operating system: {}", std::env::consts::OS);
-        log::info!("Path environment: {:?}", env::var("PATH").unwrap_or_else(|_| "Not available".to_string()));
+        log::info!(
+            "Path environment: {:?}",
+            env::var("PATH").unwrap_or_else(|_| "Not available".to_string())
+        );
 
         let chromium = playwright.chromium();
 
@@ -525,10 +586,7 @@ impl BrowserController {
             "--disable-features=VizDisplayCompositor".to_string(), // Improve stability
         ];
 
-        launcher = launcher
-            .headless(false)
-            .args(&args)
-            .timeout(45000.0); // Reduced timeout to 45 seconds for better user experience
+        launcher = launcher.headless(false).args(&args).timeout(45000.0); // Reduced timeout to 45 seconds for better user experience
 
         log::info!("Launching browser with 45 second timeout and remote debugging enabled...");
 
@@ -536,10 +594,13 @@ impl BrowserController {
             Ok(browser) => {
                 log::info!("Browser launched successfully.");
                 browser
-            },
+            }
             Err(e) => {
                 // Try one more time with even fewer args
-                log::warn!("First browser launch attempt failed: {}. Trying again with minimal args...", e);
+                log::warn!(
+                    "First browser launch attempt failed: {}. Trying again with minimal args...",
+                    e
+                );
 
                 // Reset launcher with minimal configuration
                 let mut launcher = chromium.launcher();
@@ -548,9 +609,7 @@ impl BrowserController {
                 }
 
                 // Try with absolute minimum arguments but keep remote debugging
-                let minimal_args = vec![
-                    "--remote-debugging-port=9222".to_string(),
-                ];
+                let minimal_args = vec!["--remote-debugging-port=9222".to_string()];
 
                 launcher = launcher
                     .headless(false)
@@ -558,34 +617,56 @@ impl BrowserController {
                     .timeout(45000.0); // Consistent timeout with first attempt
 
                 log::info!("Retrying browser launch with minimal configuration...");
-                launcher.launch().await
-                    .map_err(|e| AgentError::ToolError(format!("Failed to launch browser (both attempts): {}", e)))?
+                launcher.launch().await.map_err(|e| {
+                    AgentError::ToolError(format!(
+                        "Failed to launch browser (both attempts): {}",
+                        e
+                    ))
+                })?
             }
         };
 
-        log::info!("Browser launched successfully. Browser version: {}", match browser.version() {
-            Ok(version) => version,
-            Err(_) => "unknown".to_string(),
-        });
+        log::info!(
+            "Browser launched successfully. Browser version: {}",
+            match browser.version() {
+                Ok(version) => version,
+                Err(_) => "unknown".to_string(),
+            }
+        );
 
         // Get existing contexts or create a new one
         let context = match browser.contexts() {
             Ok(contexts) if !contexts.is_empty() => {
-                log::info!("Using existing browser context with {} contexts", contexts.len());
+                log::info!(
+                    "Using existing browser context with {} contexts",
+                    contexts.len()
+                );
                 // Create a new context since BrowserContext doesn't implement Clone
-                browser.context_builder()
+                browser
+                    .context_builder()
                     .accept_downloads(true)
                     .build()
                     .await
-                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
-            },
+                    .map_err(|e| {
+                        AgentError::ToolError(format!(
+                            "Failed to create context in existing browser: {}",
+                            e
+                        ))
+                    })?
+            }
             _ => {
                 log::info!("Creating new context in existing browser");
-                browser.context_builder()
+                browser
+                    .context_builder()
                     .accept_downloads(true)
                     .build()
                     .await
-                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+                    .map_err(|e| {
+                        AgentError::ToolError(format!(
+                            "Failed to create context in existing browser: {}",
+                            e
+                        ))
+                    })?
             }
         };
         log::info!("Browser context created.");
@@ -599,14 +680,22 @@ impl BrowserController {
             let mut test_page = None;
 
             for attempt in 1..=max_attempts {
-                log::info!("Attempt {} of {} to create initial page", attempt, max_attempts);
+                log::info!(
+                    "Attempt {} of {} to create initial page",
+                    attempt,
+                    max_attempts
+                );
                 match context.new_page().await {
                     Ok(page) => {
                         test_page = Some(page);
                         break;
-                    },
+                    }
                     Err(e) => {
-                        log::warn!("Failed to create initial page on attempt {}: {}", attempt, e);
+                        log::warn!(
+                            "Failed to create initial page on attempt {}: {}",
+                            attempt,
+                            e
+                        );
                         last_error = Some(e.to_string());
                         // Sleep between attempts
                         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -627,7 +716,12 @@ impl BrowserController {
 
         // Try to navigate to a simple URL to verify browser works
         log::info!("Testing browser with navigation to about:blank...");
-        match test_page.goto_builder("about:blank").timeout(10000.0).goto().await {
+        match test_page
+            .goto_builder("about:blank")
+            .timeout(10000.0)
+            .goto()
+            .await
+        {
             Ok(_) => log::info!("Browser test navigation successful."),
             Err(e) => {
                 log::warn!("Browser test navigation failed: {}", e);
@@ -652,13 +746,18 @@ impl BrowserController {
     fn detect_user_profile_directory() -> ControllerResult<String> {
         #[cfg(target_os = "macos")]
         {
-            let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
+            let home = env::var("HOME").map_err(|_| {
+                AgentError::ToolError("HOME environment variable not found".to_string())
+            })?;
 
             // Try browsers in order of preference
             let browser_paths = [
                 format!("{}/Library/Application Support/Google/Chrome", home),
                 format!("{}/Library/Application Support/Microsoft Edge", home),
-                format!("{}/Library/Application Support/BraveSoftware/Brave-Browser", home),
+                format!(
+                    "{}/Library/Application Support/BraveSoftware/Brave-Browser",
+                    home
+                ),
                 format!("{}/Library/Application Support/Chromium", home),
             ];
 
@@ -672,7 +771,9 @@ impl BrowserController {
 
         #[cfg(target_os = "windows")]
         {
-            let appdata = env::var("LOCALAPPDATA").map_err(|_| AgentError::ToolError("LOCALAPPDATA environment variable not found".to_string()))?;
+            let appdata = env::var("LOCALAPPDATA").map_err(|_| {
+                AgentError::ToolError("LOCALAPPDATA environment variable not found".to_string())
+            })?;
 
             let browser_paths = [
                 format!("{}\\Google\\Chrome\\User Data", appdata),
@@ -690,7 +791,9 @@ impl BrowserController {
 
         #[cfg(target_os = "linux")]
         {
-            let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
+            let home = env::var("HOME").map_err(|_| {
+                AgentError::ToolError("HOME environment variable not found".to_string())
+            })?;
 
             let browser_paths = [
                 format!("{}/.config/google-chrome", home),
@@ -707,7 +810,9 @@ impl BrowserController {
             }
         }
 
-        Err(AgentError::ToolError("No user browser profile directory found".to_string()))
+        Err(AgentError::ToolError(
+            "No user browser profile directory found".to_string(),
+        ))
     }
 
     /// Detect browser executable and return (channel, path)
@@ -716,9 +821,18 @@ impl BrowserController {
         {
             let browsers = [
                 ("chrome", shell_commands::CHROME_BINARY_MACOS),
-                ("msedge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-                ("chrome", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
-                ("chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
+                (
+                    "msedge",
+                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                ),
+                (
+                    "chrome",
+                    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                ),
+                (
+                    "chromium",
+                    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                ),
             ];
 
             for (channel, path) in &browsers {
@@ -732,10 +846,22 @@ impl BrowserController {
         #[cfg(target_os = "windows")]
         {
             let browsers = [
-                ("chrome", r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-                ("chrome", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
-                ("msedge", r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
-                ("chrome", r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                (
+                    "chrome",
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                ),
+                (
+                    "chrome",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                ),
+                (
+                    "msedge",
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                ),
+                (
+                    "chrome",
+                    r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                ),
             ];
 
             for (channel, path) in &browsers {
@@ -766,7 +892,9 @@ impl BrowserController {
             }
         }
 
-        Err(AgentError::ToolError("No supported browser executable found".to_string()))
+        Err(AgentError::ToolError(
+            "No supported browser executable found".to_string(),
+        ))
     }
 
     /// Get connection method for debugging
@@ -791,9 +919,12 @@ impl BrowserController {
                         Ok(_) => {
                             log::debug!("Existing page is valid.");
                             return Ok(());
-                        },
+                        }
                         Err(e) => {
-                            log::warn!("Existing page appears invalid: {}. Will create a new page.", e);
+                            log::warn!(
+                                "Existing page appears invalid: {}. Will create a new page.",
+                                e
+                            );
                             // Try to close the old page just in case
                             if let Err(ce) = page.close(None).await {
                                 log::warn!("Error closing invalid page: {}", ce);
@@ -819,17 +950,22 @@ impl BrowserController {
                     Ok(new_context) => {
                         // We successfully created a new context, but we can't replace the Arc-wrapped one
                         // Just log this situation - we'll still try to use the original context
-                        log::info!("Created new context as a test, but continuing with original context");
+                        log::info!(
+                            "Created new context as a test, but continuing with original context"
+                        );
                         // Close the test context as we can't use it
                         if let Err(e) = new_context.close().await {
                             log::warn!("Failed to close test context: {}", e);
                         }
-                    },
+                    }
                     Err(e) => {
                         log::error!("Failed to recreate browser context: {}", e);
                         // If we can't even create a context, there may be deeper issues
                         if attempt == 3 {
-                            return Err(AgentError::ToolError(format!("Browser appears to be in an unrecoverable state: {}", e)));
+                            return Err(AgentError::ToolError(format!(
+                                "Browser appears to be in an unrecoverable state: {}",
+                                e
+                            )));
                         }
                     }
                 }
@@ -842,7 +978,7 @@ impl BrowserController {
                     *page_guard = Some(new_page);
                     log::info!("New page created successfully on attempt {}", attempt);
                     return Ok(());
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to create page on attempt {}: {}", attempt, e);
 
@@ -864,41 +1000,49 @@ impl BrowserController {
     // --- Tool Implementation Methods ---
 
     pub async fn navigate(&self, args: &Value) -> ControllerResult<ToolResult> {
-        let url = args["url"].as_str().ok_or_else(|| AgentError::ToolError("Missing 'url' argument".to_string()))?;
-        let timeout_ms = args["timeout"].as_u64().unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
+        let url = args["url"]
+            .as_str()
+            .ok_or_else(|| AgentError::ToolError("Missing 'url' argument".to_string()))?;
+        let timeout_ms = args["timeout"]
+            .as_u64()
+            .unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
 
         log::info!("Navigating to: {}", url);
 
         // Ensure a page exists, then get lock
         self.ensure_page_exists().await?;
         let page_guard = self.page.lock().await;
-        let page = page_guard.as_ref().ok_or_else(|| AgentError::ToolError("Page lock could not be acquired after ensuring existence".to_string()))?;
+        let page = page_guard.as_ref().ok_or_else(|| {
+            AgentError::ToolError(
+                "Page lock could not be acquired after ensuring existence".to_string(),
+            )
+        })?;
 
         // Navigate with timeout
         let goto_options = page.goto_builder(url).timeout(timeout_ms as f64);
         match goto_options.goto().await {
             Ok(_) => {
-                 log::info!("Navigation successful to: {}", url);
+                log::info!("Navigation successful to: {}", url);
 
-                 // Get page title for a more helpful response
-                 let title = match page.title().await {
-                     Ok(t) => t,
-                     Err(_) => "Unknown".to_string()
-                 };
+                // Get page title for a more helpful response
+                let title = match page.title().await {
+                    Ok(t) => t,
+                    Err(_) => "Unknown".to_string(),
+                };
 
-                 let call_id = "nav_call".to_string();
-                 Ok(ToolResult {
+                let call_id = "nav_call".to_string();
+                Ok(ToolResult {
                     call_id,
                     output: serde_json::json!({
                         "status": "success",
                         "url": url,
                         "title": title
-                    })
-                 })
-            },
+                    }),
+                })
+            }
             Err(e) => {
-                 log::error!("Navigation failed for {}: {}", url, e);
-                 Err(AgentError::ToolError(format!("Navigation failed: {}", e)))
+                log::error!("Navigation failed for {}: {}", url, e);
+                Err(AgentError::ToolError(format!("Navigation failed: {}", e)))
             }
         }
     }
@@ -907,13 +1051,15 @@ impl BrowserController {
         // No need to ensure page exists if we just check Option
         let page_guard = self.page.lock().await;
         if let Some(page) = page_guard.as_ref() {
-            let url = page.url().map_err(|e| AgentError::ToolError(format!("Failed to get current URL: {}", e)))?;
+            let url = page
+                .url()
+                .map_err(|e| AgentError::ToolError(format!("Failed to get current URL: {}", e)))?;
             log::info!("Current URL: {}", url);
 
             // Get page title too
             let title = match page.title().await {
                 Ok(t) => t,
-                Err(_) => "Unknown".to_string()
+                Err(_) => "Unknown".to_string(),
             };
 
             let call_id = "url_call".to_string();
@@ -922,27 +1068,39 @@ impl BrowserController {
                 output: serde_json::json!({
                     "url": url,
                     "title": title
-                })
+                }),
             })
         } else {
             log::warn!("get_current_url called with no active page.");
-            Err(AgentError::ToolError("No active browser page to get URL from".to_string()))
+            Err(AgentError::ToolError(
+                "No active browser page to get URL from".to_string(),
+            ))
         }
     }
 
     // Implementation for extract_content
     pub async fn extract_content(&self, args: &Value) -> ControllerResult<ToolResult> {
-        let selector = args["selector"].as_str().ok_or_else(|| AgentError::ToolError("Missing 'selector' argument for browser_extract_content".to_string()))?;
+        let selector = args["selector"].as_str().ok_or_else(|| {
+            AgentError::ToolError(
+                "Missing 'selector' argument for browser_extract_content".to_string(),
+            )
+        })?;
         let attribute = args["attribute"].as_str(); // Optional
         let multiple = args["multiple"].as_bool().unwrap_or(false);
 
-        log::info!("Extracting content with selector: {}, attribute: {:?}, multiple: {}", selector, attribute, multiple);
+        log::info!(
+            "Extracting content with selector: {}, attribute: {:?}, multiple: {}",
+            selector,
+            attribute,
+            multiple
+        );
 
         // Ensure a page exists
         self.ensure_page_exists().await?;
         let page_guard = self.page.lock().await;
-        let page = page_guard.as_ref().ok_or_else(||
-            AgentError::ToolError("Page not available for content extraction".to_string()))?;
+        let page = page_guard.as_ref().ok_or_else(|| {
+            AgentError::ToolError("Page not available for content extraction".to_string())
+        })?;
 
         // JavaScript approach is more reliable across Playwright versions
         let js_fn = if multiple {
@@ -999,31 +1157,39 @@ impl BrowserController {
                         "attribute": attribute,
                         "content": result,
                         "multiple": multiple
-                    })
+                    }),
                 })
-            },
+            }
             Err(e) => {
                 log::error!("Content extraction failed for {}: {}", selector, e);
-                Err(AgentError::ToolError(format!("Content extraction failed: {}", e)))
+                Err(AgentError::ToolError(format!(
+                    "Content extraction failed: {}",
+                    e
+                )))
             }
         }
     }
 
     // Implementation for interact
     pub async fn interact(&self, args: &Value) -> ControllerResult<ToolResult> {
-        let action = args["action"].as_str().ok_or_else(||
-            AgentError::ToolError("Missing 'action' argument for browser_interact".to_string()))?;
+        let action = args["action"].as_str().ok_or_else(|| {
+            AgentError::ToolError("Missing 'action' argument for browser_interact".to_string())
+        })?;
 
         // Ensure a page exists
         self.ensure_page_exists().await?;
         let page_guard = self.page.lock().await;
-        let page = page_guard.as_ref().ok_or_else(||
-            AgentError::ToolError("Page not available for interaction".to_string()))?;
+        let page = page_guard.as_ref().ok_or_else(|| {
+            AgentError::ToolError("Page not available for interaction".to_string())
+        })?;
 
         match action {
             "click" => {
-                let selector = args["selector"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'selector' argument for click action".to_string()))?;
+                let selector = args["selector"].as_str().ok_or_else(|| {
+                    AgentError::ToolError(
+                        "Missing 'selector' argument for click action".to_string(),
+                    )
+                })?;
 
                 log::info!("Clicking on element: {}", selector);
 
@@ -1052,20 +1218,28 @@ impl BrowserController {
                                     "status": "success",
                                     "action": "click",
                                     "selector": selector
-                                })
+                                }),
                             })
                         } else {
-                            Err(AgentError::ToolError(format!("Element not found: {}", selector)))
+                            Err(AgentError::ToolError(format!(
+                                "Element not found: {}",
+                                selector
+                            )))
                         }
-                    },
-                    Err(e) => Err(AgentError::ToolError(format!("Failed to click element: {}", e)))
+                    }
+                    Err(e) => Err(AgentError::ToolError(format!(
+                        "Failed to click element: {}",
+                        e
+                    ))),
                 }
-            },
+            }
             "type" => {
-                let selector = args["selector"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'selector' argument for type action".to_string()))?;
-                let value = args["value"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'value' argument for type action".to_string()))?;
+                let selector = args["selector"].as_str().ok_or_else(|| {
+                    AgentError::ToolError("Missing 'selector' argument for type action".to_string())
+                })?;
+                let value = args["value"].as_str().ok_or_else(|| {
+                    AgentError::ToolError("Missing 'value' argument for type action".to_string())
+                })?;
 
                 log::info!("Typing '{}' into element: {}", value, selector);
 
@@ -1099,20 +1273,27 @@ impl BrowserController {
                                     "action": "type",
                                     "selector": selector,
                                     "value": value
-                                })
+                                }),
                             })
                         } else {
-                            Err(AgentError::ToolError(format!("Element not found: {}", selector)))
+                            Err(AgentError::ToolError(format!(
+                                "Element not found: {}",
+                                selector
+                            )))
                         }
-                    },
-                    Err(e) => Err(AgentError::ToolError(format!("Failed to type text: {}", e)))
+                    }
+                    Err(e) => Err(AgentError::ToolError(format!("Failed to type text: {}", e))),
                 }
-            },
+            }
             "select" => {
-                let selector = args["selector"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'selector' argument for select action".to_string()))?;
-                let value = args["value"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'value' argument for select action".to_string()))?;
+                let selector = args["selector"].as_str().ok_or_else(|| {
+                    AgentError::ToolError(
+                        "Missing 'selector' argument for select action".to_string(),
+                    )
+                })?;
+                let value = args["value"].as_str().ok_or_else(|| {
+                    AgentError::ToolError("Missing 'value' argument for select action".to_string())
+                })?;
 
                 log::info!("Selecting option '{}' in element: {}", value, selector);
 
@@ -1144,27 +1325,47 @@ impl BrowserController {
                                     "action": "select",
                                     "selector": selector,
                                     "value": value
-                                })
+                                }),
                             })
                         } else {
-                            Err(AgentError::ToolError(format!("Element not found: {}", selector)))
+                            Err(AgentError::ToolError(format!(
+                                "Element not found: {}",
+                                selector
+                            )))
                         }
-                    },
-                    Err(e) => Err(AgentError::ToolError(format!("Failed to select option: {}", e)))
+                    }
+                    Err(e) => Err(AgentError::ToolError(format!(
+                        "Failed to select option: {}",
+                        e
+                    ))),
                 }
-            },
+            }
             "scroll" => {
-                let direction = args["scroll_direction"].as_str().ok_or_else(||
-                    AgentError::ToolError("Missing 'scroll_direction' argument for scroll action".to_string()))?;
+                let direction = args["scroll_direction"].as_str().ok_or_else(|| {
+                    AgentError::ToolError(
+                        "Missing 'scroll_direction' argument for scroll action".to_string(),
+                    )
+                })?;
                 let amount = args["scroll_amount_pixels"].as_i64().unwrap_or(500);
 
                 log::info!("Scrolling {} by {} pixels", direction, amount);
 
                 // Scroll using JavaScript
                 let js_fn = match direction {
-                    "down" => format!("function() {{ window.scrollBy(0, {}); return true; }}", amount),
-                    "up" => format!("function() {{ window.scrollBy(0, -{}); return true; }}", amount),
-                    _ => return Err(AgentError::ToolError(format!("Invalid scroll direction: {}", direction)))
+                    "down" => format!(
+                        "function() {{ window.scrollBy(0, {}); return true; }}",
+                        amount
+                    ),
+                    "up" => format!(
+                        "function() {{ window.scrollBy(0, -{}); return true; }}",
+                        amount
+                    ),
+                    _ => {
+                        return Err(AgentError::ToolError(format!(
+                            "Invalid scroll direction: {}",
+                            direction
+                        )))
+                    }
                 };
 
                 match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
@@ -1177,13 +1378,19 @@ impl BrowserController {
                                 "action": "scroll",
                                 "direction": direction,
                                 "amount": amount
-                            })
+                            }),
                         })
-                    },
-                    Err(e) => Err(AgentError::ToolError(format!("Failed to scroll page: {}", e)))
+                    }
+                    Err(e) => Err(AgentError::ToolError(format!(
+                        "Failed to scroll page: {}",
+                        e
+                    ))),
                 }
-            },
-            _ => Err(AgentError::ToolError(format!("Unknown browser interaction action: {}", action)))
+            }
+            _ => Err(AgentError::ToolError(format!(
+                "Unknown browser interaction action: {}",
+                action
+            ))),
         }
     }
 
@@ -1192,17 +1399,26 @@ impl BrowserController {
         let selector = args["selector"].as_str(); // Optional
         let full_page = args["full_page"].as_bool().unwrap_or(false);
 
-        log::info!("Taking screenshot. Selector: {:?}, Full page: {}", selector, full_page);
+        log::info!(
+            "Taking screenshot. Selector: {:?}, Full page: {}",
+            selector,
+            full_page
+        );
 
         // Ensure a page exists
         self.ensure_page_exists().await?;
         let page_guard = self.page.lock().await;
-        let page = page_guard.as_ref().ok_or_else(||
-            AgentError::ToolError("Page not available for screenshot".to_string()))?;
+        let page = page_guard.as_ref().ok_or_else(|| {
+            AgentError::ToolError("Page not available for screenshot".to_string())
+        })?;
 
         // Create a temporary file for the screenshot
-        let temp_dir = tempfile::Builder::new().prefix("juno_screenshot_").tempdir()
-            .map_err(|e| AgentError::ToolError(format!("Failed to create temp directory: {}", e)))?;
+        let temp_dir = tempfile::Builder::new()
+            .prefix("juno_screenshot_")
+            .tempdir()
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to create temp directory: {}", e))
+            })?;
 
         let screenshot_path = temp_dir.path().join("screenshot.png");
 
@@ -1230,11 +1446,19 @@ impl BrowserController {
             let element_rect = match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
                 Ok(rect) => {
                     if rect.is_null() {
-                        return Err(AgentError::ToolError(format!("Element not found for screenshot: {}", sel)));
+                        return Err(AgentError::ToolError(format!(
+                            "Element not found for screenshot: {}",
+                            sel
+                        )));
                     }
                     rect
-                },
-                Err(e) => return Err(AgentError::ToolError(format!("Error getting element position: {}", e))),
+                }
+                Err(e) => {
+                    return Err(AgentError::ToolError(format!(
+                        "Error getting element position: {}",
+                        e
+                    )))
+                }
             };
 
             // Fix the clip call to use a proper Rectangle struct
@@ -1266,10 +1490,12 @@ impl BrowserController {
         match screenshot_builder.screenshot().await {
             Ok(_) => {
                 // Read the file and convert to base64
-                let image_data = std::fs::read(&screenshot_path)
-                    .map_err(|e| AgentError::ToolError(format!("Failed to read screenshot file: {}", e)))?;
+                let image_data = std::fs::read(&screenshot_path).map_err(|e| {
+                    AgentError::ToolError(format!("Failed to read screenshot file: {}", e))
+                })?;
 
-                let base64_data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
+                let base64_data =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
 
                 // Clean up the temp directory (this removes the file too)
                 if let Err(e) = temp_dir.close() {
@@ -1284,10 +1510,13 @@ impl BrowserController {
                         "base64": base64_data,
                         "selector": selector,
                         "full_page": full_page
-                    })
+                    }),
                 })
-            },
-            Err(e) => Err(AgentError::ToolError(format!("Failed to take screenshot: {}", e)))
+            }
+            Err(e) => Err(AgentError::ToolError(format!(
+                "Failed to take screenshot: {}",
+                e
+            ))),
         }
     }
 
@@ -1296,9 +1525,11 @@ impl BrowserController {
         log::info!("Cleaning up browser controller resources...");
 
         // Close the page if it exists
-        { // Scope for page_guard
+        {
+            // Scope for page_guard
             let mut page_guard = self.page.lock().await; // Lock mutex
-            if let Some(page) = page_guard.take() { // Take ownership from Option
+            if let Some(page) = page_guard.take() {
+                // Take ownership from Option
                 if let Err(e) = page.close(None).await {
                     log::error!("Failed to close browser page gracefully: {}", e);
                 } else {
@@ -1323,9 +1554,15 @@ impl BrowserController {
 
         // Clean up temporary profile if this was a temporary profile launch
         if self.connection_method.starts_with("TempProfile:") {
-            let temp_profile_path = self.connection_method.strip_prefix("TempProfile:").unwrap_or("");
+            let temp_profile_path = self
+                .connection_method
+                .strip_prefix("TempProfile:")
+                .unwrap_or("");
             if !temp_profile_path.is_empty() {
-                log::info!("Cleaning up temporary profile directory: {}", temp_profile_path);
+                log::info!(
+                    "Cleaning up temporary profile directory: {}",
+                    temp_profile_path
+                );
                 if let Err(e) = std::fs::remove_dir_all(temp_profile_path) {
                     log::warn!("Failed to clean up temporary profile directory: {}", e);
                 } else {
