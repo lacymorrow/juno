@@ -1,19 +1,17 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
-use futures_util::StreamExt;
 use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
-use regex::Regex;
 
-use crate::agent::structs::{
-    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
-};
-use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 use crate::agent::providers::factory::model_ids;
+use crate::agent::structs::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
 
@@ -172,41 +170,99 @@ pub struct AnthropicBrain {
     model: String,
     max_tokens: u32,
     system_prompt: Option<String>, // Optional system prompt
-    streaming_enabled: bool, // New field for streaming support
+    streaming_enabled: bool,       // New field for streaming support
 }
 
 impl AnthropicBrain {
+    /// Creates a new AnthropicBrain with the provided API key and optional configuration.
     pub fn new(
         api_key: String,
         model: Option<String>,
         max_tokens: Option<u32>,
         system_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
-        Ok(Self {
+        let model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+
+        Ok(AnthropicBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            model,
+            max_tokens,
             system_prompt,
-            streaming_enabled: true, // Enable streaming by default
+            streaming_enabled: true, // Default to streaming for real-time user experience
         })
     }
 
-    /// Creates a new AnthropicBrain using the API key from the environment variable.
+    /// Creates a new AnthropicBrain using the API key from the environment variables.
     pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
-        // Allow overriding model/max_tokens via env vars too, if desired
-        let model = env::var("ANTHROPIC_MODEL").ok();
-        let max_tokens = env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-        let system_prompt = env::var("ANTHROPIC_SYSTEM_PROMPT").ok();
+        let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            AgentError::ConfigurationError(
+                "ANTHROPIC_API_KEY environment variable not set".to_string(),
+            )
+        })?;
 
-        Self::new(api_key, model, max_tokens, system_prompt)
+        let model = env::var("ANTHROPIC_MODEL").ok();
+        let max_tokens = env::var("ANTHROPIC_MAX_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok());
+
+        Self::new(api_key, model, max_tokens, None)
     }
 
-    /// Enable or disable streaming mode
+    /// Enable or disable streaming for this brain
     pub fn set_streaming(&mut self, enabled: bool) {
         self.streaming_enabled = enabled;
+    }
+
+    /// Sanitize log content by removing or truncating base64 data to prevent console spam
+    fn sanitize_for_logging(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::String(s) => {
+                // Check if this looks like base64 data (long string with base64 characters)
+                if s.len() > 100
+                    && s.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+                {
+                    // Truncate base64 data and add indication it was truncated
+                    serde_json::Value::String(format!(
+                        "{}...[BASE64_DATA_TRUNCATED_{}bytes]",
+                        &s[..std::cmp::min(50, s.len())],
+                        s.len()
+                    ))
+                } else {
+                    serde_json::Value::String(s.clone())
+                }
+            }
+            serde_json::Value::Object(obj) => {
+                let mut sanitized = serde_json::Map::new();
+                for (key, val) in obj {
+                    sanitized.insert(key.clone(), Self::sanitize_for_logging(val));
+                }
+                serde_json::Value::Object(sanitized)
+            }
+            serde_json::Value::Array(arr) => {
+                let sanitized: Vec<_> = arr.iter().map(Self::sanitize_for_logging).collect();
+                serde_json::Value::Array(sanitized)
+            }
+            _ => value.clone(),
+        }
+    }
+
+    /// Sanitize API request/response structures for logging
+    fn sanitize_request_for_logging(request: &AnthropicRequest) -> serde_json::Value {
+        match serde_json::to_value(request) {
+            Ok(value) => Self::sanitize_for_logging(&value),
+            Err(_) => serde_json::Value::String("[SERIALIZATION_ERROR]".to_string()),
+        }
+    }
+
+    /// Sanitize API response structures for logging
+    fn sanitize_response_for_logging(response: &AnthropicMessageResponse) -> serde_json::Value {
+        match serde_json::to_value(response) {
+            Ok(value) => Self::sanitize_for_logging(&value),
+            Err(_) => serde_json::Value::String("[SERIALIZATION_ERROR]".to_string()),
+        }
     }
 
     /// Handle streaming response from Anthropic API with XML-based TTS extraction
@@ -232,17 +288,17 @@ impl AnthropicBrain {
 
         // Get the response body as a stream
         let stream = response.bytes_stream();
-        let reader = StreamReader::new(stream.map(|result| {
-            result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-        }));
+        let reader =
+            StreamReader::new(stream.map(|result| {
+                result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            }));
 
         let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
         tokio::pin!(lines_stream);
 
         while let Some(line_result) = lines_stream.next().await {
-            let line = line_result.map_err(|e| {
-                AgentError::LlmError(format!("Failed to read stream line: {}", e))
-            })?;
+            let line = line_result
+                .map_err(|e| AgentError::LlmError(format!("Failed to read stream line: {}", e)))?;
 
             // Skip empty lines
             if line.trim().is_empty() {
@@ -267,7 +323,11 @@ impl AnthropicBrain {
                 let event_data: serde_json::Value = match serde_json::from_str(data_part) {
                     Ok(data) => data,
                     Err(e) => {
-                        log::warn!("Failed to parse SSE data as JSON: {}, data: {}", e, data_part);
+                        log::warn!(
+                            "Failed to parse SSE data as JSON: {}, data: {}",
+                            e,
+                            data_part
+                        );
                         continue;
                     }
                 };
@@ -280,11 +340,21 @@ impl AnthropicBrain {
                         }
                         "content_block_start" => {
                             if let Some(content_block) = event_data.get("content_block") {
-                                if let Some(block_type) = content_block.get("type").and_then(|t| t.as_str()) {
+                                if let Some(block_type) =
+                                    content_block.get("type").and_then(|t| t.as_str())
+                                {
                                     if block_type == "tool_use" {
                                         // Start tracking a new tool call
-                                        let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let id = content_block
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let name = content_block
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
                                         log::debug!("Stream: started tool call {} ({})", name, id);
                                         current_tool_call = Some((id, name, String::new()));
                                     }
@@ -293,17 +363,21 @@ impl AnthropicBrain {
                         }
                         "content_block_delta" => {
                             if let Some(delta) = event_data.get("delta") {
-                                if let Some(delta_type) = delta.get("type").and_then(|t| t.as_str()) {
+                                if let Some(delta_type) = delta.get("type").and_then(|t| t.as_str())
+                                {
                                     match delta_type {
                                         "text_delta" => {
-                                            if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                                            if let Some(text) =
+                                                delta.get("text").and_then(|t| t.as_str())
+                                            {
                                                 // Process text for TTS XML tags
-                                                let (display_text, extracted_tts_list) = self.process_text_with_tts_extraction(
-                                                    text,
-                                                    &mut tts_buffer,
-                                                    &mut in_tts_tag,
-                                                    &mut tts_content
-                                                );
+                                                let (display_text, extracted_tts_list) = self
+                                                    .process_text_with_tts_extraction(
+                                                        text,
+                                                        &mut tts_buffer,
+                                                        &mut in_tts_tag,
+                                                        &mut tts_content,
+                                                    );
 
                                                 // Accumulate only display text (without TTS tags) for final response
                                                 accumulated_text.push_str(&display_text);
@@ -313,15 +387,22 @@ impl AnthropicBrain {
                                             }
                                         }
                                         "input_json_delta" => {
-                                            if let Some(partial_json) = delta.get("partial_json").and_then(|t| t.as_str()) {
+                                            if let Some(partial_json) =
+                                                delta.get("partial_json").and_then(|t| t.as_str())
+                                            {
                                                 // Accumulate JSON for tool call
-                                                if let Some((_, _, ref mut json_accumulator)) = current_tool_call {
+                                                if let Some((_, _, ref mut json_accumulator)) =
+                                                    current_tool_call
+                                                {
                                                     json_accumulator.push_str(partial_json);
                                                 }
                                             }
                                         }
                                         _ => {
-                                            log::debug!("Stream: unhandled delta type: {}", delta_type);
+                                            log::debug!(
+                                                "Stream: unhandled delta type: {}",
+                                                delta_type
+                                            );
                                         }
                                     }
                                 }
@@ -337,14 +418,17 @@ impl AnthropicBrain {
                                     tool_calls.push(ToolCall {
                                         id,
                                         name,
-                                        input: serde_json::json!({})
+                                        input: serde_json::json!({}),
                                     });
                                 } else {
                                     // Parse the complete JSON
                                     match serde_json::from_str(&json_str) {
                                         Ok(input) => {
                                             tool_calls.push(ToolCall { id, name, input });
-                                            log::debug!("Stream: completed tool call with input: {}", json_str);
+                                            log::debug!(
+                                                "Stream: completed tool call with input: {}",
+                                                json_str
+                                            );
                                         }
                                         Err(e) => {
                                             log::warn!("Failed to parse tool call input JSON: {}, json: '{}'. Using empty object as fallback.", e, json_str);
@@ -352,7 +436,7 @@ impl AnthropicBrain {
                                             tool_calls.push(ToolCall {
                                                 id,
                                                 name,
-                                                input: serde_json::json!({})
+                                                input: serde_json::json!({}),
                                             });
                                         }
                                     }
@@ -361,7 +445,9 @@ impl AnthropicBrain {
                         }
                         "message_delta" => {
                             if let Some(delta) = event_data.get("delta") {
-                                if let Some(reason) = delta.get("stop_reason").and_then(|r| r.as_str()) {
+                                if let Some(reason) =
+                                    delta.get("stop_reason").and_then(|r| r.as_str())
+                                {
                                     stop_reason = reason.to_string();
                                 }
                             }
@@ -383,17 +469,27 @@ impl AnthropicBrain {
 
         // CRITICAL FIX: Handle any remaining TTS state at end of stream
         if in_tts_tag || !tts_buffer.is_empty() {
-            log::warn!("Stream ended with incomplete TTS state: in_tts_tag={}, buffer='{}'", in_tts_tag, tts_buffer);
+            log::warn!(
+                "Stream ended with incomplete TTS state: in_tts_tag={}, buffer='{}'",
+                in_tts_tag,
+                tts_buffer
+            );
 
             // If we're in the middle of a TTS tag, extract what we have as TTS content
             if in_tts_tag && !tts_content.trim().is_empty() {
-                log::info!("Extracting incomplete TTS content at stream end: '{}'", tts_content);
+                log::info!(
+                    "Extracting incomplete TTS content at stream end: '{}'",
+                    tts_content
+                );
                 on_text_chunk(String::new(), vec![tts_content.clone()]);
             }
 
             // If there's remaining buffer content outside TTS tags, add it to accumulated text
             if !in_tts_tag && !tts_buffer.trim().is_empty() {
-                log::debug!("Adding remaining buffer content to accumulated text: '{}'", tts_buffer);
+                log::debug!(
+                    "Adding remaining buffer content to accumulated text: '{}'",
+                    tts_buffer
+                );
                 accumulated_text.push_str(&tts_buffer);
             }
 
@@ -488,9 +584,15 @@ impl AnthropicBrain {
         // CRITICAL FIX: Validate that no TTS tags remain in display_text
         // This should never happen if processing is correct
         if display_text.contains("<TTS>") || display_text.contains("</TTS>") {
-            log::error!("CRITICAL BUG: TTS tags found in display_text during streaming processing!");
+            log::error!(
+                "CRITICAL BUG: TTS tags found in display_text during streaming processing!"
+            );
             log::error!("Display text: '{}'", display_text);
-            log::error!("Buffer state - in_tts_tag: {}, tts_content: '{}'", *in_tts_tag, tts_content);
+            log::error!(
+                "Buffer state - in_tts_tag: {}, tts_content: '{}'",
+                *in_tts_tag,
+                tts_content
+            );
             log::error!("This indicates a bug in the streaming TTS processing logic");
 
             // Emergency cleanup to prevent tag leakage
@@ -502,14 +604,18 @@ impl AnthropicBrain {
 
     /// Check if a string could be the beginning of a partial "<TTS>" tag
     fn could_be_partial_opening_tag(&self, s: &str) -> bool {
-        if s.is_empty() { return false; }
+        if s.is_empty() {
+            return false;
+        }
         let partial_tags = ["<", "<T", "<TT", "<TTS"];
         partial_tags.iter().any(|&tag| s == tag)
     }
 
     /// Check if a string could be the beginning of a partial "</TTS>" tag
     fn could_be_partial_closing_tag(&self, s: &str) -> bool {
-        if s.is_empty() { return false; }
+        if s.is_empty() {
+            return false;
+        }
         let partial_tags = ["<", "</", "</T", "</TT", "</TTS"];
         partial_tags.iter().any(|&tag| s == tag)
     }
@@ -519,7 +625,11 @@ impl AnthropicBrain {
         // CRITICAL FIX: Remove TTS tags completely - content was already processed for immediate TTS
         // We don't want TTS content appearing in the final display text
         let tts_regex = Regex::new(r"<TTS>.*?</TTS>").unwrap();
-        tts_regex.replace_all(text, "").to_string().trim().to_string()
+        tts_regex
+            .replace_all(text, "")
+            .to_string()
+            .trim()
+            .to_string()
     }
 
     // Helper function to convert our internal Message format to Anthropic's API format
@@ -549,7 +659,9 @@ impl AnthropicBrain {
         // Add tool calls if present (for assistant messages)
         if let Some(tool_calls) = &message.tool_calls {
             if message.role != Role::Assistant {
-                return Err(AgentError::LlmError("Tool calls are only expected in assistant messages.".to_string()));
+                return Err(AgentError::LlmError(
+                    "Tool calls are only expected in assistant messages.".to_string(),
+                ));
             }
             for tool_call in tool_calls {
                 content_blocks.push(ApiContentBlock {
@@ -583,7 +695,8 @@ impl AgentBrain for AnthropicBrain {
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         // Delegate to streaming version without streaming parameters
-        self.decide_next_action_streaming(messages, available_tools, None, None).await
+        self.decide_next_action_streaming(messages, available_tools, None, None)
+            .await
     }
 
     fn supports_streaming(&self) -> bool {
@@ -618,14 +731,22 @@ impl AgentBrain for AnthropicBrain {
                                 }
                             }
                         }
-                        Err(e) => log::warn!("Skipping assistant message conversion due to error: {}", e),
+                        Err(e) => {
+                            log::warn!("Skipping assistant message conversion due to error: {}", e)
+                        }
                     }
                 }
                 Role::Tool => {
                     // Handle tool result messages with proper formatting and ordering validation
-                    let tool_call_id = message.tool_call_id.as_ref().ok_or_else(||
-                        AgentError::LlmError("Tool result message missing tool_call_id".to_string())
-                    )?.clone();
+                    let tool_call_id = message
+                        .tool_call_id
+                        .as_ref()
+                        .ok_or_else(|| {
+                            AgentError::LlmError(
+                                "Tool result message missing tool_call_id".to_string(),
+                            )
+                        })?
+                        .clone();
 
                     // Check if this tool call ID is expected
                     if !pending_tool_calls.contains(&tool_call_id) {
@@ -638,44 +759,53 @@ impl AgentBrain for AnthropicBrain {
                     let tool_result_content = message.content.clone();
 
                     // Parse the tool result content to extract just the text that needs to be passed
-                    let formatted_content = match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
-                        Ok(json_value) => {
-                            // Extract stdout for command results
-                            if let Some(stdout) = json_value.get("stdout").and_then(|v| v.as_str()) {
-                                stdout.trim().to_string()
-                            }
-                            // Extract content for file reads
-                            else if let Some(content) = json_value.get("content").and_then(|v| v.as_str()) {
-                                content.trim().to_string()
-                            }
-                            // For error messages
-                            else if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
-                                format!("Error: {}", error.trim())
-                            }
-                            // If we can't extract a specific field, return a simplified string
-                            else {
-                                // Anthropic requires simple string content for tool_result
-                                // We'll use a fallback to the first string value we can find
-                                let simplified = json_value.as_object().and_then(|obj| {
-                                    obj.values().find_map(|v| v.as_str().map(|s| s.trim().to_string()))
-                                });
+                    let formatted_content =
+                        match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
+                            Ok(json_value) => {
+                                // Extract stdout for command results
+                                if let Some(stdout) =
+                                    json_value.get("stdout").and_then(|v| v.as_str())
+                                {
+                                    stdout.trim().to_string()
+                                }
+                                // Extract content for file reads
+                                else if let Some(content) =
+                                    json_value.get("content").and_then(|v| v.as_str())
+                                {
+                                    content.trim().to_string()
+                                }
+                                // For error messages
+                                else if let Some(error) =
+                                    json_value.get("error").and_then(|v| v.as_str())
+                                {
+                                    format!("Error: {}", error.trim())
+                                }
+                                // If we can't extract a specific field, return a simplified string
+                                else {
+                                    // Anthropic requires simple string content for tool_result
+                                    // We'll use a fallback to the first string value we can find
+                                    let simplified = json_value.as_object().and_then(|obj| {
+                                        obj.values()
+                                            .find_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                                    });
 
-                                simplified.unwrap_or_else(|| "Tool executed successfully".to_string())
+                                    simplified
+                                        .unwrap_or_else(|| "Tool executed successfully".to_string())
+                                }
                             }
-                        },
-                        Err(_) => {
-                            // If content is not JSON, use it directly (trimmed)
-                            tool_result_content.trim().to_string()
-                        }
-                    };
+                            Err(_) => {
+                                // If content is not JSON, use it directly (trimmed)
+                                tool_result_content.trim().to_string()
+                            }
+                        };
 
                     api_messages.push(ApiMessage {
                         role: "user".to_string(), // Tool results have role "user"
                         content: ApiContent::Blocks(vec![ApiContentBlock {
                             block_type: "tool_result".to_string(),
                             tool_use_id: Some(tool_call_id), // Use tool_use_id instead of id
-                            text: None, // Remove text field
-                            id: None, // Not used for tool_result
+                            text: None,                      // Remove text field
+                            id: None,                        // Not used for tool_result
                             name: None,
                             input: None,
                             content: Some(formatted_content), // Add content field
@@ -686,7 +816,9 @@ impl AgentBrain for AnthropicBrain {
                     // Convert user message normally
                     match Self::convert_message_to_api(message) {
                         Ok(api_msg) => api_messages.push(api_msg),
-                        Err(e) => log::warn!("Skipping user message conversion due to error: {}", e),
+                        Err(e) => {
+                            log::warn!("Skipping user message conversion due to error: {}", e)
+                        }
                     }
                 }
                 Role::System => {
@@ -698,7 +830,10 @@ impl AgentBrain for AnthropicBrain {
 
         // Validate that all tool calls have corresponding results
         if !pending_tool_calls.is_empty() {
-            log::error!("Found tool calls without corresponding results: {:?}. This will cause API errors.", pending_tool_calls);
+            log::error!(
+                "Found tool calls without corresponding results: {:?}. This will cause API errors.",
+                pending_tool_calls
+            );
             return Err(AgentError::LlmError(format!(
                 "Tool calls without results detected: {:?}. Each tool_use must have a corresponding tool_result.",
                 pending_tool_calls
@@ -736,14 +871,17 @@ impl AgentBrain for AnthropicBrain {
         }
 
         // -- DEBUG: Log the request payload --
-        match serde_json::to_string_pretty(&request_payload) {
+        match serde_json::to_string_pretty(&Self::sanitize_request_for_logging(&request_payload)) {
             Ok(json_string) => log::debug!("Anthropic Request Payload:\n{}", json_string),
             Err(e) => log::error!("Failed to serialize request payload for logging: {}", e),
         }
         // -- END DEBUG --
 
         // --- 2. Make API Call ---
-        log::debug!("Sending request to Anthropic: {:?}", request_payload);
+        log::debug!(
+            "Sending request to Anthropic: {:?}",
+            Self::sanitize_request_for_logging(&request_payload)
+        );
 
         let response = self
             .client
@@ -759,12 +897,18 @@ impl AgentBrain for AnthropicBrain {
         // --- 3. Parse API Response ---
         if !response.status().is_success() {
             let status = response.status();
-            let error_body = response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
-            log::error!("Anthropic API Error: Status {}, Body: {}", status, error_body);
-            return Err(AgentError::LlmError(format!(
-                "Anthropic API returned error {}: {}",
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read error body".to_string());
+            log::error!(
+                "Anthropic API Error: Status {}, Body: {}",
                 status,
                 error_body
+            );
+            return Err(AgentError::LlmError(format!(
+                "Anthropic API returned error {}: {}",
+                status, error_body
             )));
         }
 
@@ -777,9 +921,8 @@ impl AgentBrain for AnthropicBrain {
             // Emit stream start event
             crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
 
-            let (accumulated_text, tool_calls, stop_reason) = self.handle_streaming_response(
-                response,
-                |chunk, tts_list| {
+            let (accumulated_text, tool_calls, stop_reason) = self
+                .handle_streaming_response(response, |chunk, tts_list| {
                     // Emit text chunk event - pass first TTS item if available for backward compatibility
                     crate::agent::tool_logger::emit_streaming_text_chunk(
                         &app_handle,
@@ -797,8 +940,8 @@ impl AgentBrain for AnthropicBrain {
                             Some(tts_content.clone()),
                         );
                     }
-                },
-            ).await?;
+                })
+                .await?;
 
             // TTS tags should now be completely removed during streaming processing
             // If any remain, it indicates a bug in our improved processing logic
@@ -809,26 +952,41 @@ impl AgentBrain for AnthropicBrain {
 
                 // Emergency fallback - but this indicates a serious bug
                 let final_clean_text = self.strip_tts_tags(&accumulated_text);
-                log::error!("Emergency cleanup applied: '{}' -> '{}'", accumulated_text, final_clean_text);
+                log::error!(
+                    "Emergency cleanup applied: '{}' -> '{}'",
+                    accumulated_text,
+                    final_clean_text
+                );
 
                 return Err(AgentError::LlmError(
-                    "TTS tag processing failed - this is a critical bug in the streaming logic".to_string()
+                    "TTS tag processing failed - this is a critical bug in the streaming logic"
+                        .to_string(),
                 ));
             }
 
             let final_display_text = accumulated_text;
 
             // Emit stream end event with final display text
-            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, final_display_text.clone());
+            crate::agent::tool_logger::emit_stream_end(
+                &app_handle,
+                message_id,
+                final_display_text.clone(),
+            );
 
             // Process stop reason and return appropriate action
             match stop_reason.as_str() {
                 "tool_use" => {
                     if tool_calls.is_empty() {
-                        Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
+                        Err(AgentError::LlmError(
+                            "Stop reason is tool_use, but no valid tool calls found in response"
+                                .to_string(),
+                        ))
                     } else {
                         if !final_display_text.is_empty() {
-                            log::info!("Anthropic response included text before tool use: {}", final_display_text);
+                            log::info!(
+                                "Anthropic response included text before tool use: {}",
+                                final_display_text
+                            );
                         }
                         Ok(AgentAction::ExecuteTool(tool_calls))
                     }
@@ -849,12 +1007,14 @@ impl AgentBrain for AnthropicBrain {
             }
         } else {
             // Handle non-streaming response (original logic)
-            let response_body: AnthropicMessageResponse = response
-                .json()
-                .await
-                .map_err(|e| AgentError::LlmError(format!("Failed to parse API response: {}", e)))?;
+            let response_body: AnthropicMessageResponse = response.json().await.map_err(|e| {
+                AgentError::LlmError(format!("Failed to parse API response: {}", e))
+            })?;
 
-            log::debug!("Received response from Anthropic: {:?}", response_body);
+            log::debug!(
+                "Received response from Anthropic: {:?}",
+                Self::sanitize_response_for_logging(&response_body)
+            );
 
             // --- 4. Determine AgentAction ---
             let mut tool_calls_to_execute = Vec::new();
@@ -874,16 +1034,18 @@ impl AgentBrain for AnthropicBrain {
                     }
                     "tool_use" => {
                         // Check if we have the required fields for a tool call
-                        let id = block.id.clone().ok_or_else(|| AgentError::LlmError("Tool call missing 'id' field".to_string()))?;
-                        let name = block.name.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'name' field", id)))?;
-                        let input = block.input.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'input' field", id)))?;
+                        let id = block.id.clone().ok_or_else(|| {
+                            AgentError::LlmError("Tool call missing 'id' field".to_string())
+                        })?;
+                        let name = block.name.clone().ok_or_else(|| {
+                            AgentError::LlmError(format!("Tool call {} missing 'name' field", id))
+                        })?;
+                        let input = block.input.clone().ok_or_else(|| {
+                            AgentError::LlmError(format!("Tool call {} missing 'input' field", id))
+                        })?;
 
                         // Add to the list of tool calls to execute
-                        tool_calls_to_execute.push(ToolCall {
-                            id,
-                            name,
-                            input,
-                        });
+                        tool_calls_to_execute.push(ToolCall { id, name, input });
                     }
                     _ => {
                         log::warn!("Unknown content block type: {}", block.block_type);
@@ -894,10 +1056,16 @@ impl AgentBrain for AnthropicBrain {
             match response_body.stop_reason.as_str() {
                 "tool_use" => {
                     if tool_calls_to_execute.is_empty() {
-                        Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
+                        Err(AgentError::LlmError(
+                            "Stop reason is tool_use, but no valid tool calls found in response"
+                                .to_string(),
+                        ))
                     } else {
                         if !response_text.is_empty() {
-                            log::info!("Anthropic response included text before tool use: {}", response_text);
+                            log::info!(
+                                "Anthropic response included text before tool use: {}",
+                                response_text
+                            );
                         }
                         Ok(AgentAction::ExecuteTool(tool_calls_to_execute))
                     }

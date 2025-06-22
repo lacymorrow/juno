@@ -1,14 +1,15 @@
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use once_cell::sync::OnceCell;
 use tracing::warn;
 
-use crate::agents::{
-    AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority, AgentType
-};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig};
+use crate::agents::{
+    AgentFactory, AgentStatus, AgentType, Orchestrator, OrchestratorConfig, Task, TaskPriority,
+    TaskResult,
+};
 use crate::state::AppState;
 
 /// Global orchestrator instance
@@ -22,7 +23,9 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     let factory = AgentFactory::with_app_handle(app_handle);
 
     // Initialize default agents
-    factory.initialize_default_agents().await
+    factory
+        .initialize_default_agents()
+        .await
         .map_err(|e| format!("Failed to initialize agents: {}", e))?;
 
     // Create orchestrator
@@ -41,9 +44,11 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     });
 
     // Store globally
-    ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
+    ORCHESTRATOR
+        .set(Arc::new(Mutex::new(orchestrator)))
         .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
-    MCP_MANAGER.set(mcp_manager)
+    MCP_MANAGER
+        .set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
     tracing::info!("Enhanced multi-agent orchestrator system initialized successfully");
@@ -61,13 +66,19 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             name: "filesystem".to_string(),
             description: Some("Secure file system operations and management".to_string()),
             command: "npx".to_string(),
-            args: vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()],
+            args: vec![
+                "@modelcontextprotocol/server-filesystem".to_string(),
+                "/Users".to_string(),
+            ],
             working_directory: None,
             environment_variables: {
                 let mut env = std::collections::HashMap::new();
                 // Prevent TLS warnings and improve stability
                 env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert(
+                    "NODE_OPTIONS".to_string(),
+                    "--max-old-space-size=512".to_string(),
+                );
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
@@ -76,19 +87,23 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             timeout_seconds: 60,
             max_retries: 1, // Reduced retries to prevent spam
         },
-
         // Everything server for comprehensive testing and development - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "everything".to_string(),
-            description: Some("Reference server with comprehensive MCP features for testing".to_string()),
+            description: Some(
+                "Reference server with comprehensive MCP features for testing".to_string(),
+            ),
             command: "npx".to_string(),
             args: vec!["@modelcontextprotocol/server-everything".to_string()],
             working_directory: None,
             environment_variables: {
                 let mut env = std::collections::HashMap::new();
                 env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert(
+                    "NODE_OPTIONS".to_string(),
+                    "--max-old-space-size=512".to_string(),
+                );
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 // Limit event listeners to prevent memory leaks
                 env.insert("NODE_MAX_LISTENERS".to_string(), "20".to_string());
@@ -99,7 +114,6 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             timeout_seconds: 75,
             max_retries: 1,
         },
-
         // Memory and sequential thinking - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
@@ -111,7 +125,10 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             environment_variables: {
                 let mut env = std::collections::HashMap::new();
                 env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert(
+                    "NODE_OPTIONS".to_string(),
+                    "--max-old-space-size=256".to_string(),
+                );
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
@@ -120,7 +137,6 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             timeout_seconds: 45,
             max_retries: 1,
         },
-
         // Sequential thinking for problem solving - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
@@ -132,7 +148,10 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
             environment_variables: {
                 let mut env = std::collections::HashMap::new();
                 env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert(
+                    "NODE_OPTIONS".to_string(),
+                    "--max-old-space-size=256".to_string(),
+                );
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
@@ -143,14 +162,20 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
         },
     ];
 
-    tracing::info!("Adding {} default MCP server configurations (disabled by default)...", default_servers.len());
+    tracing::info!(
+        "Adding {} default MCP server configurations (disabled by default)...",
+        default_servers.len()
+    );
 
     let mut successful_configs = 0;
     for config in default_servers {
         match mcp_manager.add_server(config.clone()).await {
             Ok(_) => {
                 successful_configs += 1;
-                tracing::info!("Successfully added MCP server configuration '{}'", config.name);
+                tracing::info!(
+                    "Successfully added MCP server configuration '{}'",
+                    config.name
+                );
             }
             Err(e) => {
                 tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
@@ -159,9 +184,15 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
         }
     }
 
-    tracing::info!("Successfully configured {}/{} default MCP servers", successful_configs, 4);
+    tracing::info!(
+        "Successfully configured {}/{} default MCP servers",
+        successful_configs,
+        4
+    );
     tracing::info!("MCP servers are disabled by default - enable them in Settings if needed");
-    tracing::info!("To prevent app startup delays, MCP servers must be manually enabled in Settings");
+    tracing::info!(
+        "To prevent app startup delays, MCP servers must be manually enabled in Settings"
+    );
 
     Ok(())
 }
@@ -174,14 +205,16 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
 
 /// Get the global orchestrator instance
 async fn get_orchestrator() -> Result<Arc<Mutex<Orchestrator>>, String> {
-    ORCHESTRATOR.get()
+    ORCHESTRATOR
+        .get()
         .ok_or_else(|| "Orchestrator not initialized".to_string())
         .map(|o| o.clone())
 }
 
 /// Get the global MCP manager instance
 fn get_mcp_manager() -> Result<Arc<MCPManager>, String> {
-    MCP_MANAGER.get()
+    MCP_MANAGER
+        .get()
         .ok_or_else(|| "MCP manager not initialized".to_string())
         .map(|m| m.clone())
 }
@@ -292,7 +325,8 @@ pub async fn submit_orchestrated_query(
 
     if !use_orchestrator {
         // Fall back to the existing single-agent system
-        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle).await
+        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle)
+            .await
             .map_err(|e| e)?;
         return Ok(format!("Query processed: {}", trimmed_query));
     }
@@ -328,8 +362,8 @@ async fn create_and_execute_task(
     orchestrator: &Orchestrator,
     request: TaskCreationRequest,
 ) -> Result<String, String> {
-    use uuid::Uuid;
     use crate::agents::{AgentType, Task};
+    use uuid::Uuid;
 
     // Determine agent type intelligently
     let agent_type = if let Some(ref agent_str) = request.agent_type {
@@ -341,7 +375,9 @@ async fn create_and_execute_task(
         }
     } else {
         // Use orchestrator's intelligent agent selection
-        orchestrator.determine_agent_type(&request.description).await
+        orchestrator
+            .determine_agent_type(&request.description)
+            .await
     };
 
     // Parse priority
@@ -375,9 +411,15 @@ async fn create_and_execute_task(
     match orchestrator.delegate_task(task).await {
         Ok(result) => {
             if result.success {
-                Ok(result.output.as_str().unwrap_or("Task completed successfully").to_string())
+                Ok(result
+                    .output
+                    .as_str()
+                    .unwrap_or("Task completed successfully")
+                    .to_string())
             } else {
-                Err(result.error.unwrap_or("Task failed without details".to_string()))
+                Err(result
+                    .error
+                    .unwrap_or("Task failed without details".to_string()))
             }
         }
         Err(e) => Err(format!("Orchestrator error: {}", e)),
@@ -391,7 +433,10 @@ pub async fn get_orchestrator_status() -> Result<OrchestratorStatusReport, Strin
     let orchestrator_guard = orchestrator.lock().await;
 
     let orch_status = orchestrator_guard.get_orchestrator_status().await;
-    let agent_statuses = orchestrator_guard.get_registry().get_all_agent_status().await;
+    let agent_statuses = orchestrator_guard
+        .get_registry()
+        .get_all_agent_status()
+        .await;
     let active_tasks = orchestrator_guard.get_active_tasks().await;
     let task_history = orchestrator_guard.get_task_history().await;
 
@@ -399,10 +444,12 @@ pub async fn get_orchestrator_status() -> Result<OrchestratorStatusReport, Strin
     let failed_tasks = task_history.iter().filter(|t| !t.success).count();
     let successful_tasks = task_history.iter().filter(|t| t.success).count();
     let average_completion_time = if successful_tasks > 0 {
-        task_history.iter()
+        task_history
+            .iter()
             .filter(|t| t.success)
             .map(|t| t.execution_time.as_secs_f32())
-            .sum::<f32>() / successful_tasks as f32
+            .sum::<f32>()
+            / successful_tasks as f32
     } else {
         0.0
     };
@@ -410,8 +457,14 @@ pub async fn get_orchestrator_status() -> Result<OrchestratorStatusReport, Strin
     // Get MCP status if available
     let (mcp_servers_connected, mcp_tools_available) = if let Ok(mcp_manager) = get_mcp_manager() {
         let server_statuses = mcp_manager.get_server_statuses().await;
-        let connected_servers = server_statuses.values()
-            .filter(|status| matches!(status, crate::agent::tools::mcp_integration::MCPServerStatus::Connected))
+        let connected_servers = server_statuses
+            .values()
+            .filter(|status| {
+                matches!(
+                    status,
+                    crate::agent::tools::mcp_integration::MCPServerStatus::Connected
+                )
+            })
             .count();
         let available_tools = mcp_manager.get_all_tools().await.len();
         (connected_servers, available_tools)
@@ -444,7 +497,9 @@ pub async fn configure_orchestrator(config: OrchestratorConfigDTO) -> Result<(),
     // For now, we'll recreate the orchestrator with new config
     // In a production system, this would be more sophisticated
     let factory = AgentFactory::new();
-    factory.initialize_default_agents().await
+    factory
+        .initialize_default_agents()
+        .await
         .map_err(|e| format!("Failed to initialize agents: {}", e))?;
 
     let orchestrator_config: OrchestratorConfig = config.into();
@@ -487,7 +542,9 @@ pub async fn get_task_history(
     }
 
     if let Some(ref agent_filter) = agent_type {
-        history.retain(|task| format!("{:?}", task.agent_type).to_lowercase() == agent_filter.to_lowercase());
+        history.retain(|task| {
+            format!("{:?}", task.agent_type).to_lowercase() == agent_filter.to_lowercase()
+        });
     }
 
     // Apply limit
@@ -510,18 +567,19 @@ pub async fn get_active_tasks() -> Result<Vec<Task>, String> {
 
 /// Get all agent capabilities with enhanced information
 #[tauri::command]
-pub async fn get_agent_capabilities() -> Result<std::collections::HashMap<String, Vec<crate::agents::AgentCapability>>, String> {
+pub async fn get_agent_capabilities(
+) -> Result<std::collections::HashMap<String, Vec<crate::agents::AgentCapability>>, String> {
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
 
-    let agent_statuses = orchestrator_guard.get_registry().get_all_agent_status().await;
+    let agent_statuses = orchestrator_guard
+        .get_registry()
+        .get_all_agent_status()
+        .await;
     let mut capabilities_map = std::collections::HashMap::new();
 
     for status in agent_statuses {
-        capabilities_map.insert(
-            format!("{:?}", status.agent_type),
-            status.capabilities
-        );
+        capabilities_map.insert(format!("{:?}", status.agent_type), status.capabilities);
     }
 
     Ok(capabilities_map)
@@ -533,7 +591,10 @@ pub async fn cancel_task(task_id: String) -> Result<bool, String> {
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
 
-    match orchestrator_guard.cancel_task(&task_id, "User requested cancellation").await {
+    match orchestrator_guard
+        .cancel_task(&task_id, "User requested cancellation")
+        .await
+    {
         Ok(cancelled) => {
             if cancelled {
                 tracing::info!("Successfully cancelled task: {}", task_id);
@@ -592,20 +653,22 @@ pub async fn get_workflow_templates() -> Result<Vec<WorkflowTemplate>, String> {
                     description: "Search for relevant web content".to_string(),
                     agent_type: "Browser".to_string(),
                     dependencies: vec![],
-                    context: serde_json::json!({"search_query": "{{query}}"})
+                    context: serde_json::json!({"search_query": "{{query}}"}),
                 },
                 TaskTemplate {
                     name: "analyze".to_string(),
                     description: "Analyze and extract key information".to_string(),
                     agent_type: "System".to_string(),
                     dependencies: vec!["search".to_string()],
-                    context: serde_json::json!({"analysis_focus": "{{focus}}"})
-                }
+                    context: serde_json::json!({"analysis_focus": "{{focus}}"}),
+                },
             ],
             variables: [
                 ("query".to_string(), "Search query".to_string()),
-                ("focus".to_string(), "Analysis focus".to_string())
-            ].into_iter().collect(),
+                ("focus".to_string(), "Analysis focus".to_string()),
+            ]
+            .into_iter()
+            .collect(),
         },
         WorkflowTemplate {
             id: "file-processing".to_string(),
@@ -617,28 +680,30 @@ pub async fn get_workflow_templates() -> Result<Vec<WorkflowTemplate>, String> {
                     description: "Read and validate input files".to_string(),
                     agent_type: "System".to_string(),
                     dependencies: vec![],
-                    context: serde_json::json!({"file_path": "{{input_path}}"})
+                    context: serde_json::json!({"file_path": "{{input_path}}"}),
                 },
                 TaskTemplate {
                     name: "process".to_string(),
                     description: "Process file content".to_string(),
                     agent_type: "System".to_string(),
                     dependencies: vec!["read_files".to_string()],
-                    context: serde_json::json!({"operation": "{{operation}}"})
+                    context: serde_json::json!({"operation": "{{operation}}"}),
                 },
                 TaskTemplate {
                     name: "save_results".to_string(),
                     description: "Save processed results".to_string(),
                     agent_type: "System".to_string(),
                     dependencies: vec!["process".to_string()],
-                    context: serde_json::json!({"output_path": "{{output_path}}"})
-                }
+                    context: serde_json::json!({"output_path": "{{output_path}}"}),
+                },
             ],
             variables: [
                 ("input_path".to_string(), "Input file path".to_string()),
                 ("operation".to_string(), "Processing operation".to_string()),
-                ("output_path".to_string(), "Output file path".to_string())
-            ].into_iter().collect(),
+                ("output_path".to_string(), "Output file path".to_string()),
+            ]
+            .into_iter()
+            .collect(),
         },
         WorkflowTemplate {
             id: "desktop-automation".to_string(),
@@ -650,29 +715,37 @@ pub async fn get_workflow_templates() -> Result<Vec<WorkflowTemplate>, String> {
                     description: "Prepare desktop environment".to_string(),
                     agent_type: "Desktop".to_string(),
                     dependencies: vec![],
-                    context: serde_json::json!({"applications": "{{apps}}"})
+                    context: serde_json::json!({"applications": "{{apps}}"}),
                 },
                 TaskTemplate {
                     name: "execute_actions".to_string(),
                     description: "Execute automated actions".to_string(),
                     agent_type: "Desktop".to_string(),
                     dependencies: vec!["setup".to_string()],
-                    context: serde_json::json!({"actions": "{{action_sequence}}"})
+                    context: serde_json::json!({"actions": "{{action_sequence}}"}),
                 },
                 TaskTemplate {
                     name: "verify_results".to_string(),
                     description: "Verify automation results".to_string(),
                     agent_type: "Desktop".to_string(),
                     dependencies: vec!["execute_actions".to_string()],
-                    context: serde_json::json!({"verification": "{{verify_method}}"})
-                }
+                    context: serde_json::json!({"verification": "{{verify_method}}"}),
+                },
             ],
             variables: [
                 ("apps".to_string(), "Applications to use".to_string()),
-                ("action_sequence".to_string(), "Sequence of actions".to_string()),
-                ("verify_method".to_string(), "Verification method".to_string())
-            ].into_iter().collect(),
-        }
+                (
+                    "action_sequence".to_string(),
+                    "Sequence of actions".to_string(),
+                ),
+                (
+                    "verify_method".to_string(),
+                    "Verification method".to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
     ];
 
     Ok(templates)
@@ -685,7 +758,8 @@ pub async fn execute_workflow_template(
     variables: HashMap<String, String>,
 ) -> Result<String, String> {
     let templates = get_workflow_templates().await?;
-    let template = templates.into_iter()
+    let template = templates
+        .into_iter()
         .find(|t| t.id == template_id)
         .ok_or_else(|| format!("Workflow template '{}' not found", template_id))?;
 
@@ -701,7 +775,9 @@ pub async fn execute_workflow_template(
 
         tasks_to_execute.retain(|task_template| {
             // Check if all dependencies are completed
-            let deps_satisfied = task_template.dependencies.iter()
+            let deps_satisfied = task_template
+                .dependencies
+                .iter()
                 .all(|dep| task_results.contains_key(dep));
 
             if deps_satisfied {
@@ -714,10 +790,8 @@ pub async fn execute_workflow_template(
                         if let Some(value_str) = value.as_str() {
                             let mut replaced_value = value_str.to_string();
                             for (var_name, var_value) in &variables {
-                                replaced_value = replaced_value.replace(
-                                    &format!("{{{{{}}}}}", var_name),
-                                    var_value
-                                );
+                                replaced_value = replaced_value
+                                    .replace(&format!("{{{{{}}}}}", var_name), var_value);
                             }
                             *value = serde_json::Value::String(replaced_value);
                         }
@@ -739,7 +813,7 @@ pub async fn execute_workflow_template(
                 // For now, we'll mark it as completed
                 task_results.insert(
                     task_template.name.clone(),
-                    format!("Task '{}' executed successfully", task_template.name)
+                    format!("Task '{}' executed successfully", task_template.name),
                 );
 
                 executed_any = true;
@@ -754,8 +828,11 @@ pub async fn execute_workflow_template(
         }
     }
 
-    Ok(format!("Workflow template '{}' executed successfully with {} tasks completed",
-        template.name, task_results.len()))
+    Ok(format!(
+        "Workflow template '{}' executed successfully with {} tasks completed",
+        template.name,
+        task_results.len()
+    ))
 }
 
 /// Initialize the orchestrator on app startup
@@ -765,7 +842,9 @@ pub async fn initialize_orchestrator_system() -> Result<(), String> {
     let factory = AgentFactory::new();
 
     // Initialize default agents (will skip desktop agent without app_handle)
-    factory.initialize_default_agents().await
+    factory
+        .initialize_default_agents()
+        .await
         .map_err(|e| format!("Failed to initialize agents: {}", e))?;
 
     // Create orchestrator
@@ -775,12 +854,16 @@ pub async fn initialize_orchestrator_system() -> Result<(), String> {
     let mcp_manager = Arc::new(MCPManager::new());
 
     // Store globally
-    ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
+    ORCHESTRATOR
+        .set(Arc::new(Mutex::new(orchestrator)))
         .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
-    MCP_MANAGER.set(mcp_manager)
+    MCP_MANAGER
+        .set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
-    tracing::info!("Enhanced multi-agent orchestrator system initialized successfully (minimal mode)");
+    tracing::info!(
+        "Enhanced multi-agent orchestrator system initialized successfully (minimal mode)"
+    );
     Ok(())
 }
 
@@ -822,14 +905,18 @@ pub async fn execute_intelligent_parallel_tasks(
     }
 
     // Execute with intelligent parallel processing
-    match orchestrator_guard.execute_intelligent_parallel_tasks(tasks).await {
+    match orchestrator_guard
+        .execute_intelligent_parallel_tasks(tasks)
+        .await
+    {
         Ok(results) => {
-            let outputs: Vec<String> = results.into_iter()
+            let outputs: Vec<String> = results
+                .into_iter()
                 .map(|r| r.output.as_str().unwrap_or("No output").to_string())
                 .collect();
             Ok(outputs)
         }
-        Err(e) => Err(format!("Intelligent parallel execution failed: {}", e))
+        Err(e) => Err(format!("Intelligent parallel execution failed: {}", e)),
     }
 }
 
@@ -856,14 +943,15 @@ pub async fn intelligent_task_splitting(
         }),
     };
 
-    match orchestrator_guard.intelligent_task_splitting(&complex_task).await {
+    match orchestrator_guard
+        .intelligent_task_splitting(&complex_task)
+        .await
+    {
         Ok(subtasks) => {
-            let descriptions: Vec<String> = subtasks.into_iter()
-                .map(|t| t.description)
-                .collect();
+            let descriptions: Vec<String> = subtasks.into_iter().map(|t| t.description).collect();
             Ok(descriptions)
         }
-        Err(e) => Err(format!("Task splitting failed: {}", e))
+        Err(e) => Err(format!("Task splitting failed: {}", e)),
     }
 }
 
@@ -906,7 +994,10 @@ pub async fn execute_optimized_workflow(
 
     // Step 1: Intelligent task splitting if enabled
     let tasks = if enable_task_splitting {
-        match orchestrator_guard.intelligent_task_splitting(&workflow_task).await {
+        match orchestrator_guard
+            .intelligent_task_splitting(&workflow_task)
+            .await
+        {
             Ok(split_tasks) => {
                 tracing::info!("Workflow split into {} tasks", split_tasks.len());
                 split_tasks
@@ -922,7 +1013,9 @@ pub async fn execute_optimized_workflow(
 
     // Step 2: Execute with intelligent parallel processing if enabled
     let results = if enable_parallel_execution && tasks.len() > 1 {
-        orchestrator_guard.execute_intelligent_parallel_tasks(tasks).await
+        orchestrator_guard
+            .execute_intelligent_parallel_tasks(tasks)
+            .await
     } else {
         orchestrator_guard.execute_parallel_tasks(tasks).await
     };
@@ -932,7 +1025,7 @@ pub async fn execute_optimized_workflow(
             let output = orchestrator_guard.merge_results(task_results);
             Ok(format!("Optimized workflow completed: {}", output))
         }
-        Err(e) => Err(format!("Optimized workflow failed: {}", e))
+        Err(e) => Err(format!("Optimized workflow failed: {}", e)),
     }
 }
 
@@ -954,7 +1047,9 @@ pub async fn configure_enhanced_orchestrator(
     // Create enhanced configuration
     let enhanced_config = crate::agents::OrchestratorConfig {
         max_parallel_tasks: max_parallel_tasks.unwrap_or(12),
-        task_timeout: std::time::Duration::from_secs(300),
+        task_timeout: std::time::Duration::from_secs(
+            crate::constants::agent::config::DEFAULT_TASK_TIMEOUT_SECONDS,
+        ),
         enable_task_splitting: true,
         enable_fallback_agents: true,
         min_confidence_threshold: 0.3,
@@ -998,7 +1093,10 @@ pub async fn benchmark_orchestrator_performance(
 
     let test_task_count = test_task_count.min(20).max(1); // Safety bounds
 
-    tracing::info!("Starting orchestrator performance benchmark with {} tasks", test_task_count);
+    tracing::info!(
+        "Starting orchestrator performance benchmark with {} tasks",
+        test_task_count
+    );
 
     // Create test tasks
     let mut test_tasks = Vec::new();
@@ -1026,7 +1124,9 @@ pub async fn benchmark_orchestrator_performance(
     // Execute benchmark
     let start_time = std::time::Instant::now();
     let results = if enable_optimizations {
-        orchestrator_guard.execute_intelligent_parallel_tasks(test_tasks).await
+        orchestrator_guard
+            .execute_intelligent_parallel_tasks(test_tasks)
+            .await
     } else {
         orchestrator_guard.execute_parallel_tasks(test_tasks).await
     };
@@ -1037,9 +1137,11 @@ pub async fn benchmark_orchestrator_performance(
     match results {
         Ok(task_results) => {
             let successful_tasks = task_results.iter().filter(|r| r.success).count();
-            let average_execution_time = task_results.iter()
+            let average_execution_time = task_results
+                .iter()
                 .map(|r| r.execution_time.as_millis())
-                .sum::<u128>() as f32 / task_results.len() as f32;
+                .sum::<u128>() as f32
+                / task_results.len() as f32;
 
             Ok(serde_json::json!({
                 "benchmark_results": {
@@ -1059,6 +1161,6 @@ pub async fn benchmark_orchestrator_performance(
                 "detailed_metrics": performance_metrics
             }))
         }
-        Err(e) => Err(format!("Benchmark failed: {}", e))
+        Err(e) => Err(format!("Benchmark failed: {}", e)),
     }
 }

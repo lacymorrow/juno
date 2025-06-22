@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::agent::core::{AgentError, Message, Role};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 /// Research Foundation: ComfyBench (CVPR 2025)
 /// Advanced Collaborative AI System Design for autonomous workflow orchestration
@@ -120,7 +120,9 @@ impl Default for CollaborativeAIConfig {
     fn default() -> Self {
         Self {
             max_workflow_complexity: 10.0,
-            max_design_time: Duration::from_secs(300), // 5 minutes
+            max_design_time: Duration::from_secs(
+                crate::constants::agent::config::DEFAULT_TASK_TIMEOUT_SECONDS,
+            ),
             enable_parallel_design: true,
             knowledge_retrieval_timeout: Duration::from_secs(30),
             agent_coordination_timeout: Duration::from_secs(60),
@@ -175,17 +177,20 @@ impl CollaborativeAIDesigner {
         }
 
         // Phase 1: Knowledge Retrieval and Context Building
-        let knowledge_context = self.retrieve_agent
+        let knowledge_context = self
+            .retrieve_agent
             .gather_domain_knowledge(requirements)
             .await?;
 
         // Phase 2: Initial Planning
-        let initial_plan = self.plan_agent
+        let initial_plan = self
+            .plan_agent
             .create_workflow_plan(requirements, &knowledge_context)
             .await?;
 
         // Phase 3: Component Combination and Integration
-        let combined_workflow = self.combine_agent
+        let combined_workflow = self
+            .combine_agent
             .integrate_workflow_components(&initial_plan, &knowledge_context)
             .await?;
 
@@ -199,7 +204,8 @@ impl CollaborativeAIDesigner {
         };
 
         // Phase 5: Refinement and Validation
-        let final_workflow = self.refine_agent
+        let final_workflow = self
+            .refine_agent
             .refine_and_validate(&optimized_workflow, requirements)
             .await?;
 
@@ -209,7 +215,9 @@ impl CollaborativeAIDesigner {
         let success_rate = self.estimate_success_rate(&final_workflow, requirements);
 
         // Build agent contributions map
-        let agent_contributions = self.build_agent_contributions_map(&design_id, design_time).await;
+        let agent_contributions = self
+            .build_agent_contributions_map(&design_id, design_time)
+            .await;
 
         // Create result
         let result = WorkflowDesignResult {
@@ -234,7 +242,10 @@ impl CollaborativeAIDesigner {
             active_designs.remove(&design_id);
         }
 
-        info!("Collaborative AI system design completed in {:?}", design_time);
+        info!(
+            "Collaborative AI system design completed in {:?}",
+            design_time
+        );
         Ok(result)
     }
 
@@ -318,7 +329,11 @@ impl CollaborativeAIDesigner {
         (component_count * 0.3) + (step_count * 0.5) + (dependency_count * 0.2)
     }
 
-    fn estimate_success_rate(&self, workflow: &WorkflowDesign, requirements: &SystemRequirements) -> f32 {
+    fn estimate_success_rate(
+        &self,
+        workflow: &WorkflowDesign,
+        requirements: &SystemRequirements,
+    ) -> f32 {
         // Simplified success rate estimation based on complexity and requirements alignment
         let complexity_penalty = (workflow.execution_plan.steps.len() as f32 * 0.02).min(0.3);
         let base_success_rate = 0.85;
@@ -334,33 +349,51 @@ impl CollaborativeAIDesigner {
         let mut contributions = HashMap::new();
 
         // Simulate agent contributions (in real implementation, track actual agent work)
-        let agents = ["plan_agent", "combine_agent", "adapt_agent", "refine_agent", "retrieve_agent"];
+        let agents = [
+            "plan_agent",
+            "combine_agent",
+            "adapt_agent",
+            "refine_agent",
+            "retrieve_agent",
+        ];
         let base_time = total_time.as_millis() as u64 / agents.len() as u64;
 
         for (i, agent) in agents.iter().enumerate() {
-            contributions.insert(agent.to_string(), AgentContribution {
-                agent_id: agent.to_string(),
-                role: format!("Collaborative AI {} Role", agent),
-                contribution_percentage: 20.0, // Equal distribution for simplicity
-                key_decisions: vec![format!("Key decision by {}", agent)],
-                execution_time_ms: base_time + (i as u64 * 10), // Slight variation
-            });
+            contributions.insert(
+                agent.to_string(),
+                AgentContribution {
+                    agent_id: agent.to_string(),
+                    role: format!("Collaborative AI {} Role", agent),
+                    contribution_percentage: 20.0, // Equal distribution for simplicity
+                    key_decisions: vec![format!("Key decision by {}", agent)],
+                    execution_time_ms: base_time + (i as u64 * 10), // Slight variation
+                },
+            );
         }
 
         contributions
     }
 
-    fn validate_workflow_for_execution(&self, workflow: &WorkflowDesignResult) -> Result<(), AgentError> {
+    fn validate_workflow_for_execution(
+        &self,
+        workflow: &WorkflowDesignResult,
+    ) -> Result<(), AgentError> {
         if workflow.workflow_code.is_empty() {
-            return Err(AgentError::InputError("Workflow code cannot be empty".to_string()));
+            return Err(AgentError::InputError(
+                "Workflow code cannot be empty".to_string(),
+            ));
         }
 
         if workflow.execution_plan.steps.is_empty() {
-            return Err(AgentError::InputError("Execution plan must have at least one step".to_string()));
+            return Err(AgentError::InputError(
+                "Execution plan must have at least one step".to_string(),
+            ));
         }
 
         if workflow.success_rate < 0.1 {
-            return Err(AgentError::InputError("Workflow success rate too low for execution".to_string()));
+            return Err(AgentError::InputError(
+                "Workflow success rate too low for execution".to_string(),
+            ));
         }
 
         Ok(())
@@ -525,12 +558,20 @@ impl PlanAgent {
     ) -> Result<WorkflowDesign, AgentError> {
         debug!("PlanAgent creating workflow plan");
 
-        let strategy = self.strategy_generator.generate_strategy(requirements, knowledge).await?;
-        let tasks = self.task_analyzer.analyze_requirements(requirements).await?;
+        let strategy = self
+            .strategy_generator
+            .generate_strategy(requirements, knowledge)
+            .await?;
+        let tasks = self
+            .task_analyzer
+            .analyze_requirements(requirements)
+            .await?;
 
         let execution_plan = ExecutionPlan {
-            steps: tasks.into_iter().enumerate().map(|(i, task)| {
-                ExecutionStep {
+            steps: tasks
+                .into_iter()
+                .enumerate()
+                .map(|(i, task)| ExecutionStep {
                     id: format!("step_{}", i),
                     description: task.description,
                     agent_type: task.agent_type,
@@ -538,10 +579,12 @@ impl PlanAgent {
                     timeout: Duration::from_secs(60),
                     retry_count: 3,
                     success_criteria: task.success_criteria,
-                }
-            }).collect(),
+                })
+                .collect(),
             dependencies: HashMap::new(),
-            estimated_duration: Duration::from_secs(300),
+            estimated_duration: Duration::from_secs(
+                crate::constants::agent::config::DEFAULT_TASK_TIMEOUT_SECONDS,
+            ),
             parallel_operations: vec![],
             resource_requirements: ResourceRequirements {
                 cpu_cores: 2,
@@ -582,10 +625,15 @@ impl CombineAgent {
         debug!("CombineAgent integrating workflow components");
 
         // Check component compatibility
-        self.compatibility_checker.check_compatibility(workflow).await?;
+        self.compatibility_checker
+            .check_compatibility(workflow)
+            .await?;
 
         // Integrate components
-        let integrated_workflow = self.workflow_integrator.integrate(workflow, knowledge).await?;
+        let integrated_workflow = self
+            .workflow_integrator
+            .integrate(workflow, knowledge)
+            .await?;
 
         Ok(integrated_workflow)
     }
@@ -611,15 +659,21 @@ impl AdaptAgent {
 
         // Add parallel operations where possible
         if let ComplexityLevel::Complex | ComplexityLevel::Expert = requirements.complexity_level {
-            optimized_workflow.execution_plan.parallel_operations.push(ParallelBlock {
-                id: "parallel_block_1".to_string(),
-                steps: optimized_workflow.execution_plan.steps.iter()
-                    .take(2)
-                    .map(|s| s.id.clone())
-                    .collect(),
-                max_concurrency: 2,
-                coordination_strategy: CoordinationStrategy::Independent,
-            });
+            optimized_workflow
+                .execution_plan
+                .parallel_operations
+                .push(ParallelBlock {
+                    id: "parallel_block_1".to_string(),
+                    steps: optimized_workflow
+                        .execution_plan
+                        .steps
+                        .iter()
+                        .take(2)
+                        .map(|s| s.id.clone())
+                        .collect(),
+                    max_concurrency: 2,
+                    coordination_strategy: CoordinationStrategy::Independent,
+                });
         }
 
         Ok(optimized_workflow)
@@ -666,7 +720,9 @@ impl RefineAgent {
         requirements: &SystemRequirements,
     ) -> Result<(), AgentError> {
         if workflow.execution_plan.steps.is_empty() {
-            return Err(AgentError::InputError("Workflow has no execution steps".to_string()));
+            return Err(AgentError::InputError(
+                "Workflow has no execution steps".to_string(),
+            ));
         }
 
         if workflow.code.is_empty() {
@@ -675,7 +731,9 @@ impl RefineAgent {
 
         // Validate performance requirements
         if workflow.execution_plan.estimated_duration > requirements.timeline {
-            return Err(AgentError::InputError("Workflow exceeds timeline requirements".to_string()));
+            return Err(AgentError::InputError(
+                "Workflow exceeds timeline requirements".to_string(),
+            ));
         }
 
         Ok(())
@@ -791,30 +849,35 @@ def initialize_ai_components():
         'monitor': SystemMonitor()
     }}
 "#,
-            requirements.description,
-            requirements.goals
+            requirements.description, requirements.goals
         );
 
         let mut components = HashMap::new();
 
         // Add core AI components based on requirements
-        components.insert("data_processor".to_string(), AIComponent {
-            id: "data_processor".to_string(),
-            name: "Data Processor".to_string(),
-            component_type: AIComponentType::DataProcessor,
-            capabilities: vec!["data_processing".to_string(), "analysis".to_string()],
-            configuration: serde_json::json!({"processing_mode": "batch"}),
-            integration_points: vec!["decision_maker".to_string()],
-        });
+        components.insert(
+            "data_processor".to_string(),
+            AIComponent {
+                id: "data_processor".to_string(),
+                name: "Data Processor".to_string(),
+                component_type: AIComponentType::DataProcessor,
+                capabilities: vec!["data_processing".to_string(), "analysis".to_string()],
+                configuration: serde_json::json!({"processing_mode": "batch"}),
+                integration_points: vec!["decision_maker".to_string()],
+            },
+        );
 
-        components.insert("decision_maker".to_string(), AIComponent {
-            id: "decision_maker".to_string(),
-            name: "Decision Maker".to_string(),
-            component_type: AIComponentType::DecisionMaker,
-            capabilities: vec!["decision_making".to_string(), "planning".to_string()],
-            configuration: serde_json::json!({"decision_threshold": 0.8}),
-            integration_points: vec!["action_executor".to_string()],
-        });
+        components.insert(
+            "decision_maker".to_string(),
+            AIComponent {
+                id: "decision_maker".to_string(),
+                name: "Decision Maker".to_string(),
+                component_type: AIComponentType::DecisionMaker,
+                capabilities: vec!["decision_making".to_string(), "planning".to_string()],
+                configuration: serde_json::json!({"decision_threshold": 0.8}),
+                integration_points: vec!["action_executor".to_string()],
+            },
+        );
 
         Ok(DesignStrategy {
             code,
@@ -876,10 +939,18 @@ impl WorkflowIntegrator {
         let mut integrated_workflow = workflow.clone();
 
         // Add integration code to workflow
-        integrated_workflow.code.push_str("\n\n# Integration enhancements\n");
-        integrated_workflow.code.push_str("# Added component synchronization\n");
-        integrated_workflow.code.push_str("def synchronize_components():\n");
-        integrated_workflow.code.push_str("    pass  # Component synchronization logic\n");
+        integrated_workflow
+            .code
+            .push_str("\n\n# Integration enhancements\n");
+        integrated_workflow
+            .code
+            .push_str("# Added component synchronization\n");
+        integrated_workflow
+            .code
+            .push_str("def synchronize_components():\n");
+        integrated_workflow
+            .code
+            .push_str("    pass  # Component synchronization logic\n");
 
         Ok(integrated_workflow)
     }
@@ -900,9 +971,10 @@ impl CompatibilityChecker {
             // Validate integration points exist
             for integration_point in &component.integration_points {
                 if !workflow.components.contains_key(integration_point) {
-                    return Err(AgentError::InputError(
-                        format!("Component {} references non-existent integration point: {}", id, integration_point)
-                    ));
+                    return Err(AgentError::InputError(format!(
+                        "Component {} references non-existent integration point: {}",
+                        id, integration_point
+                    )));
                 }
             }
         }
@@ -949,7 +1021,9 @@ impl CollaborativeAIDesigner {
             return 0;
         }
 
-        let total_time: u64 = memory.designs.values()
+        let total_time: u64 = memory
+            .designs
+            .values()
             .map(|design| design.design_time_ms)
             .sum();
 
@@ -961,7 +1035,9 @@ impl CollaborativeAIDesigner {
             return 0.0;
         }
 
-        let total_success_rate: f32 = memory.designs.values()
+        let total_success_rate: f32 = memory
+            .designs
+            .values()
             .map(|design| design.success_rate)
             .sum();
 
