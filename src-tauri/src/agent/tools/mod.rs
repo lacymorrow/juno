@@ -14,6 +14,7 @@
 //! - `cursor_integration`: Integration with Cursor IDE for development workflows
 //! - `mcp_integration`: Model Context Protocol (MCP) server integration for extensibility
 //! - `self_awareness_tools`: Self-building and introspection capabilities (debug mode only)
+//! - `self_improvement`: Research-backed self-improving code generation system (debug mode only)
 //! - `tool_mapping`: Tool mapping service for centralized tool categorization
 //! - `ui_token_selector`: UI-Guided Visual Token Selection for 33% computational cost reduction
 //!
@@ -32,6 +33,7 @@ pub mod enhanced_coding_tools;
 pub mod cursor_integration;
 pub mod mcp_integration;
 pub mod self_awareness_tools; // Self-building and introspection capabilities
+pub mod self_improvement; // Research-backed self-improving code generation system (debug mode only)
 pub mod tool_mapping; // Add tool mapping service
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research
@@ -47,6 +49,7 @@ pub use tool_config::{ToolConfig, ToolConfigManager, ToolCategory}; // Export to
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
+pub use self_improvement::register_self_improvement_tools; // Export self-improvement tool registration (debug mode only)
 pub use exploration_reasoning::{ExplorationEngine, ExplorationResult, ExplorationConfig}; // Export exploration-reasoning components
 pub use collaborative_ai::{CollaborativeAIDesigner, WorkflowDesignResult, SystemRequirements, ComplexityLevel}; // Export collaborative AI components
 pub use enhanced_visual_reasoning::{VisualReasoningEngine, VisualReasoningResult, ReasoningContext, SceneUnderstanding}; // Export enhanced visual reasoning components
