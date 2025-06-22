@@ -95,6 +95,7 @@ tauri-plugin-autostart = "2.3.0"
 which = "6.0"
 # Additional dependencies for UI Token Selection
 lru = "0.12"
+walkdir = "2.4"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
