@@ -638,7 +638,7 @@ const styles = \`
                     gradientWidth={12}
                     pauseOnHover={true}
                     delay={textTransitioning ? 0 : 1.2}
-                    play={["listening", "processing", "speaking"].includes(assistantState) && !isTransitioning && !textTransitioning}
+                    play={assistantState !== "idle" && !isTransitioning && !textTransitioning}
                   >
                     <span
                       className={`marquee-text text-white/80 text-xs whitespace-nowrap pr-12 ${textTransitioning ? "text-transitioning" : ""}`}
@@ -756,7 +756,7 @@ const styles = \`
         )}
       </div>
 
-      <style>{`
+      <style jsx>{`
         .voice-ai-bar-container {
           position: relative;
         }

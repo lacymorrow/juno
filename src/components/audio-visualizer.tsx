@@ -457,7 +457,7 @@ export default function AudioVisualizer({
   )
 
   // Smooth interpolation and easing functions
-  // const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
   const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
   const getTransitionDuration = useCallback((fromState: AppState, toState: AppState) => {

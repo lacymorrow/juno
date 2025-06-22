@@ -5,6 +5,7 @@ import type { DevPanelProps, AssistantState } from "../types/voice-ai"
 export function DevPanel({
   currentState,
   onStateChange,
+  sampleResponses,
   isVisible,
   onToggleVisibility,
 }: DevPanelProps) {

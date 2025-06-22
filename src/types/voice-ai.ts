@@ -22,11 +22,3 @@ export interface VoiceAIBarProps {
 	className?: string;
 	sampleResponses?: Record<string, ResponseContent>;
 }
-
-export interface DevPanelProps {
-	currentState: AssistantState;
-	onStateChange: (state: AssistantState) => void;
-	sampleResponses?: Record<string, ResponseContent>;
-	isVisible: boolean;
-	onToggleVisibility: () => void;
-}
