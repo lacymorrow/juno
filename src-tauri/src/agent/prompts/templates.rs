@@ -244,6 +244,79 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 4. **Be Resourceful**: If you don't have a specific tool, suggest MCP servers the user could add"#
     }
 
+    /// **NEW: Tool batching optimization guidelines**
+    pub fn tool_batching_optimization() -> &'static str {
+        r#"🚀 **INTELLIGENT TOOL BATCHING FOR PERFORMANCE**
+
+**CRITICAL**: Your system has advanced batching capabilities that can execute multiple related tools 33% faster. Use this intelligently to improve user experience.
+
+**⚡ ALWAYS BATCH THESE OBVIOUS SEQUENCES**:
+```
+✅ Type text → Press Enter → Take screenshot
+✅ Click element → Take screenshot
+✅ Open app → Wait for load → Take screenshot
+✅ Navigate to folder → List contents → Create new file
+✅ Fill form field → Fill next field → Submit → Screenshot
+✅ Multiple read-only operations (get status, check files, etc.)
+```
+
+**🎯 BATCHING DECISION FRAMEWORK**:
+
+**BATCH IMMEDIATELY** when you can predict the full sequence:
+- User asks: "Type 'hello world' and press enter"
+  → `[type_text("hello world"), key_press("Return"), screenshot()]`
+- User asks: "Open Calculator and take a screenshot"
+  → `[execute_command("open -a Calculator"), wait(2), screenshot()]`
+- User asks: "Fill out this form with my info"
+  → `[click(name_field), type("John"), click(email_field), type("john@email.com"), click(submit)]`
+
+**DON'T BATCH** when you need to see results first:
+- Complex UI navigation where next step depends on what appears
+- Conditional operations ("if the dialog appears, click OK")
+- Error-prone operations where failures change the plan
+
+**🔥 BATCHING EXAMPLES**:
+
+**❌ SLOW (Individual calls)**:
+```
+User: "Type my name and press enter"
+→ Call: type_text("John")
+→ Wait for result...
+→ Call: key_press("Return")
+→ Wait for result...
+→ Call: screenshot()
+```
+
+**✅ FAST (Batched)**:
+```
+User: "Type my name and press enter"
+→ Batch: [type_text("John"), key_press("Return"), screenshot()]
+→ All execute together with single approval!
+```
+
+**🎯 PERFECT BATCHING SCENARIOS**:
+
+1. **Form Filling**: Multiple fields can be filled in sequence
+2. **File Operations**: Create folder, navigate to it, create file
+3. **App Workflows**: Open → Wait → Use → Screenshot
+4. **Text Entry**: Type → Format → Screenshot
+5. **MCP Read Operations**: Multiple status checks, searches, or data retrieval
+
+**⚠️ BATCHING GUIDELINES**:
+- **Max 5 tools per batch** (system limitation)
+- **Related operations only** (don't batch unrelated tasks)
+- **Predictable sequences** (where you know all steps upfront)
+- **Include verification** (add screenshot to verify results)
+
+**🚀 PERFORMANCE IMPACT**:
+- **33% faster execution** for batched operations
+- **Single approval** instead of individual confirmations
+- **Reduced network overhead** and context switching
+- **Better user experience** with smoother workflows
+
+**Remember**: When users give you clear multi-step instructions, they expect efficient execution. Use batching to deliver professional-grade performance!"#
+    }
+
     /// Concise JSX visual capabilities (much shorter)
     pub fn jsx_capabilities() -> &'static str {
         r#"🎨 **VISUAL RESPONSES**
@@ -358,9 +431,10 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
+            PromptFragments::tool_batching_optimization(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
@@ -382,9 +456,10 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
+            PromptFragments::tool_batching_optimization(),
             PromptFragments::development_awareness(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
@@ -546,7 +621,10 @@ Focus on desktop automation and system interaction tasks with maximum precision 
 
 {}
 
+{}
+
 {}"#,
+            PromptFragments::tool_batching_optimization(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
