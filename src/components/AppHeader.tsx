@@ -88,23 +88,6 @@ export function AppHeader({
       )}
 
       <div className="flex items-center gap-1 flex-shrink-0">
-        {/* Debug Button - temporary for troubleshooting */}
-        {currentView === "chat" && process.env.NODE_ENV === "development" && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              settings.debugSettings();
-              console.log("Manual settings reload triggered");
-              settings.loadAllSettings();
-            }}
-            title="Debug Settings (Dev Only)"
-            className="h-7 w-7 p-0"
-          >
-            <Bug size={14} />
-          </Button>
-        )}
-
         {/* Back Button - show for devtools, permissions views */}
         {(currentView === "devtools" || currentView === "permissions") && (
           <Button
