@@ -176,7 +176,28 @@ pub fn init_ai_providers() -> Result<(), String> {
 }
 
 /// Handle CLI command processing and determine if app should continue
-pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+pub async fn handle_cli_processing() -> Result<bool, crate::error_handling::JunoError> {
+    // Use the new comprehensive CLI handler
+    match cli::runner::handle_cli_args().await {
+        Ok(should_exit) => {
+            if should_exit {
+                info!("CLI command executed successfully, exiting application");
+                return Ok(false); // Exit early if a CLI command was handled
+            } else {
+                info!("No CLI commands detected, proceeding with GUI launch");
+                return Ok(true); // Continue with Tauri application
+            }
+        }
+        Err(e) => {
+            error!("CLI command execution failed: {}", e);
+            return Err(e);
+        }
+    }
+}
+
+/// Handle legacy CLI command processing (deprecated)
+#[deprecated(note = "Use handle_cli_processing() instead")]
+pub fn handle_legacy_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     let cli = cli::Cli::parse();
 
     // If handle_cli_commands returns Ok(true), it means a command was executed
@@ -293,7 +314,14 @@ impl StartupSequence {
 
     fn handle_cli(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
         info!("⚡ Processing CLI arguments...");
-        handle_cli_processing(desktop_arc)
+
+        // For now, use a simple runtime to handle the async CLI processing
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| crate::error_handling::JunoError::SystemError(format!("Failed to create runtime: {}", e)))?;
+
+        rt.block_on(handle_cli_processing())
     }
 
     fn init_state(desktop_arc: Option<Arc<Desktop>>) -> state::AppState {

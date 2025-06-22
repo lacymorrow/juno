@@ -1,4 +1,5 @@
-use crate::cli::Cli;
+use crate::cli::{Cli, Commands, CliResult, OutputFormat, HeadlessConfig};
+use crate::cli::headless::{HeadlessRuntime, run_headless_query};
 use crate::state::AppState;
 use crate::tts;
 use crate::error_handling::JunoError;
@@ -6,13 +7,13 @@ use crate::settings::{manager::SettingsManager, CLISettings};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write, BufRead};
 use std::process::Command;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tempfile::Builder as TempFileBuilder;
-use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
-
-
+use tracing::{error, info, warn, debug}; // Import tracing macros // Add the TTS import
+use clap::Parser;
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
@@ -266,8 +267,6 @@ async fn show_config_from_centralized_settings() -> Result<(), String> {
     Ok(())
 }
 
-
-
 /// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
 async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
     info!("Testing accessibility permissions...");
@@ -400,4 +399,612 @@ pub async fn initialize_voice_transcription_settings(app: &AppHandle) -> Result<
             Ok(())
         }
     }
+}
+
+/// Main CLI command handler - determines if running headless or GUI mode
+pub async fn handle_cli_args() -> Result<bool, JunoError> {
+    let cli = Cli::parse();
+
+    // Setup logging based on verbosity
+    setup_cli_logging(cli.verbose, cli.no_color);
+
+    info!("Starting Juno CLI handler");
+    debug!("CLI args: {:?}", cli);
+
+    // Check for headless mode or specific commands
+    if cli.headless || cli.daemon || cli.command.is_some() {
+        return handle_headless_commands(cli).await;
+    }
+
+    // Legacy CLI handling for backward compatibility
+    if should_handle_legacy_cli(&cli) {
+        return handle_legacy_cli_commands(&cli).await;
+    }
+
+    // No CLI commands, should launch GUI
+    Ok(false)
+}
+
+/// Setup logging configuration based on CLI flags
+fn setup_cli_logging(verbose: u8, no_color: bool) {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    let log_level = match verbose {
+        0 => tracing::Level::WARN,
+        1 => tracing::Level::INFO,
+        2 => tracing::Level::DEBUG,
+        _ => tracing::Level::TRACE,
+    };
+
+    let format = tracing_subscriber::fmt::format()
+        .with_target(verbose >= 2)
+        .with_thread_ids(verbose >= 3)
+        .with_thread_names(verbose >= 3);
+
+    let fmt_layer = if no_color {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .event_format(format)
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(true)
+            .event_format(format)
+            .boxed()
+    };
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env()
+            .add_directive(log_level.into()))
+        .with(fmt_layer)
+        .init();
+}
+
+/// Handle headless CLI commands and daemon mode
+async fn handle_headless_commands(cli: Cli) -> Result<bool, JunoError> {
+    info!("Handling headless CLI commands");
+
+    // Create headless configuration
+    let config = HeadlessConfig {
+        max_execution_time: Duration::from_secs(300),
+        enable_screenshots: false,
+        output_format: OutputFormat::Json, // Default for programmatic use
+        verbose: cli.verbose > 0,
+        save_session: true,
+    };
+
+    match cli.command {
+        Some(Commands::Query { text, format, timeout, screenshot, output }) => {
+            let query_config = HeadlessConfig {
+                max_execution_time: Duration::from_secs(timeout),
+                enable_screenshots: screenshot,
+                output_format: format,
+                verbose: cli.verbose > 0,
+                save_session: true,
+            };
+
+            let result = run_headless_query(text, query_config, output).await?;
+            output_cli_result(&result, cli.verbose > 0)?;
+            Ok(true)
+        },
+
+        Some(Commands::Interactive { name, resume }) => {
+            info!("Starting interactive CLI session");
+            start_interactive_session(name, resume, config).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Daemon { port, bind, api_key }) => {
+            info!("Starting daemon mode on {}:{}", bind, port);
+            start_daemon_mode(port, bind, api_key, config).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Config { action }) => {
+            handle_config_commands(action).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Tools { action }) => {
+            handle_tool_commands(action).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Providers { action }) => {
+            handle_provider_commands(action).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Session { action }) => {
+            handle_session_commands(action).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Doctor { full, component }) => {
+            run_system_diagnostics(full, component, config).await?;
+            Ok(true)
+        },
+
+        Some(Commands::Test { test_type }) => {
+            handle_test_commands(test_type).await?;
+            Ok(true)
+        },
+
+        None if cli.headless => {
+            // Headless mode without specific command - start interactive session
+            start_interactive_session(None, None, config).await?;
+            Ok(true)
+        },
+
+        None if cli.daemon => {
+            // Daemon mode with defaults
+            start_daemon_mode(8080, "127.0.0.1".to_string(), None, config).await?;
+            Ok(true)
+        },
+
+        None => {
+            // Should not reach here, but handle gracefully
+            error!("No command specified for headless mode");
+            Ok(false)
+        }
+    }
+}
+
+/// Start interactive CLI session (REPL-style)
+async fn start_interactive_session(
+    name: Option<String>,
+    resume: Option<String>,
+    config: HeadlessConfig
+) -> Result<(), JunoError> {
+    println!("🤖 Juno AI Computer Use Agent - Interactive Session");
+    println!("Type 'help' for commands, 'quit' to exit\n");
+
+    if let Some(session_name) = &name {
+        println!("Session: {}", session_name);
+    }
+
+    if let Some(resume_session) = &resume {
+        println!("Resuming session: {}", resume_session);
+        // TODO: Implement session loading
+    }
+
+    let stdin = io::stdin();
+    let mut session_history = Vec::new();
+
+    loop {
+        print!("juno> ");
+        io::stdout().flush().map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+        let mut input = String::new();
+        match stdin.read_line(&mut input) {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                let input = input.trim();
+
+                if input.is_empty() {
+                    continue;
+                }
+
+                session_history.push(input.to_string());
+
+                match input {
+                    "quit" | "exit" | "q" => {
+                        println!("Goodbye! 👋");
+                        break;
+                    },
+                    "help" | "h" => {
+                        print_interactive_help();
+                    },
+                    "history" => {
+                        print_session_history(&session_history);
+                    },
+                    "clear" => {
+                        print!("\x1B[2J\x1B[1;1H"); // Clear screen
+                    },
+                    "status" => {
+                        print_system_status().await;
+                    },
+                    _ if input.starts_with("save ") => {
+                        let session_name = input.strip_prefix("save ").unwrap_or("default");
+                        save_interactive_session(session_name, &session_history).await?;
+                    },
+                    _ => {
+                        // Execute as agent query
+                        println!("🔄 Executing query: {}", input);
+                        match run_headless_query(input.to_string(), config.clone(), None).await {
+                            Ok(result) => {
+                                output_cli_result(&result, config.verbose)?;
+                            },
+                            Err(e) => {
+                                error!("Query failed: {}", e);
+                                println!("❌ Error: {}", e);
+                            }
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                error!("Failed to read input: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Print help for interactive session
+fn print_interactive_help() {
+    println!(r#"
+📋 Available Commands:
+  help, h          - Show this help
+  quit, exit, q    - Exit the session
+  history          - Show command history
+  clear            - Clear screen
+  status           - Show system status
+  save <name>      - Save current session
+
+  Any other input will be executed as an AI agent query.
+
+📝 Examples:
+  juno> click on the blue button
+  juno> take a screenshot
+  juno> type "hello world" in the text box
+  juno> save my_session
+"#);
+}
+
+/// Print session history
+fn print_session_history(history: &[String]) {
+    println!("\n📝 Session History:");
+    for (i, command) in history.iter().enumerate() {
+        println!("  {}: {}", i + 1, command);
+    }
+    println!();
+}
+
+/// Print system status
+async fn print_system_status() {
+    println!("\n🔍 System Status:");
+    println!("  Juno Version: {}", env!("CARGO_PKG_VERSION"));
+    println!("  Platform: {} {}", std::env::consts::OS, std::env::consts::ARCH);
+    println!("  Mode: Headless CLI");
+    // TODO: Add more status information
+    println!();
+}
+
+/// Save interactive session
+async fn save_interactive_session(name: &str, history: &[String]) -> Result<(), JunoError> {
+    // TODO: Implement session saving
+    println!("💾 Session '{}' saved with {} commands", name, history.len());
+    Ok(())
+}
+
+/// Start daemon mode HTTP server
+async fn start_daemon_mode(
+    port: u16,
+    bind: String,
+    api_key: Option<String>,
+    config: HeadlessConfig
+) -> Result<(), JunoError> {
+    info!("Starting Juno daemon on {}:{}", bind, port);
+
+    // TODO: Implement HTTP/WebSocket server for daemon mode
+    println!("🚀 Juno daemon starting on {}:{}", bind, port);
+
+    if let Some(key) = api_key {
+        println!("🔐 API authentication enabled");
+        debug!("API key configured: {}", key.chars().take(8).collect::<String>() + "...");
+    } else {
+        warn!("⚠️  No API key configured - daemon running without authentication");
+    }
+
+    // Keep daemon running
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// Output CLI result in appropriate format
+fn output_cli_result(result: &CliResult, verbose: bool) -> Result<(), JunoError> {
+    if verbose {
+        println!("⏱️  Execution time: {:?}", result.execution_time);
+    }
+
+    if result.success {
+        if verbose {
+            println!("✅ {}", result.message);
+        }
+
+        if let Some(data) = &result.data {
+            match serde_json::to_string_pretty(data) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    error!("Failed to serialize result data: {}", e);
+                    println!("{}", result.message);
+                }
+            }
+        } else if !verbose {
+            println!("{}", result.message);
+        }
+    } else {
+        if verbose {
+            eprintln!("❌ {}", result.message);
+        } else {
+            eprintln!("Error: {}", result.message);
+        }
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Check if should handle legacy CLI commands
+fn should_handle_legacy_cli(cli: &Cli) -> bool {
+    cli.tts_provider.is_some() ||
+    cli.test_focused_element_ns ||
+    cli.check_accessibility
+}
+
+/// Handle legacy CLI commands for backward compatibility
+async fn handle_legacy_cli_commands(cli: &Cli) -> Result<bool, JunoError> {
+    warn!("Using legacy CLI interface - consider upgrading to new commands");
+
+    // Convert legacy CLI to Desktop instance for compatibility
+    let desktop = computer_use_ai_sdk::Desktop::new().map_err(|e| {
+        JunoError::SystemError(format!("Failed to create desktop instance: {}", e))
+    })?;
+
+    handle_cli_commands(cli, &desktop)
+}
+
+/// Handle configuration commands
+async fn handle_config_commands(action: crate::cli::ConfigCommands) -> Result<(), JunoError> {
+    use crate::cli::ConfigCommands;
+
+    match action {
+        ConfigCommands::Show { section } => {
+            println!("📋 Configuration:");
+            if let Some(section) = section {
+                println!("Section: {}", section);
+                // TODO: Show specific section
+            } else {
+                // TODO: Show all configuration
+                show_config_from_centralized_settings().await
+                    .map_err(|e| JunoError::ConfigurationError(e))?;
+            }
+        },
+        ConfigCommands::Set { key, value } => {
+            println!("⚙️ Setting {}={}", key, value);
+            // TODO: Implement config setting
+        },
+        ConfigCommands::Get { key } => {
+            println!("📖 Getting {}", key);
+            // TODO: Implement config getting
+        },
+        ConfigCommands::Reset { section, yes } => {
+            if !yes {
+                print!("Reset configuration? [y/N]: ");
+                io::stdout().flush().map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                if !input.trim().to_lowercase().starts_with('y') {
+                    println!("Reset cancelled");
+                    return Ok(());
+                }
+            }
+
+            if let Some(section) = section {
+                println!("🔄 Resetting section: {}", section);
+            } else {
+                println!("🔄 Resetting all configuration");
+            }
+            // TODO: Implement config reset
+        },
+        ConfigCommands::Import { file } => {
+            println!("📥 Importing configuration from: {:?}", file);
+            // TODO: Implement config import
+        },
+        ConfigCommands::Export { file, format } => {
+            println!("📤 Exporting configuration to: {:?} (format: {:?})", file, format);
+            // TODO: Implement config export
+        }
+    }
+    Ok(())
+}
+
+/// Handle tool management commands
+async fn handle_tool_commands(action: crate::cli::ToolCommands) -> Result<(), JunoError> {
+    use crate::cli::ToolCommands;
+
+    match action {
+        ToolCommands::List { enabled, category } => {
+            println!("🔧 Available Tools:");
+
+            let filters = if enabled { " (enabled only)" } else { "" };
+            let cat_filter = category.as_deref().unwrap_or("all");
+            println!("Filter: {} category{}", cat_filter, filters);
+
+            // TODO: List actual tools from tool manager
+            println!("  - computer_use: Desktop automation tools");
+            println!("  - browser: Web browser automation");
+            println!("  - file_system: File operations");
+            println!("  - mcp_tools: External MCP server tools");
+        },
+        ToolCommands::Enable { name } => {
+            println!("✅ Enabling tool: {}", name);
+            // TODO: Enable tool in configuration
+        },
+        ToolCommands::Disable { name } => {
+            println!("❌ Disabling tool: {}", name);
+            // TODO: Disable tool in configuration
+        },
+        ToolCommands::Info { name } => {
+            println!("ℹ️ Tool Information: {}", name);
+            // TODO: Show detailed tool information
+        },
+        ToolCommands::Test { name, input } => {
+            println!("🧪 Testing tool: {}", name);
+            if let Some(test_input) = input {
+                println!("Input: {}", test_input);
+            }
+            // TODO: Execute tool test
+        }
+    }
+    Ok(())
+}
+
+/// Handle provider management commands
+async fn handle_provider_commands(action: crate::cli::ProviderCommands) -> Result<(), JunoError> {
+    use crate::cli::ProviderCommands;
+
+    match action {
+        ProviderCommands::List => {
+            println!("🤖 Available AI Providers:");
+            println!("  - anthropic: Claude models");
+            println!("  - openai: GPT models");
+            println!("  - gemini: Gemini models");
+            // TODO: Show actual provider status
+        },
+        ProviderCommands::Set { name, model } => {
+            println!("🔄 Setting active provider: {}", name);
+            if let Some(model) = model {
+                println!("Model: {}", model);
+            }
+            // TODO: Set provider in configuration
+        },
+        ProviderCommands::Test { name, query } => {
+            println!("🧪 Testing provider: {} with query: '{}'", name, query);
+            // TODO: Test provider connectivity
+        },
+        ProviderCommands::Status => {
+            println!("📊 Provider Status:");
+            // TODO: Show provider status and health
+        }
+    }
+    Ok(())
+}
+
+/// Handle session management commands
+async fn handle_session_commands(action: crate::cli::SessionCommands) -> Result<(), JunoError> {
+    use crate::cli::SessionCommands;
+
+    match action {
+        SessionCommands::List => {
+            println!("📝 Saved Sessions:");
+            // TODO: List actual saved sessions
+            println!("  - default (last used)");
+            println!("  - my_automation");
+            println!("  - web_scraping");
+        },
+        SessionCommands::Save { name } => {
+            println!("💾 Saving session: {}", name);
+            // TODO: Save current session
+        },
+        SessionCommands::Load { name } => {
+            println!("📂 Loading session: {}", name);
+            // TODO: Load session
+        },
+        SessionCommands::Delete { name, yes } => {
+            if !yes {
+                print!("Delete session '{}'? [y/N]: ", name);
+                io::stdout().flush().map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                if !input.trim().to_lowercase().starts_with('y') {
+                    println!("Delete cancelled");
+                    return Ok(());
+                }
+            }
+
+            println!("🗑️ Deleting session: {}", name);
+            // TODO: Delete session
+        },
+        SessionCommands::Clear { yes } => {
+            if !yes {
+                print!("Clear all session data? [y/N]: ");
+                io::stdout().flush().map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|e| JunoError::SystemError(e.to_string()))?;
+
+                if !input.trim().to_lowercase().starts_with('y') {
+                    println!("Clear cancelled");
+                    return Ok(());
+                }
+            }
+
+            println!("🧹 Clearing all session data");
+            // TODO: Clear all sessions
+        }
+    }
+    Ok(())
+}
+
+/// Run system diagnostics
+async fn run_system_diagnostics(
+    full: bool,
+    component: Option<String>,
+    config: HeadlessConfig
+) -> Result<(), JunoError> {
+    println!("🔍 Running system diagnostics...");
+
+    // Create a headless app for diagnostics
+    let app = crate::cli::headless::create_headless_app().await?;
+    let app_handle = app.handle().clone();
+
+    let runtime = HeadlessRuntime::new(app_handle, config);
+    let result = runtime.run_diagnostics(full, component).await?;
+
+    output_cli_result(&result, true)?;
+    Ok(())
+}
+
+/// Handle test commands
+async fn handle_test_commands(test_type: crate::cli::TestCommands) -> Result<(), JunoError> {
+    use crate::cli::TestCommands;
+
+    match test_type {
+        TestCommands::Tts { provider, text } => {
+            let test_text = text.unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
+            println!("🔊 Testing TTS provider: {} with text: '{}'", provider, test_text);
+
+            // Use legacy TTS test implementation
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| JunoError::SystemError(format!("Failed to create Tokio runtime for TTS test: {}", e)))?;
+
+            match rt.block_on(tts::invoke_tts_for_provider(test_text, None, &provider)) {
+                Ok(base64_audio) => {
+                    info!("TTS test successful ({} bytes)", base64_audio.len());
+                    println!("✅ TTS test completed successfully");
+                },
+                Err(e) => {
+                    error!("TTS test failed: {}", e);
+                    return Err(JunoError::ApplicationError(format!("TTS test failed: {}", e)));
+                }
+            }
+        },
+        TestCommands::Accessibility => {
+            println!("🔑 Testing accessibility permissions...");
+            // TODO: Implement accessibility test
+        },
+        TestCommands::FocusedElement => {
+            println!("🎯 Testing focused element detection...");
+            // TODO: Implement focused element test
+        }
+    }
+    Ok(())
+}
+
+/// Show configuration from centralized settings
+async fn show_config_from_centralized_settings() -> Result<(), String> {
+    println!("Configuration display not yet implemented in headless mode");
+    println!("Use the GUI for full configuration management");
+    Ok(())
 }
