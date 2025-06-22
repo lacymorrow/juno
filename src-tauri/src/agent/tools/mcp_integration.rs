@@ -1095,38 +1095,95 @@ impl MCPServerConnection {
         // Send and receive batch response
         let batch_response = self.send_batch_request(batch_request).await?;
 
-        // Process batch response
+        // Process batch response with proper validation
         let mut results = Vec::new();
         let mut success_count = 0;
         let mut failed_count = 0;
 
         if let Value::Array(responses) = batch_response {
-            for (index, response) in responses.iter().enumerate() {
-                let tool_call = &tool_calls[index];
-                let result_start = std::time::Instant::now();
+            // Validate response count matches request count
+            if responses.len() != tool_calls.len() {
+                warn!("MCP server '{}' returned {} responses for {} tool calls",
+                      self.config.name, responses.len(), tool_calls.len());
 
-                let result = if let Some(error) = response.get("error") {
-                    failed_count += 1;
-                    Err(format!("Tool execution failed: {}", error))
-                } else {
-                    success_count += 1;
-                    let output = response.get("result").unwrap_or(&json!({})).clone();
-                    Ok(ToolResult {
+                // Handle mismatched response counts gracefully
+                let min_count = std::cmp::min(responses.len(), tool_calls.len());
+
+                // Process matched responses
+                for index in 0..min_count {
+                    let response = &responses[index];
+                    let tool_call = &tool_calls[index];
+                    let result_start = std::time::Instant::now();
+
+                    let result = if let Some(error) = response.get("error") {
+                        failed_count += 1;
+                        Err(format!("Tool execution failed: {}", error))
+                    } else {
+                        success_count += 1;
+                        let output = response.get("result").unwrap_or(&json!({})).clone();
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        })
+                    };
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
                         call_id: tool_call.id.clone(),
-                        output,
-                    })
-                };
+                        result,
+                        execution_time_ms: result_start.elapsed().as_millis() as u64,
+                    });
+                }
 
-                results.push(MCPBatchResult {
-                    request_id: tool_call.id.clone(),
-                    tool_name: tool_call.name.clone(),
-                    call_id: tool_call.id.clone(),
-                    result,
-                    execution_time_ms: result_start.elapsed().as_millis() as u64,
-                });
+                // Handle missing responses (if responses.len() < tool_calls.len())
+                for index in min_count..tool_calls.len() {
+                    let tool_call = &tool_calls[index];
+                    failed_count += 1;
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                        call_id: tool_call.id.clone(),
+                        result: Err("No response received from MCP server".to_string()),
+                        execution_time_ms: 0,
+                    });
+                }
+
+                // Log extra responses (if responses.len() > tool_calls.len())
+                if responses.len() > tool_calls.len() {
+                    warn!("MCP server '{}' returned {} extra responses that will be ignored",
+                          self.config.name, responses.len() - tool_calls.len());
+                }
+            } else {
+                // Normal case: response count matches request count
+                for (index, response) in responses.iter().enumerate() {
+                    let tool_call = &tool_calls[index];
+                    let result_start = std::time::Instant::now();
+
+                    let result = if let Some(error) = response.get("error") {
+                        failed_count += 1;
+                        Err(format!("Tool execution failed: {}", error))
+                    } else {
+                        success_count += 1;
+                        let output = response.get("result").unwrap_or(&json!({})).clone();
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        })
+                    };
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                        call_id: tool_call.id.clone(),
+                        result,
+                        execution_time_ms: result_start.elapsed().as_millis() as u64,
+                    });
+                }
             }
         } else {
-            return Err("Invalid batch response format".to_string());
+            return Err("Invalid batch response format - expected array".to_string());
         }
 
         let total_time = batch_start.elapsed().as_millis() as u64;
