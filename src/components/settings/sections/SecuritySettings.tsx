@@ -320,111 +320,102 @@ export default function SecuritySettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">
-          Security & Privacy
-        </h3>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield size={20} />
-              macOS Permissions
-            </CardTitle>
-            <CardDescription>
-              Manage system permissions required for AI computer use features
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {permissionsError && (
-              <div className="p-2 bg-red-50 border border-red-200 rounded-md">
-                <p className="text-sm text-red-700">
-                  Error: {permissionsError}
-                </p>
-              </div>
-            )}
-
-            {/* Permission Cards */}
-            <div className="space-y-3">
-              {permissions.map((permission) => {
-                const permissionKey = permission.id.replace(
-                  "-",
-                  "_"
-                ) as keyof PermissionsState;
-                const permissionStatus =
-                  (permissionsState?.[permissionKey] as PermissionStatus) ||
-                  null;
-
-                return (
-                  <PermissionCard
-                    key={permission.id}
-                    permission={permission}
-                    permissionStatus={permissionStatus}
-                    onRequest={() =>
-                      requestPermission(permission.id.replace("-", "_"))
-                    }
-                    isRequesting={
-                      isRequestingPermission === permission.id.replace("-", "_")
-                    }
-                    isLoading={isLoadingPermissions}
-                  />
-                );
-              })}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield size={20} />
+            macOS Permissions
+          </CardTitle>
+          <CardDescription>
+            Manage system permissions required for AI computer use features
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {permissionsError && (
+            <div className="p-2 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-sm text-red-700">Error: {permissionsError}</p>
             </div>
+          )}
 
-            {/* Summary */}
-            {isLoadingPermissions ? (
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg animate-pulse">
+          {/* Permission Cards */}
+          <div className="space-y-3">
+            {permissions.map((permission) => {
+              const permissionKey = permission.id.replace(
+                "-",
+                "_"
+              ) as keyof PermissionsState;
+              const permissionStatus =
+                (permissionsState?.[permissionKey] as PermissionStatus) || null;
+
+              return (
+                <PermissionCard
+                  key={permission.id}
+                  permission={permission}
+                  permissionStatus={permissionStatus}
+                  onRequest={() =>
+                    requestPermission(permission.id.replace("-", "_"))
+                  }
+                  isRequesting={
+                    isRequestingPermission === permission.id.replace("-", "_")
+                  }
+                  isLoading={isLoadingPermissions}
+                />
+              );
+            })}
+          </div>
+
+          {/* Summary */}
+          {isLoadingPermissions ? (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg animate-pulse">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded w-48"></div>
+                </div>
+                <div className="h-8 bg-gray-200 rounded w-20"></div>
+              </div>
+            </div>
+          ) : (
+            permissionsState && (
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-gray-200 rounded"></div>
-                    <div className="h-4 bg-gray-200 rounded w-48"></div>
+                    {permissionsState.allGranted ? (
+                      <>
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                        <span className="font-medium text-green-800">
+                          All required permissions granted!
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="w-5 h-5 text-orange-600" />
+                        <span className="font-medium text-orange-800">
+                          Some permissions still needed
+                        </span>
+                      </>
+                    )}
                   </div>
-                  <div className="h-8 bg-gray-200 rounded w-20"></div>
+                  <Button
+                    onClick={checkPermissionsStatus}
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center gap-1"
+                    disabled={isLoadingPermissions}
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${
+                        isLoadingPermissions ? "animate-spin" : ""
+                      }`}
+                    />
+                    {isLoadingPermissions ? "Checking..." : "Refresh"}
+                  </Button>
                 </div>
               </div>
-            ) : (
-              permissionsState && (
-                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {permissionsState.allGranted ? (
-                        <>
-                          <CheckCircle className="w-5 h-5 text-green-600" />
-                          <span className="font-medium text-green-800">
-                            All required permissions granted!
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <AlertCircle className="w-5 h-5 text-orange-600" />
-                          <span className="font-medium text-orange-800">
-                            Some permissions still needed
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <Button
-                      onClick={checkPermissionsStatus}
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center gap-1"
-                      disabled={isLoadingPermissions}
-                    >
-                      <RefreshCw
-                        className={`w-4 h-4 ${
-                          isLoadingPermissions ? "animate-spin" : ""
-                        }`}
-                      />
-                      {isLoadingPermissions ? "Checking..." : "Refresh"}
-                    </Button>
-                  </div>
-                </div>
-              )
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            )
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

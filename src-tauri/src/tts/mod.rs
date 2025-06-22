@@ -215,7 +215,7 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["system", "elevenlabs", "replicate"];
+    let valid_providers = ["off", "system", "elevenlabs", "replicate"];
     if !valid_providers.contains(&provider.as_str()) {
         return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
     }

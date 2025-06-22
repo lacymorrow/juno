@@ -8,7 +8,7 @@ use super::tool_config::ToolCategory;
 /// This replaces all the brittle string matching throughout the codebase
 static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    
+
     // Anthropic Computer Use tools
     map.insert("screenshot", ToolCategory::AnthropicComputerUse);
     map.insert("click", ToolCategory::AnthropicComputerUse);
@@ -17,7 +17,11 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("scroll", ToolCategory::AnthropicComputerUse);
     map.insert("drag", ToolCategory::AnthropicComputerUse);
     map.insert("move", ToolCategory::AnthropicComputerUse);
-    
+    map.insert("computer", ToolCategory::AnthropicComputerUse);
+    map.insert("bash", ToolCategory::AnthropicComputerUse);
+    map.insert("str_replace_based_edit_tool", ToolCategory::AnthropicComputerUse);
+    map.insert("accessibility_interface", ToolCategory::AnthropicComputerUse);
+
     // Browser tools
     map.insert("browser_navigate", ToolCategory::Browser);
     map.insert("browser_click", ToolCategory::Browser);
@@ -29,7 +33,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("browser_extract_content", ToolCategory::Browser);
     map.insert("browser_get_current_url", ToolCategory::Browser);
     map.insert("browser_form", ToolCategory::Browser);
-    
+
     // Desktop tools
     map.insert("dev_left_click", ToolCategory::Desktop);
     map.insert("dev_right_click", ToolCategory::Desktop);
@@ -57,7 +61,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("quit_application", ToolCategory::Desktop);
     map.insert("get_system_info", ToolCategory::Desktop);
     map.insert("manage_audio", ToolCategory::Desktop);
-    
+
     // Basic tools (file operations, commands, etc.)
     map.insert("dev_bash_command", ToolCategory::Basic);
     map.insert("dev_list_files", ToolCategory::Basic);
@@ -77,7 +81,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("command_execute", ToolCategory::Basic);
     map.insert("shell_execute", ToolCategory::Basic);
     map.insert("bash_execute", ToolCategory::Basic);
-    
+
     // Timer tools
     map.insert("timer_create", ToolCategory::Timer);
     map.insert("timer_start", ToolCategory::Timer);
@@ -87,7 +91,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("timer_get_status", ToolCategory::Timer);
     map.insert("timer_list", ToolCategory::Timer);
     map.insert("timer_delete", ToolCategory::Timer);
-    
+
     map
 });
 
@@ -104,49 +108,49 @@ pub enum AgentType {
 /// Maps tool categories to their most appropriate agent types
 static CATEGORY_TO_AGENT_MAP: Lazy<HashMap<ToolCategory, AgentType>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    
+
     map.insert(ToolCategory::AnthropicComputerUse, AgentType::DesktopExpert);
     map.insert(ToolCategory::Browser, AgentType::BrowserExpert);
     map.insert(ToolCategory::Desktop, AgentType::DesktopExpert);
     map.insert(ToolCategory::Basic, AgentType::CodingExpert);
     map.insert(ToolCategory::Timer, AgentType::GeneralExpert);
     map.insert(ToolCategory::MCP, AgentType::GeneralExpert);
-    
+
     map
 });
 
 /// Intent keywords for user request analysis
 static INTENT_KEYWORDS: Lazy<HashMap<&'static str, AgentType>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    
+
     // Browser expert keywords
     let browser_keywords = [
-        "browse", "website", "url", "navigate", "web", "page", "form", 
+        "browse", "website", "url", "navigate", "web", "page", "form",
         "search online", "internet", "browser", "link", "domain", "http"
     ];
     for keyword in &browser_keywords {
         map.insert(*keyword, AgentType::BrowserExpert);
     }
-    
-    // Coding expert keywords  
+
+    // Coding expert keywords
     let coding_keywords = [
-        "code", "file", "program", "script", "terminal", "command", 
+        "code", "file", "program", "script", "terminal", "command",
         "debug", "compile", "git", "repository", "function", "variable",
         "edit", "create file", "read file", "write file", "bash", "shell"
     ];
     for keyword in &coding_keywords {
         map.insert(*keyword, AgentType::CodingExpert);
     }
-    
+
     // Desktop expert keywords
     let desktop_keywords = [
-        "open app", "application", "desktop", "window", "screenshot", 
+        "open app", "application", "desktop", "window", "screenshot",
         "click on", "type in", "shortcut", "mouse", "keyboard", "clipboard"
     ];
     for keyword in &desktop_keywords {
         map.insert(*keyword, AgentType::DesktopExpert);
     }
-    
+
     map
 });
 
@@ -162,7 +166,7 @@ impl ToolMappingService {
         if let Some(category) = TOOL_CATEGORY_MAP.get(tool_name) {
             return Some(category.clone());
         }
-        
+
         // Fallback to prefix matching for dynamically named tools
         if tool_name.starts_with("browser_") {
             return Some(ToolCategory::Browser);
@@ -179,10 +183,10 @@ impl ToolMappingService {
         if tool_name.starts_with("mcp_") {
             return Some(ToolCategory::MCP);
         }
-        
+
         None
     }
-    
+
     /// Get the best agent type for a specific tool
     /// This replaces matches_agent_category() and similar functions
     pub fn get_agent_for_tool(tool_name: &str) -> Option<AgentType> {
@@ -190,28 +194,28 @@ impl ToolMappingService {
             .and_then(|category| CATEGORY_TO_AGENT_MAP.get(&category))
             .cloned()
     }
-    
+
     /// Determine the best agent type based on user intent/content
     /// This replaces analyze_request_for_routing() string matching
     pub fn analyze_user_intent(content: &str) -> AgentType {
         let content_lower = content.to_lowercase();
-        
+
         // Find the most relevant agent based on keyword matches
         let mut agent_scores: HashMap<AgentType, usize> = HashMap::new();
-        
+
         for (keyword, agent_type) in INTENT_KEYWORDS.iter() {
             if content_lower.contains(keyword) {
                 *agent_scores.entry(agent_type.clone()).or_insert(0) += 1;
             }
         }
-        
+
         // Return the agent with the highest score, defaulting to GeneralExpert
         agent_scores.into_iter()
             .max_by_key(|(_, score)| *score)
             .map(|(agent, _)| agent)
             .unwrap_or(AgentType::GeneralExpert)
     }
-    
+
     /// Check if a tool belongs to a specific category
     /// This replaces individual is_*_tool() functions
     pub fn is_tool_in_category(tool_name: &str, category: &ToolCategory) -> bool {
@@ -219,7 +223,7 @@ impl ToolMappingService {
             .map(|tool_category| tool_category == *category)
             .unwrap_or(false)
     }
-    
+
     /// Check if a tool can be handled by a specific agent type
     /// This replaces the can_handle_task() string matching logic
     pub fn can_agent_handle_tool(tool_name: &str, agent_type: &AgentType) -> bool {
@@ -227,7 +231,7 @@ impl ToolMappingService {
             .map(|tool_agent| tool_agent == *agent_type)
             .unwrap_or(false)
     }
-    
+
     /// Get all tools for a specific agent type
     /// This replaces the filter_tools_for_expert() logic
     pub fn get_tools_for_agent(tool_names: &[String], agent_type: &AgentType) -> Vec<String> {
@@ -236,14 +240,14 @@ impl ToolMappingService {
             .cloned()
             .collect()
     }
-    
+
     /// Check if a task description is relevant for a specific agent
     /// This replaces the task description string matching in can_handle_task()
     pub fn can_agent_handle_description(description: &str, agent_type: &AgentType) -> bool {
         let inferred_agent = Self::analyze_user_intent(description);
         inferred_agent == *agent_type
     }
-    
+
     /// Get confidence score for an agent handling a specific tool (0.0 to 1.0)
     /// This provides a more nuanced approach than boolean matching
     pub fn get_agent_confidence_for_tool(tool_name: &str, agent_type: &AgentType) -> f32 {
@@ -265,7 +269,7 @@ impl ToolMappingService {
             }
         }
     }
-    
+
     /// Add a new tool mapping (for dynamic tools like MCP)
     /// This provides extensibility without modifying the core mappings
     pub fn register_dynamic_tool(tool_name: String, category: ToolCategory) {
