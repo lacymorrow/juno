@@ -393,7 +393,7 @@ pub async fn initialize_cli_settings(app: &AppHandle) -> Result<(), String> {
         }
         Err(e) => {
             warn!("Failed to load CLI settings, using defaults: {}", e);
-            // Save default settings
+            // Only save default settings if loading failed (settings don't exist)
             let default_settings = CLISettings::default();
             save_cli_settings_to_centralized_settings(app, &default_settings).await?;
             info!("Initialized CLI settings with defaults");
@@ -430,12 +430,24 @@ pub async fn save_voice_transcription_settings_to_centralized_settings(
 /// Initialize voice transcription settings from centralized settings
 /// Used by application startup for voice transcription configuration
 pub async fn initialize_voice_transcription_settings(app: &AppHandle) -> Result<(), String> {
-    let voice_settings = load_voice_transcription_settings_from_centralized_settings(app)
-        .await
-        .unwrap_or_default();
-    save_voice_transcription_settings_to_centralized_settings(app, &voice_settings)
-        .await
-        .map_err(|e| format!("Failed to initialize voice transcription settings: {}", e))
+    match load_voice_transcription_settings_from_centralized_settings(app).await {
+        Ok(voice_settings) => {
+            info!("Loaded voice transcription settings from centralized settings");
+            Ok(())
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load voice transcription settings, using defaults: {}",
+                e
+            );
+            // Only save default settings if loading failed (settings don't exist)
+            let default_settings = crate::settings::VoiceTranscriptionSettings::default();
+            save_voice_transcription_settings_to_centralized_settings(app, &default_settings)
+                .await?;
+            info!("Initialized voice transcription settings with defaults");
+            Ok(())
+        }
+    }
 }
 
 /// Handle self-improvement CLI commands (Development Mode Only)
