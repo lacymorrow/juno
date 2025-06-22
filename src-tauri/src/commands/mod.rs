@@ -44,6 +44,7 @@ pub mod tray_commands;
 pub mod testing;
 pub mod ui_token_selection;
 pub mod error_recovery;
+pub mod collaborative_ai_commands;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -84,6 +85,7 @@ pub use self::onboarding::*;
 pub use self::ui_token_selection::*;
 pub use self::settings::*;
 pub use self::error_recovery::*;
+pub use self::collaborative_ai_commands::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
