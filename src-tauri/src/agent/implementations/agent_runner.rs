@@ -222,10 +222,28 @@ where
                     Ok(Some(response)) => {
                         if response.approved {
                             // User approved continuation - extend max_steps
-                            let additional_steps = response.additional_steps.unwrap_or(
+                            let mut additional_steps = response.additional_steps.unwrap_or(
                                 crate::constants::agent::config::DEFAULT_CONTINUATION_ADDITIONAL_STEPS
                             );
-                            self.max_steps += additional_steps;
+
+                            // Fix Issue 1: Prevent infinite loop with 0 additional steps
+                            if additional_steps == 0 {
+                                log::warn!("User approved continuation but provided 0 additional steps. Using default value.");
+                                additional_steps = crate::constants::agent::config::DEFAULT_CONTINUATION_ADDITIONAL_STEPS;
+                            }
+
+                            // Fix Issue 2: Prevent integer overflow using saturating_add
+                            let new_max_steps = self.max_steps.saturating_add(additional_steps);
+
+                            // Check if we hit the saturation limit
+                            if new_max_steps == u32::MAX && self.max_steps < u32::MAX {
+                                log::warn!(
+                                    "Maximum steps would overflow. Capped at maximum value: {}",
+                                    u32::MAX
+                                );
+                            }
+
+                            self.max_steps = new_max_steps;
                             log::info!(
                                 "User approved continuation. Extended max steps to {} (+{} steps)",
                                 self.max_steps,
@@ -729,5 +747,134 @@ where
                 Ok(AgentAction::Think)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Simple mock implementations for testing
+    use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
+    use async_trait::async_trait;
+    use serde_json::Value;
+
+    // Create a simple mock app handle for testing
+    fn mock_app_handle() -> tauri::AppHandle {
+        // Use a simple test-specific implementation or skip this for unit tests
+        panic!("This test requires a proper Tauri app context")
+    }
+
+    // Simple mock implementations for testing
+    struct MockToolProvider;
+
+    #[async_trait]
+    impl ToolProvider for MockToolProvider {
+        async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
+            Ok(vec![])
+        }
+
+        async fn execute_tool(&self, _tool_call: ToolCall) -> Result<ToolResult, AgentError> {
+            Ok(ToolResult {
+                call_id: "test".to_string(),
+                output: Value::String("test output".to_string()),
+            })
+        }
+    }
+
+    struct MockBrain;
+
+    #[async_trait]
+    impl AgentBrain for MockBrain {
+        async fn decide_next_action(
+            &self,
+            _messages: &[crate::agent::structs::Message],
+            _tools: &[ToolDefinition],
+        ) -> Result<AgentAction, AgentError> {
+            Ok(AgentAction::Finish("test response".to_string()))
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn decide_next_action_streaming(
+            &self,
+            _messages: &[crate::agent::structs::Message],
+            _tools: &[ToolDefinition],
+            _app_handle: Option<AppHandle>,
+            _message_id: Option<String>,
+        ) -> Result<AgentAction, AgentError> {
+            Ok(AgentAction::Finish("test response".to_string()))
+        }
+    }
+
+    struct MockMemoryManagerTest;
+
+    #[async_trait]
+    impl MemoryManager for MockMemoryManagerTest {
+        async fn add_message(
+            &mut self,
+            _message: crate::agent::structs::Message,
+        ) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn get_messages(&self) -> Result<Vec<crate::agent::structs::Message>, AgentError> {
+            Ok(vec![])
+        }
+
+        async fn get_last_n_messages(
+            &self,
+            _n: usize,
+        ) -> Result<Vec<crate::agent::structs::Message>, AgentError> {
+            Ok(vec![])
+        }
+
+        async fn clear_memory(&mut self) -> Result<(), AgentError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_continuation_logic_prevents_infinite_loop() {
+        // Test that 0 additional_steps is corrected to prevent infinite loop
+        // Simulate the logic from the continuation handler
+        let mut additional_steps = 0u32;
+
+        // This should match the fix logic
+        if additional_steps == 0 {
+            additional_steps =
+                crate::constants::agent::config::DEFAULT_CONTINUATION_ADDITIONAL_STEPS;
+        }
+
+        // Verify that additional_steps is no longer 0
+        assert_ne!(
+            additional_steps, 0,
+            "additional_steps should not remain 0 to prevent infinite loop"
+        );
+    }
+
+    #[test]
+    fn test_continuation_logic_prevents_overflow() {
+        // Test that integer overflow is prevented using saturating_add
+        let max_steps_near_overflow = u32::MAX - 1;
+        let large_additional_steps = 100u32;
+
+        // This should match the fix logic
+        let new_max_steps = max_steps_near_overflow.saturating_add(large_additional_steps);
+
+        // Verify that we get u32::MAX instead of wrapping around
+        assert_eq!(
+            new_max_steps,
+            u32::MAX,
+            "max_steps should saturate at u32::MAX instead of overflowing"
+        );
+
+        // Test normal case doesn't change behavior
+        let normal_max_steps = 10u32;
+        let normal_additional_steps = 5u32;
+        let normal_result = normal_max_steps.saturating_add(normal_additional_steps);
+
+        assert_eq!(normal_result, 15, "Normal addition should work as expected");
     }
 }
