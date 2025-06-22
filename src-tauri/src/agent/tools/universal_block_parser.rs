@@ -341,7 +341,7 @@ impl UniversalBlockParser {
         let height = block_size.min(image_buffer.height() - global_y);
 
         // Generate 2D position embedding
-        let position_embedding = self.generate_position_embedding(col, row, image_buffer.width(), image_buffer.height());
+        let position_embedding = self.generate_position_embedding(col, row, image_buffer.width(), image_buffer.height(), block_size);
 
         // Detect UI elements within this block
         let elements = self.detect_elements_in_block(
@@ -368,22 +368,42 @@ impl UniversalBlockParser {
     }
 
     /// Generates 2D position embedding for spatial relationships
-    fn generate_position_embedding(&self, col: u32, row: u32, image_width: u32, image_height: u32) -> Vec<f32> {
+    fn generate_position_embedding(&self, col: u32, row: u32, image_width: u32, image_height: u32, actual_block_size: u32) -> Vec<f32> {
         let mut embedding = Vec::with_capacity(16); // 16-dimensional embedding
 
-        // Absolute position encoding
-        embedding.push(col as f32 / (image_width / self.config.block_size) as f32);
-        embedding.push(row as f32 / (image_height / self.config.block_size) as f32);
+        // Calculate grid dimensions using actual block size to prevent division by zero
+        let blocks_x = if actual_block_size > 0 { (image_width + actual_block_size - 1) / actual_block_size } else { 1 };
+        let blocks_y = if actual_block_size > 0 { (image_height + actual_block_size - 1) / actual_block_size } else { 1 };
+
+        // Ensure we don't divide by zero
+        let blocks_x_f32 = blocks_x.max(1) as f32;
+        let blocks_y_f32 = blocks_y.max(1) as f32;
+
+        // Absolute position encoding (normalized to 0-1 range)
+        embedding.push(col as f32 / blocks_x_f32);
+        embedding.push(row as f32 / blocks_y_f32);
 
         // Relative position encoding (distance from corners and center)
-        let center_x = (image_width / self.config.block_size) as f32 / 2.0;
-        let center_y = (image_height / self.config.block_size) as f32 / 2.0;
-        embedding.push((col as f32 - center_x) / center_x); // Distance from center X
-        embedding.push((row as f32 - center_y) / center_y); // Distance from center Y
+        let center_x = blocks_x_f32 / 2.0;
+        let center_y = blocks_y_f32 / 2.0;
 
-        // Corner distances
-        embedding.push(col as f32); // Distance from left
-        embedding.push(row as f32); // Distance from top
+        // Distance from center (normalized)
+        let dist_from_center_x = if center_x > 0.0 { (col as f32 - center_x) / center_x } else { 0.0 };
+        let dist_from_center_y = if center_y > 0.0 { (row as f32 - center_y) / center_y } else { 0.0 };
+        embedding.push(dist_from_center_x);
+        embedding.push(dist_from_center_y);
+
+        // Corner distances (normalized)
+        embedding.push(col as f32 / blocks_x_f32); // Distance from left (normalized)
+        embedding.push(row as f32 / blocks_y_f32); // Distance from top (normalized)
+
+        // Additional spatial features
+        embedding.push((blocks_x - 1 - col) as f32 / blocks_x_f32); // Distance from right (normalized)
+        embedding.push((blocks_y - 1 - row) as f32 / blocks_y_f32); // Distance from bottom (normalized)
+
+        // Block size information
+        embedding.push(actual_block_size as f32 / image_width.max(1) as f32); // Block size relative to width
+        embedding.push(actual_block_size as f32 / image_height.max(1) as f32); // Block size relative to height
 
         // Pad to 16 dimensions
         while embedding.len() < 16 {
