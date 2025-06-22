@@ -320,7 +320,7 @@ pub(crate) async fn set_agent_mode(
     let settings_manager = SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let agent_mode = AgentMode::from_str(&mode)
+    let _agent_mode = AgentMode::from_str(&mode)
         .ok_or_else(|| format!("Invalid agent mode: '{}'. Must be 'single' or 'multi'", mode))?;
 
     // Load current agent settings
