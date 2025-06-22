@@ -1,0 +1,18 @@
+[build]
+# Increase parallel jobs for faster builds (adjust based on your CPU cores)
+jobs = 8
+
+# Enable incremental compilation
+incremental = true
+
+# Enable better caching
+[profile.dev]
+incremental = true
+
+[env]
+# Speed up builds by avoiding unnecessary recompilation
+CARGO_INCREMENTAL = "1"
+CARGO_CACHE_RUSTC_INFO = "1"
+
+# Skip documentation builds during development
+RUSTDOCFLAGS = "--cfg docsrs"
