@@ -338,8 +338,6 @@ impl ToolConfigManager {
         }
     }
 
-
-
     /// Check if a tool is enabled.
     /// Checks both individual tool setting and category enablement state.
     /// Used by: Agent tool execution system for availability decisions.
@@ -471,6 +469,10 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_anthropic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let anthropic_tools = vec![
+            ("computer", "Use mouse and keyboard to interact with computer, and take screenshots"),
+            ("accessibility_interface", "Use macOS accessibility APIs for precise UI interaction (preferred method)"),
+            ("str_replace_based_edit_tool", "Create, view, and edit files with precise text operations"),
+            ("bash", "Execute bash commands and shell operations"),
             ("screenshot", "Take a screenshot of the current screen"),
             ("click", "Click on screen coordinates"),
             ("type", "Type text into the focused application"),
@@ -729,8 +731,6 @@ pub async fn load_tool_config_from_centralized_settings(
     info!("Loaded tool configuration from centralized settings on startup");
     Ok(())
 }
-
-
 
 /// Save tool configuration to centralized settings
 /// NEW: Uses centralized settings instead of direct JSON store access.
