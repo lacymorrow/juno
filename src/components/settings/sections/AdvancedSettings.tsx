@@ -9,28 +9,10 @@ import {
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  AlertCircle,
-  CheckCircle,
-  RefreshCw,
-  RotateCcw,
-  Shield,
-} from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionProps } from "../types";
-
-interface PermissionState {
-  granted: boolean;
-  required: boolean;
-}
-
-interface PermissionsState {
-  accessibility: PermissionState;
-  screenRecording: PermissionState;
-  microphone: PermissionState;
-  allGranted: boolean;
-}
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
@@ -40,10 +22,10 @@ export default function AdvancedSettings({
   settings,
   onNavigateToPermissions,
 }: AdvancedSettingsProps) {
-  const [permissionsState, setPermissionsState] =
-    useState<PermissionsState | null>(null);
-  const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+
+  // Suppress unused parameter warning for onNavigateToPermissions
+  void onNavigateToPermissions;
 
   // Load debug mode status on mount
   useEffect(() => {
@@ -56,46 +38,6 @@ export default function AdvancedSettings({
       }
     };
     loadDebugMode();
-  }, []);
-
-  const loadPermissionsStatus = async () => {
-    setPermissionsLoading(true);
-    try {
-      // Use native permission checking - eliminates all password prompts
-      const result = await invoke<PermissionsState>(
-        "check_permissions_status_native"
-      );
-      setPermissionsState(result);
-    } catch (error) {
-      console.error("Failed to load permissions:", error);
-      setPermissionsState(null);
-    } finally {
-      setPermissionsLoading(false);
-    }
-  };
-
-  const getPermissionIcon = (granted: boolean, required: boolean) => {
-    if (!required) return <CheckCircle className="h-4 w-4 text-gray-400" />;
-    return granted ? (
-      <CheckCircle className="h-4 w-4 text-green-500" />
-    ) : (
-      <AlertCircle className="h-4 w-4 text-red-500" />
-    );
-  };
-
-  const getPermissionBadge = (granted: boolean, required: boolean) => {
-    if (!required) {
-      return <Badge variant="secondary">Optional</Badge>;
-    }
-    return (
-      <Badge variant={granted ? "default" : "destructive"}>
-        {granted ? "Granted" : "Required"}
-      </Badge>
-    );
-  };
-
-  useEffect(() => {
-    loadPermissionsStatus();
   }, []);
 
   return (
@@ -147,138 +89,6 @@ export default function AdvancedSettings({
                 onCheckedChange={settings.handlePerformanceMonitoringChange}
               />
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Permissions Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield size={20} />
-              macOS Permissions
-            </CardTitle>
-            <CardDescription>
-              Manage system permissions required for AI computer use features
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {permissionsLoading ? (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                <span>Checking permissions...</span>
-              </div>
-            ) : permissionsState ? (
-              <div className="space-y-3">
-                {/* Overall Status */}
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    {permissionsState.allGranted ? (
-                      <CheckCircle className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <AlertCircle className="h-5 w-5 text-red-500" />
-                    )}
-                    <span className="font-medium">
-                      {permissionsState.allGranted
-                        ? "All permissions granted"
-                        : "Some permissions missing"}
-                    </span>
-                  </div>
-                  <Badge
-                    variant={
-                      permissionsState.allGranted ? "default" : "destructive"
-                    }
-                  >
-                    {permissionsState.allGranted ? "Ready" : "Needs Setup"}
-                  </Badge>
-                </div>
-
-                {/* Individual Permissions */}
-                <div className="grid gap-2">
-                  {/* Accessibility */}
-                  <div className="flex items-center justify-between p-2 border rounded">
-                    <div className="flex items-center gap-2">
-                      {getPermissionIcon(
-                        permissionsState.accessibility.granted,
-                        permissionsState.accessibility.required
-                      )}
-                      <span className="text-sm">Accessibility</span>
-                    </div>
-                    {getPermissionBadge(
-                      permissionsState.accessibility.granted,
-                      permissionsState.accessibility.required
-                    )}
-                  </div>
-
-                  {/* Screen Recording */}
-                  <div className="flex items-center justify-between p-2 border rounded">
-                    <div className="flex items-center gap-2">
-                      {getPermissionIcon(
-                        permissionsState.screenRecording.granted,
-                        permissionsState.screenRecording.required
-                      )}
-                      <span className="text-sm">Screen Recording</span>
-                    </div>
-                    {getPermissionBadge(
-                      permissionsState.screenRecording.granted,
-                      permissionsState.screenRecording.required
-                    )}
-                  </div>
-
-                  {/* Microphone */}
-                  <div className="flex items-center justify-between p-2 border rounded">
-                    <div className="flex items-center gap-2">
-                      {getPermissionIcon(
-                        permissionsState.microphone.granted,
-                        permissionsState.microphone.required
-                      )}
-                      <span className="text-sm">Microphone</span>
-                    </div>
-                    {getPermissionBadge(
-                      permissionsState.microphone.granted,
-                      permissionsState.microphone.required
-                    )}
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={loadPermissionsStatus}
-                    disabled={permissionsLoading}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-1" />
-                    Refresh
-                  </Button>
-                  <Button
-                    onClick={onNavigateToPermissions}
-                    size="sm"
-                    variant={
-                      permissionsState.allGranted ? "outline" : "default"
-                    }
-                  >
-                    <Shield className="h-4 w-4 mr-1" />
-                    {permissionsState.allGranted
-                      ? "View Details"
-                      : "Setup Permissions"}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-4 text-muted-foreground">
-                <p>Unable to check permissions status</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={loadPermissionsStatus}
-                  className="mt-2"
-                >
-                  <RefreshCw className="h-4 w-4 mr-1" />
-                  Try Again
-                </Button>
-              </div>
-            )}
           </CardContent>
         </Card>
 

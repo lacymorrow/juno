@@ -776,7 +776,7 @@ pub fn run() {
             commands::agent_continuation::respond_to_agent_continuation,
             commands::agent_continuation::get_pending_continuation_requests,
             commands::agent_continuation::has_pending_continuation_requests,
-          
+
             // Self-Improvement Commands (Development Mode Only)
             commands::self_improvement::initialize_self_improvement,
             commands::self_improvement::start_improvement_cycle,
