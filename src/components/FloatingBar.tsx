@@ -68,6 +68,7 @@ export function FloatingBar() {
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
+  const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
   const [showTooltip, setShowTooltip] = useState(false);
   const [config, setConfig] = useState<FloatingBarConfig>({
@@ -112,6 +113,13 @@ export function FloatingBar() {
       resizeWindow(targetSize);
     }
   }, [barState, resizeWindow]);
+
+  // Handle animation state tracking
+  useEffect(() => {
+    if (config.enableAnimations) {
+      setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
+    }
+  }, [barState, config.enableAnimations]);
 
   // Cleanup tooltip timeout on unmount
   useEffect(() => {
@@ -312,11 +320,11 @@ export function FloatingBar() {
     }
   };
 
-  // Get enhanced container styles with voice mode awareness and glass morphism vibrancy
+  // Get enhanced container styles with voice mode awareness
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
-      text-white rounded-full shadow-lg border
+      text-white rounded-full shadow-lg border border-white/20
       transition-all duration-300 ease-in-out
       [will-change:width,height,transform]
       [backface-visibility:hidden]
@@ -324,42 +332,32 @@ export function FloatingBar() {
 			cursor-move
     `;
 
-    // Enhanced glass morphism styling
-    let borderColor = "border-white/20";
-    let backdropFilter = "backdrop-blur-[20px] backdrop-saturate-[180%]";
-    let boxShadow = "shadow-[0_4px_20px_rgba(31,38,135,0.3)]";
+    // Enhanced background based on voice mode and state
+    let bgColor = "bg-black/90";
 
-    // Enhanced styling based on voice mode and state with glass morphism
     switch (voiceMode) {
       case "dictation":
-        borderColor = "border-orange-400/30";
-        boxShadow = "shadow-[0_4px_20px_rgba(255,165,0,0.4)]";
+        bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
         break;
       case "agent":
-        borderColor = "border-blue-400/30";
-        boxShadow = "shadow-[0_4px_20px_rgba(59,130,246,0.4)]";
+        bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
         break;
       default:
         if (isDictationMode) {
-          borderColor = "border-orange-400/25";
-          boxShadow = "shadow-[0_4px_20px_rgba(255,165,0,0.35)]";
+          bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
         } else if (isAgentWorking) {
-          borderColor = "border-blue-400/25";
-          boxShadow = "shadow-[0_4px_20px_rgba(59,130,246,0.35)]";
+          bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
         }
         break;
     }
 
-    // Override for specific states with enhanced glass morphism
+    // Override for specific states
     if (barState === "error") {
-      borderColor = "border-red-400/30";
-      boxShadow = "shadow-[0_4px_20px_rgba(239,68,68,0.4)]";
+      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
     } else if (barState === "success") {
-      borderColor = "border-emerald-400/30";
-      boxShadow = "shadow-[0_4px_20px_rgba(16,185,129,0.4)]";
+      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
     } else if (barState === "always-listening") {
-      borderColor = "border-blue-400/25";
-      boxShadow = "shadow-[0_4px_20px_rgba(59,130,246,0.35)]";
+      bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
     const sizeStyles = ["default"].includes(barState)
@@ -375,20 +373,13 @@ export function FloatingBar() {
       ? "cursor-pointer"
       : "";
 
-    // Combine all glass morphism styles
-    const glassStyles = `
-      ${backdropFilter}
-      ${borderColor}
-      ${boxShadow}
-      glass-morphism-container
-    `;
-
     return cn(
       baseStyles,
-      glassStyles,
+      bgColor,
       sizeStyles,
       hoverEffect,
-      clickable
+      clickable,
+      !isAnimatingSize && "backdrop-blur-md"
     );
   };
 
@@ -447,41 +438,7 @@ export function FloatingBar() {
         <div
           data-tauri-drag-region
           className={getContainerStyles()}
-          style={{
-            opacity: config.opacity,
-            background: (() => {
-              // Enhanced glass morphism background with vibrancy
-              let baseBackground = "rgba(255, 255, 255, 0.15)";
-
-              // Enhanced background based on voice mode and state with glass morphism
-              switch (voiceMode) {
-                case "dictation":
-                  baseBackground = "rgba(255, 165, 0, 0.2)"; // Orange with transparency
-                  break;
-                case "agent":
-                  baseBackground = "rgba(59, 130, 246, 0.2)"; // Blue with transparency
-                  break;
-                default:
-                  if (isDictationMode) {
-                    baseBackground = "rgba(255, 165, 0, 0.18)";
-                  } else if (isAgentWorking) {
-                    baseBackground = "rgba(59, 130, 246, 0.18)";
-                  }
-                  break;
-              }
-
-              // Override for specific states with enhanced glass morphism
-              if (barState === "error") {
-                baseBackground = "rgba(239, 68, 68, 0.2)";
-              } else if (barState === "success") {
-                baseBackground = "rgba(16, 185, 129, 0.2)";
-              } else if (barState === "always-listening") {
-                baseBackground = "rgba(59, 130, 246, 0.18)";
-              }
-
-              return baseBackground;
-            })()
-          }}
+          style={{ opacity: config.opacity }}
           onClick={
             ["default", "dictation_ready"].includes(barState)
               ? handleBarClick
@@ -767,38 +724,6 @@ export function FloatingBar() {
           )}
         </div>
       </div>
-
-      {/* Glass Morphism Styles */}
-      <style>{`
-        .glass-morphism-container {
-          position: relative;
-        }
-
-        .glass-morphism-container::after {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: inherit;
-          backdrop-filter: blur(1px);
-          box-shadow: inset -6px -4px 0px -7px rgba(255, 255, 255, 0.3),
-                      inset 0px -5px 0px -4px rgba(255, 255, 255, 0.2);
-          opacity: 0.6;
-          z-index: -1;
-          pointer-events: none;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .glass-morphism-container:hover::after {
-          background: rgba(255, 255, 255, 0.08);
-          box-shadow: inset -6px -4px 0px -7px rgba(255, 255, 255, 0.4),
-                      inset 0px -5px 0px -4px rgba(255, 255, 255, 0.3);
-          opacity: 0.8;
-        }
-      `}</style>
     </div>
   );
 }
