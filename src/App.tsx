@@ -1,3 +1,5 @@
+import './styles/App.css'
+
 import React, { useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -257,8 +259,8 @@ function App() {
 
   // Render main UI
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Header - Fixed to include required props for model/agent selection */}
+    <div className="flex flex-col h-screen bg-gradient-to-br from-background via-background/95 to-muted/20 overflow-hidden">
+      {/* Header - Enhanced with glass effect */}
       <AppHeader
         currentView={appState.currentView}
         onViewChange={appState.setCurrentView}
@@ -268,79 +270,97 @@ function App() {
         isDevPanelOpen={appState.isDevPanelOpen}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 min-h-0">
-        <ResizablePanelGroup direction="horizontal">
-          {/* Primary Content Panel */}
+      {/* Main Content - Enhanced with better spacing and glass effects */}
+      <div className="flex-1 min-h-0 relative">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
+          {/* Primary Content Panel - Enhanced styling */}
           <ResizablePanel defaultSize={appState.isDevPanelOpen ? 70 : 100}>
-            <div className="flex flex-col h-full">
-              {/* Content Area */}
-              <div className="flex-1 min-h-0 p-4">
+            <div className="flex flex-col h-full bg-background/50 backdrop-blur-sm">
+              {/* Content Area - Enhanced with better padding and glass effects */}
+              <div className="flex-1 min-h-0 p-6">
                 {appState.currentView === "chat" && (
-                  <div className="flex flex-col h-full space-y-2">
-                    <ChatContainer
-                      conversation={conversation.conversation}
-                      copyingMessageId={appState.copyingMessageId}
-                      savingMessageId={appState.savingMessageId}
-                      userHasScrolledUp={appState.userHasScrolledUp}
-                      lastScrollTime={appState.lastScrollTime}
-                      setUserHasScrolledUp={appState.setUserHasScrolledUp}
-                      setLastScrollTime={appState.setLastScrollTime}
-                      onCopyResponse={handleCopyResponse}
-                      onSaveResponse={handleSaveResponse}
-                      onExamplePromptSelect={handleExamplePromptSelect}
-                    />
+                  <div className="flex flex-col h-full space-y-3 max-w-4xl mx-auto">
+                    {/* Chat Container with enhanced styling */}
+                    <div className="flex-1 min-h-0 rounded-xl bg-background/80 backdrop-blur-sm border border-border/30 shadow-sm overflow-hidden">
+                      <ChatContainer
+                        conversation={conversation.conversation}
+                        copyingMessageId={appState.copyingMessageId}
+                        savingMessageId={appState.savingMessageId}
+                        userHasScrolledUp={appState.userHasScrolledUp}
+                        lastScrollTime={appState.lastScrollTime}
+                        setUserHasScrolledUp={appState.setUserHasScrolledUp}
+                        setLastScrollTime={appState.setLastScrollTime}
+                        onCopyResponse={handleCopyResponse}
+                        onSaveResponse={handleSaveResponse}
+                        onExamplePromptSelect={handleExamplePromptSelect}
+                      />
+                    </div>
 
-                    <ChatInput
-                      query={conversation.query}
-                      isProcessing={appState.isProcessing}
-                      canSubmit={appState.canSubmit}
-                      onQueryChange={conversation.setQuery}
-                      onSubmit={handleSubmit}
-                      onStop={handleStop}
-                      onNewChat={conversation.startNewChat}
-                      onClearConversation={conversation.clearConversation}
-                    />
+                    {/* Chat Input with enhanced styling */}
+                    <div className="rounded-xl bg-background/90 backdrop-blur-sm border border-border/30 shadow-sm overflow-hidden">
+                      <ChatInput
+                        query={conversation.query}
+                        isProcessing={appState.isProcessing}
+                        canSubmit={appState.canSubmit}
+                        onQueryChange={conversation.setQuery}
+                        onSubmit={handleSubmit}
+                        onStop={handleStop}
+                        onNewChat={conversation.startNewChat}
+                        onClearConversation={conversation.clearConversation}
+                      />
+                    </div>
                   </div>
                 )}
 
-                {appState.currentView === "permissions" && <PermissionsFlow />}
+                {appState.currentView === "permissions" && (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="w-full max-w-2xl">
+                      <PermissionsFlow />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </ResizablePanel>
 
-          {/* Dev Tools Panel */}
+          {/* Dev Tools Panel - Enhanced styling */}
           {appState.isDevPanelOpen && (
             <>
-              <ResizableHandle />
+              <ResizableHandle className="w-1 bg-border/30 hover:bg-border/50 transition-colors duration-200" />
               <ResizablePanel defaultSize={30} minSize={25} maxSize={50}>
-                <DevToolsPanel />
+                <div className="h-full bg-background/30 backdrop-blur-sm border-l border-border/30">
+                  <DevToolsPanel />
+                </div>
               </ResizablePanel>
             </>
           )}
         </ResizablePanelGroup>
       </div>
 
-      {/* Overlays */}
-      <ClickVisualizer />
-      <CommandOverlay />
-      <KeyPressOverlay />
-      <ToolApprovalModal />
+      {/* Overlays - Enhanced with better z-index management */}
+      <div className="relative z-50">
+        <ClickVisualizer />
+        <CommandOverlay />
+        <KeyPressOverlay />
+        <ToolApprovalModal />
+      </div>
 
-      {/* Modal System - Fixed to match expected props */}
-      <ModalSystem
-        activeModal={appState.activeModal}
-        onClose={() => appState.setActiveModal(null)}
-        feedbackData={appState.feedbackData}
-        onFeedbackDataChange={appState.handleFeedbackDataChange}
-        updateInfo={appState.updateInfo}
-        conversation={conversation.conversation}
-        isExporting={false}
-        isImporting={false}
-        keyboardShortcuts={appState.keyboardShortcuts}
-        onUpdateConversation={conversation.updateConversation}
-        onAddSystemMessage={conversation.addSystemMessage}
-      />
+      {/* Modal System - Enhanced positioning */}
+      <div className="relative z-[100]">
+        <ModalSystem
+          activeModal={appState.activeModal}
+          onClose={() => appState.setActiveModal(null)}
+          feedbackData={appState.feedbackData}
+          onFeedbackDataChange={appState.handleFeedbackDataChange}
+          updateInfo={appState.updateInfo}
+          conversation={conversation.conversation}
+          isExporting={false}
+          isImporting={false}
+          keyboardShortcuts={appState.keyboardShortcuts}
+          onUpdateConversation={conversation.updateConversation}
+          onAddSystemMessage={conversation.addSystemMessage}
+        />
+      </div>
     </div>
   );
 }

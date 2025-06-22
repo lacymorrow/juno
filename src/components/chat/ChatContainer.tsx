@@ -99,11 +99,11 @@ export const ChatContainer = React.memo(function ChatContainer({
 
         return (
           <div key={`msg-container-${index}-${msg.timestamp || Date.now()}`}>
-            {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
+            {/* Enhanced Timestamp header - macOS Messages style */}
             {showTimestamp && msg.timestamp && (
-              <div className="flex justify-center my-4">
+              <div className="flex justify-center my-6">
                 <span
-                  className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
+                  className="text-xs text-muted-foreground bg-background/80 backdrop-blur-sm px-4 py-2 border border-border/30 rounded-full shadow-sm cursor-default transition-all duration-200 hover:bg-background/90 hover:shadow-md font-medium"
                   title={formatFullTimestamp(msg.timestamp)}
                 >
                   {formatMessageTimestamp(msg.timestamp)}
@@ -134,23 +134,42 @@ export const ChatContainer = React.memo(function ChatContainer({
   return (
     <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4" ref={scrollAreaRef}>
       {conversation.length === 0 ? (
-        /* Compact welcome message when conversation is empty */
-        <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
-          <div className="space-y-1">
-            <DogIcon size={16} className="text-blue-500 mx-auto" />
-            <div>
-              <h2 className="text-sm font-semibold">Juno AI</h2>
-              <p className="text-xs text-muted-foreground">
-                AI desktop assistant
+        /* Enhanced welcome message with macOS styling */
+        <div className="flex flex-col items-center justify-center h-full text-center space-y-6 p-6">
+          <div className="space-y-4">
+            {/* Enhanced App Identity */}
+            <div className="flex items-center justify-center gap-3 px-6 py-3 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50 border border-blue-200/50 dark:border-blue-800/50 backdrop-blur-sm shadow-sm">
+              <DogIcon size={24} className="text-blue-600 dark:text-blue-400" />
+              <div className="text-left">
+                <h2 className="text-lg font-semibold bg-gradient-to-r from-blue-700 to-indigo-700 dark:from-blue-300 dark:to-indigo-300 bg-clip-text text-transparent">
+                  Juno AI
+                </h2>
+                <p className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">
+                  AI desktop assistant
+                </p>
+              </div>
+            </div>
+
+            {/* Welcome Text */}
+            <div className="space-y-2">
+              <h3 className="text-base font-medium text-foreground">
+                Welcome to your AI assistant
+              </h3>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
+                Ask me anything, control your Mac, or try one of the examples below to get started.
               </p>
             </div>
           </div>
 
-          {/* Compact Example Prompts */}
-          <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+          {/* Enhanced Example Prompts */}
+          <div className="w-full max-w-2xl">
+            <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+          </div>
         </div>
       ) : (
-        messageList
+        <div className="space-y-4 py-4">
+          {messageList}
+        </div>
       )}
       <div ref={conversationEndRef} />
     </ScrollArea>

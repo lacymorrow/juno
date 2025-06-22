@@ -166,98 +166,147 @@ const DevToolsPanel: React.FC = () => {
   };
 
   return (
-    <ScrollArea className="h-full w-full rounded-md border p-4">
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-lg font-semibold">Cloud & WebSocket Testing</h2>
-          <Separator className="my-2" />
+    <ScrollArea className="h-full w-full">
+      <div className="p-6 space-y-8">
+        {/* Header */}
+        <div className="space-y-2">
+          <h1 className="text-xl font-semibold bg-gradient-to-r from-purple-700 to-indigo-700 dark:from-purple-300 dark:to-indigo-300 bg-clip-text text-transparent">
+            Development Tools
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Test and debug Juno AI functionality
+          </p>
+        </div>
+
+        {/* Cloud & WebSocket Testing */}
+        <div className="rounded-xl bg-gradient-to-r from-blue-50/50 to-indigo-50/30 dark:from-blue-950/30 dark:to-indigo-950/20 border border-blue-200/50 dark:border-blue-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            <h2 className="text-base font-semibold text-blue-900 dark:text-blue-100">Cloud & WebSocket Testing</h2>
+          </div>
           <CloudTestPanel />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Wake Word Testing</h2>
-          <Separator className="my-2" />
+        {/* Wake Word Testing */}
+        <div className="rounded-xl bg-gradient-to-r from-green-50/50 to-emerald-50/30 dark:from-green-950/30 dark:to-emerald-950/20 border border-green-200/50 dark:border-green-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+            <h2 className="text-base font-semibold text-green-900 dark:text-green-100">Wake Word Testing</h2>
+          </div>
           <WakeWordTesting
             loadingStates={loadingStates}
             setLoadingStates={setLoadingStates}
           />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Visualization Controls</h2>
-          <Separator className="my-2" />
+        {/* Visualization Controls */}
+        <div className="rounded-xl bg-gradient-to-r from-purple-50/50 to-violet-50/30 dark:from-purple-950/30 dark:to-violet-950/20 border border-purple-200/50 dark:border-purple-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+            <h2 className="text-base font-semibold text-purple-900 dark:text-purple-100">Visualization Controls</h2>
+          </div>
           <VisualizationSettings />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Screenshot & Testing</h2>
-          <Separator className="my-2" />
+        {/* Screenshot & Testing */}
+        <div className="rounded-xl bg-gradient-to-r from-orange-50/50 to-amber-50/30 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200/50 dark:border-orange-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+            <h2 className="text-base font-semibold text-orange-900 dark:text-orange-100">Screenshot & Testing</h2>
+          </div>
           <ScreenshotOperations />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Keyboard Operations</h2>
-          <Separator className="my-2" />
+        {/* Keyboard Operations */}
+        <div className="rounded-xl bg-gradient-to-r from-teal-50/50 to-cyan-50/30 dark:from-teal-950/30 dark:to-cyan-950/20 border border-teal-200/50 dark:border-teal-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-teal-500"></div>
+            <h2 className="text-base font-semibold text-teal-900 dark:text-teal-100">Keyboard Operations</h2>
+          </div>
           <KeyboardOperations />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Mouse Operations</h2>
-          <Separator className="my-2" />
+        {/* Mouse Operations */}
+        <div className="rounded-xl bg-gradient-to-r from-pink-50/50 to-rose-50/30 dark:from-pink-950/30 dark:to-rose-950/20 border border-pink-200/50 dark:border-pink-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-pink-500"></div>
+            <h2 className="text-base font-semibold text-pink-900 dark:text-pink-100">Mouse Operations</h2>
+          </div>
           <MouseOperations />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Window Operations</h2>
-          <Separator className="my-2" />
+        {/* Window Operations */}
+        <div className="rounded-xl bg-gradient-to-r from-indigo-50/50 to-blue-50/30 dark:from-indigo-950/30 dark:to-blue-950/20 border border-indigo-200/50 dark:border-indigo-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+            <h2 className="text-base font-semibold text-indigo-900 dark:text-indigo-100">Window Operations</h2>
+          </div>
           <WindowOperations />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">File Operations</h2>
-          <Separator className="my-2" />
+        {/* File Operations */}
+        <div className="rounded-xl bg-gradient-to-r from-yellow-50/50 to-orange-50/30 dark:from-yellow-950/30 dark:to-orange-950/20 border border-yellow-200/50 dark:border-yellow-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+            <h2 className="text-base font-semibold text-yellow-900 dark:text-yellow-100">File Operations</h2>
+          </div>
           <FileOperations />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Application Control</h2>
-          <Separator className="my-2" />
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <ExternalLink className="h-4 w-4" />
+        {/* Application Control */}
+        <div className="rounded-xl bg-gradient-to-r from-slate-50/50 to-gray-50/30 dark:from-slate-950/30 dark:to-gray-950/20 border border-slate-200/50 dark:border-slate-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-slate-500"></div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Application Control</h2>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-background/50 backdrop-blur-sm border border-border/30">
+              <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <Input
                 placeholder="App name (e.g., TextEdit)"
                 value={appToOpen}
                 onChange={(e) => setAppToOpen(e.target.value)}
+                className="flex-1"
               />
-              <Button onClick={handleOpenApp}>Open App</Button>
+              <Button onClick={handleOpenApp} size="sm" className="flex-shrink-0">
+                Open App
+              </Button>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <ExternalLink className="h-4 w-4" />
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-background/50 backdrop-blur-sm border border-border/30">
+              <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <Input
                 placeholder="URL to open"
                 value={urlToOpen}
                 onChange={(e) => setUrlToOpen(e.target.value)}
+                className="flex-1"
               />
-              <Button onClick={handleOpenUrl}>Open URL</Button>
+              <Button onClick={handleOpenUrl} size="sm" className="flex-shrink-0">
+                Open URL
+              </Button>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Timer className="h-4 w-4" />
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-background/50 backdrop-blur-sm border border-border/30">
+              <Timer className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <Input
                 placeholder="Wait duration (ms)"
                 value={waitDuration}
                 onChange={(e) => setWaitDuration(e.target.value)}
+                className="flex-1"
               />
-              <Button onClick={handleWait}>Wait</Button>
+              <Button onClick={handleWait} size="sm" className="flex-shrink-0">
+                Wait
+              </Button>
             </div>
           </div>
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Self Improvement</h2>
-          <Separator className="my-2" />
+        {/* Self Improvement */}
+        <div className="rounded-xl bg-gradient-to-r from-emerald-50/50 to-teal-50/30 dark:from-emerald-950/30 dark:to-teal-950/20 border border-emerald-200/50 dark:border-emerald-800/50 backdrop-blur-sm p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+            <h2 className="text-base font-semibold text-emerald-900 dark:text-emerald-100">Self Improvement</h2>
+          </div>
           <SelfImprovementPanel />
         </div>
       </div>

@@ -346,172 +346,82 @@ export function PermissionsFlow({
     onRequest?: () => void,
     onRequestEnhanced?: () => void
   ) => {
-    const isRequired = permission.required;
-    const cardClassName = permission.granted
-      ? "transition-colors border-green-200 bg-green-50/30"
-      : isRequired
-      ? "transition-colors border-red-200 bg-red-50/30"
-      : "transition-colors border-yellow-200 bg-yellow-50/30";
+    const isRequesting = isRequestingPermission === permission.permissionType;
+    const gradientClass = permission.granted
+      ? "from-green-50/50 to-emerald-50/30 dark:from-green-950/30 dark:to-emerald-950/20 border-green-200/50 dark:border-green-800/50"
+      : permission.required
+        ? "from-red-50/50 to-rose-50/30 dark:from-red-950/30 dark:to-rose-950/20 border-red-200/50 dark:border-red-800/50"
+        : "from-amber-50/50 to-orange-50/30 dark:from-amber-950/30 dark:to-orange-950/20 border-amber-200/50 dark:border-amber-800/50";
 
     return (
-      <Card key={permission.permissionType} className={cardClassName}>
-        <CardHeader className="pb-4">
+      <Card key={permission.permissionType} className={`rounded-xl bg-gradient-to-r ${gradientClass} backdrop-blur-sm border shadow-sm hover:shadow-md transition-all duration-200`}>
+        <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
-            <div className="flex items-start space-x-3">
-              <div className="flex items-center space-x-2">
-                {getPermissionPriorityIcon(permission)}
-                {getPermissionIcon(permission)}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center space-x-2 mb-1">
-                  <CardTitle className="text-lg">
-                    {permission.permissionType
-                      .replace("_", " ")
-                      .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
-                    Access
-                  </CardTitle>
+            <div className="flex items-center gap-3">
+              {getPermissionIcon(permission)}
+              <div className="space-y-1">
+                <CardTitle className="text-base font-semibold text-foreground">
+                  {permission.permissionType === "accessibility" && "Accessibility"}
+                  {permission.permissionType === "screen_recording" && "Screen Recording"}
+                  {permission.permissionType === "microphone" && "Microphone"}
+                  {permission.permissionType === "input_monitoring" && "Input Monitoring"}
+                </CardTitle>
+                <div className="flex items-center gap-2">
                   {getPermissionBadge(permission)}
+                  {getPermissionPriorityIcon(permission)}
                 </div>
-                <CardDescription className="text-sm">
-                  {permission.description}
-                </CardDescription>
-                {isRequired && !permission.granted && (
-                  <div className="flex items-center space-x-1 mt-2">
-                    <AlertCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-700">
-                      This permission is required for Juno to function properly
-                    </span>
-                  </div>
-                )}
-                {!isRequired && !permission.granted && (
-                  <div className="flex items-center space-x-1 mt-2">
-                    <Info className="h-4 w-4 text-yellow-600" />
-                    <span className="text-sm text-yellow-700">
-                      Optional - enhances functionality when granted
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-0 space-y-4">
+          <CardDescription className="text-sm text-muted-foreground leading-relaxed">
+            {permission.description}
+          </CardDescription>
+
           {!permission.granted && (
             <div className="space-y-3">
-              <div
-                className={`p-3 rounded-md border ${
-                  isRequired
-                    ? "bg-red-50 border-red-200"
-                    : "bg-yellow-50 border-yellow-200"
-                }`}
-              >
-                <p
-                  className={`text-sm ${
-                    isRequired ? "text-red-800" : "text-yellow-800"
-                  }`}
-                >
-                  <strong>
-                    {isRequired ? "Action Required:" : "Optional Setup:"}
-                  </strong>{" "}
+              <div className="p-3 rounded-lg bg-background/50 backdrop-blur-sm border border-border/30">
+                <p className="text-xs text-muted-foreground font-medium mb-1">Instructions:</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   {permission.instructions}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {/* Enhanced auto-redirect button for accessibility */}
-                {onRequestEnhanced &&
-                  autoRedirectEnabled &&
-                  permission.permissionType === "accessibility" && (
-                    <Button
-                      onClick={onRequestEnhanced}
-                      disabled={
-                        isRequestingPermission === permission.permissionType
-                      }
-                      size="sm"
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      {isRequestingPermission === permission.permissionType ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Opening Settings...
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="h-4 w-4 mr-2" />
-                          Auto-Grant Permission
-                        </>
-                      )}
-                    </Button>
-                  )}
 
-                {/* Standard request button */}
+              <div className="flex gap-2">
                 {onRequest && (
                   <Button
                     onClick={onRequest}
-                    disabled={
-                      isRequestingPermission === permission.permissionType
-                    }
+                    disabled={isRequesting}
                     size="sm"
-                    variant={
-                      autoRedirectEnabled &&
-                      permission.permissionType === "accessibility"
-                        ? "outline"
-                        : isRequired
-                        ? "default"
-                        : "secondary"
-                    }
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all duration-200"
                   >
-                    {isRequestingPermission === permission.permissionType ? (
+                    {isRequesting ? (
                       <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        <RefreshCw className="w-3 h-3 mr-2 animate-spin" />
                         Requesting...
                       </>
                     ) : (
                       <>
-                        {isRequired
-                          ? "Grant Required Permission"
-                          : "Grant Optional Permission"}
+                        <Shield className="w-3 h-3 mr-2" />
+                        Grant Permission
                       </>
                     )}
                   </Button>
                 )}
 
-                {/* Manual settings button */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    autoRedirectEnabled
-                      ? openSystemPreferencesEnhanced(permission.permissionType)
-                      : openSystemPreferences(permission.permissionType)
-                  }
-                >
-                  <Settings className="h-4 w-4 mr-2" />
-                  Open System Settings
-                  <ExternalLink className="h-4 w-4 ml-2" />
-                </Button>
-              </div>
-
-              {/* Auto-redirect feature notice */}
-              {autoRedirectEnabled &&
-                permission.permissionType === "accessibility" && (
-                  <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
-                    <p className="text-xs text-blue-700">
-                      <Zap className="h-3 w-3 inline mr-1" />
-                      Auto-redirect enabled: System Settings will open
-                      automatically when needed
-                    </p>
-                  </div>
+                {onRequestEnhanced && (
+                  <Button
+                    onClick={onRequestEnhanced}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 border-border/50 hover:bg-muted/50 transition-all duration-200"
+                  >
+                    <Settings className="w-3 h-3 mr-2" />
+                    Open Settings
+                  </Button>
                 )}
-            </div>
-          )}
-          {permission.granted && (
-            <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-md border border-green-200">
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <p className="text-sm text-green-800 font-medium">
-                Permission granted -{" "}
-                {permission.permissionType.replace("_", " ")} access is working
-                properly
-              </p>
+              </div>
             </div>
           )}
         </CardContent>
@@ -542,14 +452,14 @@ export function PermissionsFlow({
   if (error) {
     return (
       <div className={`space-y-6 ${className}`}>
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="rounded-xl border-red-200/50 bg-gradient-to-r from-red-50/50 to-rose-50/30 dark:from-red-950/30 dark:to-rose-950/20">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
+          <AlertDescription className="text-red-800 dark:text-red-200">
             Error checking permissions: {error}
           </AlertDescription>
         </Alert>
-        <div className="flex gap-2">
-          <Button onClick={() => checkPermissions()} className="flex-1">
+        <div className="flex gap-3">
+          <Button onClick={() => checkPermissions()} className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200">
             <RefreshCw className="h-4 w-4 mr-2" />
             Try Again
           </Button>
@@ -557,7 +467,7 @@ export function PermissionsFlow({
             <Button
               onClick={() => checkPermissions(true)}
               variant="outline"
-              className="flex-1"
+              className="flex-1 border-border/50 hover:bg-muted/50 rounded-xl transition-all duration-200"
             >
               <Zap className="h-4 w-4 mr-2" />
               Retry with Auto-Open
@@ -573,33 +483,33 @@ export function PermissionsFlow({
   }
 
   return (
-    <div className={`space-y-6 ${className}`}>
+    <div className={`space-y-8 ${className}`}>
       {/* Header */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
+      <Card className="rounded-2xl bg-gradient-to-r from-blue-50/50 to-indigo-50/30 dark:from-blue-950/30 dark:to-indigo-950/20 border border-blue-200/50 dark:border-blue-800/50 backdrop-blur-sm shadow-lg">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-3 text-xl">
             {permissions.allGranted ? (
-              <CheckCircle className="h-5 w-5 text-green-500" />
+              <CheckCircle className="h-6 w-6 text-green-500" />
             ) : (
-              <Shield className="h-5 w-5 text-blue-500" />
+              <Shield className="h-6 w-6 text-blue-500" />
             )}
-            <span>macOS Permissions Setup for {permissions.appName}</span>
+            <span className="bg-gradient-to-r from-blue-700 to-indigo-700 dark:from-blue-300 dark:to-indigo-300 bg-clip-text text-transparent font-semibold">
+              macOS Permissions Setup for {permissions.appName}
+            </span>
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-muted-foreground leading-relaxed">
             {permissions.allGranted
               ? "✅ All permissions configured! Juno is ready for full functionality."
-              : autoRedirectEnabled
-              ? "Configure the permissions below to enable Juno's AI computer use capabilities. Required permissions are marked with ⚠️."
-              : "Configure the permissions below to enable Juno's AI computer use capabilities. Some permissions are required for core functionality."}
+              : "Configure the permissions below to enable Juno's AI computer use capabilities. Required permissions are marked with priority indicators."}
           </CardDescription>
         </CardHeader>
         {!permissions.allGranted && (
           <CardContent>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex gap-3">
               <Button
                 onClick={() => checkPermissions(true)}
                 size="sm"
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh Status
@@ -609,6 +519,7 @@ export function PermissionsFlow({
                   onClick={() => checkPermissions(true)}
                   size="sm"
                   variant="outline"
+                  className="border-border/50 hover:bg-muted/50 rounded-xl transition-all duration-200"
                 >
                   <Zap className="h-4 w-4 mr-2" />
                   Check with Auto-Open
@@ -620,23 +531,25 @@ export function PermissionsFlow({
       </Card>
 
       {/* Required Permissions Section */}
-      <div className="space-y-4">
-        <div className="flex items-center space-x-2">
-          <AlertCircle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-semibold text-red-800">
-            Required Permissions
-          </h3>
-          <Badge variant="destructive" className="bg-red-100 text-red-700">
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
+            <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-red-800 dark:text-red-200">
+              Required Permissions
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Essential for Juno's core AI computer use functionality
+            </p>
+          </div>
+          <Badge variant="destructive" className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800 rounded-full px-3 py-1">
             2 Required
           </Badge>
         </div>
-        <p className="text-sm text-gray-600 mb-4">
-          These permissions are essential for Juno's core AI computer use
-          functionality. Without them, Juno cannot automate tasks or interact
-          with your desktop.
-        </p>
 
-        <div className="space-y-3">
+        <div className="grid gap-4">
           {/* Accessibility Permission */}
           {permissions.accessibility.required &&
             renderPermissionCard(
@@ -654,24 +567,26 @@ export function PermissionsFlow({
       </div>
 
       {/* Optional Permissions Section */}
-      <Separator />
-      <div className="space-y-4">
-        <div className="flex items-center space-x-2">
-          <Info className="h-5 w-5 text-yellow-600" />
-          <h3 className="text-lg font-semibold text-yellow-800">
-            Optional Permissions
-          </h3>
-          <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+      <Separator className="bg-border/30" />
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-full bg-amber-100 dark:bg-amber-900/30">
+            <Info className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-200">
+              Optional Permissions
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Enhance functionality but not required for basic operation
+            </p>
+          </div>
+          <Badge variant="secondary" className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 rounded-full px-3 py-1">
             Enhances Experience
           </Badge>
         </div>
-        <p className="text-sm text-gray-600 mb-4">
-          These permissions enhance Juno's functionality but are not required
-          for basic operation. You can grant them now or skip and enable them
-          later.
-        </p>
 
-        <div className="space-y-3">
+        <div className="grid gap-4">
           {/* Microphone Permission */}
           {!permissions.microphone.required &&
             renderPermissionCard(
@@ -690,25 +605,26 @@ export function PermissionsFlow({
 
       {/* Success Footer */}
       {permissions.allGranted && (
-        <Card className="border-green-200 bg-green-50">
+        <Card className="rounded-2xl bg-gradient-to-r from-green-50/50 to-emerald-50/30 dark:from-green-950/30 dark:to-emerald-950/20 border border-green-200/50 dark:border-green-800/50 backdrop-blur-sm shadow-lg">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <CheckCircle className="h-6 w-6 text-green-600" />
+              <div className="flex items-center gap-4">
+                <div className="p-3 rounded-full bg-green-100 dark:bg-green-900/30">
+                  <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+                </div>
                 <div>
-                  <span className="text-green-800 font-semibold text-lg">
+                  <span className="text-green-800 dark:text-green-200 font-semibold text-xl">
                     🎉 Setup Complete!
                   </span>
-                  <p className="text-green-700 text-sm mt-1">
-                    All permissions configured. Juno is ready for AI computer
-                    use.
+                  <p className="text-green-700 dark:text-green-300 text-sm mt-1">
+                    All permissions configured. Juno is ready for AI computer use.
                   </p>
                 </div>
               </div>
               {onComplete && (
                 <Button
                   onClick={onComplete}
-                  className="bg-green-600 hover:bg-green-700"
+                  className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 px-6 py-3"
                 >
                   Continue to Juno
                 </Button>
@@ -720,11 +636,11 @@ export function PermissionsFlow({
 
       {/* Skip Option */}
       {showSkipOption && !permissions.allGranted && onSkip && (
-        <div className="text-center">
-          <Button variant="ghost" onClick={handleSkip} size="sm">
+        <div className="text-center space-y-2">
+          <Button variant="ghost" onClick={handleSkip} size="sm" className="text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl transition-all duration-200">
             Skip setup for now (limited functionality)
           </Button>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted-foreground">
             You can complete setup later in Settings
           </p>
         </div>

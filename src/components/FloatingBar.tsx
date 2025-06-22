@@ -487,7 +487,7 @@ export function FloatingBar() {
                   onChange={(e) => handleInputChange(e.target.value)}
                   onBlur={handleInputBlur}
                   placeholder="Ask me anything..."
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60 bg-transparent"
                   disabled={barState !== "input"}
                 />
               </div>
