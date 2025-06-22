@@ -265,7 +265,39 @@ async fn capture_screenshot_with_advanced_processing(
                                     debug!("Applying Universal Block Parsing (UBP) to screenshot");
 
                                     let ubp_config = UBPConfig::default();
-                                    let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
+                                    let ubp_parser = match UniversalBlockParser::new_with_config(ubp_config) {
+                                        Ok(parser) => parser,
+                                        Err(e) => {
+                                            warn!("Failed to create UBP parser: {}", e);
+                                            return Ok(json!({
+                                                "type": "image",
+                                                "data": base64_image,
+                                                "format": "png",
+                                                "token_selection": {
+                                                    "enabled": true,
+                                                    "original_tokens": processed_result.original_token_count,
+                                                    "reduced_tokens": processed_result.reduced_token_count,
+                                                    "reduction_percentage": processed_result.reduction_percentage,
+                                                    "processing_time_ms": processed_result.processing_time_ms,
+                                                    "rgb_analysis_time_ms": processed_result.rgb_analysis_time_ms,
+                                                    "token_reduction_time_ms": processed_result.token_reduction_time_ms,
+                                                    "original_dimensions": {
+                                                        "width": processed_result.original_width,
+                                                        "height": processed_result.original_height
+                                                    },
+                                                    "display_info": {
+                                                        "display_id": processed_result.display_id,
+                                                        "bounds": processed_result.display_bounds
+                                                    },
+                                                    "token_count": processed_result.tokens.len()
+                                                },
+                                                "universal_block_parsing": {
+                                                    "enabled": false,
+                                                    "error": e.to_string()
+                                                }
+                                            }));
+                                        }
+                                    };
                                             match ubp_parser.parse_screenshot_from_bytes(&image_bytes).await {
                                                 Ok(ubp_result) => {
                                                     info!(
@@ -440,7 +472,23 @@ async fn capture_screenshot_with_advanced_processing(
                 };
 
                 let ubp_config = UBPConfig::default();
-                let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
+                let ubp_parser = match UniversalBlockParser::new_with_config(ubp_config) {
+                    Ok(parser) => parser,
+                    Err(e) => {
+                        warn!("Failed to create UBP parser: {}", e);
+                        return Ok(json!({
+                            "type": "image",
+                            "data": base64_image,
+                            "format": "png",
+                            "token_selection": {"enabled": false},
+                            "universal_block_parsing": {
+                                "enabled": false,
+                                "error": e.to_string()
+                            },
+                            "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
+                        }));
+                    }
+                };
 
                         match ubp_parser.parse_screenshot_from_bytes(&image_bytes).await {
                             Ok(ubp_result) => {
