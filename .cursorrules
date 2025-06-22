@@ -34,29 +34,6 @@ After substantial changes in the Rust code, please run this check to verify ever
 cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
 ```
 
-### Quality Assurance Procedures
-
-For major feature implementations, follow comprehensive QA validation:
-
-```bash
-# Full QA validation suite
-./scripts/qa-full-validation.sh
-
-# Performance benchmarking
-./scripts/benchmark-token-selection.sh
-
-# Multi-monitor testing
-./scripts/test-multi-monitor-scenarios.sh
-```
-
-**QA Requirements**:
-
-- All automated tests must pass (18/18 minimum for UI token selection)
-- Performance targets must be met (33%+ computational cost reduction)
-- Multi-monitor scenarios must be validated
-- Error handling must be comprehensive
-- Documentation must be complete
-
 ### Hierarchical Agent Architecture (Enhanced)
 
 - **Orchestrator**: `src-tauri/src/anthropic.rs` - personality + memory + delegation + advanced workflow management
