@@ -477,19 +477,37 @@ pub struct VoiceController {
 
 - **Server Registration**: Dynamic MCP server registration and management
 - **Tool Discovery**: Automatic tool discovery from MCP servers
-- **Execution Framework**: Secure execution of external tools
-- **Error Handling**: Robust error handling for external tool failures
+- **Individual Tool Execution**: Simplified, reliable individual tool execution
+- **Connection Management**: Robust connection handling with retry logic
+- **Error Recovery**: Enhanced error handling with backoff strategies
 
-#### Integration Architecture
+#### Simplified Architecture
 
 ```rust
-pub struct McpIntegration {
-    servers: HashMap<String, McpServer>,
-    tool_registry: ToolRegistry,
-    execution_sandbox: ExecutionSandbox,
-    security_validator: SecurityValidator,
+pub struct MCPManager {
+    servers: Arc<RwLock<HashMap<String, MCPServerConnection>>>,
+    configs: Arc<RwLock<HashMap<String, MCPServerConfig>>>,
+}
+
+pub struct MCPServerConnection {
+    config: MCPServerConfig,
+    process: Option<Child>,
+    status: MCPServerStatus,
+    tools: Vec<ToolDefinition>,
+    // Enhanced error recovery
+    connection_attempts: u32,
+    consecutive_failures: u32,
+    last_failure_time: Option<std::time::Instant>,
 }
 ```
+
+#### Key Features
+
+- **Individual Tool Execution**: Simplified approach eliminates batch processing complexity
+- **Enhanced Error Handling**: Comprehensive failure tracking and recovery
+- **Connection Resilience**: Automatic reconnection with exponential backoff
+- **Process Monitoring**: Real-time process health checking
+- **Resource Management**: Proper cleanup and resource isolation
 
 ## 🧪 Testing Architecture
 
