@@ -172,7 +172,7 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Create voice transcription config based on centralized settings
-    let voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
+    let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
         model_path: "models/ggml-tiny.en.bin".to_string(),
         sample_rate: 16000,
         channels: 1,

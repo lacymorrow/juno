@@ -12,10 +12,10 @@ use tokio::sync::Mutex;
 use once_cell::sync::OnceCell;
 
 use crate::agent::qa::{
-    AgentQACoordinator, QACoordinatorConfig, QATestCase, QAResults, 
+    AgentQACoordinator, QACoordinatorConfig, QATestCase, QAResults,
     TestDifficulty, TestDomain, SuccessCriteria, ConfidenceScore, CalibrationMetrics
 };
-use crate::agent::core::Message;
+use crate::agent::structs::Message;
 use crate::agent::providers::factory::BrainFactory;
 use crate::state::AppState;
 
@@ -108,15 +108,44 @@ pub struct QATestReport {
 
 /// Initialize QA coordinator
 pub async fn init_qa_coordinator() -> Result<(), String> {
-    // This would be called during app startup
-    // For now, return success - actual initialization would happen here
+    info!("Initializing QA coordinator...");
+
+    // Create primary agent brain using static method
+    let primary_agent = BrainFactory::create_brain().await
+        .map_err(|e| format!("Failed to create primary agent: {}", e))?;
+
+    // Convert Box to Arc for primary agent
+    let primary_agent: Arc<dyn crate::agent::traits::AgentBrain + Send + Sync> = Arc::from(primary_agent);
+
+    // Create validator agent brains
+    let mut validator_agents = Vec::new();
+    for i in 0..3 { // Create 3 validator agents
+        let validator = BrainFactory::create_brain().await
+            .map_err(|e| format!("Failed to create validator agent {}: {}", i, e))?;
+
+        // Convert Box to Arc for validator
+        let validator: Arc<dyn crate::agent::traits::AgentBrain + Send + Sync> = Arc::from(validator);
+        validator_agents.push(validator);
+    }
+
+    // Create QA coordinator configuration
+    let config = QACoordinatorConfig::default();
+
+    // Create QA coordinator
+    let coordinator = AgentQACoordinator::new(primary_agent, validator_agents, config);
+
+    // Initialize the global coordinator
+    QA_COORDINATOR.set(Arc::new(Mutex::new(coordinator)))
+        .map_err(|_| "QA coordinator already initialized".to_string())?;
+
+    info!("QA coordinator initialized successfully");
     Ok(())
 }
 
 /// Get QA coordinator instance
 async fn get_qa_coordinator() -> Result<Arc<Mutex<AgentQACoordinator>>, String> {
     QA_COORDINATOR.get()
-        .ok_or_else(|| "QA coordinator not initialized".to_string())
+        .ok_or_else(|| "QA coordinator not initialized. Call init_qa_coordinator() first.".to_string())
         .map(|c| c.clone())
 }
 
@@ -126,16 +155,16 @@ pub async fn run_agent_qa_cycle(
     test_configuration: QAConfiguration,
 ) -> Result<QAReport, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     // Generate test cases based on configuration
     let test_cases = generate_test_cases(&test_configuration)?;
-    
+
     // Execute QA testing
     let test_results = execute_qa_tests(test_cases).await?;
-    
+
     // Analyze results and generate report
     let report = generate_qa_report(test_results)?;
-    
+
     Ok(report)
 }
 
@@ -146,7 +175,7 @@ pub async fn run_calibration_assessment(
     calibration_method: String,
 ) -> Result<CalibrationAnalysis, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     // Analyze confidence calibration
     Ok(CalibrationAnalysis {
         expected_calibration_error: 0.08,
@@ -163,7 +192,7 @@ pub async fn test_agent_consensus(
     num_agents: usize,
 ) -> Result<ConsensusResult, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     // Run consensus testing
     Ok(ConsensusResult {
         query: test_query,
@@ -184,7 +213,7 @@ pub async fn run_adversarial_qa_tests(
     target_domains: Vec<TestDomain>,
 ) -> Result<AdversarialReport, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     // Execute adversarial testing
     Ok(AdversarialReport {
         attack_results: vec![],
@@ -201,7 +230,7 @@ pub async fn run_adversarial_qa_tests(
 #[tauri::command]
 pub async fn get_qa_performance_dashboard() -> Result<QADashboard, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     Ok(QADashboard {
         overall_qa_score: 0.82,
         confidence_calibration: CalibrationMetrics {
@@ -232,7 +261,7 @@ pub async fn get_calibration_metrics(
     time_window_days: Option<u32>,
 ) -> Result<CalibrationMetrics, String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     Ok(CalibrationMetrics {
         calibration_error: 0.08,
         reliability_score: 0.85,
@@ -247,7 +276,7 @@ pub async fn configure_qa_settings(
     config: QAConfiguration,
 ) -> Result<(), String> {
     let _coordinator = get_qa_coordinator().await?;
-    
+
     // Update QA configuration
     tracing::info!("QA configuration updated: {:?}", config);
     Ok(())
@@ -305,7 +334,7 @@ pub enum SeverityLevel {
 // Helper functions
 fn generate_test_cases(config: &QAConfiguration) -> Result<Vec<QATestCase>, String> {
     let mut test_cases = Vec::new();
-    
+
     for domain in &config.test_domains {
         for difficulty in &config.difficulty_levels {
             for i in 0..(config.num_test_cases / config.test_domains.len().max(1)) {
@@ -313,7 +342,7 @@ fn generate_test_cases(config: &QAConfiguration) -> Result<Vec<QATestCase>, Stri
             }
         }
     }
-    
+
     Ok(test_cases)
 }
 
@@ -324,9 +353,9 @@ fn create_test_case_for_domain(
 ) -> Result<QATestCase, String> {
     use crate::agent::structs::{Message, Role};
     use crate::agent::qa::coordinator::SuccessCriteria;
-    
+
     let description = format!("Test case for {:?} domain at {:?} level #{}", domain, difficulty, index);
-    
+
     Ok(QATestCase {
         id: format!("{:?}_{:?}_{}", domain, difficulty, index),
         description: description.clone(),
@@ -358,18 +387,18 @@ async fn execute_qa_tests(test_cases: Vec<QATestCase>) -> Result<Vec<QAResults>,
     // This would execute the actual QA tests
     // For now, return mock results
     let mut results = Vec::new();
-    
+
     for test_case in test_cases {
         results.push(create_mock_qa_result(test_case)?);
     }
-    
+
     Ok(results)
 }
 
 fn create_mock_qa_result(test_case: QATestCase) -> Result<QAResults, String> {
     use crate::agents::TaskResult;
     use crate::agent::qa::coordinator::{ValidationResult, PerformanceMetrics, ResourceUsage};
-    
+
     Ok(QAResults {
         test_id: test_case.id.clone(),
         agent_id: "primary_agent".to_string(),
@@ -428,17 +457,17 @@ fn generate_qa_report(test_results: Vec<QAResults>) -> Result<QAReport, String> 
     let total_tests = test_results.len();
     let passed_tests = test_results.iter().filter(|r| r.passed).count();
     let failed_tests = total_tests - passed_tests;
-    
+
     let overall_success_rate = if total_tests > 0 {
         passed_tests as f64 / total_tests as f64
     } else {
         0.0
     };
-    
+
     let total_execution_time: std::time::Duration = test_results.iter()
         .map(|r| r.performance_metrics.response_time)
         .sum();
-    
+
     let average_confidence = if total_tests > 0 {
         test_results.iter()
             .map(|r| r.confidence_score.p_true as f64)
@@ -446,7 +475,7 @@ fn generate_qa_report(test_results: Vec<QAResults>) -> Result<QAReport, String> 
     } else {
         0.0
     };
-    
+
     Ok(QAReport {
         test_results,
         overall_success_rate,
@@ -469,18 +498,18 @@ fn generate_qa_report(test_results: Vec<QAResults>) -> Result<QAReport, String> 
 
 fn generate_recommendations(success_rate: f64, avg_confidence: f64) -> Vec<String> {
     let mut recommendations = Vec::new();
-    
+
     if success_rate < 0.8 {
         recommendations.push("Consider improving agent training or task complexity".to_string());
     }
-    
+
     if avg_confidence > 0.9 && success_rate < 0.8 {
         recommendations.push("Agent shows signs of overconfidence - implement calibration".to_string());
     }
-    
+
     if avg_confidence < 0.5 {
         recommendations.push("Agent may be underconfident - consider confidence boosting".to_string());
     }
-    
+
     recommendations
 }

@@ -274,13 +274,15 @@ impl CollaborativeAIDesigner {
             (execution_results.len() as f32) / (workflow.execution_plan.steps.len() as f32)
         };
 
+        let resource_usage = self.calculate_resource_usage(&execution_results);
+
         Ok(WorkflowExecutionResult {
             execution_id,
             success_rate,
             execution_time_ms: execution_time.as_millis() as u64,
             completed_steps: execution_results,
             failed_steps,
-            resource_usage: self.calculate_resource_usage(&execution_results),
+            resource_usage,
         })
     }
 
@@ -350,15 +352,15 @@ impl CollaborativeAIDesigner {
 
     fn validate_workflow_for_execution(&self, workflow: &WorkflowDesignResult) -> Result<(), AgentError> {
         if workflow.workflow_code.is_empty() {
-            return Err(AgentError::ValidationError("Workflow code cannot be empty".to_string()));
+            return Err(AgentError::InputError("Workflow code cannot be empty".to_string()));
         }
 
         if workflow.execution_plan.steps.is_empty() {
-            return Err(AgentError::ValidationError("Execution plan must have at least one step".to_string()));
+            return Err(AgentError::InputError("Execution plan must have at least one step".to_string()));
         }
 
         if workflow.success_rate < 0.1 {
-            return Err(AgentError::ValidationError("Workflow success rate too low for execution".to_string()));
+            return Err(AgentError::InputError("Workflow success rate too low for execution".to_string()));
         }
 
         Ok(())
@@ -664,16 +666,16 @@ impl RefineAgent {
         requirements: &SystemRequirements,
     ) -> Result<(), AgentError> {
         if workflow.execution_plan.steps.is_empty() {
-            return Err(AgentError::ValidationError("Workflow has no execution steps".to_string()));
+            return Err(AgentError::InputError("Workflow has no execution steps".to_string()));
         }
 
         if workflow.code.is_empty() {
-            return Err(AgentError::ValidationError("Workflow code is empty".to_string()));
+            return Err(AgentError::InputError("Workflow code is empty".to_string()));
         }
 
         // Validate performance requirements
         if workflow.execution_plan.estimated_duration > requirements.timeline {
-            return Err(AgentError::ValidationError("Workflow exceeds timeline requirements".to_string()));
+            return Err(AgentError::InputError("Workflow exceeds timeline requirements".to_string()));
         }
 
         Ok(())
@@ -898,7 +900,7 @@ impl CompatibilityChecker {
             // Validate integration points exist
             for integration_point in &component.integration_points {
                 if !workflow.components.contains_key(integration_point) {
-                    return Err(AgentError::ValidationError(
+                    return Err(AgentError::InputError(
                         format!("Component {} references non-existent integration point: {}", id, integration_point)
                     ));
                 }
@@ -988,10 +990,6 @@ pub struct DesignStatistics {
 impl AgentError {
     pub fn design_error(message: &str) -> Self {
         AgentError::Other(format!("Collaborative AI Design Error: {}", message))
-    }
-
-    pub fn validation_error(message: &str) -> Self {
-        AgentError::ValidationError(message.to_string())
     }
 }
 

@@ -430,13 +430,13 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     let _ = app_handle.listen("voice-error", {
         let app_handle = app_handle_clone.clone();
         move |_event| {
-            let app_handle = app_handle.clone();
+            let _app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 update_tray_icon_state(TrayIconState::Error).await;
 
                 // After a delay, reset to current state
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                let new_state = determine_current_state(&app_handle).await;
+                let new_state = determine_current_state(&_app_handle).await;
                 update_tray_icon_state(new_state).await;
             });
         }
@@ -446,13 +446,13 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     let _ = app_handle.listen("voice-transcription:error", {
         let app_handle = app_handle_clone.clone();
         move |_event| {
-            let app_handle = app_handle.clone();
+            let app_handle_inner = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 update_tray_icon_state(TrayIconState::Error).await;
 
                 // After a delay, reset to current state
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                let new_state = determine_current_state(&app_handle).await;
+                let new_state = determine_current_state(&app_handle_inner).await;
                 update_tray_icon_state(new_state).await;
             });
         }

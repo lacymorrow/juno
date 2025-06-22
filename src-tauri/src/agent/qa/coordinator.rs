@@ -10,30 +10,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-use crate::agent::core::AgentError as CoreAgentError;
 use crate::agent::structs::{AgentError, Message, Role, AgentAction};
 use crate::agent::traits::AgentBrain;
 use crate::agents::{AgentType, Task, TaskResult};
-
-// Helper function to convert between error types
-fn convert_agent_error(err: AgentError) -> CoreAgentError {
-    match err {
-        AgentError::LlmError(msg) => CoreAgentError::LlmError(msg),
-        AgentError::ToolError(msg) => CoreAgentError::ToolError(msg),
-        AgentError::MemoryError(msg) => CoreAgentError::MemoryError(msg),
-        AgentError::ConfigurationError(msg) => CoreAgentError::ConfigurationError(msg),
-        AgentError::StateError(msg) => CoreAgentError::StateError(msg),
-        AgentError::MaxStepsReached => CoreAgentError::MaxStepsReached,
-        AgentError::LoopError(msg) => CoreAgentError::LoopError(msg),
-        AgentError::InputError(msg) => CoreAgentError::InputError(msg),
-        AgentError::OutputError(msg) => CoreAgentError::OutputError(msg),
-        AgentError::ToolNotFound(msg) => CoreAgentError::ToolNotFound(msg),
-        AgentError::Terminated => CoreAgentError::Terminated,
-        AgentError::PermissionDenied(msg) => CoreAgentError::PermissionDenied(msg),
-        AgentError::Unknown(msg) => CoreAgentError::Unknown(msg),
-        _ => CoreAgentError::Unknown("Unknown error during conversion".to_string()),
-    }
-}
 
 /// QA test case for agent evaluation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +31,7 @@ pub struct QATestCase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TestDifficulty {
     Basic,
-    Intermediate, 
+    Intermediate,
     Advanced,
     Expert,
     Adversarial,
@@ -111,7 +90,7 @@ pub struct ValidationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfidenceScore {
     pub p_true: f32,        // Probability the answer is correct
-    pub p_know: f32,        // Probability "I know" the answer  
+    pub p_know: f32,        // Probability "I know" the answer
     pub uncertainty: f32,   // Epistemic uncertainty
     pub explanation: String, // Reasoning for confidence level
 }
@@ -214,9 +193,9 @@ impl AgentQACoordinator {
     }
 
     /// Run comprehensive QA testing cycle
-    pub async fn run_qa_cycle(&self, test_cases: Vec<QATestCase>) -> Result<Vec<QAResults>, CoreAgentError> {
+    pub async fn run_qa_cycle(&self, test_cases: Vec<QATestCase>) -> Result<Vec<QAResults>, AgentError> {
         let mut results = Vec::new();
-        
+
         for test_case in test_cases {
             match self.run_single_qa_test(test_case).await {
                 Ok(result) => {
@@ -241,25 +220,25 @@ impl AgentQACoordinator {
     }
 
     /// Run a single QA test with validation
-    pub async fn run_single_qa_test(&self, test_case: QATestCase) -> Result<QAResults, CoreAgentError> {
+    pub async fn run_single_qa_test(&self, test_case: QATestCase) -> Result<QAResults, AgentError> {
         let start_time = Instant::now();
-        
+
         // 1. Primary agent performs the task
         tracing::info!("Running QA test: {}", test_case.description);
         let primary_result = self.execute_test_with_primary_agent(&test_case).await?;
-        
+
         // 2. Multiple validators evaluate the result
         let validation_results = self.validate_with_multiple_agents(&test_case, &primary_result).await?;
-        
+
         // 3. Calculate confidence scores using latest research methods
         let confidence_score = self.calculate_confidence_score(&test_case, &primary_result, &validation_results).await?;
-        
+
         // 4. Assess calibration quality
         let calibration_metrics = self.assess_calibration(&confidence_score, &primary_result).await?;
-        
+
         // 5. Calculate cross-agent agreement
         let cross_agent_agreement = self.calculate_agreement(&validation_results);
-        
+
         // 6. Evaluate performance metrics
         let performance_metrics = PerformanceMetrics {
             accuracy: self.calculate_accuracy(&test_case, &primary_result),
@@ -289,28 +268,28 @@ impl AgentQACoordinator {
     }
 
     /// Execute test case with primary agent
-    async fn execute_test_with_primary_agent(&self, test_case: &QATestCase) -> Result<TaskResult, CoreAgentError> {
+    async fn execute_test_with_primary_agent(&self, test_case: &QATestCase) -> Result<TaskResult, AgentError> {
         // Convert QA test case to agent task
         let task = self.convert_test_case_to_task(test_case)?;
-        
+
         // Execute with timeout
         match tokio::time::timeout(self.config.max_test_duration, self.execute_task_with_agent(&task, &self.primary_agent)).await {
             Ok(result) => result,
-            Err(_) => Err(CoreAgentError::Timeout(format!("Test {} timed out", test_case.id))),
+            Err(_) => Err(AgentError::Unknown(format!("Test {} timed out", test_case.id))),
         }
     }
 
     /// Validate result with multiple validator agents
     async fn validate_with_multiple_agents(
-        &self, 
-        test_case: &QATestCase, 
+        &self,
+        test_case: &QATestCase,
         primary_result: &TaskResult
-    ) -> Result<Vec<ValidationResult>, CoreAgentError> {
+    ) -> Result<Vec<ValidationResult>, AgentError> {
         let mut validation_results = Vec::new();
-        
+
         for (i, validator) in self.validator_agents.iter().enumerate() {
             let validation_task = self.create_validation_task(test_case, primary_result)?;
-            
+
             match self.execute_task_with_agent(&validation_task, validator).await {
                 Ok(validation_result) => {
                     let parsed_validation = self.parse_validation_result(
@@ -325,7 +304,7 @@ impl AgentQACoordinator {
                 }
             }
         }
-        
+
         Ok(validation_results)
     }
 
@@ -335,25 +314,25 @@ impl AgentQACoordinator {
         test_case: &QATestCase,
         primary_result: &TaskResult,
         validation_results: &[ValidationResult]
-    ) -> Result<ConfidenceScore, CoreAgentError> {
+    ) -> Result<ConfidenceScore, AgentError> {
         // P(True) - probability the answer is correct
         let validation_agreement = validation_results.iter()
             .map(|v| if v.agrees_with_primary { 1.0 } else { 0.0 })
             .sum::<f32>() / validation_results.len() as f32;
-        
+
         let p_true = (validation_agreement + self.get_historical_accuracy_for_domain(&test_case.domain).await) / 2.0;
-        
+
         // P(IK) - probability "I know" the answer (based on response confidence)
         let response_confidence = self.extract_confidence_from_response(primary_result);
         let domain_expertise = self.get_domain_expertise(&test_case.domain).await;
         let p_know = (response_confidence + domain_expertise) / 2.0;
-        
+
         // Epistemic uncertainty
         let validator_disagreement = validation_results.iter()
             .map(|v| (v.validation_score - validation_agreement).abs())
             .sum::<f32>() / validation_results.len() as f32;
         let uncertainty = validator_disagreement.max(1.0 - p_true);
-        
+
         Ok(ConfidenceScore {
             p_true,
             p_know,
@@ -373,7 +352,7 @@ impl AgentQACoordinator {
         tracker.update_calibration_metrics();
     }
 
-    /// Update performance tracking with new results  
+    /// Update performance tracking with new results
     async fn update_performance_tracking(&self, result: &QAResults) {
         let mut tracker = self.performance_tracker.write().await;
         tracker.add_accuracy_point(result.timestamp, result.performance_metrics.accuracy);
@@ -382,7 +361,7 @@ impl AgentQACoordinator {
     }
 
     // Helper methods
-    fn convert_test_case_to_task(&self, test_case: &QATestCase) -> Result<Task, CoreAgentError> {
+    fn convert_test_case_to_task(&self, test_case: &QATestCase) -> Result<Task, AgentError> {
         // Convert QA test case format to internal Task format
         // This bridges the QA system with the existing agent infrastructure
         Ok(Task {
@@ -398,10 +377,10 @@ impl AgentQACoordinator {
     }
 
     async fn execute_task_with_agent(
-        &self, 
-        task: &Task, 
+        &self,
+        task: &Task,
         agent: &Arc<dyn AgentBrain + Send + Sync>
-    ) -> Result<TaskResult, CoreAgentError> {
+    ) -> Result<TaskResult, AgentError> {
         // Execute task with the specified agent brain
         // This integrates with the existing agent execution infrastructure
         let messages = vec![Message {
@@ -412,8 +391,8 @@ impl AgentQACoordinator {
             name: None,
         }];
 
-        let action = agent.decide_next_action(&messages, &[]).await.map_err(convert_agent_error)?;
-        
+        let action = agent.decide_next_action(&messages, &[]).await?;
+
         // Convert action to TaskResult format
         Ok(TaskResult {
             task_id: task.id.clone(),
@@ -429,7 +408,7 @@ impl AgentQACoordinator {
         })
     }
 
-    fn create_validation_task(&self, test_case: &QATestCase, primary_result: &TaskResult) -> Result<Task, CoreAgentError> {
+    fn create_validation_task(&self, test_case: &QATestCase, primary_result: &TaskResult) -> Result<Task, AgentError> {
         // Create a task for validators to evaluate the primary result
         Ok(Task {
             id: format!("{}_validation", test_case.id),
@@ -450,7 +429,7 @@ impl AgentQACoordinator {
         })
     }
 
-    fn parse_validation_result(&self, validator_id: String, result: &TaskResult) -> Result<ValidationResult, CoreAgentError> {
+    fn parse_validation_result(&self, validator_id: String, result: &TaskResult) -> Result<ValidationResult, AgentError> {
         // Parse validator response into structured ValidationResult
         // Extract validation score, agreement, confidence, feedback
         Ok(ValidationResult {
@@ -467,11 +446,11 @@ impl AgentQACoordinator {
         if validation_results.is_empty() {
             return 0.0;
         }
-        
+
         let agreement_sum = validation_results.iter()
             .map(|v| if v.agrees_with_primary { 1.0 } else { 0.0 })
             .sum::<f32>();
-            
+
         agreement_sum / validation_results.len() as f32
     }
 
@@ -506,7 +485,7 @@ impl AgentQACoordinator {
         }
     }
 
-    async fn assess_calibration(&self, _confidence: &ConfidenceScore, _result: &TaskResult) -> Result<CalibrationMetrics, CoreAgentError> {
+    async fn assess_calibration(&self, _confidence: &ConfidenceScore, _result: &TaskResult) -> Result<CalibrationMetrics, AgentError> {
         Ok(CalibrationMetrics {
             calibration_error: 0.1,
             reliability_score: 0.85,
@@ -517,17 +496,17 @@ impl AgentQACoordinator {
 
     fn evaluate_success(&self, test_case: &QATestCase, result: &TaskResult, confidence: &ConfidenceScore, _performance: &PerformanceMetrics) -> (bool, Vec<String>) {
         let mut failure_reasons = Vec::new();
-        
+
         // Check success criteria
         if confidence.p_true < test_case.success_criteria.confidence_threshold {
-            failure_reasons.push(format!("Confidence {} below threshold {}", 
+            failure_reasons.push(format!("Confidence {} below threshold {}",
                 confidence.p_true, test_case.success_criteria.confidence_threshold));
         }
-        
+
         if !result.success {
             failure_reasons.push("Primary task execution failed".to_string());
         }
-        
+
         (failure_reasons.is_empty(), failure_reasons)
     }
 }
@@ -543,7 +522,7 @@ impl CalibrationTracker {
 
     pub fn add_observation(&mut self, confidence: f32, was_correct: bool) {
         self.confidence_history.push((confidence, was_correct));
-        
+
         // Update bucketed accuracy
         let bucket = (confidence * 10.0) as u8;
         let entry = self.accuracy_by_confidence.entry(bucket).or_insert((0, 0));
@@ -557,7 +536,7 @@ impl CalibrationTracker {
         // Calculate calibration error using Expected Calibration Error (ECE)
         let mut weighted_error = 0.0;
         let total_samples = self.confidence_history.len() as f32;
-        
+
         for (bucket, (correct, total)) in &self.accuracy_by_confidence {
             if *total > 0 {
                 let accuracy = *correct as f32 / *total as f32;
@@ -566,7 +545,7 @@ impl CalibrationTracker {
                 weighted_error += weight * (confidence - accuracy).abs();
             }
         }
-        
+
         self.recent_calibration_error = weighted_error;
     }
 }
@@ -583,7 +562,7 @@ impl PerformanceTracker {
 
     pub fn add_accuracy_point(&mut self, timestamp: chrono::DateTime<chrono::Utc>, accuracy: f32) {
         self.accuracy_trends.push((timestamp, accuracy));
-        
+
         // Calculate improvement rate from recent trends
         if self.accuracy_trends.len() >= 10 {
             let recent = &self.accuracy_trends[self.accuracy_trends.len()-10..];
@@ -597,7 +576,7 @@ impl PerformanceTracker {
         // Update domain-specific performance tracking
         // This would need additional metadata to determine domain from TaskResult
         let domain = TestDomain::ComputerUse; // Placeholder
-        
+
         let entry = self.domain_performance.entry(domain).or_insert(0.0);
         *entry = (*entry + accuracy) / 2.0; // Moving average
     }

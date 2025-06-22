@@ -607,7 +607,7 @@ impl ErrorRecoveryManager {
         strategy: RecoveryStrategy,
         tool_call: &ToolCall,
         error: &AgentError,
-        pre_execution_checkpoint: &Option<String>,
+        _pre_execution_checkpoint: &Option<String>,
     ) -> Result<Option<ToolCall>, AgentError> {
         match strategy {
             RecoveryStrategy::SaveStateAndRetry => {
@@ -634,7 +634,7 @@ impl ErrorRecoveryManager {
                 let _rollback_info = self.rollback_to_checkpoint(&checkpoint_id).await?;
 
                 // Modify the tool call slightly for retry
-                let mut modified_call = tool_call.clone();
+                let modified_call = tool_call.clone();
                 if let Some(modified) = self.adjust_tool_parameters(&modified_call, error)? {
                     return Ok(Some(modified));
                 }

@@ -1015,8 +1015,10 @@ async fn get_selected_text_safe(app_state: Option<&crate::state::AppState>) -> O
         // Use the same pattern as dev_get_selected_text command
         match state.desktop.get_desktop() {
             Ok(desktop) => {
-                match desktop.get_selected_text() {
-                    Ok(text) => {
+                match desktop.focused_element() {
+                    Ok(element) => {
+                        let attrs = element.attributes();
+                        let text = attrs.value.unwrap_or_else(|| "".to_string());
                         const MAX_SELECTED_TEXT_LENGTH: usize = 300;
                         if text.trim().is_empty() {
                             Some("[No text selected]".to_string())
