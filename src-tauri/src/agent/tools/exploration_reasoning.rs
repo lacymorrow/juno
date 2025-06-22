@@ -427,6 +427,11 @@ impl ExplorationEngine {
                 break;
             }
 
+            // Periodic cleanup to prevent memory leaks
+            if step % 10 == 0 {
+                self.cleanup_planned_interactions();
+            }
+
             // Select next exploration action
             let exploration_action = self.select_exploration_action(
                 &current_state_id,
@@ -434,14 +439,23 @@ impl ExplorationEngine {
             ).await?;
 
             // Record planned interaction to prevent duplicates
-            if let ActionType::Click { x, y } = &exploration_action.action_type {
-                self.planned_interactions.push((*x, *y));
-            }
+            let planned_coords = if let ActionType::Click { x, y } = &exploration_action.action_type {
+                let coords = (*x, *y);
+                self.planned_interactions.push(coords);
+                Some(coords)
+            } else {
+                None
+            };
 
             // Execute exploration action and capture new state
             let action_type = exploration_action.action_type.clone();
             match self.execute_exploration_action(exploration_action).await {
                 Ok((new_state, execution_time_ms)) => {
+                    // Remove planned interaction since it completed successfully
+                    if let Some(coords) = planned_coords {
+                        self.planned_interactions.retain(|&planned| planned != coords);
+                    }
+
                     // Record transition
                     let transition = GUITransition {
                         from_state: current_state_id.clone(),
@@ -467,6 +481,11 @@ impl ExplorationEngine {
                     debug!("Exploration step {}: transitioned to state {}", step, current_state_id);
                 }
                 Err(e) => {
+                    // Remove planned interaction since it failed and should be retryable
+                    if let Some(coords) = planned_coords {
+                        self.planned_interactions.retain(|&planned| planned != coords);
+                    }
+
                     warn!("Exploration step {} failed: {}", step, e);
                     // Continue with exploration despite individual step failures
                 }
@@ -484,6 +503,9 @@ impl ExplorationEngine {
 
         let exploration_time_ms = start_time.elapsed().as_millis() as u64;
         let completeness_score = self.calculate_completeness_score(states_explored, &exploration_goals);
+
+        // Clear planned interactions to prevent state leakage between exploration sessions
+        self.planned_interactions.clear();
 
         info!("Exploration completed: {} states explored in {}ms",
               states_explored, exploration_time_ms);
@@ -577,6 +599,7 @@ impl ExplorationEngine {
     }
 
     /// Checks if we have already interacted with an element
+    /// This prevents duplicate interactions during exploration
     fn has_interacted_with_element(&self, element: &InteractiveElement) -> bool {
         // First check transition history for completed interactions
         for transition in &self.exploration_memory.transition_history {
@@ -589,7 +612,9 @@ impl ExplorationEngine {
             }
         }
 
-        // Also check planned interactions to prevent duplicate attempts before they're recorded
+        // Check planned interactions to prevent duplicate attempts before they're recorded
+        // Note: Planned interactions are now cleaned up after each attempt (success or failure)
+        // to prevent memory leaks and allow re-attempts of failed interactions
         for (planned_x, planned_y) in &self.planned_interactions {
             let distance = ((planned_x - element.x).powi(2) + (planned_y - element.y).powi(2)).sqrt();
             if distance < 10.0 { // 10 pixel tolerance
@@ -649,6 +674,22 @@ impl ExplorationEngine {
         let goal_bonus = goals_met / exploration_goals.len() as f32 * 0.2;
 
         (base_score + goal_bonus).min(1.0)
+    }
+
+    /// Cleans up planned interactions to prevent memory leaks
+    /// Removes any planned interactions that have been successfully executed
+    fn cleanup_planned_interactions(&mut self) {
+        // Keep only recent planned interactions to prevent unbounded growth
+        const MAX_PLANNED_INTERACTIONS: usize = 100;
+
+        if self.planned_interactions.len() > MAX_PLANNED_INTERACTIONS {
+            // Keep only the most recent interactions
+            let keep_from = self.planned_interactions.len() - MAX_PLANNED_INTERACTIONS;
+            self.planned_interactions.drain(0..keep_from);
+
+            debug!("Cleaned up planned interactions, now have {} entries",
+                   self.planned_interactions.len());
+        }
     }
 }
 
