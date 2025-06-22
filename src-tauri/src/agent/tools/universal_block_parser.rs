@@ -208,35 +208,58 @@ impl UniversalBlockParser {
         global_x: f64,
         global_y: f64,
     ) -> Result<BlockCoordinates, UBPError> {
-        let (blocks_x, _blocks_y) = ubp_result.grid_dimensions;
+        let (blocks_x, blocks_y) = ubp_result.grid_dimensions;
 
-        // Find the block containing these coordinates using the actual block size used
-        let block_col = (global_x as u32) / ubp_result.actual_block_size;
-        let block_row = (global_y as u32) / ubp_result.actual_block_size;
+        // Validate input coordinates - reject negative coordinates
+        if global_x < 0.0 || global_y < 0.0 {
+            return Err(UBPError::InvalidInput(format!(
+                "Negative coordinates not supported: ({}, {})", global_x, global_y
+            )));
+        }
+
+        // Clamp coordinates to image boundaries to prevent out-of-bounds access
+        let clamped_x = global_x.min(ubp_result.image_width as f64 - 1.0).max(0.0);
+        let clamped_y = global_y.min(ubp_result.image_height as f64 - 1.0).max(0.0);
+
+        // Calculate block indices using clamped coordinates
+        let block_col = (clamped_x as u32) / ubp_result.actual_block_size;
+        let block_row = (clamped_y as u32) / ubp_result.actual_block_size;
+
+        // Additional bounds checking for block indices
+        let block_col = block_col.min(blocks_x - 1);
+        let block_row = block_row.min(blocks_y - 1);
+
         let block_index = block_row * blocks_x + block_col;
 
         // Ensure block_index is within bounds
         if block_index >= ubp_result.blocks.len() as u32 {
             return Err(UBPError::InvalidInput(format!(
-                "Block index {} out of bounds for coordinates ({}, {}). Grid has {} blocks.",
-                block_index, global_x, global_y, ubp_result.blocks.len()
+                "Block index {} out of bounds for coordinates ({}, {}). Grid has {} blocks ({}x{}).",
+                block_index, global_x, global_y, ubp_result.blocks.len(), blocks_x, blocks_y
             )));
         }
 
         if let Some(block) = ubp_result.blocks.get(block_index as usize) {
-            // Calculate relative coordinates within the block
-            let relative_x = ((global_x as u32 - block.global_x) as f32) / (block.width as f32);
-            let relative_y = ((global_y as u32 - block.global_y) as f32) / (block.height as f32);
+            // Calculate relative coordinates within the block using original (unclamped) coordinates
+            // but ensure they're within the block bounds
+            let block_relative_x = global_x - block.global_x as f64;
+            let block_relative_y = global_y - block.global_y as f64;
 
-            // Clamp to valid range
-            let relative_x = relative_x.max(0.0).min(1.0);
-            let relative_y = relative_y.max(0.0).min(1.0);
+            let relative_x = (block_relative_x / block.width as f64).max(0.0).min(1.0) as f32;
+            let relative_y = (block_relative_y / block.height as f64).max(0.0).min(1.0) as f32;
+
+            // Adjust confidence based on whether coordinates were clamped
+            let confidence = if global_x != clamped_x || global_y != clamped_y {
+                0.7 // Lower confidence for clamped coordinates
+            } else {
+                0.95 // High confidence for coordinates within bounds
+            };
 
             Ok(BlockCoordinates {
                 block_index,
                 relative_x,
                 relative_y,
-                confidence: 0.95, // High confidence for direct coordinate conversion
+                confidence,
             })
         } else {
             Err(UBPError::InvalidInput(format!(
