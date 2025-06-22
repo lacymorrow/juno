@@ -53,7 +53,7 @@ Juno is a **production-ready Tauri v2 desktop application** implementing Anthrop
 - **Three-Mode Voice System** (Dictation, Agent, Always Listening)
 - **Hierarchical Agent Architecture** with memory management
 - **Enterprise Security Hardening** with comprehensive protections
-- **MCP Integration** for external tool server support
+- **MCP Integration** for simplified external tool server support with enhanced reliability
 - **Cloud Connectivity** for remote control capabilities
 
 ### ✅ **Production Quality**

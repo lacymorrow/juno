@@ -1600,13 +1600,6 @@ impl ToolProvider for LocalToolProvider {
             })) {
                 error!("Failed to emit command-execution-start event: {}", e);
             }
-
-            tool_logger::log_tool_call_request(
-                app_handle,
-                &tool_name,
-                tool_call.input.clone(),
-                Some(format!("Executing tool: {}", tool_name)),
-            );
         }
 
         // 1. Validate the tool call before execution
@@ -1648,29 +1641,6 @@ impl ToolProvider for LocalToolProvider {
                 "error": error_msg
             })) {
                 error!("Failed to emit command-execution-end event: {}", e);
-            }
-
-            match &result {
-                Ok(tool_result) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        &tool_name,
-                        tool_result.output.clone(),
-                        true, // success = true
-                        Some(format!("Tool {} completed successfully", tool_name)),
-                        None,
-                    );
-                }
-                Err(error) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        &tool_name,
-                        serde_json::json!({"error": error.to_string()}),
-                        false, // success = false
-                        Some(format!("Tool {} failed: {}", tool_name, error)),
-                        None,
-                    );
-                }
             }
         }
 

@@ -92,7 +92,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Voice Interaction**: Complete three-mode voice system with production-ready functionality
 - **JSX Visual Responses**: Rich React component responses instead of raw SVG/HTML code
 - **Hierarchical Agents**: Orchestrator with specialist agents for different domains
-- **MCP Integration**: External tool server support with protocol compliance
+- **MCP Integration**: Simplified external tool server support with enhanced reliability
 - **Cloud Control**: Remote connectivity and command execution
 - **macOS Permissions**: Robust permission handling with graceful degradation
 
