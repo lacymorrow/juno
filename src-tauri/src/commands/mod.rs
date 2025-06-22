@@ -47,6 +47,7 @@ pub mod error_recovery;
 pub mod collaborative_ai_commands;
 pub mod enhanced_visual_reasoning_commands;
 pub mod agent_continuation;
+pub mod self_improvement; // Research-backed self-improving code generation system (debug mode only)
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -89,6 +90,7 @@ pub use self::settings::*;
 pub use self::error_recovery::*;
 pub use self::collaborative_ai_commands::*;
 pub use self::enhanced_visual_reasoning_commands::*;
+pub use self::self_improvement::*; // Re-export self-improvement commands (debug mode only)
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

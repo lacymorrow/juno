@@ -2,39 +2,37 @@
 
 // Import necessary external crates and standard library items
 use std::env;
-use tauri::{
-    AppHandle, Manager,
-};
-use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers}; // Global shortcuts
-use tracing::{info, error, warn};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_global_shortcut::{Code, Modifiers as ShortcutModifiers, Shortcut}; // Global shortcuts
+use tracing::{error, info, warn};
 
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
 
 // Declare modules
-pub mod tts;
-pub mod state;
-pub mod anthropic;
-pub mod tools;
-pub mod commands;
-pub mod cli;
-pub mod utils;
 pub mod agent;
-pub mod agents; // Multi-agent system with specialized agents
-pub mod constants;
-pub mod settings; // Centralized settings management with reactive updates
-pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
+pub mod agents; // Multi-agent system with specialized agents
+pub mod anthropic;
+pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
-pub mod voice_control;
+pub mod commands;
+pub mod constants;
+pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
+pub mod events; // Event handling system for shortcuts and voice transcription
+pub mod integration;
 pub mod menu; // Menu management for app and tray menus
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
-pub mod events; // Event handling system for shortcuts and voice transcription
-pub mod window_management; // Window operations, state management, and positioning
+pub mod settings; // Centralized settings management with reactive updates
 pub mod startup; // Application startup, initialization, and bootstrapping
+pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
-pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
-pub mod integration; // Application integration patterns, component coordination, and event listeners
+pub mod tools;
+pub mod tts;
+pub mod utils;
+pub mod voice_control;
+pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes
@@ -194,16 +192,16 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
         // Additional punctuation and symbols
         "\"" | "doublequote" | "quotation" => Code::Quote, // Map to same as single quote for compatibility
-        ":" | "colon" => Code::Semicolon, // Often on same key as semicolon
-        "<" | "less" | "lessthan" => Code::Comma, // Often on same key as comma
-        ">" | "greater" | "greaterthan" => Code::Period, // Often on same key as period
-        "?" | "question" | "questionmark" => Code::Slash, // Often on same key as slash
+        ":" | "colon" => Code::Semicolon,                  // Often on same key as semicolon
+        "<" | "less" | "lessthan" => Code::Comma,          // Often on same key as comma
+        ">" | "greater" | "greaterthan" => Code::Period,   // Often on same key as period
+        "?" | "question" | "questionmark" => Code::Slash,  // Often on same key as slash
         "{" | "leftbrace" | "openbrace" => Code::BracketLeft, // Often on same key as [
         "}" | "rightbrace" | "closebrace" => Code::BracketRight, // Often on same key as ]
-        "|" | "pipe" | "verticalbar" => Code::Backslash, // Often on same key as \
-        "~" | "tilde" => Code::Backquote, // Often on same key as `
-        "_" | "underscore" => Code::Minus, // Often on same key as -
-        "+" | "plus" => Code::Equal, // Often on same key as =
+        "|" | "pipe" | "verticalbar" => Code::Backslash,   // Often on same key as \
+        "~" | "tilde" => Code::Backquote,                  // Often on same key as `
+        "_" | "underscore" => Code::Minus,                 // Often on same key as -
+        "+" | "plus" => Code::Equal,                       // Often on same key as =
 
         _ => {
             warn!("Unknown key: {}", key_part);
@@ -215,101 +213,68 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*, ui_token_selection::*, error_recovery::*};
+use commands::{
+    always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
+    error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
+    mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
+    ui_token_selection::*, window::*,
+};
 
 // Import specific sound commands from sound.rs
 use crate::commands::sound::{
-    play_agent_start_sound, play_agent_success_sound, play_agent_error_sound, play_agent_attention_sound,
-    play_voice_start_sound, play_voice_end_sound, play_dictation_start_sound, play_dictation_end_sound, play_voice_error_sound,
-    play_boot_sound, play_system_ready_sound, play_connection_sound, play_disconnection_sound
+    play_agent_attention_sound, play_agent_error_sound, play_agent_start_sound,
+    play_agent_success_sound, play_boot_sound, play_connection_sound, play_dictation_end_sound,
+    play_dictation_start_sound, play_disconnection_sound, play_system_ready_sound,
+    play_voice_end_sound, play_voice_error_sound, play_voice_start_sound,
 };
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
 // Removed deprecated dictation_reset imports
 use crate::commands::dictation_state_manager::{
-    force_reset_dictation_state,
-    get_dictation_comprehensive_status,
+    force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
-    transition_dictation_state
 };
 
 // Import tool configuration commands explicitly
 use crate::commands::{
-    get_tool_configurations,
-    get_tool_config,
+    approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_enabled_tools,
+    get_pending_tool_approvals, get_tool_approval_required, get_tool_config,
+    get_tool_configuration_summary, get_tool_configurations, is_tool_enabled,
+    reset_tool_configuration, set_tool_approval_required, set_tool_category_enabled,
     set_tool_enabled,
-    set_tool_category_enabled,
-    get_enabled_tools,
-    is_tool_enabled,
-    reset_tool_configuration,
-    get_tool_configuration_summary,
-    set_tool_approval_required,
-    get_tool_approval_required,
-    approve_tool_execution,
-    deny_tool_execution,
-    get_pending_tool_approvals,
-    clear_pending_tool_approvals,
 };
 
 // Import keyboard shortcuts commands explicitly
 use crate::commands::{
-    get_keyboard_shortcuts,
-    set_keyboard_shortcut,
-    set_keyboard_shortcuts,
-    reset_keyboard_shortcuts,
-    validate_keyboard_shortcut,
-    get_shortcut_suggestions,
-    get_shortcut_best_practices,
-    get_escape_key_status,
+    get_escape_key_status, get_keyboard_shortcuts, get_shortcut_best_practices,
+    get_shortcut_suggestions, reset_keyboard_shortcuts, set_keyboard_shortcut,
+    set_keyboard_shortcuts, validate_keyboard_shortcut,
 };
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
-    add_mcp_server,
-    remove_mcp_server,
-    start_mcp_server,
-    stop_mcp_server,
-    get_mcp_servers,
-    get_mcp_server_statuses,
-    get_mcp_tools,
+    add_mcp_server, apply_mcp_quick_fixes, check_mcp_prerequisites, force_restart_all_mcp_servers,
+    get_mcp_diagnostics, get_mcp_server_statuses, get_mcp_servers, get_mcp_system_diagnostics,
+    get_mcp_tools, initialize_mcp_servers, remove_mcp_server, restart_mcp_server_with_diagnostics,
+    retry_failed_mcp_servers, set_mcp_server_enabled, start_mcp_server, stop_mcp_server,
+    test_mcp_server_connection, toggle_mcp_server, toggle_mcp_tool, troubleshoot_mcp_issues,
     update_mcp_server,
-    set_mcp_server_enabled,
-    toggle_mcp_server,
-    toggle_mcp_tool,
-    test_mcp_server_connection,
-    initialize_mcp_servers,
-    get_mcp_diagnostics,
-    restart_mcp_server_with_diagnostics,
-    troubleshoot_mcp_issues,
-    apply_mcp_quick_fixes,
-    retry_failed_mcp_servers,
-    get_mcp_system_diagnostics,
-    force_restart_all_mcp_servers,
-    check_mcp_prerequisites,
 };
 
 // Import collaborative AI commands explicitly
 use crate::commands::collaborative_ai_commands::{
-    design_collaborative_ai_system,
-    execute_collaborative_workflow,
-    get_collaborative_ai_capabilities,
-    get_collaborative_ai_statistics,
-    create_sample_collaborative_ai_request,
-    validate_collaborative_ai_request,
-    get_complexity_levels,
+    create_sample_collaborative_ai_request, design_collaborative_ai_system,
+    execute_collaborative_workflow, get_collaborative_ai_capabilities,
+    get_collaborative_ai_statistics, get_complexity_levels, validate_collaborative_ai_request,
 };
 
 // Import Enhanced Visual Reasoning commands explicitly
 use crate::commands::enhanced_visual_reasoning_commands::{
-    analyze_gui_scene_with_visual_reasoning,
-    get_visual_reasoning_capabilities,
-    get_visual_reasoning_statistics,
-    create_sample_visual_analysis_request,
+    analyze_gui_scene_with_visual_reasoning, create_sample_visual_analysis_request,
+    get_scene_types, get_visual_reasoning_capabilities, get_visual_reasoning_statistics,
+    initialize_visual_reasoning_state, test_visual_reasoning_engine,
     validate_visual_analysis_request,
-    get_scene_types,
-    test_visual_reasoning_engine,
-    initialize_visual_reasoning_state,
 };
 
 // Added for selector parsing
@@ -318,9 +283,9 @@ use crate::commands::enhanced_visual_reasoning_commands::{
 
 // Cloud Commands
 use commands::cloud::{
-    get_cloud_config, update_cloud_config, get_cloud_status, enable_cloud, disable_cloud,
-    test_cloud_connection, get_cloud_device_info, generate_device_id,
-    execute_remote_command, get_cloud_connection_diagnostics,
+    disable_cloud, enable_cloud, execute_remote_command, generate_device_id, get_cloud_config,
+    get_cloud_connection_diagnostics, get_cloud_device_info, get_cloud_status,
+    test_cloud_connection, update_cloud_config,
 };
 
 // Environment loading functions moved to startup module
@@ -338,7 +303,10 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
                     Ok(_) => {
                         info!("Successfully loaded environment variables from bundled .env file: {:?}", bundled_env_path);
                         startup::validate_environment_variables();
-                        Ok(format!("Environment variables loaded from: {:?}", bundled_env_path))
+                        Ok(format!(
+                            "Environment variables loaded from: {:?}",
+                            bundled_env_path
+                        ))
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to load bundled .env file: {}", e);
@@ -373,7 +341,7 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
         "OPENAI_API_KEY",
         "ELEVENLABS_API_KEY",
         "PERPLEXITY_API_KEY",
-        "GEMINI_API_KEY"
+        "GEMINI_API_KEY",
     ];
 
     for var_name in &env_vars {
@@ -385,10 +353,16 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
                 } else {
                     "***".to_string()
                 };
-                result.insert(var_name.to_string(), serde_json::Value::String(masked_value));
+                result.insert(
+                    var_name.to_string(),
+                    serde_json::Value::String(masked_value),
+                );
             }
             Err(_) => {
-                result.insert(var_name.to_string(), serde_json::Value::String("NOT_SET".to_string()));
+                result.insert(
+                    var_name.to_string(),
+                    serde_json::Value::String("NOT_SET".to_string()),
+                );
             }
         }
     }
@@ -411,24 +385,32 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None)) // Add autostart plugin
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        )) // Add autostart plugin
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
-            events::shortcuts::handle_global_shortcut(app, shortcut, &event);
-        }).build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
+                    events::shortcuts::handle_global_shortcut(app, shortcut, &event);
+                })
+                .build(),
+        )
         .manage(app_state) // Manage the AppState
         .manage(crate::commands::collaborative_ai_commands::initialize_collaborative_ai_state()) // Manage the Collaborative AI state
         .manage(initialize_visual_reasoning_state()) // Manage the Enhanced Visual Reasoning state
+        .manage(commands::self_improvement::initialize_self_improvement_state()) // Manage the Self-Improvement state (development mode only)
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
             check_server_status,
             submit_query,
             anthropic::clear_conversation_history, // Add conversation history clearing
-            commands::test_system_context, // Test system context gathering
+            commands::test_system_context,         // Test system context gathering
             // Orchestrator Commands
             submit_orchestrated_query,
             get_orchestrator_status,
@@ -438,7 +420,6 @@ pub fn run() {
             get_active_tasks,
             get_agent_capabilities,
             cancel_task,
-
             // Enhanced Orchestrator Commands (90.2% Performance Improvement)
             commands::orchestrator::execute_intelligent_parallel_tasks,
             commands::orchestrator::intelligent_task_splitting,
@@ -446,12 +427,10 @@ pub fn run() {
             commands::orchestrator::execute_optimized_workflow,
             commands::orchestrator::configure_enhanced_orchestrator,
             commands::orchestrator::benchmark_orchestrator_performance,
-
-                                    // Workflow Orchestration Commands
+            // Workflow Orchestration Commands
             execute_mcp_task,
             get_workflow_templates,
             execute_workflow_template,
-
             // Memory Management Commands
             get_memory_status,
             clear_conversation_memory,
@@ -471,11 +450,11 @@ pub fn run() {
             test_error_recovery,
             update_agent_state,
             get_execution_history,
-            anthropic::cleanup_browser, // Add browser cleanup function
-            tts::invoke_tts, // Use the main invoke_tts command for Tauri
+            anthropic::cleanup_browser,    // Add browser cleanup function
+            tts::invoke_tts,               // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
             tts::get_tts_provider_command, // Added for TTS provider selection
-            tts::stop_tts, // Added for stopping TTS via escape key
+            tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
             dev_get_focused_element_info,
@@ -528,11 +507,11 @@ pub fn run() {
             dev_text_editor_insert,
             dev_text_editor_undo_edit,
             // Provider Management Commands
-                    get_providers,
-        get_active_provider,
-        set_active_provider,
-        validate_provider_model,
-        get_provider_models,
+            get_providers,
+            get_active_provider,
+            set_active_provider,
+            validate_provider_model,
+            get_provider_models,
             get_provider_settings,
             update_provider_api_key,
             update_provider_model,
@@ -631,13 +610,13 @@ pub fn run() {
             is_autostart_enabled,
             toggle_autostart,
             // Floating Bar Commands
-                    floating_bar_click,
-        floating_bar_focus_change,
-        floating_bar_input_blur,
-        floating_bar_input_change,
-        floating_bar_submit,
-        get_floating_bar_config,
-        set_floating_bar_config,
+            floating_bar_click,
+            floating_bar_focus_change,
+            floating_bar_input_blur,
+            floating_bar_input_change,
+            floating_bar_submit,
+            get_floating_bar_config,
+            set_floating_bar_config,
             // Floating Panel Commands
             set_floating_panel_click_through,
             enable_floating_panel_click_through,
@@ -733,8 +712,6 @@ pub fn run() {
             commands::restart_onboarding,
             commands::get_onboarding_info,
             commands::test_global_shortcuts_working,
-
-
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
@@ -762,10 +739,8 @@ pub fn run() {
             get_system_context,
             get_agent_execution_progress,
             set_agent_execution_progress,
-
             set_debug_mode,
             get_debug_mode,
-
             // Tray Icon Commands
             commands::tray_commands::set_tray_icon_default,
             commands::tray_commands::set_tray_icon_agent_active,
@@ -780,7 +755,6 @@ pub fn run() {
             commands::testing::run_test_suite,
             commands::testing::run_human_comparison_benchmark,
             commands::testing::generate_benchmark_report,
-
             // Collaborative AI Commands
             design_collaborative_ai_system,
             execute_collaborative_workflow,
@@ -789,7 +763,6 @@ pub fn run() {
             create_sample_collaborative_ai_request,
             validate_collaborative_ai_request,
             get_complexity_levels,
-
             // Enhanced Visual Reasoning Commands
             analyze_gui_scene_with_visual_reasoning,
             get_visual_reasoning_capabilities,
@@ -803,6 +776,20 @@ pub fn run() {
             commands::agent_continuation::respond_to_agent_continuation,
             commands::agent_continuation::get_pending_continuation_requests,
             commands::agent_continuation::has_pending_continuation_requests,
+          
+            // Self-Improvement Commands (Development Mode Only)
+            commands::self_improvement::initialize_self_improvement,
+            commands::self_improvement::start_improvement_cycle,
+            commands::self_improvement::get_self_improvement_status,
+            commands::self_improvement::analyze_system_performance,
+            commands::self_improvement::get_improvement_archive,
+            commands::self_improvement::get_iteration_details,
+            commands::self_improvement::update_self_improvement_config,
+            commands::self_improvement::emergency_stop_improvement,
+            commands::self_improvement::generate_improvement_proposal,
+            commands::self_improvement::run_performance_benchmarks,
+            commands::self_improvement::get_system_health_metrics,
+            commands::self_improvement::get_available_benchmarks,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -810,7 +797,9 @@ pub fn run() {
             // --- Initialize Application State Management ---
             let state_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = state_management::initialize_application_state(&state_app_handle).await {
+                if let Err(e) =
+                    state_management::initialize_application_state(&state_app_handle).await
+                {
                     tracing::error!("Failed to initialize application state: {}", e);
                 } else {
                     tracing::info!("Application state management initialized successfully");
@@ -845,14 +834,8 @@ pub fn run() {
                 tracing::info!("Application integration setup completed successfully");
             }
 
-
-
             // NOTE: All specialized event listeners (dictation, always listening, agent mode)
             // are now handled by the integration module to prevent code duplication
-
-
-
-
 
             Ok(())
         });
@@ -873,13 +856,19 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 // In debug builds, we can be more aggressive about stopping on errors
-                panic!("Application startup failed in debug mode: {}", startup_error);
+                panic!(
+                    "Application startup failed in debug mode: {}",
+                    startup_error
+                );
             }
 
             #[cfg(not(debug_assertions))]
             {
                 // In release builds, log the error and let the process exit naturally
-                error!("Application startup failed in production mode: {}", startup_error);
+                error!(
+                    "Application startup failed in production mode: {}",
+                    startup_error
+                );
                 // Process will exit naturally when this function returns
             }
         }
@@ -961,6 +950,20 @@ mod tests {
             check_accessibility: false,
             tts_provider: None,
             tts_text: None,
+            self_improvement_init: false,
+            self_improvement_start: false,
+            self_improvement_status: false,
+            self_improvement_analyze: false,
+            self_improvement_archive: false,
+            self_improvement_iteration: None,
+            self_improvement_config: None,
+            self_improvement_stop: false,
+            self_improvement_proposal: false,
+            self_improvement_benchmark: None,
+            self_improvement_health: false,
+            self_improvement_benchmarks: false,
+            self_improvement_continuous: false,
+            self_improvement_verbose: 1,
         };
 
         let result = runner::handle_non_desktop_cli_commands(&cli);
@@ -985,7 +988,11 @@ mod tests {
         for shortcut_str in test_shortcuts {
             // This should never crash, only return None for invalid shortcuts
             let result = parse_shortcut_string(shortcut_str);
-            println!("Shortcut '{}' parsed safely: {:?}", shortcut_str, result.is_some());
+            println!(
+                "Shortcut '{}' parsed safely: {:?}",
+                shortcut_str,
+                result.is_some()
+            );
         }
 
         println!("✅ Shortcut parsing is memory-safe");
@@ -1011,7 +1018,10 @@ mod tests {
             println!("Safe focus attempt: {}", focus_attempts);
         }
 
-        assert_eq!(focus_attempts, 1, "Should only attempt focus once to avoid infinite loops");
+        assert_eq!(
+            focus_attempts, 1,
+            "Should only attempt focus once to avoid infinite loops"
+        );
         println!("✅ Window focus operations are bounded and safe");
     }
 
@@ -1138,7 +1148,10 @@ mod tests {
         };
 
         assert!(!app_state.desktop_available);
-        assert!(app_state.ui_functional, "UI should work even without desktop permissions");
+        assert!(
+            app_state.ui_functional,
+            "UI should work even without desktop permissions"
+        );
 
         println!("✅ App initializes safely with missing permissions");
     }
