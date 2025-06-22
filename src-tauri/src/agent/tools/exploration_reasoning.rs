@@ -289,6 +289,8 @@ pub struct ExplorationEngine {
     gui_transition_graph: GUITransitionGraph,
     exploration_memory: ExplorationMemory,
     knowledge_extractor: TransitionAwareKnowledgeExtractor,
+    /// Track planned interactions to prevent duplicate attempts before transitions are recorded
+    planned_interactions: Vec<(f32, f32)>,
 }
 
 /// Function-aware task goal generator
@@ -389,6 +391,7 @@ impl ExplorationEngine {
             gui_transition_graph: GUITransitionGraph::new(),
             exploration_memory: ExplorationMemory::new(config.max_gui_states),
             knowledge_extractor: TransitionAwareKnowledgeExtractor::new(),
+            planned_interactions: Vec::new(),
         }
     }
 
@@ -430,6 +433,11 @@ impl ExplorationEngine {
                 &exploration_goals
             ).await?;
 
+            // Record planned interaction to prevent duplicates
+            if let ActionType::Click { x, y } = &exploration_action.action_type {
+                self.planned_interactions.push((*x, *y));
+            }
+
             // Execute exploration action and capture new state
             let action_type = exploration_action.action_type.clone();
             match self.execute_exploration_action(exploration_action).await {
@@ -443,10 +451,15 @@ impl ExplorationEngine {
                         transition_time_ms: execution_time_ms,
                     };
 
+                    // Record transition in both graph and memory
                     self.gui_transition_graph.add_transition(transition.clone());
                     self.exploration_memory.add_transition(transition);
                     self.exploration_memory.add_state(new_state.clone());
                     self.gui_transition_graph.add_state(new_state.clone());
+
+                    debug!("Recorded transition: {} -> {} (total transitions: {})",
+                           current_state_id, new_state.state_id,
+                           self.exploration_memory.transition_history.len());
 
                     current_state_id = new_state.state_id;
                     states_explored += 1;
@@ -565,7 +578,7 @@ impl ExplorationEngine {
 
     /// Checks if we have already interacted with an element
     fn has_interacted_with_element(&self, element: &InteractiveElement) -> bool {
-        // Check transition history for interactions with this element
+        // First check transition history for completed interactions
         for transition in &self.exploration_memory.transition_history {
             if let ActionType::Click { x, y } = &transition.trigger_action {
                 // Check if coordinates are close to the element
@@ -575,6 +588,15 @@ impl ExplorationEngine {
                 }
             }
         }
+
+        // Also check planned interactions to prevent duplicate attempts before they're recorded
+        for (planned_x, planned_y) in &self.planned_interactions {
+            let distance = ((planned_x - element.x).powi(2) + (planned_y - element.y).powi(2)).sqrt();
+            if distance < 10.0 { // 10 pixel tolerance
+                return true;
+            }
+        }
+
         false
     }
 
