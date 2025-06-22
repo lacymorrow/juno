@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::agent::structs::{AgentError, ToolDefinition, ToolResult};
+use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::constants::agent;
 
 /// Configuration for an external MCP server
@@ -790,6 +790,60 @@ impl MCPManager {
         Err(AgentError::ToolNotFound(tool_name.to_string()))
     }
 
+    /// Execute multiple tools as a batch on the appropriate MCP servers
+    pub async fn execute_batch_tools(&self, tool_calls: Vec<ToolCall>) -> Result<Vec<ToolResult>, AgentError> {
+        if tool_calls.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        info!("Executing batch of {} tools via MCP", tool_calls.len());
+
+        // Group tool calls by server
+        let mut server_batches: std::collections::HashMap<String, Vec<ToolCall>> = std::collections::HashMap::new();
+        let servers_guard = self.servers.read().await;
+
+        for tool_call in tool_calls {
+            let mut server_found = false;
+            for (server_id, connection) in servers_guard.iter() {
+                if connection.get_tools().iter().any(|t| t.name == tool_call.name) {
+                    server_batches.entry(server_id.clone()).or_insert_with(Vec::new).push(tool_call.clone());
+                    server_found = true;
+                    break;
+                }
+            }
+
+            if !server_found {
+                return Err(AgentError::ToolNotFound(tool_call.name.clone()));
+            }
+        }
+
+        drop(servers_guard); // Release read lock before acquiring write lock
+
+        // Execute batches on each server
+        let mut all_results = Vec::new();
+        let mut servers_guard = self.servers.write().await;
+
+        for (server_id, tool_calls_for_server) in server_batches {
+            if let Some(connection) = servers_guard.get_mut(&server_id) {
+                match connection.execute_batch_tools(tool_calls_for_server).await {
+                    Ok(batch_response) => {
+                        // Extract successful results and handle errors
+                        for batch_result in batch_response.results {
+                            match batch_result.result {
+                                Ok(tool_result) => all_results.push(tool_result),
+                                Err(e) => return Err(AgentError::ToolError(e)),
+                            }
+                        }
+                    }
+                    Err(e) => return Err(AgentError::ToolError(e)),
+                }
+            }
+        }
+
+        info!("Batch execution completed: {} results", all_results.len());
+        Ok(all_results)
+    }
+
     /// Get status of all servers
     pub async fn get_server_statuses(&self) -> HashMap<String, MCPServerStatus> {
         let servers = self.servers.read().await;
@@ -878,5 +932,352 @@ impl MCPManager {
 impl Default for MCPManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Batch request for executing multiple tools in sequence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPBatchRequest {
+    pub id: String,
+    pub requests: Vec<MCPBatchItem>,
+    pub execution_mode: BatchExecutionMode,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPBatchItem {
+    pub id: String,
+    pub method: String, // "tools/call"
+    pub params: Value,
+    pub tool_name: String,
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BatchExecutionMode {
+    Sequential,
+    Parallel,
+    Optimized, // Intelligently choose based on tool dependencies
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPBatchResponse {
+    pub batch_id: String,
+    pub results: Vec<MCPBatchResult>,
+    pub execution_time_ms: u64,
+    pub success_count: usize,
+    pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPBatchResult {
+    pub request_id: String,
+    pub tool_name: String,
+    pub call_id: String,
+    pub result: Result<ToolResult, String>,
+    pub execution_time_ms: u64,
+}
+
+/// Tool batching analyzer for determining which tools can be batched together
+pub struct ToolBatchingAnalyzer;
+
+impl ToolBatchingAnalyzer {
+    /// Analyze tool calls to determine if they can be batched together
+    pub fn can_batch_tools(tool_calls: &[ToolCall]) -> bool {
+        if tool_calls.len() < 2 {
+            return false;
+        }
+
+        // Define batching patterns for obvious sequential operations
+        let sequential_patterns = [
+            // Computer use patterns
+            ("computer_20241022_type", "computer_20241022_key"),
+            ("computer_20241022_key", "computer_20241022_screenshot"),
+            ("computer_20241022_click", "computer_20241022_screenshot"),
+            ("computer_20241022_type", "computer_20241022_screenshot"),
+
+            // MCP tool patterns (can be batched by default unless they modify state)
+            ("mcp_", "mcp_"), // Most MCP tools can be batched
+        ];
+
+        // Check for obvious sequential patterns
+        for window in tool_calls.windows(2) {
+            let first = &window[0].name;
+            let second = &window[1].name;
+
+            for (pattern1, pattern2) in &sequential_patterns {
+                if first.contains(pattern1) && second.contains(pattern2) {
+                    return true;
+                }
+            }
+        }
+
+        // Check if all tools are read-only MCP tools
+        let all_mcp_readonly = tool_calls.iter().all(|tool| {
+            tool.name.starts_with("mcp_") && Self::is_readonly_tool(&tool.name)
+        });
+
+        all_mcp_readonly
+    }
+
+    /// Determine if a tool is read-only and safe for batching
+    fn is_readonly_tool(tool_name: &str) -> bool {
+        let readonly_patterns = [
+            "search", "get", "read", "list", "check", "status",
+            "info", "find", "query", "fetch", "retrieve"
+        ];
+
+        readonly_patterns.iter().any(|pattern| tool_name.contains(pattern))
+    }
+
+    /// Analyze tool calls and group them into optimal batches
+    pub fn create_batches(tool_calls: Vec<ToolCall>) -> Vec<Vec<ToolCall>> {
+        let mut batches = Vec::new();
+        let mut current_batch = Vec::new();
+
+        for tool_call in tool_calls {
+            if current_batch.is_empty() {
+                current_batch.push(tool_call);
+            } else {
+                let can_add_to_batch = Self::can_batch_tools(&[
+                    current_batch.last().unwrap().clone(),
+                    tool_call.clone()
+                ]);
+
+                if can_add_to_batch && current_batch.len() < 5 { // Max 5 tools per batch
+                    current_batch.push(tool_call);
+                } else {
+                    // Start new batch
+                    batches.push(current_batch);
+                    current_batch = vec![tool_call];
+                }
+            }
+        }
+
+        if !current_batch.is_empty() {
+            batches.push(current_batch);
+        }
+
+        batches
+    }
+}
+
+impl MCPServerConnection {
+    /// Execute multiple tools as a batch request using JSON-RPC batch format
+    pub async fn execute_batch_tools(&mut self, tool_calls: Vec<ToolCall>) -> Result<MCPBatchResponse, String> {
+        let batch_start = std::time::Instant::now();
+        let batch_id = uuid::Uuid::new_v4().to_string();
+
+        info!("Executing batch of {} tools on server '{}'", tool_calls.len(), self.config.name);
+
+        // Create batch request items
+        let mut batch_items = Vec::new();
+        for tool_call in &tool_calls {
+            let original_tool_name = tool_call.name.strip_prefix(&format!("{}_", self.config.name))
+                .unwrap_or(&tool_call.name);
+
+            batch_items.push(json!({
+                "jsonrpc": "2.0",
+                "id": self.next_request_id(),
+                "method": "tools/call",
+                "params": {
+                    "name": original_tool_name,
+                    "arguments": tool_call.input
+                }
+            }));
+        }
+
+        // Send batch request (JSON-RPC 2.0 supports array of requests)
+        let batch_request = Value::Array(batch_items);
+
+        debug!("Sending batch request to '{}': {}", self.config.name, batch_request);
+
+        // Send and receive batch response
+        let batch_response = self.send_batch_request(batch_request).await?;
+
+        // Process batch response with proper validation
+        let mut results = Vec::new();
+        let mut success_count = 0;
+        let mut failed_count = 0;
+
+        if let Value::Array(responses) = batch_response {
+            // Validate response count matches request count
+            if responses.len() != tool_calls.len() {
+                warn!("MCP server '{}' returned {} responses for {} tool calls",
+                      self.config.name, responses.len(), tool_calls.len());
+
+                // Handle mismatched response counts gracefully
+                let min_count = std::cmp::min(responses.len(), tool_calls.len());
+
+                // Process matched responses
+                for index in 0..min_count {
+                    let response = &responses[index];
+                    let tool_call = &tool_calls[index];
+                    let result_start = std::time::Instant::now();
+
+                    let result = if let Some(error) = response.get("error") {
+                        failed_count += 1;
+                        Err(format!("Tool execution failed: {}", error))
+                    } else {
+                        success_count += 1;
+                        let output = response.get("result").unwrap_or(&json!({})).clone();
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        })
+                    };
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                        call_id: tool_call.id.clone(),
+                        result,
+                        execution_time_ms: result_start.elapsed().as_millis() as u64,
+                    });
+                }
+
+                // Handle missing responses (if responses.len() < tool_calls.len())
+                for index in min_count..tool_calls.len() {
+                    let tool_call = &tool_calls[index];
+                    failed_count += 1;
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                        call_id: tool_call.id.clone(),
+                        result: Err("No response received from MCP server".to_string()),
+                        execution_time_ms: 0,
+                    });
+                }
+
+                // Log extra responses (if responses.len() > tool_calls.len())
+                if responses.len() > tool_calls.len() {
+                    warn!("MCP server '{}' returned {} extra responses that will be ignored",
+                          self.config.name, responses.len() - tool_calls.len());
+                }
+            } else {
+                // Normal case: response count matches request count
+                for (index, response) in responses.iter().enumerate() {
+                    let tool_call = &tool_calls[index];
+                    let result_start = std::time::Instant::now();
+
+                    let result = if let Some(error) = response.get("error") {
+                        failed_count += 1;
+                        Err(format!("Tool execution failed: {}", error))
+                    } else {
+                        success_count += 1;
+                        let output = response.get("result").unwrap_or(&json!({})).clone();
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        })
+                    };
+
+                    results.push(MCPBatchResult {
+                        request_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                        call_id: tool_call.id.clone(),
+                        result,
+                        execution_time_ms: result_start.elapsed().as_millis() as u64,
+                    });
+                }
+            }
+        } else {
+            return Err("Invalid batch response format - expected array".to_string());
+        }
+
+        let total_time = batch_start.elapsed().as_millis() as u64;
+
+        info!("Batch execution completed: {}/{} succeeded in {}ms",
+              success_count, tool_calls.len(), total_time);
+
+        Ok(MCPBatchResponse {
+            batch_id,
+            results,
+            execution_time_ms: total_time,
+            success_count,
+            failed_count,
+        })
+    }
+
+    /// Send batch request with enhanced error handling
+    async fn send_batch_request(&mut self, batch_request: Value) -> Result<Value, String> {
+        let request_str = serde_json::to_string(&batch_request)
+            .map_err(|e| format!("Failed to serialize batch request: {}", e))?;
+
+        debug!("Sending MCP batch request to '{}': {}", self.config.name, request_str);
+
+        // Check if process is still alive
+        if let Some(ref mut process) = self.process {
+            match process.try_wait() {
+                Ok(Some(exit_status)) => {
+                    let err = format!("MCP server '{}' has exited with status: {}", self.config.name, exit_status);
+                    error!("{}", err);
+                    self.status = MCPServerStatus::Error(err.clone());
+                    return Err(err);
+                }
+                Ok(None) => {} // Process is still running
+                Err(e) => {
+                    warn!("Failed to check MCP server '{}' process status: {}", self.config.name, e);
+                }
+            }
+        }
+
+        // Send batch request
+        if let Some(ref mut writer) = self.stdin_writer {
+            writer.write_all(request_str.as_bytes()).await
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::BrokenPipe {
+                        format!("MCP server '{}' pipe broken during batch write", self.config.name)
+                    } else {
+                        format!("Failed to write batch request to '{}': {}", self.config.name, e)
+                    }
+                })?;
+            writer.write_all(b"\n").await
+                .map_err(|e| format!("Failed to write newline: {}", e))?;
+            writer.flush().await
+                .map_err(|e| format!("Failed to flush batch request: {}", e))?;
+        } else {
+            return Err("No stdin writer available for batch request".to_string());
+        }
+
+        // Read batch response with timeout
+        let timeout_duration = Duration::from_secs(self.config.timeout_seconds * 2); // Double timeout for batch
+
+        let response_future = async {
+            if let Some(ref mut reader) = self.stdout_reader {
+                let mut line = String::new();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => {
+                        Err(format!("MCP server '{}' closed stdout during batch read", self.config.name))
+                    }
+                    Ok(_) => {
+                        let trimmed = line.trim();
+                        debug!("Received MCP batch response from '{}': {}", self.config.name, trimmed);
+
+                        serde_json::from_str::<Value>(trimmed)
+                            .map_err(|e| format!("Failed to parse batch response JSON from '{}': {} - Response: '{}'",
+                                              self.config.name, e, trimmed))
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe {
+                            Err(format!("MCP server '{}' pipe broken during batch read", self.config.name))
+                        } else {
+                            Err(format!("Failed to read batch response from '{}': {}", self.config.name, e))
+                        }
+                    }
+                }
+            } else {
+                Err("No stdout reader available for batch response".to_string())
+            }
+        };
+
+        tokio::time::timeout(timeout_duration, response_future)
+            .await
+            .map_err(|_| {
+                self.status = MCPServerStatus::Timeout;
+                self.record_failure();
+                format!("Batch request timeout for MCP server '{}' ({}s)", self.config.name, timeout_duration.as_secs())
+            })?
     }
 }
