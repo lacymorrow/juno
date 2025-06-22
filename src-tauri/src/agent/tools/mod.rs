@@ -14,6 +14,7 @@
 //! - `cursor_integration`: Integration with Cursor IDE for development workflows
 //! - `mcp_integration`: Model Context Protocol (MCP) server integration for extensibility
 //! - `self_awareness_tools`: Self-building and introspection capabilities (debug mode only)
+//! - `self_improvement`: Research-backed self-improving code generation system (debug mode only)
 //! - `tool_mapping`: Tool mapping service for centralized tool categorization
 //! - `ui_token_selector`: UI-Guided Visual Token Selection for 33% computational cost reduction
 //!
@@ -21,32 +22,38 @@
 //! Tools are registered with the `LocalToolProvider` and made available to AI agents.
 //! Each module exports registration functions and relevant types.
 
-pub mod desktop_tools;
-pub mod browser_tools;
-pub mod browser_controller;
-pub mod basic_tools; // Ensure basic_tools is declared
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
-pub mod timer_tools; // Add timer tools for agent scheduling
-pub mod tool_config; // Add tool configuration management
-pub mod enhanced_coding_tools;
+pub mod basic_tools; // Ensure basic_tools is declared
+pub mod browser_controller;
+pub mod browser_tools;
+pub mod collaborative_ai; // Advanced Collaborative AI System Design from ComfyBench research
 pub mod cursor_integration;
+pub mod desktop_tools;
+pub mod enhanced_coding_tools;
+pub mod enhanced_visual_reasoning;
+pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 pub mod mcp_integration;
 pub mod self_awareness_tools; // Self-building and introspection capabilities
+pub mod self_improvement; // Research-backed self-improving code generation system (debug mode only)
+pub mod timer_tools; // Add timer tools for agent scheduling
+pub mod tool_config; // Add tool configuration management
 pub mod tool_mapping; // Add tool mapping service
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
-pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research
-pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
-pub mod collaborative_ai; // Advanced Collaborative AI System Design from ComfyBench research
-pub mod enhanced_visual_reasoning; // Enhanced Visual Reasoning System from CVPR 2025 research
+pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research // Enhanced Visual Reasoning System from CVPR 2025 research
 
-pub use browser_tools::get_browser_tool_definitions;
-pub use browser_controller::BrowserController;
 pub use basic_tools::*; // Export functions from basic_tools
-pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
-pub use tool_config::{ToolConfig, ToolConfigManager, ToolCategory}; // Export tool configuration types
-pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service
+pub use browser_controller::BrowserController;
+pub use browser_tools::get_browser_tool_definitions;
+pub use collaborative_ai::{
+    CollaborativeAIDesigner, ComplexityLevel, SystemRequirements, WorkflowDesignResult,
+}; // Export collaborative AI components
+pub use enhanced_visual_reasoning::{
+    ReasoningContext, SceneUnderstanding, VisualReasoningEngine, VisualReasoningResult,
+};
+pub use exploration_reasoning::{ExplorationConfig, ExplorationEngine, ExplorationResult}; // Export exploration-reasoning components
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
-pub use exploration_reasoning::{ExplorationEngine, ExplorationResult, ExplorationConfig}; // Export exploration-reasoning components
-pub use collaborative_ai::{CollaborativeAIDesigner, WorkflowDesignResult, SystemRequirements, ComplexityLevel}; // Export collaborative AI components
-pub use enhanced_visual_reasoning::{VisualReasoningEngine, VisualReasoningResult, ReasoningContext, SceneUnderstanding}; // Export enhanced visual reasoning components
+pub use self_improvement::register_self_improvement_tools_with_provider; // Export self-improvement tool registration (debug mode only)
+pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
+pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
+pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service // Export enhanced visual reasoning components

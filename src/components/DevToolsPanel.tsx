@@ -12,6 +12,7 @@ import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
+import SelfImprovementPanel from "./devtools/SelfImprovementPanel";
 import VisualizationSettings from "./devtools/VisualizationSettings";
 import WakeWordTesting from "./devtools/WakeWordTesting";
 import WindowOperations from "./devtools/WindowOperations";
@@ -252,6 +253,12 @@ const DevToolsPanel: React.FC = () => {
               <Button onClick={handleWait}>Wait</Button>
             </div>
           </div>
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">Self Improvement</h2>
+          <Separator className="my-2" />
+          <SelfImprovementPanel />
         </div>
       </div>
     </ScrollArea>

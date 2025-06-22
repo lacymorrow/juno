@@ -3119,6 +3119,7 @@ dependencies = [
  "url",
  "uuid",
  "wait-timeout",
+ "walkdir",
  "which 6.0.3",
  "whisper-rs",
 ]
