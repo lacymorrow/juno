@@ -146,3 +146,26 @@ Enterprise Security Framework ✅ COMPLETED
 Production-grade file system and command execution protection
 Advanced Memory Management ✅ COMPLETED (573+ lines)
 Token-aware pruning with conversation summarization
+
+### Quality Assurance Procedures
+
+For major feature implementations, follow comprehensive QA validation:
+
+```bash
+# Full QA validation suite
+./scripts/qa-full-validation.sh
+
+# Performance benchmarking
+./scripts/benchmark-token-selection.sh
+
+# Multi-monitor testing
+./scripts/test-multi-monitor-scenarios.sh
+```
+
+**QA Requirements**:
+
+- All automated tests must pass (18/18 minimum for UI token selection)
+- Performance targets must be met (33%+ computational cost reduction)
+- Multi-monitor scenarios must be validated
+- Error handling must be comprehensive
+- Documentation must be complete
