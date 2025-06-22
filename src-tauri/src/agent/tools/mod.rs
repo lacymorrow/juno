@@ -37,6 +37,7 @@ pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 pub mod collaborative_ai; // Advanced Collaborative AI System Design from ComfyBench research
+pub mod enhanced_visual_reasoning; // Enhanced Visual Reasoning System from CVPR 2025 research
 
 pub use browser_tools::get_browser_tool_definitions;
 pub use browser_controller::BrowserController;
@@ -48,3 +49,4 @@ pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolI
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
 pub use exploration_reasoning::{ExplorationEngine, ExplorationResult, ExplorationConfig}; // Export exploration-reasoning components
 pub use collaborative_ai::{CollaborativeAIDesigner, WorkflowDesignResult, SystemRequirements, ComplexityLevel}; // Export collaborative AI components
+pub use enhanced_visual_reasoning::{VisualReasoningEngine, VisualReasoningResult, ReasoningContext, SceneUnderstanding}; // Export enhanced visual reasoning components
