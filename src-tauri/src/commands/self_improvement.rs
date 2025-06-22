@@ -635,31 +635,57 @@ pub async fn get_system_health_metrics() -> Result<serde_json::Value, String> {
 
     tracing::info!("🏥 Collecting system health metrics");
 
-    // Mock system health data
+    // Calculate overall health score from various metrics
+    let system_health_score = 85.0; // Mock calculation based on all metrics
+
+    // Format system health data to match frontend expectations
     let metrics = serde_json::json!({
-        "system_resources": {
-            "cpu_usage": 0.23,
-            "memory_usage": 0.67,
-            "disk_usage": 0.45,
-            "network_latency": 45.2
+        "overall_score": system_health_score,
+        "components": {
+            "Agent Performance": "healthy",
+            "Tool Reliability": "healthy",
+            "System Resources": "healthy",
+            "Memory Management": "healthy",
+            "Network Connectivity": "healthy",
+            "Error Recovery": "healthy"
         },
-        "agent_performance": {
-            "success_rate": 0.87,
-            "avg_response_time": 2.1,
-            "error_rate": 0.08,
-            "task_completion_rate": 0.91
+        "vital_signs": {
+            "CPU Usage": "23%",
+            "Memory Usage": "67%",
+            "Success Rate": "87%",
+            "Response Time": "2.1s",
+            "Tool Availability": "98%"
         },
-        "tool_reliability": {
-            "screenshot": 0.98,
-            "browser_navigate": 0.72,
-            "type_text": 0.95,
-            "click": 0.89
-        },
-        "improvement_readiness": {
-            "system_stability": 0.85,
-            "performance_baseline": 0.78,
-            "safety_score": 0.92,
-            "ready_for_improvement": true
+        "recommendations": [
+            "Browser navigation tool reliability could be improved (72%)",
+            "Consider optimizing memory usage patterns",
+            "System performance is stable and ready for improvements"
+        ],
+        "raw_metrics": {
+            "system_resources": {
+                "cpu_usage": 0.23,
+                "memory_usage": 0.67,
+                "disk_usage": 0.45,
+                "network_latency": 45.2
+            },
+            "agent_performance": {
+                "success_rate": 0.87,
+                "avg_response_time": 2.1,
+                "error_rate": 0.08,
+                "task_completion_rate": 0.91
+            },
+            "tool_reliability": {
+                "screenshot": 0.98,
+                "browser_navigate": 0.72,
+                "type_text": 0.95,
+                "click": 0.89
+            },
+            "improvement_readiness": {
+                "system_stability": 0.85,
+                "performance_baseline": 0.78,
+                "safety_score": 0.92,
+                "ready_for_improvement": true
+            }
         },
         "timestamp": chrono::Utc::now().timestamp()
     });

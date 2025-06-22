@@ -741,203 +741,199 @@ export default function OnboardingFlow({
   return (
     <>
       <div className="fixed inset-0 flex items-center justify-center z-50">
-        <div className="bg-white/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-10">
-            {/* Progress indicator */}
-            <div className="flex gap-2 mb-10">
-              {onboardingSteps.map((_, index) => (
-                <div
-                  key={index}
-                  className={`h-1 flex-1 rounded-full transition-all duration-500 ${
-                    index <= currentStep ? "bg-blue-500" : "bg-gray-200"
-                  }`}
-                />
-              ))}
-            </div>
+        <div className="bg-white/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto p-10">
+          {/* Progress indicator */}
+          <div className="flex gap-2 mb-10">
+            {onboardingSteps.map((_, index) => (
+              <div
+                key={index}
+                className={`h-1 flex-1 rounded-full transition-all duration-500 ${
+                  index <= currentStep ? "bg-blue-500" : "bg-gray-200"
+                }`}
+              />
+            ))}
+          </div>
 
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={step.id}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-                className="text-center"
-              >
-                {/* Icon */}
-                <div className="flex justify-center mb-8">{step.icon}</div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={step.id}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="text-center"
+            >
+              {/* Icon */}
+              <div className="flex justify-center mb-8">{step.icon}</div>
 
-                {/* Content */}
-                <div className="space-y-4 mb-10">
-                  <div>
-                    <h2 className="text-3xl font-light text-gray-900 mb-3">
-                      {step.title}
-                    </h2>
-                    <p className="text-sm text-blue-600 font-medium mb-4">
-                      {step.subtitle}
+              {/* Content */}
+              <div className="space-y-4 mb-10">
+                <div>
+                  <h2 className="text-3xl font-light text-gray-900 mb-3">
+                    {step.title}
+                  </h2>
+                  <p className="text-sm text-blue-600 font-medium mb-4">
+                    {step.subtitle}
+                  </p>
+                </div>
+
+                <p className="text-gray-600 leading-relaxed text-base">
+                  {step.description}
+                </p>
+
+                {/* Keyboard shortcut for shortcut step */}
+                {step.id === "shortcut" && (
+                  <div className="relative">
+                    <KeyboardShortcut
+                      onShortcutPressed={handleShortcutPressed}
+                      shortcutString={keyboardShortcuts?.agent_mode_toggle}
+                    />
+                    <p className="text-sm text-gray-500 mt-4">
+                      {shortcutPressed
+                        ? "Perfect! You've got it."
+                        : keyboardShortcuts?.agent_mode_toggle
+                        ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
+                            /\+/g,
+                            " + "
+                          )} to activate agent mode`
+                        : "Press the keys above together to activate agent mode"}
                     </p>
                   </div>
+                )}
 
-                  <p className="text-gray-600 leading-relaxed text-base">
-                    {step.description}
-                  </p>
-
-                  {/* Keyboard shortcut for shortcut step */}
-                  {step.id === "shortcut" && (
-                    <div className="relative">
-                      <KeyboardShortcut
-                        onShortcutPressed={handleShortcutPressed}
-                        shortcutString={keyboardShortcuts?.agent_mode_toggle}
-                      />
-                      <p className="text-sm text-gray-500 mt-4">
-                        {shortcutPressed
-                          ? "Perfect! You've got it."
-                          : keyboardShortcuts?.agent_mode_toggle
-                          ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
-                              /\+/g,
-                              " + "
-                            )} to activate agent mode`
-                          : "Press the keys above together to activate agent mode"}
-                      </p>
+                {/* Cancel shortcut for cancel step */}
+                {step.id === "cancel" && (
+                  <div className="relative">
+                    {/* Simple visual representation of Escape key */}
+                    <div className="flex justify-center my-6">
+                      <div className="flex items-center justify-center w-20 h-20 rounded-xl border-2 bg-white border-gray-300 text-gray-700 shadow-sm">
+                        <span className="text-lg font-semibold">Esc</span>
+                      </div>
                     </div>
-                  )}
 
-                  {/* Cancel shortcut for cancel step */}
-                  {step.id === "cancel" && (
-                    <div className="relative">
-                      {/* Simple visual representation of Escape key */}
-                      <div className="flex justify-center my-6">
-                        <div className="flex items-center justify-center w-20 h-20 rounded-xl border-2 bg-white border-gray-300 text-gray-700 shadow-sm">
-                          <span className="text-lg font-semibold">Esc</span>
-                        </div>
-                      </div>
+                    <p className="text-sm text-gray-500 mt-4 text-center">
+                      The Escape key is your universal "stop" button in Juno
+                    </p>
+                  </div>
+                )}
 
-                      <p className="text-sm text-gray-500 mt-4 text-center">
-                        The Escape key is your universal "stop" button in Juno
+                {/* Granular permissions interface */}
+                {step.id === "permissions" && (
+                  <div className="space-y-4 mt-8 text-left">
+                    {/* Header */}
+                    <div className="text-center mb-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Grant Permissions
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Click "Grant Permission" for each item below to enable
+                        full functionality
                       </p>
-                    </div>
-                  )}
-
-                  {/* Granular permissions interface */}
-                  {step.id === "permissions" && (
-                    <div className="space-y-4 mt-8 text-left">
-                      {/* Header */}
-                      <div className="text-center mb-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                          Grant Permissions
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          Click "Grant Permission" for each item below to enable
-                          full functionality
-                        </p>
-                        {permissionsError && (
-                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
-                            <p className="text-sm text-red-700">
-                              Error: {permissionsError}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Permission Cards */}
-                      <div className="space-y-3">
-                        {permissions.map((permission) => {
-                          const permissionKey = permission.id.replace(
-                            "-",
-                            "_"
-                          ) as keyof PermissionsState;
-                          const permissionStatus =
-                            (permissionsState?.[
-                              permissionKey
-                            ] as PermissionStatus) || null;
-
-                          return (
-                            <PermissionCard
-                              key={permission.id}
-                              permission={permission}
-                              permissionStatus={permissionStatus}
-                              onRequest={() =>
-                                requestPermission(
-                                  permission.id.replace("-", "_")
-                                )
-                              }
-                              isRequesting={
-                                isRequestingPermission ===
-                                permission.id.replace("-", "_")
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-
-                      {/* Summary */}
-                      {permissionsState && (
-                        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {permissionsState.allGranted ? (
-                                <>
-                                  <CheckCircle className="w-5 h-5 text-green-600" />
-                                  <span className="font-medium text-green-800">
-                                    All required permissions granted!
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertCircle className="w-5 h-5 text-orange-600" />
-                                  <span className="font-medium text-orange-800">
-                                    Some permissions still needed
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                            <button
-                              onClick={checkPermissionsStatus}
-                              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                              Refresh
-                            </button>
-                          </div>
+                      {permissionsError && (
+                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                          <p className="text-sm text-red-700">
+                            Error: {permissionsError}
+                          </p>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="flex gap-4">
-                  {/* Show skip all button on final step */}
-                  {[0, onboardingSteps.length - 1].includes(currentStep) ? (
-                    <button
-                      onClick={handleSkip}
-                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
-                    >
-                      Skip
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleSkipStep}
-                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
-                    >
-                      Skip
-                    </button>
-                  )}
+                    {/* Permission Cards */}
+                    <div className="space-y-3">
+                      {permissions.map((permission) => {
+                        const permissionKey = permission.id.replace(
+                          "-",
+                          "_"
+                        ) as keyof PermissionsState;
+                        const permissionStatus =
+                          (permissionsState?.[
+                            permissionKey
+                          ] as PermissionStatus) || null;
 
-                  {/* Continue button - hide for shortcut step until completed */}
-                  {(step.id !== "shortcut" || shortcutPressed) && (
-                    <button
-                      onClick={handleNext}
-                      className="flex-1 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-                    >
-                      {step.action}
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
+                        return (
+                          <PermissionCard
+                            key={permission.id}
+                            permission={permission}
+                            permissionStatus={permissionStatus}
+                            onRequest={() =>
+                              requestPermission(permission.id.replace("-", "_"))
+                            }
+                            isRequesting={
+                              isRequestingPermission ===
+                              permission.id.replace("-", "_")
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Summary */}
+                    {permissionsState && (
+                      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {permissionsState.allGranted ? (
+                              <>
+                                <CheckCircle className="w-5 h-5 text-green-600" />
+                                <span className="font-medium text-green-800">
+                                  All required permissions granted!
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle className="w-5 h-5 text-orange-600" />
+                                <span className="font-medium text-orange-800">
+                                  Some permissions still needed
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <button
+                            onClick={checkPermissionsStatus}
+                            className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            Refresh
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-4">
+                {/* Show skip all button on final step */}
+                {[0, onboardingSteps.length - 1].includes(currentStep) ? (
+                  <button
+                    onClick={handleSkip}
+                    className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                  >
+                    Skip
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSkipStep}
+                    className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                  >
+                    Skip
+                  </button>
+                )}
+
+                {/* Continue button - hide for shortcut step until completed */}
+                {(step.id !== "shortcut" || shortcutPressed) && (
+                  <button
+                    onClick={handleNext}
+                    className="flex-1 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+                  >
+                    {step.action}
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
     </>

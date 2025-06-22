@@ -8,6 +8,7 @@ import { ExternalLink, Timer } from "lucide-react";
 import React, { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { CloudTestPanel } from "./devtools/CloudTestPanel";
+import ClickQATestPanel from "./devtools/ClickQATestPanel";
 import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
@@ -187,6 +188,12 @@ const DevToolsPanel: React.FC = () => {
           <h2 className="text-lg font-semibold">Visualization Controls</h2>
           <Separator className="my-2" />
           <VisualizationSettings />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">Click System QA Testing</h2>
+          <Separator className="my-2" />
+          <ClickQATestPanel />
         </div>
 
         <div>

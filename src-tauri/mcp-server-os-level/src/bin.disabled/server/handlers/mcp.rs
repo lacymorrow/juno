@@ -382,11 +382,10 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-             // Call the existing handler logic - this assumes handlers return Result<JsonResponse<Value>, (StatusCode, JsonResponse<Value>)>)
-             // We need to adapt this to return Result<Value, AutomationError> or similar for MCP
-             // For now, let's call the SDK directly, assuming elements are cached.
+            // Call the existing handler logic - this assumes handlers return Result<JsonResponse<Value>, (StatusCode, JsonResponse<Value>)>)
+            // We need to adapt this to return Result<Value, AutomationError> or similar for MCP
+            // For now, let's call the SDK directly, assuming elements are cached.
             execute_element_action(state, click_params.element_index, |el| el.click()).await
-
         }
         "typeByIndex" => {
             let type_params: TypeByIndexRequest = match serde_json::from_value(tool_input) {
@@ -400,7 +399,10 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-             execute_element_action(state, type_params.element_index, |el| el.type_text(&type_params.text)).await
+            execute_element_action(state, type_params.element_index, |el| {
+                el.type_text(&type_params.text)
+            })
+            .await
         }
         "pressKeyByIndex" => {
             let press_params: PressKeyByIndexRequest = match serde_json::from_value(tool_input) {
@@ -414,7 +416,10 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-            execute_element_action(state, press_params.element_index, |el| el.press_key(&press_params.key_combo)).await
+            execute_element_action(state, press_params.element_index, |el| {
+                el.press_key(&press_params.key_combo)
+            })
+            .await
         }
         "openApplication" => {
             let open_app_params: OpenApplicationRequest = match serde_json::from_value(tool_input) {
@@ -428,23 +433,23 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-             // This handler likely needs different logic (doesn't operate on cached index)
-             // Re-use list_elements logic for now
-             // TODO: Refactor this for better separation
-             let list_req = ListInteractableElementsRequest {
-                 app_name: open_app_params.app_name,
-                 use_background_apps: open_app_params.use_background_apps,
-                 activate_app: open_app_params.activate_app,
-                 cache_id: None, // Ensure we get fresh elements after opening
-             };
-             match list_elements_and_attributes_handler(State(state), Json(list_req)).await {
-                 Ok(response) => Ok(response.into_inner()), // Extract the inner value
-                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
-                     "Failed to list elements after opening app ({}): {}",
-                     status,
-                     response.0.to_string()
-                 ))),
-             }
+            // This handler likely needs different logic (doesn't operate on cached index)
+            // Re-use list_elements logic for now
+            // TODO: Refactor this for better separation
+            let list_req = ListInteractableElementsRequest {
+                app_name: open_app_params.app_name,
+                use_background_apps: open_app_params.use_background_apps,
+                activate_app: open_app_params.activate_app,
+                cache_id: None, // Ensure we get fresh elements after opening
+            };
+            match list_elements_and_attributes_handler(State(state), Json(list_req)).await {
+                Ok(response) => Ok(response.into_inner()), // Extract the inner value
+                Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                    "Failed to list elements after opening app ({}): {}",
+                    status,
+                    response.0.to_string()
+                ))),
+            }
         }
         "openUrl" => {
             let open_url_params: OpenUrlRequest = match serde_json::from_value(tool_input) {
@@ -458,16 +463,16 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-             // Similar to openApplication, needs to re-list elements
-             // TODO: Refactor - use a dedicated function maybe?
-             match open_url_handler(State(state.clone()), Json(open_url_params)).await {
-                 Ok(response) => Ok(response.into_inner()),
-                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
-                     "Failed to list elements after opening URL ({}): {}",
-                     status,
-                     response.0.to_string()
-                 ))),
-             }
+            // Similar to openApplication, needs to re-list elements
+            // TODO: Refactor - use a dedicated function maybe?
+            match open_url_handler(State(state.clone()), Json(open_url_params)).await {
+                Ok(response) => Ok(response.into_inner()),
+                Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                    "Failed to list elements after opening URL ({}): {}",
+                    status,
+                    response.0.to_string()
+                ))),
+            }
         }
         "inputControl" => {
             // Deserialize the action part first to determine the type
@@ -481,32 +486,34 @@ pub async fn handle_execute_tool_function(
                 action: ActionType,
             }
 
-            let action_wrapper: InputControlAction = match serde_json::from_value(tool_input.clone()) {
-                Ok(p) => p,
-                Err(e) => {
-                    return mcp_error_response(
-                        id,
-                        -32602,
-                        format!("invalid input structure for {}: {}", tool_name, e),
-                        None,
-                    );
-                }
-            };
+            let action_wrapper: InputControlAction =
+                match serde_json::from_value(tool_input.clone()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return mcp_error_response(
+                            id,
+                            -32602,
+                            format!("invalid input structure for {}: {}", tool_name, e),
+                            None,
+                        );
+                    }
+                };
 
             // Match on the specific action type
             match action_wrapper.action.action_type.as_str() {
                 "KeyPress" | "MouseMove" | "MouseClick" | "WriteText" => {
                     // Original handler logic for existing actions
-                    let input_params: InputControlRequest = match serde_json::from_value(tool_input) {
-                         Ok(p) => p,
-                         Err(e) => {
-                             return mcp_error_response(
-                                 id,
-                                 -32602,
-                                 format!("invalid input params for {}: {}", tool_name, e),
-                                 None,
-                             );
-                         }
+                    let input_params: InputControlRequest = match serde_json::from_value(tool_input)
+                    {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid input params for {}: {}", tool_name, e),
+                                None,
+                            );
+                        }
                     };
                     // Reuse the existing handler
                     match input_control_handler(State(state.clone()), Json(input_params)).await {
@@ -527,7 +534,7 @@ pub async fn handle_execute_tool_function(
                     }
                     #[derive(serde::Deserialize, Debug)]
                     struct WaitAction {
-                       action: WaitData,
+                        action: WaitData,
                     }
 
                     let wait_params: WaitAction = match serde_json::from_value(tool_input) {
@@ -551,95 +558,257 @@ pub async fn handle_execute_tool_function(
                 "LeftClickDrag" => {
                     #[derive(serde::Deserialize, Debug)]
                     struct DragData {
-                        start_x: f64, start_y: f64, end_x: f64, end_y: f64,
+                        start_x: f64,
+                        start_y: f64,
+                        end_x: f64,
+                        end_y: f64,
                     }
                     #[derive(serde::Deserialize, Debug)]
-                    struct DragAction { action: struct { #[serde(rename = "type")] _type: String, data: DragData } }
+                    struct DragActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: DragData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct DragAction {
+                        action: DragActionInner,
+                    }
                     let params: DragAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftClickDrag: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for LeftClickDrag: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.drag(params.action.data.start_x, params.action.data.start_y, params.action.data.end_x, params.action.data.end_y) {
-                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state.desktop.drag(
+                        params.action.data.start_x,
+                        params.action.data.start_y,
+                        params.action.data.end_x,
+                        params.action.data.end_y,
+                    ) {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
-                 "MiddleClick" => {
+                "MiddleClick" => {
                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordData { x: f64, y: f64 }
+                    struct CoordData {
+                        x: f64,
+                        y: f64,
+                    }
                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    struct CoordActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: CoordData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction {
+                        action: CoordActionInner,
+                    }
                     let params: CoordAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for MiddleClick: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for MiddleClick: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.middle_click(params.action.data.x, params.action.data.y) {
-                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state
+                        .desktop
+                        .middle_click(params.action.data.x, params.action.data.y)
+                    {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
                 "DoubleClick" => {
-                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordData { x: f64, y: f64 }
                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    struct CoordData {
+                        x: f64,
+                        y: f64,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: CoordData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction {
+                        action: CoordActionInner,
+                    }
                     let params: CoordAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for DoubleClick: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for DoubleClick: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.double_click(params.action.data.x, params.action.data.y) {
-                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state
+                        .desktop
+                        .double_click(params.action.data.x, params.action.data.y)
+                    {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
                 "TripleClick" => {
                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordData { x: f64, y: f64 }
+                    struct CoordData {
+                        x: f64,
+                        y: f64,
+                    }
                     #[derive(serde::Deserialize, Debug)]
-                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    struct CoordActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: CoordData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction {
+                        action: CoordActionInner,
+                    }
                     let params: CoordAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for TripleClick: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for TripleClick: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.triple_click(params.action.data.x, params.action.data.y) {
-                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state
+                        .desktop
+                        .triple_click(params.action.data.x, params.action.data.y)
+                    {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
-                 "HoldKey" => {
+                "HoldKey" => {
                     #[derive(serde::Deserialize, Debug)]
-                    struct HoldKeyData { key: String, duration: u64 }
+                    struct HoldKeyData {
+                        key: String,
+                        duration: u64,
+                    }
                     #[derive(serde::Deserialize, Debug)]
-                    struct HoldKeyAction { action: struct { #[serde(rename = "type")] _type: String, data: HoldKeyData } }
+                    struct HoldKeyActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: HoldKeyData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct HoldKeyAction {
+                        action: HoldKeyActionInner,
+                    }
                     let params: HoldKeyAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for HoldKey: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for HoldKey: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.hold_key(&params.action.data.key, params.action.data.duration) {
-                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state
+                        .desktop
+                        .hold_key(&params.action.data.key, params.action.data.duration)
+                    {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
                 "LeftMouseDown" => {
                     #[derive(serde::Deserialize, Debug)]
-                    struct MouseDownData { x: Option<f64>, y: Option<f64> }
+                    struct MouseDownData {
+                        x: Option<f64>,
+                        y: Option<f64>,
+                    }
                     #[derive(serde::Deserialize, Debug)]
-                    struct MouseDownAction { action: struct { #[serde(rename = "type")] _type: String, data: MouseDownData } }
+                    struct MouseDownActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: MouseDownData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseDownAction {
+                        action: MouseDownActionInner,
+                    }
                     let params: MouseDownAction = match serde_json::from_value(tool_input) {
-                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftMouseDown: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for LeftMouseDown: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.mouse_down("left", params.action.data.x, params.action.data.y) {
-                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state.desktop.mouse_down(
+                        "left",
+                        params.action.data.x,
+                        params.action.data.y,
+                    ) {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
-                 "LeftMouseUp" => {
+                "LeftMouseUp" => {
                     #[derive(serde::Deserialize, Debug)]
-                    struct MouseUpData { x: Option<f64>, y: Option<f64> }
-                     #[derive(serde::Deserialize, Debug)]
-                    struct MouseUpAction { action: struct { #[serde(rename = "type")] _type: String, data: MouseUpData } }
+                    struct MouseUpData {
+                        x: Option<f64>,
+                        y: Option<f64>,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseUpActionInner {
+                        #[serde(rename = "type")]
+                        _type: String,
+                        data: MouseUpData,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseUpAction {
+                        action: MouseUpActionInner,
+                    }
                     let params: MouseUpAction = match serde_json::from_value(tool_input) {
-                         Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftMouseUp: {}", e), None),
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid params for LeftMouseUp: {}", e),
+                                None,
+                            )
+                        }
                     };
-                    match state.desktop.mouse_up("left", params.action.data.x, params.action.data.y) {
-                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    match state
+                        .desktop
+                        .mouse_up("left", params.action.data.x, params.action.data.y)
+                    {
+                        Ok(_) => Ok(json!(null)),
+                        Err(e) => Err(e),
                     }
                 }
-                _ => {
-                    Err(AutomationError::InvalidArgument(format!(
-                        "Unsupported action type for inputControl: {}",
-                        action_wrapper.action.action_type
-                    )))
-                }
+                _ => Err(AutomationError::InvalidArgument(format!(
+                    "Unsupported action type for inputControl: {}",
+                    action_wrapper.action.action_type
+                ))),
             }
         }
         // Add cases for new tools
@@ -672,12 +841,12 @@ pub async fn handle_execute_tool_function(
             execute_element_action(state, click_params.element_index, |el| el.hover()).await
         }
         "scrollByIndex" => {
-             #[derive(serde::Deserialize)]
-             struct ScrollParams {
-                 element_index: usize,
-                 direction: String,
-                 amount: f64,
-             }
+            #[derive(serde::Deserialize)]
+            struct ScrollParams {
+                element_index: usize,
+                direction: String,
+                amount: f64,
+            }
             let scroll_params: ScrollParams = match serde_json::from_value(tool_input) {
                 Ok(p) => p,
                 Err(e) => {
@@ -689,10 +858,10 @@ pub async fn handle_execute_tool_function(
                     );
                 }
             };
-             execute_element_action(state, scroll_params.element_index, |el| {
-                 el.scroll(&scroll_params.direction, scroll_params.amount)
-             })
-             .await
+            execute_element_action(state, scroll_params.element_index, |el| {
+                el.scroll(&scroll_params.direction, scroll_params.amount)
+            })
+            .await
         }
         "captureScreenshot" => {
             // This tool doesn't fit the execute_element_action pattern
@@ -701,13 +870,13 @@ pub async fn handle_execute_tool_function(
             {
                 use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
                 match capture_and_encode_screenshot() {
-                     Ok(base64_string) => Ok(json!({ "screenshot_base64": base64_string })),
-                     Err(e) => Err(e),
+                    Ok(base64_string) => Ok(json!({ "screenshot_base64": base64_string })),
+                    Err(e) => Err(e),
                 }
             }
             #[cfg(not(target_os = "macos"))]
             {
-                 Err(AutomationError::UnsupportedPlatform)
+                Err(AutomationError::UnsupportedPlatform)
             }
         }
 
@@ -728,26 +897,47 @@ pub async fn handle_execute_tool_function(
         Err(e) => {
             error!("tool {} execution failed: {}", tool_name, e);
             match e {
-                AutomationError::ElementNotFound(msg) => {
-                    mcp_error_response(id, -32001, "element not found".to_string(), Some(json!({ "details": msg })))
-                }
-                AutomationError::CacheMiss(msg) => {
-                    mcp_error_response(id, -32002, "cache miss".to_string(), Some(json!({ "details": msg })))
-                }
-                AutomationError::ToolNotFound(tool) => {
-                     mcp_error_response(id, -32601, "method not found".to_string(), Some(json!({ "tool_name": tool })))
-                }
-                AutomationError::InvalidArgument(msg) => {
-                     mcp_error_response(id, -32602, "invalid params".to_string(), Some(json!({ "details": msg })))
-                }
-                AutomationError::UnsupportedOperation(msg) => {
-                    mcp_error_response(id, -32603, "unsupported operation".to_string(), Some(json!({ "details": msg })))
-                }
-                 AutomationError::UnsupportedPlatform => {
+                AutomationError::ElementNotFound(msg) => mcp_error_response(
+                    id,
+                    -32001,
+                    "element not found".to_string(),
+                    Some(json!({ "details": msg })),
+                ),
+                AutomationError::CacheMiss(msg) => mcp_error_response(
+                    id,
+                    -32002,
+                    "cache miss".to_string(),
+                    Some(json!({ "details": msg })),
+                ),
+                AutomationError::ToolNotFound(tool) => mcp_error_response(
+                    id,
+                    -32601,
+                    "method not found".to_string(),
+                    Some(json!({ "tool_name": tool })),
+                ),
+                AutomationError::InvalidArgument(msg) => mcp_error_response(
+                    id,
+                    -32602,
+                    "invalid params".to_string(),
+                    Some(json!({ "details": msg })),
+                ),
+                AutomationError::UnsupportedOperation(msg) => mcp_error_response(
+                    id,
+                    -32603,
+                    "unsupported operation".to_string(),
+                    Some(json!({ "details": msg })),
+                ),
+                AutomationError::UnsupportedPlatform(_) => {
                     mcp_error_response(id, -32003, "unsupported platform".to_string(), None)
                 }
-                _ => { // Generic platform error or other
-                    mcp_error_response(id, -32000, "tool execution error".to_string(), Some(json!({ "details": e.to_string() })))
+                _ => {
+                    // Generic platform error or other
+                    mcp_error_response(
+                        id,
+                        -32000,
+                        "tool execution error".to_string(),
+                        Some(json!({ "details": e.to_string() })),
+                    )
                 }
             }
         }
@@ -755,7 +945,7 @@ pub async fn handle_execute_tool_function(
 }
 
 // Helper function to execute an action on an element from the cache
-async fn execute_element_action<F, Fut>(
+async fn execute_element_action<F, Fut, T>(
     state: Arc<AppState>,
     element_index: usize,
     action: F,
@@ -773,9 +963,12 @@ where
             // Execute the action
             match action(element_clone).await {
                 Ok(result) => {
-                     // Serialize the action's result to JSON Value
+                    // Serialize the action's result to JSON Value
                     serde_json::to_value(result).map_err(|e| {
-                         AutomationError::SerializationError(format!("Failed to serialize action result: {}", e))
+                        AutomationError::SerializationError(format!(
+                            "Failed to serialize action result: {}",
+                            e
+                        ))
                     })
                 }
                 Err(e) => Err(e),
