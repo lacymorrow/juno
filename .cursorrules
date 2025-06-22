@@ -14,6 +14,12 @@ We want it to have a complete implementation. Make sure that you research anthro
 @<https://docs.anthropic.com/en/docs/agents-and-tools/computer-use>
 @main.rs
 
+## THIS IS NOT
+
+- An AI-powered platform automating business loan processing for lenders and brokers.
+
+We are building a completely unrelated AI agent that can use the computer.
+
 ## Development Rules
 
 Remember this is a new build so we don't need to leave any legacy functionality or anything like that. Just change the functionality. You can make breaking changes if they work.

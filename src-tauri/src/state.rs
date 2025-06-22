@@ -1464,28 +1464,28 @@ mod tests {
         use crate::commands::permissions::{PermissionStatus, PermissionsState};
         let mock_permissions = vec![
             PermissionStatus {
-                permission_type: permission_types::ACCESSIBILITY.to_string(),
+                permission_type: crate::constants::permissions::types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
                 description: "Accessibility permission is granted".to_string(),
                 instructions: "No action needed".to_string(),
             },
             PermissionStatus {
-                permission_type: permission_types::SCREEN_RECORDING.to_string(),
+                permission_type: crate::constants::permissions::types::SCREEN_RECORDING.to_string(),
                 granted: false,
                 required: true,
                 description: "Screen recording permission is denied".to_string(),
                 instructions: "Grant in System Preferences".to_string(),
             },
             PermissionStatus {
-                permission_type: permission_types::MICROPHONE.to_string(),
+                permission_type: crate::constants::permissions::types::MICROPHONE.to_string(),
                 granted: true,
                 required: false,
                 description: "Microphone permission not determined".to_string(),
                 instructions: "Will prompt when needed".to_string(),
             },
             PermissionStatus {
-                permission_type: permission_types::INPUT_MONITORING.to_string(),
+                permission_type: crate::constants::permissions::types::INPUT_MONITORING.to_string(),
                 granted: true,
                 required: true,
                 description: "Input monitoring permission is granted".to_string(),
