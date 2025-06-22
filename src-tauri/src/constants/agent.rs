@@ -40,8 +40,8 @@ pub mod tool_names {
 
 // Agent configuration
 pub mod config {
-    pub const MAX_ITERATIONS: u32 = 40;
-    pub const MAX_ITERATIONS_REDUCED: u32 = 20;
+    pub const MAX_ITERATIONS: u32 = 2;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 2;
 
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
@@ -65,16 +65,14 @@ pub mod monitor_sessions {
     pub const IMMEDIATE_START_MS: u64 = 0;
 
     // Max durations
-    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000;  // 30 seconds
-    pub const MAX_AGENT_DURATION_MS: u64 = 180_000;         // 2 minutes
+    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
+    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 2 minutes
 
     // Cleanup timeouts
-    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000;       // 5 seconds
-    pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150;         // 150ms
+    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds
+    pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms
 
     // Monitor intervals
     pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
     pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
 }
-
-

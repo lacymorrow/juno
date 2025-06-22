@@ -1,18 +1,18 @@
 use std::env;
-use tracing::{info, warn};
 use tauri::Manager;
+use tracing::{info, warn};
 
-use crate::agent::structs::AgentError;
-use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider, AgentRunnable};
-use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::implementations::agent_runner::DefaultAgentRunner;
+use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
+use crate::agent::providers::config::{apply_provider_settings_to_env, AgentMode, ProviderConfig};
+use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
-use crate::agent::providers::gemini::GeminiBrain;
-use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env, AgentMode};
+use crate::agent::structs::AgentError;
 use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
-use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
@@ -48,8 +48,8 @@ pub enum AgentRuntime {
 /// Model categories based on capabilities
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ModelCategory {
-    ComputerUse,   // Models that support computer automation
-    GeneralChat,   // Models for general conversation and text generation
+    ComputerUse, // Models that support computer automation
+    GeneralChat, // Models for general conversation and text generation
 }
 
 /// Model definition with all metadata
@@ -95,7 +95,9 @@ impl AgentRuntime {
             AgentRuntime::Multi(_orchestrator) => {
                 // For multi-agent, we need to implement a similar run interface
                 // This is a simplified version - you might need to adapt based on your multi-agent implementation
-                Err(AgentError::ConfigurationError("Multi-agent run not yet implemented".to_string()))
+                Err(AgentError::ConfigurationError(
+                    "Multi-agent run not yet implemented".to_string(),
+                ))
             }
         }
     }
@@ -137,7 +139,9 @@ impl Provider {
     /// Get description for the provider
     pub fn description(&self) -> &'static str {
         match self {
-            Provider::Anthropic => "High-performance AI assistant with advanced reasoning capabilities",
+            Provider::Anthropic => {
+                "High-performance AI assistant with advanced reasoning capabilities"
+            }
             Provider::OpenAI => "OpenAI's GPT models for conversational AI and text generation",
             Provider::Rig => "Rig framework for building AI agents with structured outputs",
             Provider::Gemini => "Google's Gemini models for multimodal AI capabilities",
@@ -227,7 +231,7 @@ impl Provider {
                         },
                     ]
                 }
-            },
+            }
             Provider::OpenAI => &[
                 ModelDefinition {
                     id: model_ids::OPENAI_CUA,
@@ -437,7 +441,7 @@ impl BrainFactory {
                 // Create a single agent runtime
                 let brain = Self::create_brain().await?;
 
-                                // Convert Arc<dyn ToolProvider> to concrete type if needed
+                // Convert Arc<dyn ToolProvider> to concrete type if needed
                 let local_tool_provider = if let Some(ref handle) = app_handle {
                     let provider = LocalToolProvider::with_app_handle(handle.clone());
                     // Copy tools from the Arc provider to local provider
@@ -450,21 +454,27 @@ impl BrainFactory {
                 // Create memory manager - need to extract from Arc
                 // This is tricky because we need to move out of Arc
                 // For now, create a new one with same type
-                let memory_impl = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+                let memory_impl =
+                    crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
 
                 let runner = DefaultAgentRunner::with_boxed_brain(
                     memory_impl,
                     local_tool_provider,
                     brain,
-                    15, // max_steps
+                    crate::constants::agent::config::MAX_ITERATIONS, // max_steps
                     app_handle.ok_or("AppHandle required for single agent")?,
                 );
 
                 Ok(AgentRuntime::Single(Box::new(runner)))
-            },
+            }
             AgentMode::Multi => {
                 // Create multi-agent orchestrator
-                let orchestrator = Self::create_multi_agent_orchestrator(memory, tool_provider, app_handle.as_ref()).await?;
+                let orchestrator = Self::create_multi_agent_orchestrator(
+                    memory,
+                    tool_provider,
+                    app_handle.as_ref(),
+                )
+                .await?;
                 Ok(AgentRuntime::Multi(orchestrator))
             }
         }
@@ -489,29 +499,70 @@ impl BrainFactory {
     /// Get list of all available providers with their status
     pub fn list_providers() -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
-        let providers = vec![Provider::Anthropic, Provider::OpenAI, Provider::Rig, Provider::Gemini];
+        let providers = vec![
+            Provider::Anthropic,
+            Provider::OpenAI,
+            Provider::Rig,
+            Provider::Gemini,
+        ];
         let config = Some(ProviderConfig::default()); // Use default config for new app
 
-        providers.into_iter().map(|provider| {
-            let provider_id = provider.id();
-            let is_available = match provider {
-                Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-                Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-                Provider::Rig => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings("openai")).and_then(|s| s.api_key.as_ref()).is_some() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-                Provider::Gemini => env::var("GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-            };
-            ProviderInfo {
-                id: provider_id.to_string(),
-                name: provider.display_name().to_string(),
-                description: provider.description().to_string(),
-                models: provider.models(),
-                model_info: provider.get_model_info(),
-                default_model: provider.default_model().to_string(),
-                is_available,
-                is_default: provider == current_provider,
-                computer_use_supported: provider.supports_computer_use(),
-            }
-        }).collect()
+        providers
+            .into_iter()
+            .map(|provider| {
+                let provider_id = provider.id();
+                let is_available = match provider {
+                    Provider::Anthropic => {
+                        env::var("ANTHROPIC_API_KEY").is_ok()
+                            || config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings(provider_id))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some()
+                    }
+                    Provider::OpenAI => {
+                        env::var("OPENAI_API_KEY").is_ok()
+                            || config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings(provider_id))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some()
+                    }
+                    Provider::Rig => {
+                        env::var("OPENAI_API_KEY").is_ok()
+                            || config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings("openai"))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some()
+                            || config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings(provider_id))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some()
+                    }
+                    Provider::Gemini => {
+                        env::var("GEMINI_API_KEY").is_ok()
+                            || config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings(provider_id))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some()
+                    }
+                };
+                ProviderInfo {
+                    id: provider_id.to_string(),
+                    name: provider.display_name().to_string(),
+                    description: provider.description().to_string(),
+                    models: provider.models(),
+                    model_info: provider.get_model_info(),
+                    default_model: provider.default_model().to_string(),
+                    is_available,
+                    is_default: provider == current_provider,
+                    computer_use_supported: provider.supports_computer_use(),
+                }
+            })
+            .collect()
     }
 
     /// Create an AgentBrain implementation based on provider configuration
@@ -520,7 +571,9 @@ impl BrainFactory {
     }
 
     /// Create an AgentBrain implementation with app handle for proper prompt loading
-    pub async fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+    pub async fn create_brain_with_app_handle(
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
             "anthropic".to_string() // Default to Anthropic for new app
         });
@@ -531,20 +584,22 @@ impl BrainFactory {
         // Load system prompt from prompt manager if app_handle is available
         let system_prompt = if let Some(handle) = app_handle {
             // Create settings manager from app handle
-            let settings_manager = match crate::settings::manager::SettingsManager::new(handle.clone()) {
-                Ok(manager) => manager,
-                Err(e) => {
-                    warn!("Failed to create settings manager: {}. Using defaults.", e);
-                    // Use default prompt instead of returning
-                    let prompt_manager = crate::agent::prompts::PromptManager::new();
-                    return Ok(Box::new(AnthropicBrain::new(
-                        env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
-                        None,
-                        None,
-                        Some(prompt_manager.get_default_system_prompt())
-                    )?) as Box<dyn AgentBrain + Send + Sync>);
-                }
-            };
+            let settings_manager =
+                match crate::settings::manager::SettingsManager::new(handle.clone()) {
+                    Ok(manager) => manager,
+                    Err(e) => {
+                        warn!("Failed to create settings manager: {}. Using defaults.", e);
+                        // Use default prompt instead of returning
+                        let prompt_manager = crate::agent::prompts::PromptManager::new();
+                        return Ok(Box::new(AnthropicBrain::new(
+                            env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+                            None,
+                            None,
+                            Some(prompt_manager.get_default_system_prompt()),
+                        )?)
+                            as Box<dyn AgentBrain + Send + Sync>);
+                    }
+                };
 
             // Load prompt manager with centralized settings
             let prompt_manager = crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
@@ -564,50 +619,63 @@ impl BrainFactory {
         match Provider::from_str(&provider_str) {
             Some(Provider::Anthropic) => {
                 info!("Initializing Anthropic brain with system prompt...");
-                let api_key = env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
+                let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
+                    AgentError::ConfigurationError(
+                        "ANTHROPIC_API_KEY environment variable not set".to_string(),
+                    )
+                })?;
                 let model = env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
+                let max_tokens = env::var("ANTHROPIC_MAX_TOKENS")
+                    .ok()
+                    .and_then(|s| s.parse::<u32>().ok());
 
                 AnthropicBrain::new(api_key, model, max_tokens, system_prompt)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::OpenAI) => {
                 info!("Initializing OpenAI brain...");
-                OpenAIBrain::from_env()
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                OpenAIBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::Rig) => {
                 info!("Initializing Rig brain...");
-                RigBrain::from_env()
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                RigBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::Gemini) => {
                 info!("Initializing Gemini brain...");
-                GeminiBrain::from_env()
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                GeminiBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            None => {
-                Err(AgentError::ConfigurationError(format!("Unknown AI provider: {}", provider_str)))
-            }
+            None => Err(AgentError::ConfigurationError(format!(
+                "Unknown AI provider: {}",
+                provider_str
+            ))),
         }
     }
 
     /// Create an AgentBrain implementation with a custom system prompt
-    pub fn create_brain_with_system_prompt(system_prompt: String) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+    pub fn create_brain_with_system_prompt(
+        system_prompt: String,
+    ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
             "anthropic".to_string() // Default to Anthropic for new app
         });
-        info!("Attempting to use AI provider: {} with custom system prompt", provider_str);
+        info!(
+            "Attempting to use AI provider: {} with custom system prompt",
+            provider_str
+        );
         apply_provider_settings_to_env()?;
 
         match Provider::from_str(&provider_str) {
             Some(Provider::Anthropic) => {
                 info!("Initializing Anthropic brain with custom system prompt...");
-                let api_key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
+                let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+                    AgentError::ConfigurationError(
+                        "ANTHROPIC_API_KEY environment variable not set".to_string(),
+                    )
+                })?;
                 let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
+                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS")
+                    .ok()
+                    .and_then(|s| s.parse::<u32>().ok());
 
                 AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
@@ -615,25 +683,32 @@ impl BrainFactory {
             Some(Provider::OpenAI) => {
                 info!("Initializing OpenAI brain with custom system prompt...");
                 // TODO: Implement custom system prompt for OpenAI
-                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for OpenAI".to_string()));
+                return Err(AgentError::ConfigurationError(
+                    "Custom system prompts not yet implemented for OpenAI".to_string(),
+                ));
             }
             Some(Provider::Rig) => {
                 info!("Initializing Rig brain with custom system prompt...");
                 // TODO: Implement custom system prompt for Rig
-                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for Rig".to_string()));
+                return Err(AgentError::ConfigurationError(
+                    "Custom system prompts not yet implemented for Rig".to_string(),
+                ));
             }
             Some(Provider::Gemini) => {
                 info!("Initializing Gemini brain with custom system prompt...");
                 // TODO: Implement custom system prompt for Gemini
-                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for Gemini".to_string()));
+                return Err(AgentError::ConfigurationError(
+                    "Custom system prompts not yet implemented for Gemini".to_string(),
+                ));
             }
-            None => {
-                Err(AgentError::ConfigurationError(format!("Unknown AI provider: {}", provider_str)))
-            }
+            None => Err(AgentError::ConfigurationError(format!(
+                "Unknown AI provider: {}",
+                provider_str
+            ))),
         }
     }
 
-        /// Register all available computer use tools for the agent
+    /// Register all available computer use tools for the agent
     pub async fn register_computer_use_tools(
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
@@ -665,7 +740,12 @@ impl BrainFactory {
         register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
         // Register additional desktop automation tools (per-provider instance)
-        crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
+        crate::agent::tools::desktop_tools::register_desktop_tools(
+            provider,
+            state_manager.clone(),
+            app_handle.clone(),
+        )
+        .await;
 
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;

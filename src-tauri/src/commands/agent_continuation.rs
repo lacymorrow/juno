@@ -1,11 +1,11 @@
-use crate::state::AppState;
 use crate::agent::structs::AgentError;
+use crate::state::AppState;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, State, Emitter};
-use tokio::sync::{Mutex, oneshot};
-use tracing::{info, warn, error, debug};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::{oneshot, Mutex};
+use tracing::{debug, error, info, warn};
 
 /// Request for agent continuation when max iterations reached
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +33,8 @@ pub struct ContinuationManager {
     /// Continuation responses (approved/denied)
     responses: Arc<Mutex<HashMap<String, ContinuationResponse>>>,
     /// Notify agents waiting for continuation decisions (using oneshot channels)
-    continuation_notifiers: Arc<Mutex<HashMap<String, oneshot::Sender<Option<ContinuationResponse>>>>>,
+    continuation_notifiers:
+        Arc<Mutex<HashMap<String, oneshot::Sender<Option<ContinuationResponse>>>>>,
 }
 
 impl ContinuationManager {
@@ -95,10 +96,16 @@ impl ContinuationManager {
 
         if let Err(e) = app_handle.emit("agent-continuation-request", event_data) {
             error!("Failed to emit agent-continuation-request event: {}", e);
-            return Err(AgentError::Unknown(format!("Failed to request continuation: {}", e)));
+            return Err(AgentError::Unknown(format!(
+                "Failed to request continuation: {}",
+                e
+            )));
         }
 
-        info!("Requested continuation for execution {} at step {}/{}", execution_id, current_step, max_steps);
+        info!(
+            "Requested continuation for execution {} at step {}/{}",
+            execution_id, current_step, max_steps
+        );
 
         // Wait for user response (with timeout)
         let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes timeout
@@ -112,12 +119,16 @@ impl ContinuationManager {
                 error!("Oneshot channel error while waiting for continuation");
             }
             Err(_) => {
-                warn!("Timeout waiting for continuation response for execution {}", execution_id);
+                warn!(
+                    "Timeout waiting for continuation response for execution {}",
+                    execution_id
+                );
+                // Don't clean up immediately on timeout - allow a grace period for late responses
+                // The request will be cleaned up when a response comes or when the manager is reset
             }
         }
 
-        // Clean up on timeout or error
-        self.cleanup_request(&request_id).await;
+        // For timeout case, return None but don't clean up yet (allow grace period)
         Ok(None)
     }
 
@@ -145,14 +156,25 @@ impl ContinuationManager {
             let mut notifiers = self.continuation_notifiers.lock().await;
             if let Some(tx) = notifiers.remove(&request_id) {
                 if let Err(_) = tx.send(Some(response.clone())) {
-                    error!("Failed to send continuation response: receiver dropped");
-                    return Err("Failed to notify agent of continuation decision".to_string());
+                    warn!("Failed to send continuation response: receiver dropped (agent may have timed out)");
+                    // Don't return error - this is expected if agent timed out
+                    // Clean up the orphaned request
+                    self.cleanup_request(&request_id).await;
                 }
+            } else {
+                warn!(
+                    "No waiting agent found for continuation request: {} (may have timed out)",
+                    request_id
+                );
+                // Clean up orphaned request
+                self.cleanup_request(&request_id).await;
             }
         }
 
-        info!("Continuation response sent for request {}: approved={}, additional_steps={:?}",
-              request_id, approved, additional_steps);
+        info!(
+            "Continuation response sent for request {}: approved={}, additional_steps={:?}",
+            request_id, approved, additional_steps
+        );
         Ok(())
     }
 
@@ -196,7 +218,9 @@ pub async fn request_agent_continuation(
     app_handle: &AppHandle,
 ) -> Result<Option<ContinuationResponse>, AgentError> {
     let manager = get_continuation_manager();
-    manager.request_continuation(execution_id, current_step, max_steps, app_handle).await
+    manager
+        .request_continuation(execution_id, current_step, max_steps, app_handle)
+        .await
 }
 
 /// Tauri command: Respond to a continuation request
@@ -208,11 +232,15 @@ pub async fn respond_to_agent_continuation(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    info!("Received continuation response: request_id={}, approved={}, additional_steps={:?}",
-          request_id, approved, additional_steps);
+    info!(
+        "Received continuation response: request_id={}, approved={}, additional_steps={:?}",
+        request_id, approved, additional_steps
+    );
 
     let manager = get_continuation_manager();
-    manager.respond_to_continuation(request_id.clone(), approved, additional_steps).await?;
+    manager
+        .respond_to_continuation(request_id.clone(), approved, additional_steps)
+        .await?;
 
     // Emit event to notify other parts of the application
     let event_data = serde_json::json!({
@@ -248,9 +276,7 @@ pub async fn get_pending_continuation_requests(
 
 /// Tauri command: Check if there are any pending continuation requests
 #[tauri::command]
-pub async fn has_pending_continuation_requests(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn has_pending_continuation_requests(state: State<'_, AppState>) -> Result<bool, String> {
     let manager = get_continuation_manager();
     let requests = manager.get_pending_requests().await;
     Ok(!requests.is_empty())
