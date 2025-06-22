@@ -490,13 +490,22 @@ impl TimerEventHandler {
         drop(pending); // Release lock
 
         let mut processed = 0;
-        for timer in timers_to_process {
+        let mut timers_iter = timers_to_process.into_iter().enumerate();
+
+        for (_index, timer) in timers_iter.by_ref() {
             // Check if agent is still busy
             let agent_state = self.detect_agent_system_state().await?;
             if agent_state == AgentSystemState::ProcessingQuery {
-                // Put timer back in queue
+                // Re-queue current timer and all remaining timers
                 let mut pending = self.pending_timers.lock().await;
                 pending.push(timer);
+
+                // Re-queue all remaining timers that weren't processed
+                for (_, remaining_timer) in timers_iter {
+                    pending.push(remaining_timer);
+                }
+
+                info!("Agent became busy, re-queued {} unprocessed timers", pending.len());
                 break;
             }
 
