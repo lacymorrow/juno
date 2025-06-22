@@ -145,7 +145,8 @@ pub async fn reset_keyboard_shortcuts(
 
 /// Load keyboard shortcuts from centralized settings
 pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let settings_manager = app.state::<SettingsManager>();
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     match settings_manager.get_keyboard_shortcuts().await {
         Ok(settings_shortcuts) => {
@@ -170,7 +171,8 @@ pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &A
 
 /// Save keyboard shortcuts to centralized settings
 async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let settings_manager = app.state::<SettingsManager>();
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     let state_shortcuts = state.keyboard_shortcuts.lock()
         .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?
@@ -375,78 +377,21 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
 }
 
 /// Register the escape key for cancellation (only when something can be cancelled)
+/// This function now delegates to the centralized escape key coordinator
 pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
+    info!("[EscapeKey] Register escape key handler requested - delegating to coordinator");
 
-    // Increment the user count atomically
-    let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
-    info!("[EscapeKey] Registering escape key handler, user count: {}", user_count);
-
-    // Only register if not already registered
-    if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        match app_handle.global_shortcut().register(escape_shortcut) {
-            Ok(()) => {
-                ESCAPE_KEY_REGISTERED.store(true, Ordering::SeqCst);
-                info!("[EscapeKey] Successfully registered escape key for cancellation (users: {})", user_count);
-            },
-            Err(e) => {
-                // Rollback user count on failure
-                ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst);
-                error!("[EscapeKey] Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
-                return Err(format!("Failed to register escape key: {}", e));
-            }
-        }
-    } else {
-        info!("[EscapeKey] Escape key already registered, increased user count to: {}", user_count);
-    }
-
-    Ok(())
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    coordinator.register_escape_user(&app_handle, "legacy_shortcut_handler").await
 }
 
 /// Unregister the escape key (when nothing needs to be cancelled)
+/// This function now delegates to the centralized escape key coordinator
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
+    info!("[EscapeKey] Unregister escape key handler requested - delegating to coordinator");
 
-    // Atomically decrement the user count, preventing underflow
-    let user_count = ESCAPE_KEY_USERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-        if current > 0 {
-            Some(current - 1)
-        } else {
-            None
-        }
-    });
-
-    match user_count {
-        Ok(previous_count) => {
-            let new_count = previous_count - 1;
-            info!("[EscapeKey] Unregistering escape key handler, user count: {} -> {}", previous_count, new_count);
-
-            // Only unregister if no more users and currently registered
-            if new_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-                let escape_shortcut = Shortcut::new(None, Code::Escape);
-                match app_handle.global_shortcut().unregister(escape_shortcut) {
-                    Ok(()) => {
-                        ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
-                        info!("[EscapeKey] Successfully unregistered escape key - no more active users");
-                    },
-                    Err(e) => {
-                        // Rollback user count on failure
-                        ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
-                        warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
-                        // Don't return error for unregistration failures as it's not critical
-                    }
-                }
-            } else {
-                info!("[EscapeKey] Escape key still has {} users, keeping registered", new_count);
-            }
-        },
-        Err(_) => {
-            warn!("[EscapeKey] Attempted to unregister escape key with zero users");
-        }
-    }
-
-    Ok(())
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    coordinator.unregister_escape_user(&app_handle, "legacy_shortcut_handler").await
 }
 
 /// Get current escape key registration status (for debugging)
@@ -459,30 +404,13 @@ fn get_escape_key_status_internal() -> (bool, u32) {
 }
 
 /// Get current escape key registration status (for debugging) - Tauri command
+/// This function now delegates to the centralized escape key coordinator
 #[tauri::command]
 pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
-    let (is_registered, user_count) = get_escape_key_status_internal();
-    let description = if user_count == 0 {
-        "Escape key is not registered - passes through to other apps".to_string()
-    } else if user_count == 1 {
-        if is_registered {
-            "Escape key is registered for 1 user (agent or dictation)".to_string()
-        } else {
-            "ERROR: 1 user but not registered".to_string()
-        }
-    } else {
-        if is_registered {
-            format!("Escape key is registered for {} users (agent and dictation)", user_count)
-        } else {
-            format!("ERROR: {} users but not registered", user_count)
-        }
-    };
+    info!("[EscapeKey] Get escape key status requested - delegating to coordinator");
 
-    Ok(serde_json::json!({
-        "escape_key_registered": is_registered,
-        "user_count": user_count,
-        "description": description
-    }))
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    Ok(coordinator.get_status().await)
 }
 
 /// Register global shortcuts with proper error handling for missing permissions
@@ -493,32 +421,9 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     #[cfg(target_os = "macos")]
     {
         // On macOS, we need Input Monitoring permissions for global shortcuts
-        use std::process::Command;
-
-        let has_input_monitoring = check_input_monitoring_permissions().unwrap_or(false);
-        if !has_input_monitoring {
-            warn!("Input Monitoring permissions not granted - shortcuts may not work properly");
-
-            // Try to open System Settings for Input Monitoring
-            let output = Command::new("open")
-                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-                .output();
-
-            match output {
-                Ok(result) if result.status.success() => {
-                    info!("Opened System Settings for Input Monitoring permissions");
-                },
-                Ok(result) => {
-                    warn!("Failed to open System Settings: {}", String::from_utf8_lossy(&result.stderr));
-                },
-                Err(e) => {
-                    warn!("Failed to execute open command: {}", e);
-                }
-            }
-
-            // Return early but don't fail - app should still function
-            return Ok(());
-        }
+        // But for now, we'll proceed with registration and handle errors gracefully
+        // TODO: Implement proper IOHIDRequestAccess() check in the future
+        info!("macOS detected - proceeding with shortcut registration (permission check disabled for now)");
     }
 
     // Unregister existing shortcuts with error handling
@@ -537,10 +442,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode_toggle) {
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("Registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
+                info!("✅ Successfully registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
             },
             Err(e) => {
-                error!("Failed to register agent mode toggle shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode_toggle, e);
+                error!("❌ Failed to register agent mode toggle shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode_toggle, e);
                 // Don't fail - continue with other shortcuts
             }
         }
@@ -552,10 +457,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("Registered dictation input shortcut: {}", shortcuts.dictation_input);
+                info!("✅ Successfully registered dictation input shortcut: {}", shortcuts.dictation_input);
             },
             Err(e) => {
-                error!("Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
+                error!("❌ Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
                 // Don't fail - continue with other shortcuts
             }
         }
@@ -583,7 +488,7 @@ pub fn check_input_monitoring_permissions() -> Result<bool, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn check_input_monitoring_permissions() -> Result<bool, String> {
+pub fn check_input_monitoring_permissions() -> Result<bool, String> {
     Ok(true) // Always true on non-macOS platforms
 }
 

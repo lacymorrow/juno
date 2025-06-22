@@ -2,13 +2,11 @@
 
 // Import necessary external crates and standard library items
 use std::env;
-use std::sync::Arc;
 use tauri::{
-    AppHandle, Listener, Emitter, Manager,
+    AppHandle, Manager,
 };
 use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers}; // Global shortcuts
 use tracing::{info, error, warn};
-use std::sync::Mutex; // Added for VoiceController state access
 
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
@@ -291,6 +289,29 @@ use crate::commands::mcp::{
     check_mcp_prerequisites,
 };
 
+// Import collaborative AI commands explicitly
+use crate::commands::collaborative_ai_commands::{
+    design_collaborative_ai_system,
+    execute_collaborative_workflow,
+    get_collaborative_ai_capabilities,
+    get_collaborative_ai_statistics,
+    create_sample_collaborative_ai_request,
+    validate_collaborative_ai_request,
+    get_complexity_levels,
+};
+
+// Import Enhanced Visual Reasoning commands explicitly
+use crate::commands::enhanced_visual_reasoning_commands::{
+    analyze_gui_scene_with_visual_reasoning,
+    get_visual_reasoning_capabilities,
+    get_visual_reasoning_statistics,
+    create_sample_visual_analysis_request,
+    validate_visual_analysis_request,
+    get_scene_types,
+    test_visual_reasoning_engine,
+    initialize_visual_reasoning_state,
+};
+
 // Added for selector parsing
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
@@ -399,6 +420,8 @@ pub fn run() {
             events::shortcuts::handle_global_shortcut(app, shortcut, &event);
         }).build())
         .manage(app_state) // Manage the AppState
+        .manage(crate::commands::collaborative_ai_commands::initialize_collaborative_ai_state()) // Manage the Collaborative AI state
+        .manage(initialize_visual_reasoning_state()) // Manage the Enhanced Visual Reasoning state
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
@@ -757,7 +780,7 @@ pub fn run() {
             commands::testing::run_test_suite,
             commands::testing::run_human_comparison_benchmark,
             commands::testing::generate_benchmark_report,
-            
+
             // QA Commands - LLM-to-LLM Quality Assurance
             commands::qa_commands::run_agent_qa_cycle,
             commands::qa_commands::run_calibration_assessment,
@@ -766,6 +789,24 @@ pub fn run() {
             commands::qa_commands::get_qa_performance_dashboard,
             commands::qa_commands::get_calibration_metrics,
             commands::qa_commands::configure_qa_settings,
+
+            // Collaborative AI Commands
+            design_collaborative_ai_system,
+            execute_collaborative_workflow,
+            get_collaborative_ai_capabilities,
+            get_collaborative_ai_statistics,
+            create_sample_collaborative_ai_request,
+            validate_collaborative_ai_request,
+            get_complexity_levels,
+
+            // Enhanced Visual Reasoning Commands
+            analyze_gui_scene_with_visual_reasoning,
+            get_visual_reasoning_capabilities,
+            get_visual_reasoning_statistics,
+            create_sample_visual_analysis_request,
+            validate_visual_analysis_request,
+            get_scene_types,
+            test_visual_reasoning_engine,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

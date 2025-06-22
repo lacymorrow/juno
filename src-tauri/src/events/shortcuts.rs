@@ -56,50 +56,16 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 }
 
 /// Handle escape key shortcut - universal "cancel anything" button
-/// Only handles the key if we have registered it (meaning we have something to cancel)
+/// Uses the new escape key coordinator to prevent race conditions
 fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     if event.state() == ShortcutState::Pressed {
-        // First check if we should even be handling this escape key press
-        // If the escape key isn't registered or has no users, let it pass through to other apps
-        use std::sync::atomic::Ordering;
-        let is_registered = crate::commands::shortcuts::ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst);
-        let user_count = crate::commands::shortcuts::ESCAPE_KEY_USERS.load(Ordering::SeqCst);
-
-        if !is_registered || user_count == 0 {
-            info!("[Escape Key] Pressed but not registered for cancellation (users: {}) - ignoring to let other apps handle it", user_count);
-            return; // Let the escape key pass through to other applications
-        }
-
-        info!("[Escape Key] Pressed - checking for active operations to cancel (registered users: {})", user_count);
-
-        let app_state = app.state::<state::AppState>();
-
-        // Check what operations are currently active
-        let is_dictation_active = app_state.dictation_active.lock()
-            .map(|active| *active)
-            .unwrap_or(false);
-
-        let is_agent_active = !*app_state.cancel_rx.borrow();
-
-        // Always listening status
-        let is_always_listening_active = app_state.always_listening_active.lock()
-            .map(|active| *active)
-            .unwrap_or(false);
-
-        // Always call comprehensive stop_all_operations for consistency
-        // This ensures all operations are stopped regardless of state detection
-        info!("[Escape Key] Cancelling all operations (detected states - dictation: {}, agent: {}, always_listening: {})",
-              is_dictation_active, is_agent_active, is_always_listening_active);
+        info!("[Escape Key] Pressed - initiating coordinated stop");
 
         let app_handle_clone = app.clone();
         tauri::async_runtime::spawn(async move {
-            match crate::commands::stop_operations::stop_all_operations(app_handle_clone).await {
-                Ok(message) => {
-                    info!("[Escape Key] Successfully stopped all operations: {}", message);
-                }
-                Err(e) => {
-                    error!("[Escape Key] Failed to stop all operations: {}", e);
-                }
+            let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+            if let Err(e) = coordinator.stop_all_operations(&app_handle_clone, "Escape key pressed").await {
+                error!("[Escape Key] Failed to stop operations via coordinator: {}", e);
             }
         });
     }

@@ -36,6 +36,8 @@ pub mod memory;
 pub mod always_listening;
 pub mod notifications;
 pub mod stop_operations;
+pub mod stop_coordinator;
+pub mod escape_key_coordinator;
 pub mod onboarding;
 pub mod settings;
 pub mod tray_commands;
@@ -43,6 +45,8 @@ pub mod testing;
 pub mod ui_token_selection;
 pub mod error_recovery;
 pub mod qa_commands;
+pub mod collaborative_ai_commands;
+pub mod enhanced_visual_reasoning_commands;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -84,6 +88,8 @@ pub use self::ui_token_selection::*;
 pub use self::settings::*;
 pub use self::error_recovery::*;
 pub use self::qa_commands::*;
+pub use self::collaborative_ai_commands::*;
+pub use self::enhanced_visual_reasoning_commands::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

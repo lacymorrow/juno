@@ -1577,25 +1577,21 @@ pub async fn setup_tools(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Arc<tokio::sync::Mutex<LocalToolProvider>> {
-    // Set up MCP manager in the tool provider
+    // Set up MCP manager in the tool provider (lightweight operation)
     let mcp_manager = state.get_mcp_manager().await;
     provider.set_mcp_manager(mcp_manager);
 
-    // Register basic desktop tools
+    // Register basic desktop tools (core functionality)
     register_desktop_tools(provider, state.clone(), app_handle.clone()).await;
 
-    // Initialize MCP servers and refresh tools if needed
-    if let Err(e) = state.initialize_mcp_servers().await {
-        log::warn!("Failed to initialize MCP servers: {}", e);
-    } else {
-        log::info!("MCP servers initialized successfully");
+    // MCP servers are initialized at app startup via state_management.rs to avoid
+    // repeated initialization on every agent creation. Here we only refresh from cache.
 
-        // Refresh MCP tools to include them in the provider
-        if let Err(e) = provider.refresh_mcp_tools().await {
-            log::warn!("Failed to refresh MCP tools: {}", e);
-        } else {
-            log::debug!("MCP tools refreshed and available in tool provider");
-        }
+    // Refresh MCP tools from cache (fast operation - no network calls or server startup)
+    if let Err(e) = provider.refresh_mcp_tools().await {
+        log::warn!("Failed to refresh MCP tools from cache: {}", e);
+    } else {
+        log::debug!("MCP tools refreshed from cache for tool provider");
     }
 
     // Create the Arc<Mutex<>> wrapper for the provider
