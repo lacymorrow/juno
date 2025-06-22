@@ -1,20 +1,19 @@
+use crate::state::CancelReceiver; // Import the type alias
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
-use crate::state::CancelReceiver; // Import the type alias
 use uuid;
 
 use crate::agent::structs::{
-    AgentAction, AgentError, AgentState, Message, Role, // Removed ToolCall, ToolResult
-};
-use crate::agent::traits::{
-    AgentBrain,
-    AgentRunnable,
-    MemoryManager,
-    ToolProvider,
+    AgentAction,
+    AgentError,
+    AgentState,
+    Message,
+    Role, // Removed ToolCall, ToolResult
 };
 use crate::agent::tool_logger; // Added for logging
-use tauri::{AppHandle, Manager, Emitter}; // Added Manager trait for accessing app state
+use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
+use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -44,7 +43,10 @@ where
         max_steps: u32,
         app_handle: AppHandle, // Added AppHandle
     ) -> Self {
-        log::info!("DefaultAgentRunner::new created. max_steps: {}, current_step: 0 (hardcoded init)", max_steps);
+        log::info!(
+            "DefaultAgentRunner::new created. max_steps: {}, current_step: 0 (hardcoded init)",
+            max_steps
+        );
         DefaultAgentRunner {
             state: AgentState::Idle,
             memory: Arc::new(Mutex::new(memory)),
@@ -77,22 +79,29 @@ where
     }
 
     /// Filter tools based on brain type to prevent access to inappropriate tools
-    fn filter_tools_for_brain(&self, all_tools: &[crate::agent::structs::ToolDefinition]) -> Vec<crate::agent::structs::ToolDefinition> {
+    fn filter_tools_for_brain(
+        &self,
+        all_tools: &[crate::agent::structs::ToolDefinition],
+    ) -> Vec<crate::agent::structs::ToolDefinition> {
         // Check if this brain is an orchestrator by checking if it only has delegation tools
-        let has_delegation_tools = all_tools.iter().any(|tool|
-            tool.name.starts_with("delegate_to_")
-        );
+        let has_delegation_tools = all_tools
+            .iter()
+            .any(|tool| tool.name.starts_with("delegate_to_"));
 
         // If this tool provider has delegation tools, it's likely an orchestrator
         // Only allow delegation tools and basic coordination tools
         if has_delegation_tools {
-            let delegation_tool_count = all_tools.iter()
+            let delegation_tool_count = all_tools
+                .iter()
                 .filter(|tool| tool.name.starts_with("delegate_to_"))
                 .count();
 
             // If most tools are delegation tools, this is an orchestrator
-            if delegation_tool_count > 0 && (delegation_tool_count as f32 / all_tools.len() as f32) > 0.3 {
-                let filtered_tools: Vec<crate::agent::structs::ToolDefinition> = all_tools.iter()
+            if delegation_tool_count > 0
+                && (delegation_tool_count as f32 / all_tools.len() as f32) > 0.3
+            {
+                let filtered_tools: Vec<crate::agent::structs::ToolDefinition> = all_tools
+                    .iter()
                     .filter(|tool| {
                         // Allow delegation tools
                         if tool.name.starts_with("delegate_to_") {
@@ -101,9 +110,9 @@ where
 
                         // Allow basic coordination tools that orchestrators might need
                         match tool.name.as_str() {
-                            "analyze_task" | "plan_workflow" | "coordinate_agents" |
-                            "check_task_status" | "summarize_results" => true,
-                            _ => false
+                            "analyze_task" | "plan_workflow" | "coordinate_agents"
+                            | "check_task_status" | "summarize_results" => true,
+                            _ => false,
                         }
                     })
                     .cloned()
@@ -121,7 +130,11 @@ where
     }
 
     async fn transition_state(&mut self, new_state: AgentState) {
-        log::debug!("Agent state transition: {:?} -> {:?}", self.state, new_state);
+        log::debug!(
+            "Agent state transition: {:?} -> {:?}",
+            self.state,
+            new_state
+        );
         self.state = new_state;
         // TODO: Emit state change events if needed (e.g., for UI updates)
     }
@@ -179,16 +192,22 @@ where
             // --- Cancellation Check (Start of Loop) ---
             if *cancel_rx.borrow() {
                 log::info!("Agent run cancelled.");
-                self.transition_state(AgentState::Failed("Cancelled".to_string())).await;
+                self.transition_state(AgentState::Failed("Cancelled".to_string()))
+                    .await;
                 return Err(AgentError::Terminated);
             }
 
+            // Check max steps AFTER incrementing, so we get the full number of steps
             if self.current_step >= self.max_steps {
-                log::warn!("Reached maximum steps ({}), requesting continuation from user", self.max_steps);
+                log::warn!(
+                    "Reached maximum steps ({}), requesting continuation from user",
+                    self.max_steps
+                );
 
                 // Get current execution ID from AppState
                 let app_state = self.app_handle.state::<crate::state::AppState>();
-                let execution_id = app_state.get_current_agent_execution_id()
+                let execution_id = app_state
+                    .get_current_agent_execution_id()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
                 // Request continuation from user
@@ -196,15 +215,20 @@ where
                     execution_id.clone(),
                     self.current_step,
                     self.max_steps,
-                    &self.app_handle
-                ).await {
+                    &self.app_handle,
+                )
+                .await
+                {
                     Ok(Some(response)) => {
                         if response.approved {
                             // User approved continuation - extend max_steps
                             let additional_steps = response.additional_steps.unwrap_or(20); // Default 20 more steps
                             self.max_steps += additional_steps;
-                            log::info!("User approved continuation. Extended max steps to {} (+{} steps)",
-                                      self.max_steps, additional_steps);
+                            log::info!(
+                                "User approved continuation. Extended max steps to {} (+{} steps)",
+                                self.max_steps,
+                                additional_steps
+                            );
 
                             // Update AppState with new max steps
                             if let Ok(mut max_steps_guard) = app_state.agent_max_steps.lock() {
@@ -214,28 +238,38 @@ where
                             // Continue execution - don't return error
                         } else {
                             log::info!("User denied continuation. Terminating agent.");
-                            self.transition_state(AgentState::Failed("Continuation denied by user".to_string()))
-                                .await;
+                            self.transition_state(AgentState::Failed(
+                                "Continuation denied by user".to_string(),
+                            ))
+                            .await;
                             return Err(AgentError::MaxStepsReached);
                         }
                     }
                     Ok(None) => {
                         // Timeout or no response - terminate
-                        log::warn!("No response to continuation request (timeout). Terminating agent.");
-                        self.transition_state(AgentState::Failed("Max steps reached (no continuation response)".to_string()))
-                            .await;
+                        log::warn!(
+                            "No response to continuation request (timeout). Terminating agent."
+                        );
+                        self.transition_state(AgentState::Failed(
+                            "Max steps reached (no continuation response)".to_string(),
+                        ))
+                        .await;
                         return Err(AgentError::MaxStepsReached);
                     }
                     Err(e) => {
                         log::error!("Failed to request continuation: {}. Terminating agent.", e);
-                        self.transition_state(AgentState::Failed("Max steps reached (continuation error)".to_string()))
-                    .await;
-                return Err(AgentError::MaxStepsReached);
+                        self.transition_state(AgentState::Failed(
+                            "Max steps reached (continuation error)".to_string(),
+                        ))
+                        .await;
+                        return Err(AgentError::MaxStepsReached);
                     }
                 }
             }
 
-            log::info!("Agent step {} of {}", self.current_step + 1, self.max_steps);
+            // Increment step counter at the START of each iteration
+            self.current_step += 1;
+            log::info!("Agent step {} of {}", self.current_step, self.max_steps);
 
             // Update AppState with current step progress
             let app_state = self.app_handle.state::<crate::state::AppState>();
@@ -253,7 +287,7 @@ where
                     return Ok(final_response);
                 }
 
-                 AgentAction::RespondToUser(text) => {
+                AgentAction::RespondToUser(text) => {
                     log::info!("Agent intermediate response: {}", text);
                     // Add the assistant's response to memory
                     {
@@ -267,8 +301,8 @@ where
                         })
                         .await?;
                     }
-                     // Continue loop, keep thinking unless brain explicitly finishes
-                     self.transition_state(AgentState::Thinking).await;
+                    // Continue loop, keep thinking unless brain explicitly finishes
+                    self.transition_state(AgentState::Thinking).await;
                 }
                 AgentAction::Error(e) => {
                     let error_message = e.to_string();
@@ -277,15 +311,15 @@ where
                         .await;
                     return Err(e); // Propagate the error
                 }
-                 AgentAction::Think | AgentAction::ExecuteTool(_) => {
-                     // ExecuteTool is handled within step().
-                     // Think means continue the loop.
+                AgentAction::Think | AgentAction::ExecuteTool(_) => {
+                    // ExecuteTool is handled within step().
+                    // Think means continue the loop.
                     log::debug!("AgentAction::Think or handled ExecuteTool, continuing loop.");
                     self.transition_state(AgentState::Thinking).await; // Ensure state is Thinking
                 }
             }
 
-            self.current_step += 1;
+            // Step counter is incremented at the start of each iteration now
         }
     }
 
@@ -296,7 +330,7 @@ where
     ) -> Result<AgentAction, AgentError> {
         // --- Cancellation Check (Start of Step) ---
         if *cancel_rx.borrow() {
-             log::debug!("Cancellation detected at start of step.");
+            log::debug!("Cancellation detected at start of step.");
             return Err(AgentError::Terminated);
         }
 
@@ -312,25 +346,30 @@ where
         let tools = self.filter_tools_for_brain(&all_tools);
 
         // --- Log Thinking Step ---
-        tool_logger::log_thinking(&self.app_handle, "Deciding next action based on current messages and available tools...");
+        tool_logger::log_thinking(
+            &self.app_handle,
+            "Deciding next action based on current messages and available tools...",
+        );
 
         // --- Cancellation Check (Before Brain Action) ---
-         if *cancel_rx.borrow() {
-             log::debug!("Cancellation detected before brain action.");
-             return Err(AgentError::Terminated);
-         }
+        if *cancel_rx.borrow() {
+            log::debug!("Cancellation detected before brain action.");
+            return Err(AgentError::Terminated);
+        }
 
         // Check if brain supports streaming and use appropriate method
         let brain_action = if self.brain.supports_streaming() {
             // Brain supports streaming - generate a message ID and call streaming method
             let message_id = uuid::Uuid::new_v4().to_string();
             log::debug!("Using streaming brain with message ID: {}", message_id);
-            self.brain.decide_next_action_streaming(
-                &messages,
-                &tools,
-                Some((*self.app_handle).clone()),
-                Some(message_id)
-            ).await?
+            self.brain
+                .decide_next_action_streaming(
+                    &messages,
+                    &tools,
+                    Some((*self.app_handle).clone()),
+                    Some(message_id),
+                )
+                .await?
         } else {
             // Fall back to regular brain method
             log::debug!("Using non-streaming brain");
@@ -377,16 +416,25 @@ where
                 for (index, tool_call) in tool_calls.iter().enumerate() {
                     // --- Cancellation Check (Before Tool Execution) ---
                     if *cancel_rx.borrow() {
-                        log::info!("Cancellation detected before tool execution: {}", tool_call.name);
+                        log::info!(
+                            "Cancellation detected before tool execution: {}",
+                            tool_call.name
+                        );
 
                         // Add cancelled tool results for all remaining tool calls (including this one)
                         let mut mem = self.memory.lock().await;
-                        for (remaining_tool_call, cached_result) in tool_results_cache.iter().skip(index) {
+                        for (remaining_tool_call, cached_result) in
+                            tool_results_cache.iter().skip(index)
+                        {
                             if cached_result.is_none() {
-                                log::debug!("Adding cancelled tool result for tool: {}", remaining_tool_call.name);
+                                log::debug!(
+                                    "Adding cancelled tool result for tool: {}",
+                                    remaining_tool_call.name
+                                );
                                 mem.add_message(Message {
                                     role: Role::Tool,
-                                    content: "Tool execution was cancelled before completion.".to_string(),
+                                    content: "Tool execution was cancelled before completion."
+                                        .to_string(),
                                     tool_calls: None,
                                     tool_call_id: Some(remaining_tool_call.id.clone()),
                                     name: Some(remaining_tool_call.name.clone()),
@@ -408,11 +456,13 @@ where
                             tool_call.id.clone(),
                             tool_call.name.clone(),
                             tool_call.input.clone(),
-                            format!("Agent wants to execute tool: {}", tool_call.name)
+                            format!("Agent wants to execute tool: {}", tool_call.name),
                         );
 
                         // Add to pending approvals
-                        app_state.add_pending_tool_approval(approval_request.clone()).await;
+                        app_state
+                            .add_pending_tool_approval(approval_request.clone())
+                            .await;
 
                         // Emit tool approval request event to frontend
                         let approval_event = serde_json::json!({
@@ -423,7 +473,10 @@ where
                             "timestamp": approval_request.timestamp
                         });
 
-                        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+                        if let Err(e) = self
+                            .app_handle
+                            .emit("tool-approval-request", approval_event)
+                        {
                             log::error!("Failed to emit tool approval request: {}", e);
                             // Continue with execution if we can't emit the event
                         }
@@ -467,7 +520,11 @@ where
                         app_state.remove_tool_approval(&tool_call.id).await;
 
                         if !approved {
-                            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+                            let reason = if approval_timeout <= 0 {
+                                "timeout"
+                            } else {
+                                "user denied"
+                            };
                             log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
 
                             // Add tool result indicating rejection
@@ -491,7 +548,7 @@ where
                         &self.app_handle,
                         &tool_call.name,
                         tool_call.input.clone(),
-                        Some(format!("Executing tool: {}", tool_call.name))
+                        Some(format!("Executing tool: {}", tool_call.name)),
                     );
 
                     log::info!(
@@ -509,7 +566,10 @@ where
                     // --- Cancellation Check (After Tool Execution) ---
                     // Check even if tool execution failed, to ensure timely termination
                     if *cancel_rx.borrow() {
-                        log::info!("Cancellation detected after tool execution: {}", tool_call.name);
+                        log::info!(
+                            "Cancellation detected after tool execution: {}",
+                            tool_call.name
+                        );
 
                         // Add tool result for the current tool call (completed or failed)
                         let mut mem = self.memory.lock().await;
@@ -517,11 +577,15 @@ where
                             Ok(result) => {
                                 mem.add_message(Message {
                                     role: Role::Tool,
-                                    content: serde_json::to_string(&result.output)
-                                        .unwrap_or_else(|e| {
-                                            log::warn!("Failed to serialize tool output to JSON: {}", e);
+                                    content: serde_json::to_string(&result.output).unwrap_or_else(
+                                        |e| {
+                                            log::warn!(
+                                                "Failed to serialize tool output to JSON: {}",
+                                                e
+                                            );
                                             format!("{:?}", result.output)
-                                        }),
+                                        },
+                                    ),
                                     tool_calls: None,
                                     tool_call_id: Some(result.call_id),
                                     name: Some(tool_call.name.clone()),
@@ -541,12 +605,18 @@ where
                         }
 
                         // Add cancelled tool results for any remaining tool calls
-                        for (remaining_tool_call, cached_result) in tool_results_cache.iter().skip(index + 1) {
+                        for (remaining_tool_call, cached_result) in
+                            tool_results_cache.iter().skip(index + 1)
+                        {
                             if cached_result.is_none() {
-                                log::debug!("Adding cancelled tool result for remaining tool: {}", remaining_tool_call.name);
+                                log::debug!(
+                                    "Adding cancelled tool result for remaining tool: {}",
+                                    remaining_tool_call.name
+                                );
                                 mem.add_message(Message {
                                     role: Role::Tool,
-                                    content: "Tool execution was cancelled before completion.".to_string(),
+                                    content: "Tool execution was cancelled before completion."
+                                        .to_string(),
                                     tool_calls: None,
                                     tool_call_id: Some(remaining_tool_call.id.clone()),
                                     name: Some(remaining_tool_call.name.clone()),
@@ -565,7 +635,9 @@ where
                             log::debug!("Tool {} finished successfully.", tool_call.name);
 
                             // Emit tool call result event
-                            let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "screenshot" {
+                            let screenshot_base64 = if tool_call.name == "capture_screenshot"
+                                || tool_call.name == "screenshot"
+                            {
                                 result.output.as_str().map(|s| s.to_string())
                             } else {
                                 None
@@ -577,17 +649,21 @@ where
                                 result.output.clone(),
                                 true, // success
                                 Some(format!("Tool {} executed successfully", tool_call.name)),
-                                screenshot_base64
+                                screenshot_base64,
                             );
 
                             mem.add_message(Message {
                                 role: Role::Tool,
                                 // Prefer JSON string if possible, fallback to debug representation
-                                content: serde_json::to_string(&result.output)
-                                    .unwrap_or_else(|e| {
-                                        log::warn!("Failed to serialize tool output to JSON: {}", e);
+                                content: serde_json::to_string(&result.output).unwrap_or_else(
+                                    |e| {
+                                        log::warn!(
+                                            "Failed to serialize tool output to JSON: {}",
+                                            e
+                                        );
                                         format!("{:?}", result.output) // Fallback
-                                    }),
+                                    },
+                                ),
                                 tool_calls: None,
                                 tool_call_id: Some(result.call_id),
                                 name: Some(tool_call.name.clone()), // Often tool name goes here
@@ -604,7 +680,7 @@ where
                                 serde_json::json!({"error": e.to_string()}),
                                 false, // success = false
                                 Some(format!("Tool {} failed: {}", tool_call.name, e)),
-                                None
+                                None,
                             );
 
                             // Create error result message
@@ -622,32 +698,34 @@ where
                 }
 
                 // All tools completed successfully without cancellation
-                log::info!("All {} tool call(s) completed successfully", tool_calls.len());
+                log::info!(
+                    "All {} tool call(s) completed successfully",
+                    tool_calls.len()
+                );
 
                 // After executing all tools, transition back to Thinking for the next loop iteration
                 self.transition_state(AgentState::Thinking).await;
                 Ok(AgentAction::Think) // Indicate thinking should continue
             }
-             AgentAction::RespondToUser(response) => {
-                 self.transition_state(AgentState::Responding).await;
-                 // The run loop will add this response to memory if needed.
-                 Ok(AgentAction::RespondToUser(response))
-             }
-             AgentAction::Finish(response) => {
-                 // This action will terminate the loop when returned to run()
-                 Ok(AgentAction::Finish(response))
-             }
+            AgentAction::RespondToUser(response) => {
+                self.transition_state(AgentState::Responding).await;
+                // The run loop will add this response to memory if needed.
+                Ok(AgentAction::RespondToUser(response))
+            }
+            AgentAction::Finish(response) => {
+                // This action will terminate the loop when returned to run()
+                Ok(AgentAction::Finish(response))
+            }
 
-             AgentAction::Error(e) => {
-                 // Propagate the error up to the run loop
-                 Ok(AgentAction::Error(e))
-             }
-             AgentAction::Think => {
-                 // Brain explicitly requests thinking, keep state as Thinking
-                  self.transition_state(AgentState::Thinking).await;
-                 Ok(AgentAction::Think)
-             }
+            AgentAction::Error(e) => {
+                // Propagate the error up to the run loop
+                Ok(AgentAction::Error(e))
+            }
+            AgentAction::Think => {
+                // Brain explicitly requests thinking, keep state as Thinking
+                self.transition_state(AgentState::Thinking).await;
+                Ok(AgentAction::Think)
+            }
         }
     }
 }
-
