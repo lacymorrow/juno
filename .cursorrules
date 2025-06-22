@@ -29,12 +29,6 @@ Since you're working on a new app when you create a feature, focus on the featur
 ### Mandatory Compilation Check
 
 ```bash
-./scripts/quick-cargo-check.sh
-```
-
-OR
-
-```bash
 cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
 ```
 

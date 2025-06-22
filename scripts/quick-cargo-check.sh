@@ -9,10 +9,11 @@ output=$(cargo check --manifest-path src-tauri/Cargo.toml --message-format=short
 exit_code=$?
 
 if [ $exit_code -eq 0 ]; then
-    echo "✅ Compilation passed"
+	echo "✅ Compilation passed"
 else
-    echo "❌ Compilation failed:"
-    echo "$output" | grep -E "(error|warning):" | head -20
+	echo "❌ Compilation failed:"
+	echo "$output" | grep -E "(error|warning):" | head -20
+	exit 1
 fi
 
 exit $exit_code
