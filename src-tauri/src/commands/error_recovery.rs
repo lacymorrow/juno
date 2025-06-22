@@ -4,17 +4,18 @@
 //! including checkpoint management, rollback operations, and recovery statistics.
 
 use crate::agent::error_recovery::{
-    ErrorRecoveryManager, RecoveryConfig, ExecutionCheckpoint, RollbackInfo, AgentState
+    AgentState, ErrorRecoveryManager, ExecutionCheckpoint, RecoveryConfig, RollbackInfo,
 };
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{command, State};
 use tokio::sync::Mutex;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Global error recovery manager instance
-static ERROR_RECOVERY_MANAGER: std::sync::OnceLock<Arc<Mutex<ErrorRecoveryManager>>> = std::sync::OnceLock::new();
+static ERROR_RECOVERY_MANAGER: std::sync::OnceLock<Arc<Mutex<ErrorRecoveryManager>>> =
+    std::sync::OnceLock::new();
 
 /// Configuration for error recovery operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,11 +35,15 @@ impl From<ErrorRecoveryConfigDTO> for RecoveryConfig {
         Self {
             max_retries: dto.max_retries,
             base_retry_delay: std::time::Duration::from_millis(500),
-            max_retry_delay: std::time::Duration::from_secs(10),
+            max_retry_delay: std::time::Duration::from_secs(
+                crate::constants::timeouts::ERROR_RECOVERY_MAX_RETRY_DELAY_SECONDS,
+            ),
             enable_alternative_methods: dto.enable_alternative_methods,
             enable_llm_recovery: true,
             enable_user_escalation: dto.enable_user_escalation,
-            timeout_threshold: std::time::Duration::from_secs(30),
+            timeout_threshold: std::time::Duration::from_secs(
+                crate::constants::timeouts::ERROR_RECOVERY_TIMEOUT_THRESHOLD_SECONDS,
+            ),
             enable_checkpoints: dto.enable_checkpoints,
             max_checkpoints: dto.max_checkpoints,
             checkpoint_interval: dto.checkpoint_interval,
@@ -69,16 +74,14 @@ pub struct RollbackResult {
 
 /// Get or initialize the global error recovery manager
 async fn get_recovery_manager() -> Arc<Mutex<ErrorRecoveryManager>> {
-    ERROR_RECOVERY_MANAGER.get_or_init(|| {
-        Arc::new(Mutex::new(ErrorRecoveryManager::new()))
-    }).clone()
+    ERROR_RECOVERY_MANAGER
+        .get_or_init(|| Arc::new(Mutex::new(ErrorRecoveryManager::new())))
+        .clone()
 }
 
 /// Initialize the enhanced error recovery system
 #[command]
-pub async fn initialize_error_recovery(
-    app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn initialize_error_recovery(app_state: State<'_, AppState>) -> Result<String, String> {
     info!("Initializing Enhanced Error Recovery System");
 
     let manager = get_recovery_manager().await;
@@ -88,7 +91,10 @@ pub async fn initialize_error_recovery(
     manager_guard.reset_checkpoints();
 
     info!("Enhanced Error Recovery System initialized successfully");
-    Ok("Enhanced Error Recovery System initialized with checkpoint and rollback capabilities".to_string())
+    Ok(
+        "Enhanced Error Recovery System initialized with checkpoint and rollback capabilities"
+            .to_string(),
+    )
 }
 
 /// Create a new execution checkpoint
@@ -137,7 +143,10 @@ pub async fn rollback_to_checkpoint(
 
     match manager_guard.rollback_to_checkpoint(&checkpoint_id).await {
         Ok(rollback_info) => {
-            info!("Rollback completed successfully to checkpoint: {}", checkpoint_id);
+            info!(
+                "Rollback completed successfully to checkpoint: {}",
+                checkpoint_id
+            );
             Ok(RollbackResult {
                 success: true,
                 checkpoint_id: Some(rollback_info.checkpoint_id),
@@ -147,7 +156,10 @@ pub async fn rollback_to_checkpoint(
             })
         }
         Err(e) => {
-            error!("Failed to rollback to checkpoint '{}': {}", checkpoint_id, e);
+            error!(
+                "Failed to rollback to checkpoint '{}': {}",
+                checkpoint_id, e
+            );
             Ok(RollbackResult {
                 success: false,
                 checkpoint_id: Some(checkpoint_id),
@@ -242,10 +254,16 @@ pub async fn get_recovery_config(
         enable_checkpoints: config["enable_checkpoints"].as_bool().unwrap_or(true),
         max_checkpoints: config["max_checkpoints"].as_u64().unwrap_or(10) as usize,
         checkpoint_interval: config["checkpoint_interval"].as_u64().unwrap_or(3) as u32,
-        enable_automatic_rollback: config["enable_automatic_rollback"].as_bool().unwrap_or(true),
-        rollback_on_cascading_failures: config["rollback_on_cascading_failures"].as_bool().unwrap_or(true),
+        enable_automatic_rollback: config["enable_automatic_rollback"]
+            .as_bool()
+            .unwrap_or(true),
+        rollback_on_cascading_failures: config["rollback_on_cascading_failures"]
+            .as_bool()
+            .unwrap_or(true),
         max_retries: config["max_retries"].as_u64().unwrap_or(3) as usize,
-        enable_alternative_methods: config["enable_alternative_methods"].as_bool().unwrap_or(true),
+        enable_alternative_methods: config["enable_alternative_methods"]
+            .as_bool()
+            .unwrap_or(true),
         enable_user_escalation: config["enable_user_escalation"].as_bool().unwrap_or(false),
     })
 }
@@ -281,9 +299,7 @@ pub async fn list_checkpoints(
 
 /// Clear all checkpoints and reset state
 #[command]
-pub async fn reset_recovery_state(
-    app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn reset_recovery_state(app_state: State<'_, AppState>) -> Result<String, String> {
     info!("Resetting error recovery state");
 
     let manager = get_recovery_manager().await;
@@ -302,7 +318,10 @@ pub async fn test_error_recovery(
     app_state: State<'_, AppState>,
     error_type: String,
 ) -> Result<serde_json::Value, String> {
-    info!("Testing error recovery system with error type: {}", error_type);
+    info!(
+        "Testing error recovery system with error type: {}",
+        error_type
+    );
 
     let manager = get_recovery_manager().await;
     let manager_guard = manager.lock().await;
@@ -314,7 +333,9 @@ pub async fn test_error_recovery(
     let test_error = match error_type.as_str() {
         "element_not_found" => AgentError::ToolError("Element not found on screen".to_string()),
         "network_error" => AgentError::ToolError("Connection failed".to_string()),
-        "permission_denied" => AgentError::PermissionDenied("Accessibility permission required".to_string()),
+        "permission_denied" => {
+            AgentError::PermissionDenied("Accessibility permission required".to_string())
+        }
         "timeout" => AgentError::ToolError("Operation timed out".to_string()),
         "state_corruption" => AgentError::Unknown("Invalid state detected".to_string()),
         "cascading_failure" => AgentError::Unknown("Multiple related failures".to_string()),
@@ -322,7 +343,9 @@ pub async fn test_error_recovery(
     };
 
     let error_pattern = manager_guard.determine_error_pattern(&test_error);
-    let strategies = manager_guard.get_strategy_mappings().get(&error_pattern)
+    let strategies = manager_guard
+        .get_strategy_mappings()
+        .get(&error_pattern)
         .cloned()
         .unwrap_or_default();
 

@@ -2,14 +2,14 @@ use async_trait::async_trait;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use tokio::sync::{RwLock, Mutex};
 
-use crate::agent::core::{AgentError, Message, Role};
-use super::base_agent::{
-    SpecializedAgent, AgentType, Task, TaskResult, AgentCapability, AgentStatus, TaskPriority
-};
 use super::agent_factory::AgentRegistry;
+use super::base_agent::{
+    AgentCapability, AgentStatus, AgentType, SpecializedAgent, Task, TaskPriority, TaskResult,
+};
+use crate::agent::core::{AgentError, Message, Role};
 
 /// Enhanced configuration for the orchestrator with performance optimization
 #[derive(Debug, Clone)]
@@ -35,12 +35,14 @@ pub struct OrchestratorConfig {
 impl Default for OrchestratorConfig {
     fn default() -> Self {
         Self {
-            max_parallel_tasks: 12,  // Increased from 5 for better performance
-            task_timeout: Duration::from_secs(300),
+            max_parallel_tasks: 12, // Increased from 5 for better performance
+            task_timeout: Duration::from_secs(
+                crate::constants::agent::config::DEFAULT_TASK_TIMEOUT_SECONDS,
+            ),
             enable_task_splitting: true,
             enable_fallback_agents: true,
             min_confidence_threshold: 0.3,
-            max_queue_size: 100,  // Increased capacity
+            max_queue_size: 100, // Increased capacity
             queue_processing_interval: Duration::from_millis(250), // Faster processing
             // Performance optimization defaults
             enable_intelligent_batching: true,
@@ -193,7 +195,7 @@ impl Orchestrator {
         let task = Task {
             id: Uuid::new_v4().to_string(),
             description: user_input.clone(),
-            tool_calls: vec![], // Would be populated by LLM analysis
+            tool_calls: vec![],             // Would be populated by LLM analysis
             agent_type: AgentType::Desktop, // Default, would be determined by analysis
             priority: TaskPriority::Normal,
             dependencies: vec![],
@@ -207,11 +209,15 @@ impl Orchestrator {
         match self.delegate_task(task).await {
             Ok(result) => {
                 if result.success {
-                    Ok(format!("Task completed successfully: {}",
-                        result.output.as_str().unwrap_or("No output")))
+                    Ok(format!(
+                        "Task completed successfully: {}",
+                        result.output.as_str().unwrap_or("No output")
+                    ))
                 } else {
-                    Ok(format!("Task failed: {}",
-                        result.error.unwrap_or("Unknown error".to_string())))
+                    Ok(format!(
+                        "Task failed: {}",
+                        result.error.unwrap_or("Unknown error".to_string())
+                    ))
                 }
             }
             Err(e) => Err(e),
@@ -232,7 +238,11 @@ impl Orchestrator {
                     tool_calls: message.tool_calls.clone().unwrap_or_default(),
                     agent_type: self.determine_agent_type(&message.content).await,
                     priority: TaskPriority::Normal,
-                    dependencies: if i > 0 { vec![format!("task_{}", i - 1)] } else { vec![] },
+                    dependencies: if i > 0 {
+                        vec![format!("task_{}", i - 1)]
+                    } else {
+                        vec![]
+                    },
                     timeout: Some(self.config.task_timeout),
                     metadata: serde_json::json!({
                         "message_index": i,
@@ -293,12 +303,16 @@ impl Orchestrator {
                 } else {
                     // Check agent confidence if enabled
                     let confidence = agent.get_confidence_for_tool(
-                        &task.tool_calls.first()
+                        &task
+                            .tool_calls
+                            .first()
                             .map(|tc| tc.name.clone())
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
                     );
 
-                    if confidence < self.config.min_confidence_threshold && self.config.enable_fallback_agents {
+                    if confidence < self.config.min_confidence_threshold
+                        && self.config.enable_fallback_agents
+                    {
                         // Try to find a fallback agent
                         if let Some(fallback_agent) = self.find_fallback_agent(&task).await {
                             fallback_agent.handle_task(task.clone()).await
@@ -314,8 +328,9 @@ impl Orchestrator {
                 }
             }
             None => Err(AgentError::Other(format!(
-                "No suitable agent found for task: {}", task.description
-            )))
+                "No suitable agent found for task: {}",
+                task.description
+            ))),
         };
 
         let execution_time = start_time.elapsed();
@@ -372,9 +387,10 @@ impl Orchestrator {
         };
 
         // Insert based on priority (higher priority tasks go first)
-        let insert_position = queue.iter().position(|qt| {
-            qt.task.priority < task.priority
-        }).unwrap_or(queue.len());
+        let insert_position = queue
+            .iter()
+            .position(|qt| qt.task.priority < task.priority)
+            .unwrap_or(queue.len());
 
         queue.insert(insert_position, queued_task);
 
@@ -518,7 +534,10 @@ impl Orchestrator {
 
         tracing::info!(
             "Task {} cancelled: removed_from_queue={}, was_active={}, reason='{}'",
-            task_id, removed_from_queue, was_active, reason
+            task_id,
+            removed_from_queue,
+            was_active,
+            reason
         );
 
         Ok(removed_from_queue || was_active)
@@ -564,9 +583,10 @@ impl Orchestrator {
         let agents = self.registry.get_all_agents().await;
 
         for agent in agents {
-            if agent.agent_type() != task.agent_type &&
-               agent.can_handle_task(task).await &&
-               agent.is_available().await {
+            if agent.agent_type() != task.agent_type
+                && agent.can_handle_task(task).await
+                && agent.is_available().await
+            {
                 return Some(agent);
             }
         }
@@ -580,13 +600,15 @@ impl Orchestrator {
 
         // Simple keyword-based classification
         // In a full implementation, this would use more sophisticated analysis
-        if description_lower.contains("browser") ||
-           description_lower.contains("web") ||
-           description_lower.contains("navigate") {
+        if description_lower.contains("browser")
+            || description_lower.contains("web")
+            || description_lower.contains("navigate")
+        {
             AgentType::Browser
-        } else if description_lower.contains("file") ||
-                  description_lower.contains("command") ||
-                  description_lower.contains("system") {
+        } else if description_lower.contains("file")
+            || description_lower.contains("command")
+            || description_lower.contains("system")
+        {
             AgentType::System
         } else {
             AgentType::Desktop // Default fallback
@@ -620,34 +642,41 @@ impl Orchestrator {
             return "No results to merge".to_string();
         }
 
-        let successful_results: Vec<&TaskResult> = results.iter()
-            .filter(|r| r.success)
-            .collect();
+        let successful_results: Vec<&TaskResult> = results.iter().filter(|r| r.success).collect();
 
         if successful_results.is_empty() {
             return format!("All {} tasks failed", results.len());
         }
 
-        let mut response = format!("Completed {} out of {} tasks successfully:\n\n",
-            successful_results.len(), results.len());
+        let mut response = format!(
+            "Completed {} out of {} tasks successfully:\n\n",
+            successful_results.len(),
+            results.len()
+        );
 
         for (i, result) in successful_results.iter().enumerate() {
-            response.push_str(&format!("Task {}: {}\n",
+            response.push_str(&format!(
+                "Task {}: {}\n",
                 i + 1,
                 result.output.as_str().unwrap_or("No output")
             ));
         }
 
         if successful_results.len() < results.len() {
-            response.push_str(&format!("\n{} tasks failed.",
-                results.len() - successful_results.len()));
+            response.push_str(&format!(
+                "\n{} tasks failed.",
+                results.len() - successful_results.len()
+            ));
         }
 
         response
     }
 
     /// Execute multiple tasks in parallel with dependency management
-    pub async fn execute_parallel_tasks(&self, tasks: Vec<Task>) -> Result<Vec<TaskResult>, AgentError> {
+    pub async fn execute_parallel_tasks(
+        &self,
+        tasks: Vec<Task>,
+    ) -> Result<Vec<TaskResult>, AgentError> {
         // Industry-leading parallel execution with smart timeout policies
         let mut independent_tasks = Vec::new();
         let mut dependent_tasks = Vec::new();
@@ -665,11 +694,14 @@ impl Orchestrator {
 
         // Execute independent tasks in parallel (industry best practice)
         if !independent_tasks.is_empty() {
-            let parallel_futures: Vec<_> = independent_tasks.into_iter()
+            let parallel_futures: Vec<_> = independent_tasks
+                .into_iter()
                 .map(|task| {
                     let orchestrator = std::sync::Arc::new(self);
                     async move {
-                        orchestrator.execute_task_with_timeout(task, Duration::from_millis(800)).await
+                        orchestrator
+                            .execute_task_with_timeout(task, Duration::from_millis(800))
+                            .await
                     }
                 })
                 .collect();
@@ -677,8 +709,10 @@ impl Orchestrator {
             // Use timeout for critical path vs enhancement components
             let parallel_results = match tokio::time::timeout(
                 Duration::from_secs(5), // Max wait for parallel execution
-                futures::future::join_all(parallel_futures)
-            ).await {
+                futures::future::join_all(parallel_futures),
+            )
+            .await
+            {
                 Ok(results) => results,
                 Err(_) => {
                     log::warn!("Parallel task execution timed out - using graduated fallback");
@@ -690,7 +724,10 @@ impl Orchestrator {
                 match result {
                     Ok(task_result) => all_results.push(task_result),
                     Err(e) => {
-                        log::warn!("Parallel task failed: {} - continuing with degraded functionality", e);
+                        log::warn!(
+                            "Parallel task failed: {} - continuing with degraded functionality",
+                            e
+                        );
                         // Continue with other tasks instead of failing completely
                     }
                 }
@@ -702,7 +739,10 @@ impl Orchestrator {
             match self.execute_task_with_graduated_timeout(task).await {
                 Ok(result) => all_results.push(result),
                 Err(e) => {
-                    log::warn!("Dependent task failed: {} - applying graceful degradation", e);
+                    log::warn!(
+                        "Dependent task failed: {} - applying graceful degradation",
+                        e
+                    );
                     // Add a default result instead of failing
                     all_results.push(self.create_degraded_result(&e).await);
                 }
@@ -713,11 +753,19 @@ impl Orchestrator {
     }
 
     /// Execute task with industry-standard timeout policies
-    async fn execute_task_with_timeout(&self, task: Task, timeout: Duration) -> Result<TaskResult, AgentError> {
+    async fn execute_task_with_timeout(
+        &self,
+        task: Task,
+        timeout: Duration,
+    ) -> Result<TaskResult, AgentError> {
         match tokio::time::timeout(timeout, self.delegate_task(task.clone())).await {
             Ok(result) => result,
             Err(_) => {
-                log::warn!("Task {} timed out after {:?} - creating fallback result", task.id, timeout);
+                log::warn!(
+                    "Task {} timed out after {:?} - creating fallback result",
+                    task.id,
+                    timeout
+                );
                 Ok(TaskResult {
                     task_id: task.id.clone(),
                     agent_type: task.agent_type,
@@ -735,33 +783,42 @@ impl Orchestrator {
     }
 
     /// Graduated timeout strategy: try fast, then medium, then basic
-    async fn execute_task_with_graduated_timeout(&self, task: Task) -> Result<TaskResult, AgentError> {
+    async fn execute_task_with_graduated_timeout(
+        &self,
+        task: Task,
+    ) -> Result<TaskResult, AgentError> {
         // Try fast execution first (300ms for critical components)
-        if let Ok(result) = tokio::time::timeout(
-            Duration::from_millis(300),
-            self.delegate_task(task.clone())
-        ).await {
+        if let Ok(result) =
+            tokio::time::timeout(Duration::from_millis(300), self.delegate_task(task.clone())).await
+        {
             return result;
         }
 
-        log::info!("Fast execution failed for task {}, trying medium timeout", task.id);
+        log::info!(
+            "Fast execution failed for task {}, trying medium timeout",
+            task.id
+        );
 
         // Fall back to medium timeout (800ms for enhancement components)
-        if let Ok(result) = tokio::time::timeout(
-            Duration::from_millis(800),
-            self.delegate_task(task.clone())
-        ).await {
+        if let Ok(result) =
+            tokio::time::timeout(Duration::from_millis(800), self.delegate_task(task.clone())).await
+        {
             return result;
         }
 
-        log::info!("Medium execution failed for task {}, using basic fallback", task.id);
+        log::info!(
+            "Medium execution failed for task {}, using basic fallback",
+            task.id
+        );
 
         // Final fallback: basic response (industry standard for reliability)
         Ok(TaskResult {
             task_id: task.id.clone(),
             agent_type: task.agent_type,
             success: true,
-            output: serde_json::json!("I'm working on a more detailed response - here's a quick overview in the meantime"),
+            output: serde_json::json!(
+                "I'm working on a more detailed response - here's a quick overview in the meantime"
+            ),
             error: None,
             execution_time: Duration::from_millis(800),
             metadata: serde_json::json!({
@@ -772,7 +829,10 @@ impl Orchestrator {
     }
 
     /// Fallback strategy when parallel execution fails
-    async fn execute_fallback_strategy(&self, tasks: Vec<Task>) -> Result<Vec<TaskResult>, AgentError> {
+    async fn execute_fallback_strategy(
+        &self,
+        tasks: Vec<Task>,
+    ) -> Result<Vec<TaskResult>, AgentError> {
         log::info!("Executing fallback strategy for {} tasks", tasks.len());
 
         let mut results = Vec::new();
@@ -781,13 +841,21 @@ impl Orchestrator {
         let mut priority_tasks = tasks;
         priority_tasks.sort_by(|a, b| b.priority.cmp(&a.priority)); // Sort by priority desc
 
-        for (i, task) in priority_tasks.iter().take(3).enumerate() { // Limit to top 3 for performance
-            match self.execute_task_with_timeout(task.clone(), Duration::from_millis(500)).await {
+        for (i, task) in priority_tasks.iter().take(3).enumerate() {
+            // Limit to top 3 for performance
+            match self
+                .execute_task_with_timeout(task.clone(), Duration::from_millis(500))
+                .await
+            {
                 Ok(result) => results.push(result),
                 Err(_) => {
-                    results.push(self.create_degraded_result(&AgentError::Other(
-                        format!("Task {} degraded due to system load", task.id)
-                    )).await);
+                    results.push(
+                        self.create_degraded_result(&AgentError::Other(format!(
+                            "Task {} degraded due to system load",
+                            task.id
+                        )))
+                        .await,
+                    );
                 }
             }
 
@@ -817,14 +885,22 @@ impl Orchestrator {
     }
 
     /// NEW: Enhanced parallel task execution with intelligent batching
-    pub async fn execute_intelligent_parallel_tasks(&self, tasks: Vec<Task>) -> Result<Vec<TaskResult>, AgentError> {
+    pub async fn execute_intelligent_parallel_tasks(
+        &self,
+        tasks: Vec<Task>,
+    ) -> Result<Vec<TaskResult>, AgentError> {
         let start_time = Instant::now();
 
-        if !self.config.enable_intelligent_batching || tasks.len() < self.config.parallel_execution_threshold {
+        if !self.config.enable_intelligent_batching
+            || tasks.len() < self.config.parallel_execution_threshold
+        {
             return self.execute_parallel_tasks(tasks).await;
         }
 
-        tracing::info!("Starting intelligent parallel execution for {} tasks", tasks.len());
+        tracing::info!(
+            "Starting intelligent parallel execution for {} tasks",
+            tasks.len()
+        );
 
         // Step 1: Intelligent task analysis and grouping
         let task_groups = self.analyze_and_group_tasks(tasks).await;
@@ -842,19 +918,26 @@ impl Orchestrator {
         };
 
         for (batch_index, task_batch) in task_groups.into_iter().enumerate() {
-            tracing::debug!("Executing batch {} with {} tasks", batch_index, task_batch.len());
+            tracing::debug!(
+                "Executing batch {} with {} tasks",
+                batch_index,
+                task_batch.len()
+            );
 
             // Step 3: Adaptive timeout calculation
             let adaptive_timeout = self.calculate_adaptive_timeout(&task_batch).await;
 
             // Step 4: Execute batch with performance tracking
             let batch_start = Instant::now();
-            let batch_results = self.execute_batch_with_performance_tracking(task_batch, adaptive_timeout).await?;
+            let batch_results = self
+                .execute_batch_with_performance_tracking(task_batch, adaptive_timeout)
+                .await?;
 
             // Step 5: Update performance metrics
             let batch_time = batch_start.elapsed();
             performance_metrics.execution_time += batch_time;
-            performance_metrics.parallel_factor += batch_results.len() as f32 / batch_time.as_secs_f32();
+            performance_metrics.parallel_factor +=
+                batch_results.len() as f32 / batch_time.as_secs_f32();
 
             all_results.extend(batch_results);
 
@@ -876,7 +959,8 @@ impl Orchestrator {
             performance_metrics.parallel_factor
         );
 
-        self.update_performance_statistics(performance_metrics).await;
+        self.update_performance_statistics(performance_metrics)
+            .await;
         Ok(all_results)
     }
 
@@ -911,9 +995,12 @@ impl Orchestrator {
         }
 
         // Create optimized batches
-        self.create_optimized_batches(&mut task_groups, browser_tasks, "Browser").await;
-        self.create_optimized_batches(&mut task_groups, desktop_tasks, "Desktop").await;
-        self.create_optimized_batches(&mut task_groups, system_tasks, "System").await;
+        self.create_optimized_batches(&mut task_groups, browser_tasks, "Browser")
+            .await;
+        self.create_optimized_batches(&mut task_groups, desktop_tasks, "Desktop")
+            .await;
+        self.create_optimized_batches(&mut task_groups, system_tasks, "System")
+            .await;
 
         // Add remaining tasks
         if !current_batch.is_empty() {
@@ -929,12 +1016,19 @@ impl Orchestrator {
     }
 
     /// NEW: Create optimized batches for specific agent types
-    async fn create_optimized_batches(&self, task_groups: &mut Vec<Vec<Task>>, tasks: Vec<Task>, agent_type: &str) {
+    async fn create_optimized_batches(
+        &self,
+        task_groups: &mut Vec<Vec<Task>>,
+        tasks: Vec<Task>,
+        agent_type: &str,
+    ) {
         if tasks.is_empty() {
             return;
         }
 
-        let optimal_batch_size = self.calculate_optimal_batch_size_for_agent(agent_type).await;
+        let optimal_batch_size = self
+            .calculate_optimal_batch_size_for_agent(agent_type)
+            .await;
 
         for chunk in tasks.chunks(optimal_batch_size) {
             task_groups.push(chunk.to_vec());
@@ -958,12 +1052,14 @@ impl Orchestrator {
         // Agent-specific optimizations
         let agent_factor = match agent_type {
             "Browser" => 0.8, // Browser tasks are resource-intensive
-            "Desktop" => 1.0,  // Desktop tasks are balanced
-            "System" => 1.2,   // System tasks are lighter
+            "Desktop" => 1.0, // Desktop tasks are balanced
+            "System" => 1.2,  // System tasks are lighter
             _ => 1.0,
         };
 
-        ((base_batch_size as f32 * load_factor * agent_factor) as usize).max(1).min(8)
+        ((base_batch_size as f32 * load_factor * agent_factor) as usize)
+            .max(1)
+            .min(8)
     }
 
     /// NEW: Adaptive timeout calculation based on task characteristics
@@ -978,12 +1074,13 @@ impl Orchestrator {
 
         // Calculate adaptive timeout
         let adaptive_multiplier = task_complexity_factor * current_load_factor;
-        let adaptive_timeout = Duration::from_secs(
-            (base_timeout.as_secs() as f32 * adaptive_multiplier) as u64
-        );
+        let adaptive_timeout =
+            Duration::from_secs((base_timeout.as_secs() as f32 * adaptive_multiplier) as u64);
 
         // Ensure reasonable bounds
-        adaptive_timeout.max(Duration::from_secs(30)).min(Duration::from_secs(600))
+        adaptive_timeout
+            .max(Duration::from_secs(30))
+            .min(Duration::from_secs(600))
     }
 
     /// NEW: Analyze task complexity for timeout calculation
@@ -1000,8 +1097,8 @@ impl Orchestrator {
             // Factor in agent type complexity
             let agent_complexity = match task.agent_type {
                 AgentType::Browser => 1.3, // Browser tasks are more complex
-                AgentType::Desktop => 1.1,  // Desktop tasks are moderately complex
-                AgentType::System => 0.9,   // System tasks are simpler
+                AgentType::Desktop => 1.1, // Desktop tasks are moderately complex
+                AgentType::System => 0.9,  // System tasks are simpler
                 _ => 1.0,
             };
 
@@ -1034,7 +1131,8 @@ impl Orchestrator {
         let batch_start = Instant::now();
 
         // Execute tasks in parallel with sophisticated error handling
-        let futures: Vec<_> = tasks.into_iter()
+        let futures: Vec<_> = tasks
+            .into_iter()
             .map(|task| {
                 let task_id = task.id.clone();
                 async move {
@@ -1083,7 +1181,7 @@ impl Orchestrator {
         let queue = self.task_queue.lock().await;
 
         ResourceUsageMetrics {
-            cpu_utilization: 0.5, // Would be implemented with actual system monitoring
+            cpu_utilization: 0.5,   // Would be implemented with actual system monitoring
             memory_usage_mb: 256.0, // Would be implemented with actual memory monitoring
             active_agents: status.current_tasks,
             queue_depth: queue.len(),
@@ -1097,7 +1195,7 @@ impl Orchestrator {
         if resource_usage.cpu_utilization > 0.8 {
             Duration::from_millis(200) // Longer delay under high load
         } else if resource_usage.cpu_utilization < 0.4 {
-            Duration::from_millis(50)  // Shorter delay under low load
+            Duration::from_millis(50) // Shorter delay under low load
         } else {
             Duration::from_millis(100) // Standard delay
         }
@@ -1108,9 +1206,11 @@ impl Orchestrator {
         let mut status = self.status.write().await;
 
         // Update running averages
-        status.average_parallel_factor = (status.average_parallel_factor + metrics.parallel_factor) / 2.0;
+        status.average_parallel_factor =
+            (status.average_parallel_factor + metrics.parallel_factor) / 2.0;
         status.cache_hit_rate = (status.cache_hit_rate + metrics.cache_hit_rate) / 2.0;
-        status.agent_efficiency_score = (status.agent_efficiency_score + metrics.agent_efficiency) / 2.0;
+        status.agent_efficiency_score =
+            (status.agent_efficiency_score + metrics.agent_efficiency) / 2.0;
         status.throughput_per_minute = metrics.parallel_factor * 60.0;
         status.resource_utilization = metrics.resource_usage;
     }
@@ -1132,18 +1232,27 @@ impl Orchestrator {
     }
 
     /// NEW: Enhanced task splitting for complex requests
-    pub async fn intelligent_task_splitting(&self, complex_task: &Task) -> Result<Vec<Task>, AgentError> {
+    pub async fn intelligent_task_splitting(
+        &self,
+        complex_task: &Task,
+    ) -> Result<Vec<Task>, AgentError> {
         if !self.config.enable_task_splitting {
             return Ok(vec![complex_task.clone()]);
         }
 
-        tracing::info!("Analyzing task for intelligent splitting: {}", complex_task.description);
+        tracing::info!(
+            "Analyzing task for intelligent splitting: {}",
+            complex_task.description
+        );
 
         // Analyze task complexity and determine optimal splitting strategy
         let split_tasks = self.analyze_and_split_task(complex_task).await?;
 
         if split_tasks.len() > 1 {
-            tracing::info!("Task split into {} subtasks for optimal parallel execution", split_tasks.len());
+            tracing::info!(
+                "Task split into {} subtasks for optimal parallel execution",
+                split_tasks.len()
+            );
         } else {
             tracing::debug!("Task does not benefit from splitting");
         }
@@ -1177,7 +1286,8 @@ impl Orchestrator {
                 let window = &chars[i..i + indicator_chars.len()];
 
                 // Compare case-insensitively
-                let matches = window.iter()
+                let matches = window
+                    .iter()
                     .zip(indicator_chars.iter())
                     .all(|(c1, c2)| c1.to_lowercase().eq(c2.to_lowercase()));
 
@@ -1213,7 +1323,11 @@ impl Orchestrator {
                         tool_calls: vec![], // Will be populated by agent
                         agent_type: self.determine_agent_type(&subtask_description).await,
                         priority: task.priority.clone(),
-                        dependencies: if i == 0 { vec![] } else { vec![format!("{}-{}", task.id, i - 1)] },
+                        dependencies: if i == 0 {
+                            vec![]
+                        } else {
+                            vec![format!("{}-{}", task.id, i - 1)]
+                        },
                         timeout: task.timeout,
                         metadata: serde_json::json!({
                             "parent_task": task.id,
@@ -1316,19 +1430,33 @@ impl SpecializedAgent for Orchestrator {
             AgentCapability {
                 name: "Task Coordination".to_string(),
                 description: "Coordinate and delegate tasks to specialized agents".to_string(),
-                tool_patterns: vec!["orchestrate".to_string(), "coordinate".to_string(), "delegate".to_string()],
+                tool_patterns: vec![
+                    "orchestrate".to_string(),
+                    "coordinate".to_string(),
+                    "delegate".to_string(),
+                ],
                 confidence: 1.0,
             },
             AgentCapability {
                 name: "Multi-Agent Management".to_string(),
-                description: "Manage multiple specialized agents and their capabilities".to_string(),
-                tool_patterns: vec!["multi".to_string(), "agents".to_string(), "manage".to_string()],
+                description: "Manage multiple specialized agents and their capabilities"
+                    .to_string(),
+                tool_patterns: vec![
+                    "multi".to_string(),
+                    "agents".to_string(),
+                    "manage".to_string(),
+                ],
                 confidence: 1.0,
             },
             AgentCapability {
                 name: "Task Planning".to_string(),
-                description: "Analyze complex requests and break them into manageable tasks".to_string(),
-                tool_patterns: vec!["plan".to_string(), "analyze".to_string(), "break down".to_string()],
+                description: "Analyze complex requests and break them into manageable tasks"
+                    .to_string(),
+                tool_patterns: vec![
+                    "plan".to_string(),
+                    "analyze".to_string(),
+                    "break down".to_string(),
+                ],
                 confidence: 0.9,
             },
         ]
