@@ -1219,28 +1219,9 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     // Clone everything needed before the async task
     let content_clone = trimmed_content.to_string();
 
-    // Get TTS provider from app state
-    let tts_provider = {
-        let app_state = app_handle.state::<crate::state::AppState>();
-        app_state
-            .tts_provider
-            .lock()
-            .map(|provider| provider.clone())
-            .unwrap_or_else(|_| "system".to_string())
-    };
-
     tauri::async_runtime::spawn(async move {
         // Clone app handle for emit call
         let app_handle_for_emit = app_handle.clone();
-
-        // Check if TTS is disabled
-        if tts_provider.is_empty() || tts_provider.to_lowercase() == "off" {
-            info!(
-                "TTS is disabled (provider: {}), skipping immediate TTS",
-                tts_provider
-            );
-            return;
-        }
 
         // Filter TTS content to prevent code/unwanted content from being spoken
         let filtered_text = crate::tts::filter_tts_content(&content_clone);
@@ -1254,8 +1235,8 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
         // Register escape key for TTS cancellation
         crate::tts::register_tts_escape_key(&app_handle).await;
 
-        // Call TTS with fallback directly instead of going through the command interface
-        match crate::tts::invoke_tts_with_fallback(filtered_text, &tts_provider).await {
+        // Use invoke_tts to ensure reliability with automatic fallback
+        match crate::tts::invoke_tts(filtered_text, app_handle.state(), app_handle.clone()).await {
             Ok(audio_result) => {
                 if audio_result != "TTS_DISABLED_BY_SETTING"
                     && audio_result != "TTS_CONTENT_FILTERED"
