@@ -257,11 +257,6 @@ use crate::commands::keyboard::{
     type_text, press_key, global_type_text, hold_key, release_key,
 };
 
-// Import dev keyboard functions from dev module
-use crate::commands::dev::keyboard::{
-    dev_type_text, dev_press_key, dev_global_type_text, dev_hold_key, dev_release_key,
-};
-
 // Import MCP commands explicitly
 use crate::commands::mcp::{
     add_mcp_server, apply_mcp_quick_fixes, check_mcp_prerequisites, force_restart_all_mcp_servers,
@@ -470,18 +465,12 @@ pub fn run() {
             dev_get_focused_element_info,
             capture_element_screenshot_command,
             dev_click_focused_element,
-            // Production keyboard functions
+            // Keyboard functions (with integrated debug capabilities)
             type_text,
             press_key,
             global_type_text,
             hold_key,
             release_key,
-            // Development keyboard functions
-            dev_type_text,
-            dev_press_key,
-            dev_global_type_text,
-            dev_hold_key,
-            dev_release_key,
             dev_open_application,
             dev_open_url,
             dev_scroll_window,
