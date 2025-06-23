@@ -1051,13 +1051,19 @@ async fn execute_specialized_agent_task(
 
     info!("Executing {} agent task: {}", agent_type, task);
 
-    // Create a simple memory manager for the specialized agent
-    let mut specialist_memory =
-        crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+    // FIXED: Get the orchestrator's memory manager instead of creating a new one
+    // This preserves conversation context and fixes the "yes please" cohesion issue
+    let state = app_handle.state::<AppState>();
+    let memory_manager_arc = state.get_memory_manager().await;
+    let specialist_memory = {
+        let memory_guard = memory_manager_arc.lock().await;
+        memory_guard.clone()
+    };
 
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
-    if let Err(e) = specialist_memory.clean_orphaned_tool_calls().await {
+    let mut cloned_memory = specialist_memory;
+    if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
         warn!(
             "Failed to clean orphaned tool calls for {} agent: {}",
             agent_type, e
@@ -1071,9 +1077,9 @@ async fn execute_specialized_agent_task(
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };
 
-    // Create specialist agent runner with focused system prompt
+    // Create specialist agent runner with the shared memory (conversation context preserved)
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
-        specialist_memory,
+        cloned_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
         specialist_brain,
         agent::config::MAX_ITERATIONS, // Use same max iterations as orchestrator
