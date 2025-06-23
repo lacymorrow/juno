@@ -346,6 +346,44 @@ where
 
         let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
 
+        // FIXED: Emit tool result event to frontend for chat display
+        match &tool_result {
+            Ok(result) => {
+                // Extract screenshot if this is a screenshot tool
+                let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                    // For screenshot tools, the result output should contain base64 data
+                    if let Some(screenshot_data) = result.output.get("data") {
+                        screenshot_data.as_str().map(|s| s.to_string())
+                    } else if let Some(screenshot_str) = result.output.as_str() {
+                        Some(screenshot_str.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                crate::agent::tool_logger::log_tool_call_result(
+                    &self.app_handle,
+                    &tool_call.name,
+                    result.output.clone(),
+                    true,
+                    Some(format!("Tool {} executed successfully", tool_call.name)),
+                    screenshot_base64,
+                );
+            }
+            Err(error) => {
+                crate::agent::tool_logger::log_tool_call_result(
+                    &self.app_handle,
+                    &tool_call.name,
+                    serde_json::json!({"error": error.to_string()}),
+                    false,
+                    Some(format!("Tool {} failed: {}", tool_call.name, error)),
+                    None,
+                );
+            }
+        }
+
         // Cache result and add to memory
         tool_results_cache[tool_index].1 = Some(tool_result.clone());
         self.add_tool_result_to_memory(tool_call, tool_result).await?;
@@ -415,6 +453,31 @@ where
                 // Process all results and add to memory
                 for (i, result) in results.into_iter().enumerate() {
                     let tool_call = &batch[i];
+
+                    // FIXED: Emit tool result event to frontend for chat display
+                    // Extract screenshot if this is a screenshot tool
+                    let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                        // For screenshot tools, the result output should contain base64 data
+                        if let Some(screenshot_data) = result.output.get("data") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_str) = result.output.as_str() {
+                            Some(screenshot_str.to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    crate::agent::tool_logger::log_tool_call_result(
+                        &self.app_handle,
+                        &tool_call.name,
+                        result.output.clone(),
+                        true,
+                        Some(format!("MCP batched tool {} executed successfully", tool_call.name)),
+                        screenshot_base64,
+                    );
+
                     tool_results_cache[start_index + i].1 = Some(Ok(result.clone()));
                     self.add_tool_result_to_memory(tool_call, Ok(result)).await?;
                 }
@@ -422,6 +485,22 @@ where
             }
             Err(e) => {
                 log::error!("MCP batch execution failed: {}", e);
+
+                // FIXED: Emit failure events for all tools in the failed batch
+                for (i, tool_call) in batch.iter().enumerate() {
+                    crate::agent::tool_logger::log_tool_call_result(
+                        &self.app_handle,
+                        &tool_call.name,
+                        serde_json::json!({"error": e.to_string()}),
+                        false,
+                        Some(format!("MCP batched tool {} failed: {}", tool_call.name, e)),
+                        None,
+                    );
+
+                    tool_results_cache[start_index + i].1 = Some(Err(AgentError::ToolError(e.to_string())));
+                    self.add_tool_result_to_memory(tool_call, Err(AgentError::ToolError(e.to_string()))).await?;
+                }
+
                 // Fall back to sequential execution
                 self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
             }
@@ -461,6 +540,45 @@ where
             );
 
             let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+
+            // FIXED: Emit tool result event to frontend for chat display
+            match &tool_result {
+                Ok(result) => {
+                    // Extract screenshot if this is a screenshot tool
+                    let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                        // For screenshot tools, the result output should contain base64 data
+                        if let Some(screenshot_data) = result.output.get("data") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_str) = result.output.as_str() {
+                            Some(screenshot_str.to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    crate::agent::tool_logger::log_tool_call_result(
+                        &self.app_handle,
+                        &tool_call.name,
+                        result.output.clone(),
+                        true,
+                        Some(format!("Batched tool {} executed successfully", tool_call.name)),
+                        screenshot_base64,
+                    );
+                }
+                Err(error) => {
+                    crate::agent::tool_logger::log_tool_call_result(
+                        &self.app_handle,
+                        &tool_call.name,
+                        serde_json::json!({"error": error.to_string()}),
+                        false,
+                        Some(format!("Batched tool {} failed: {}", tool_call.name, error)),
+                        None,
+                    );
+                }
+            }
+
             tool_results_cache[start_index + i].1 = Some(tool_result.clone());
             self.add_tool_result_to_memory(tool_call, tool_result).await?;
         }
