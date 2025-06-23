@@ -7,6 +7,92 @@ use crate::utils::coordinates;
 use crate::constants::{timeouts, events};
 use super::send_dev_tool_notification;
 
+// Smooth mouse movement configuration
+const SMOOTH_MOVEMENT_FPS: u64 = 60; // 60 FPS for smooth movement
+const SMOOTH_MOVEMENT_FRAME_TIME_MS: u64 = 1000 / SMOOTH_MOVEMENT_FPS; // ~16.67ms per frame
+const DEFAULT_MOVEMENT_DURATION_MS: u64 = 300; // Default movement duration
+const MIN_MOVEMENT_DISTANCE: f64 = 5.0; // Minimum distance to trigger smooth movement
+
+// Helper function to perform smooth mouse movement with cursor highlighting
+async fn smooth_mouse_move(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    target_x: f64,
+    target_y: f64,
+    duration_ms: Option<u64>,
+) -> Result<(), String> {
+    let duration = duration_ms.unwrap_or(DEFAULT_MOVEMENT_DURATION_MS);
+
+    // Get current cursor position
+    let current_pos = match state.desktop.cursor_position() {
+        Ok(pos) => pos,
+        Err(e) => {
+            error!("Failed to get current cursor position: {}", e);
+            // If we can't get current position, just move directly
+            return match state.desktop.mouse_move(target_x, target_y) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Failed to move mouse: {}", e)),
+            };
+        }
+    };
+
+    let start_x = current_pos.0;
+    let start_y = current_pos.1;
+
+    // Calculate distance and check if smooth movement is needed
+    let distance = ((target_x - start_x).powi(2) + (target_y - start_y).powi(2)).sqrt();
+
+    // If distance is too small, just move directly
+    if distance < MIN_MOVEMENT_DISTANCE {
+        return match state.desktop.mouse_move(target_x, target_y) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Failed to move mouse: {}", e)),
+        };
+    }
+
+    // Start cursor highlighting
+    if let Err(e) = app.emit(events::ui::UI_CURSOR_HIGHLIGHT_START, (start_x, start_y)) {
+        error!("Failed to emit cursor highlight start: {}", e);
+    }
+
+    // Calculate number of frames needed
+    let total_frames = (duration / SMOOTH_MOVEMENT_FRAME_TIME_MS).max(1);
+
+    // Perform smooth movement with ease-out curve
+    for frame in 0..=total_frames {
+        let progress = frame as f64 / total_frames as f64;
+
+        // Ease-out curve: 1 - (1 - t)^3
+        let eased_progress = 1.0 - (1.0 - progress).powi(3);
+
+        let current_x = start_x + (target_x - start_x) * eased_progress;
+        let current_y = start_y + (target_y - start_y) * eased_progress;
+
+        // Move mouse to current position
+        if let Err(e) = state.desktop.mouse_move(current_x, current_y) {
+            error!("Failed to move mouse during smooth movement: {}", e);
+            // Continue with the movement even if one frame fails
+        }
+
+        // Emit cursor highlight move event
+        if let Err(e) = app.emit(events::ui::UI_CURSOR_HIGHLIGHT_MOVE, (current_x, current_y)) {
+            error!("Failed to emit cursor highlight move: {}", e);
+        }
+
+        // Wait for next frame (except on last frame)
+        if frame < total_frames {
+            tokio::time::sleep(tokio::time::Duration::from_millis(SMOOTH_MOVEMENT_FRAME_TIME_MS)).await;
+        }
+    }
+
+    // Stop cursor highlighting
+    if let Err(e) = app.emit(events::ui::UI_CURSOR_HIGHLIGHT_STOP, (target_x, target_y)) {
+        error!("Failed to emit cursor highlight stop: {}", e);
+    }
+
+    Ok(())
+}
+
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
     // Send an event to the frontend to display a visual indicator
@@ -367,6 +453,9 @@ pub(crate) async fn dev_right_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
     match state.desktop.right_click(x, y, modifier.as_deref()) {
         Ok(_) => {
@@ -393,6 +482,9 @@ pub(crate) async fn dev_middle_click(
 
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
+
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
 
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click (Adjusted from tools2 green)
     match state.desktop.middle_click(x, y, modifier.as_deref()) {
@@ -421,6 +513,9 @@ pub(crate) async fn dev_double_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
     match state.desktop.double_click(x, y, modifier.as_deref()) {
         Ok(_) => {
@@ -448,6 +543,9 @@ pub(crate) async fn dev_triple_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
     match state.desktop.triple_click(x, y, modifier.as_deref()) { // Use main's logic
         Ok(_) => {
@@ -469,14 +567,16 @@ pub(crate) async fn dev_mouse_move(
     x: f64,
     y: f64
 ) -> Result<(), String> {
-    info!("[DEV_TOOL] Moving mouse to ({}, {})...", x, y);
-    match state.desktop.mouse_move(x, y) { // Use main's logging style
+    info!("[DEV_TOOL] Moving mouse smoothly to ({}, {})...", x, y);
+
+    // Use smooth movement instead of direct movement
+    match smooth_mouse_move(&app, &state, x, y, None).await {
         Ok(_) => {
-            send_dev_tool_notification(&app, "Mouse Move", &format!("Moved mouse to ({}, {})", x, y))?;
+            send_dev_tool_notification(&app, "Mouse Move", &format!("Moved mouse smoothly to ({}, {})", x, y))?;
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to call mouse_move: {}", e);
+            let err_msg = format!("Failed to perform smooth mouse move: {}", e);
             error!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
@@ -491,6 +591,10 @@ pub(crate) async fn dev_left_mouse_down(
     y: f64
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Left mouse down at ({}, {})...", x, y);
+
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     match state.desktop.left_mouse_down(x, y) { // Use main's logging style
         Ok(_) => {
             send_dev_tool_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {})", x, y))?;
@@ -512,6 +616,10 @@ pub(crate) async fn dev_left_mouse_up(
     y: f64
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Left mouse up at ({}, {})...", x, y);
+
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     match state.desktop.left_mouse_up(x, y) { // Use main's logging style
         Ok(_) => {
             send_dev_tool_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {})", x, y))?;
@@ -538,6 +646,9 @@ pub(crate) async fn dev_left_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Perform smooth movement to target position first
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
     match state.desktop.left_click(x, y, modifier.as_deref()) { // Use main's version
         Ok(_) => {
@@ -562,14 +673,41 @@ pub(crate) async fn dev_left_click_drag(
     end_y: f64,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Left click drag from ({}, {}) to ({}, {})...", start_x, start_y, end_x, end_y);
-    match state.desktop.left_click_drag(start_x, start_y, end_x, end_y) { // Use main's logging style
+
+    // First, perform smooth movement to the start position
+    smooth_mouse_move(&app, &state, start_x, start_y, None).await?;
+
+    // Start cursor highlighting for drag operation
+    if let Err(e) = app.emit(events::ui::UI_CURSOR_HIGHLIGHT_START, (start_x, start_y)) {
+        error!("Failed to emit cursor highlight start for drag: {}", e);
+    }
+
+    // Perform mouse down at start position
+    if let Err(e) = state.desktop.left_mouse_down(start_x, start_y) {
+        let err_msg = format!("Failed to press mouse button at start position ({}, {}): {}", start_x, start_y, e);
+        error!("[DEV_TOOL] {}", err_msg);
+        return Err(err_msg);
+    }
+
+    // Small delay to ensure mouse down is registered
+    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_MICRO_DELAY_MS)).await;
+
+    // Perform smooth movement to end position while dragging
+    smooth_mouse_move(&app, &state, end_x, end_y, Some(400)).await?; // Slightly slower for drag
+
+    // Perform mouse up at end position
+    match state.desktop.left_mouse_up(end_x, end_y) {
         Ok(_) => {
-            send_dev_tool_notification(&app, "Mouse Action", &format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y))?;
+            // Stop cursor highlighting
+            if let Err(e) = app.emit(events::ui::UI_CURSOR_HIGHLIGHT_STOP, (end_x, end_y)) {
+                error!("Failed to emit cursor highlight stop for drag: {}", e);
+            }
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Dragged smoothly from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y))?;
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to call left_click_drag: {}", e);
-            error!("[DEV_TOOL] Error: {}", err_msg);
+            let err_msg = format!("Failed to release mouse button at end position ({}, {}): {}", end_x, end_y, e);
+            error!("[DEV_TOOL] {}", err_msg);
             Err(err_msg)
         }
     }
