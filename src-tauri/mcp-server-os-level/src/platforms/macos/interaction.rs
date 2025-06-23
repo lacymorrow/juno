@@ -296,6 +296,7 @@ pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
 }
 
 /// Move the mouse cursor to the specified coordinates.
+/// This is now a simple atomic move - smooth movement is handled at the command level.
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;

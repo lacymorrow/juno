@@ -20,7 +20,6 @@ import {
   Info,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SettingsSectionProps } from "../types";
 
 // Permission status interface matching backend (from Onboarding)
 interface PermissionStatus {
@@ -238,7 +237,7 @@ function PermissionCard({
   );
 }
 
-export default function SecuritySettings({ settings }: SettingsSectionProps) {
+export default function SecuritySettings() {
   // State for granular permissions (from Onboarding)
   const [permissionsState, setPermissionsState] =
     useState<PermissionsState | null>(null);
