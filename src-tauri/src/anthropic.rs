@@ -1095,6 +1095,13 @@ async fn execute_specialized_agent_task(
             // Check if the result contains JSX content
             let is_jsx = is_jsx_content(&result);
 
+            // Determine if the specialist actually handled user communication
+            // User communication is considered handled if:
+            // 1. The result contains JSX content (visual components for user)
+            // 2. The result contains substantial text content (more than just status messages)
+            // 3. The result is not just a simple success/failure indicator
+            let user_communication_handled = is_jsx || (result.len() > 50 && !result.trim().is_empty());
+
             if is_jsx {
                 // If the result contains JSX, return it directly to preserve JSX rendering
                 info!(
@@ -1112,15 +1119,19 @@ async fn execute_specialized_agent_task(
                     "message": format!("{} agent completed the task successfully with visual components", agent_type)
                 }))
             } else {
-                // Standard non-JSX response
-                // Log communication handling for debugging
-                info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
+                // Standard non-JSX response - check if it contains meaningful user communication
+                if user_communication_handled {
+                    info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
+                } else {
+                    info!("Specialist {} agent completed background task - orchestrator should provide user feedback", agent_type);
+                }
+
                 Ok(serde_json::json!({
                     "success": true,
                     "agent_type": agent_type,
                     "result": result,
                     "is_jsx": false,
-                    "user_communication_handled": true, // Signal that specialist handled user communication
+                    "user_communication_handled": user_communication_handled,
                     "message": format!("{} agent completed the task successfully", agent_type)
                 }))
             }
