@@ -4,14 +4,12 @@ import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { ModelSelector } from "@/components/ModelSelector";
 import { AgentModeSelector } from "@/components/AgentModeSelector";
 import { ProviderSelector } from "@/components/ProviderSelector";
-import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
-  Bug,
 } from "lucide-react";
 
 // Type for view state
@@ -34,8 +32,6 @@ export function AppHeader({
   onViewChange,
   onToggleDevPanel,
 }: AppHeaderProps) {
-  const settings = useSettings();
-
   return (
     <header className="flex items-center py-1 px-2 border-b min-h-[40px]">
       <div className="flex items-center gap-2 flex-shrink-0">

@@ -20,13 +20,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
-import type { ClickQAResult, CoordinateTestResult } from "@/types/devtools";
-
-interface ClickSeriesPosition {
-  x: number;
-  y: number;
-  click_type: string;
-}
+import type { ClickQAResult } from "@/types/devtools";
 
 const ClickQATestPanel: React.FC = () => {
   // Individual click test state
