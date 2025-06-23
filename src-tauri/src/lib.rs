@@ -253,9 +253,8 @@ use crate::commands::{
 };
 
 // Import keyboard functions directly from keyboard module
-use crate::commands::keyboard::{
-    type_text, press_key, global_type_text, hold_key, release_key,
-};
+// Note: Keyboard functions are accessed through Anthropic computer use tools,
+// not as direct Tauri commands, so no import needed here
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
@@ -465,12 +464,7 @@ pub fn run() {
             dev_get_focused_element_info,
             capture_element_screenshot_command,
             dev_click_focused_element,
-            // Keyboard functions (with integrated debug capabilities)
-            type_text,
-            press_key,
-            global_type_text,
-            hold_key,
-            release_key,
+            // Keyboard functions are imported via use statement above (line 256)
             dev_open_application,
             dev_open_url,
             dev_scroll_window,
