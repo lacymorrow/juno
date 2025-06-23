@@ -376,12 +376,22 @@ async fn execute_agent_internal(
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
 
-    // Clean up any orphaned tool calls from previous cancelled executions
-    // This prevents LLM errors when tool calls don't have corresponding results
+    // Clean up orphaned tool calls before starting
     {
         let mut memory_manager = memory_manager_arc.lock().await;
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
             warn!("Failed to clean orphaned tool calls: {}", e);
+        }
+
+        // Also clean up orphaned tool results that have no corresponding tool calls
+        match memory_manager.clean_orphaned_tool_results().await {
+            Ok(cleaned_count) if cleaned_count > 0 => {
+                info!("Cleaned {} orphaned tool results before agent execution", cleaned_count);
+            }
+            Ok(_) => {} // No orphaned results found
+            Err(e) => {
+                warn!("Failed to clean orphaned tool results: {}", e);
+            }
         }
     }
 
