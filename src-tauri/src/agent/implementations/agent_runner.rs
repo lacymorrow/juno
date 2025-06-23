@@ -484,24 +484,13 @@ where
                 Ok(true)
             }
             Err(e) => {
-                log::error!("MCP batch execution failed: {}", e);
+                log::error!("MCP batch execution failed: {}. Falling back to sequential execution.", e);
 
-                // FIXED: Emit failure events for all tools in the failed batch
-                for (i, tool_call) in batch.iter().enumerate() {
-                    crate::agent::tool_logger::log_tool_call_result(
-                        &self.app_handle,
-                        &tool_call.name,
-                        serde_json::json!({"error": e.to_string()}),
-                        false,
-                        Some(format!("MCP batched tool {} failed: {}", tool_call.name, e)),
-                        None,
-                    );
+                // FIXED: Don't add error results to cache/memory when falling back to sequential execution
+                // This prevents duplicate tool executions and conflicting results
+                // The sequential execution will handle the actual tool execution and results
 
-                    tool_results_cache[start_index + i].1 = Some(Err(AgentError::ToolError(e.to_string())));
-                    self.add_tool_result_to_memory(tool_call, Err(AgentError::ToolError(e.to_string()))).await?;
-                }
-
-                // Fall back to sequential execution
+                // Fall back to sequential execution without polluting cache/memory
                 self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
             }
         }
