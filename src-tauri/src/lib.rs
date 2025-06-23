@@ -535,11 +535,16 @@ pub fn run() {
             dev_set_file_content,
             save_agent_response,
             // Text Editor Commands
-            dev_text_editor_view,
-            dev_text_editor_create,
-            dev_text_editor_str_replace,
-            dev_text_editor_insert,
-            dev_text_editor_undo_edit,
+            commands::text_editor::dev_text_editor_view,
+            commands::text_editor::text_editor_view,
+            commands::text_editor::dev_text_editor_create,
+            commands::text_editor::text_editor_create,
+            commands::text_editor::dev_text_editor_str_replace,
+            commands::text_editor::text_editor_str_replace,
+            commands::text_editor::dev_text_editor_insert,
+            commands::text_editor::text_editor_insert,
+            commands::text_editor::dev_text_editor_undo_edit,
+            commands::text_editor::text_editor_undo_edit,
             // Provider Management Commands
             get_providers,
             get_active_provider,
@@ -824,6 +829,30 @@ pub fn run() {
             commands::self_improvement::run_performance_benchmarks,
             commands::self_improvement::get_system_health_metrics,
             commands::self_improvement::get_available_benchmarks,
+            // Element operations
+            commands::element::dev_get_focused_element_info,
+            commands::element::get_focused_element_info,
+            commands::element::dev_click_focused_element,
+            commands::element::click_focused_element,
+            commands::element::dev_find_element_by_selector,
+            commands::element::find_element_by_selector,
+            commands::element::dev_click_element_by_selector,
+            commands::element::click_element_by_selector,
+            commands::element::dev_get_selected_text,
+            commands::element::get_selected_text,
+            commands::element::capture_element_screenshot_command,
+            // Filesystem operations
+            commands::filesystem::dev_list_files,
+            commands::filesystem::list_files,
+            commands::filesystem::dev_get_file_content,
+            commands::filesystem::get_file_content,
+            commands::filesystem::dev_set_file_content,
+            commands::filesystem::set_file_content,
+            // Application and URL operations
+            commands::app_url::dev_open_application,
+            commands::app_url::open_application,
+            commands::app_url::dev_open_url,
+            commands::app_url::open_url,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

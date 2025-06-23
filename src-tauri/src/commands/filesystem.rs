@@ -6,6 +6,7 @@ use tracing::info;
 use html_escape;
 use chrono;
 
+use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 use crate::commands::send_dev_tool_notification;
 use crate::state::AppState;
 
@@ -16,20 +17,31 @@ struct FileEntry {
     // Consider adding other fields like size, modified_date if needed in the future
 }
 
+// =============================================================================
+// CONSOLIDATED PRODUCTION COMMANDS WITH DEBUG FEATURES
+// =============================================================================
+
 #[tauri::command]
-pub async fn dev_list_files(
+pub async fn list_files(
     app: AppHandle,
-    _state: State<'_, AppState>, // _state might be needed later for config or context
-    path_str: String, // Renamed from path to path_str to avoid conflict with std::path
+    state: State<'_, AppState>,
+    path_str: String,
+    debug_mode: Option<bool>
 ) -> Result<String, String> {
-    info!("[DEV_TOOL] Listing files for input path: {}", path_str);
+    let debug = should_enable_debug(&state, debug_mode);
+
+    if debug {
+        log_debug_operation("list_files", &format!("Listing files for path: {}", path_str));
+    }
+
+    let start_time = std::time::Instant::now();
 
     let expanded_path = if path_str.starts_with("~") {
         match dirs::home_dir() {
             Some(home) => {
                 if path_str == "~" {
                     home
-                } else if path_str.starts_with("~/" ){
+                } else if path_str.starts_with("~/") {
                     home.join(&path_str[2..])
                 } else {
                     PathBuf::from(path_str.clone())
@@ -37,12 +49,10 @@ pub async fn dev_list_files(
             }
             None => {
                 let err_msg = "Failed to resolve home directory for path starting with ~".to_string();
-                info!("[DEV_TOOL] Error: {}", err_msg);
-                send_dev_tool_notification(
-                    &app,
-                    "List Files Error",
-                    &err_msg,
-                )?;
+                if debug {
+                    log_debug_operation("list_files", &format!("Error: {}", err_msg));
+                    send_debug_notification(&app, "List Files Error", &err_msg)?;
+                }
                 return Err(err_msg);
             }
         }
@@ -50,28 +60,23 @@ pub async fn dev_list_files(
         PathBuf::from(path_str.clone())
     };
 
-    info!("[DEV_TOOL] Expanded path to list: {:?}", expanded_path);
     let path_to_list = expanded_path.as_path();
 
     if !path_to_list.exists() {
         let err_msg = format!("Path does not exist: {:?}", path_to_list);
-        info!("[DEV_TOOL] Error: {}", err_msg);
-        send_dev_tool_notification(
-            &app,
-            "List Files Error",
-            &format!("Path not found: {:?}", path_to_list),
-        )?;
+        if debug {
+            log_debug_operation("list_files", &format!("Error: {}", err_msg));
+            send_debug_notification(&app, "List Files Error", &format!("Path not found: {:?}", path_to_list))?;
+        }
         return Err(err_msg);
     }
 
     if !path_to_list.is_dir() {
         let err_msg = format!("Path is not a directory: {:?}", path_to_list);
-        info!("[DEV_TOOL] Error: {}", err_msg);
-        send_dev_tool_notification(
-            &app,
-            "List Files Error",
-            &format!("Not a directory: {:?}", path_to_list),
-        )?;
+        if debug {
+            log_debug_operation("list_files", &format!("Error: {}", err_msg));
+            send_debug_notification(&app, "List Files Error", &format!("Not a directory: {:?}", path_to_list))?;
+        }
         return Err(err_msg);
     }
 
@@ -92,57 +97,62 @@ pub async fn dev_list_files(
                         });
                     }
                     Err(e) => {
-                        info!("[DEV_TOOL] Error reading directory entry in {:?}: {}", path_to_list, e);
+                        if debug {
+                            log_debug_operation("list_files", &format!("Error reading directory entry: {}", e));
+                        }
                     }
                 }
             }
 
             match serde_json::to_string_pretty(&file_entries) {
                 Ok(json_string) => {
-                    send_dev_tool_notification(
-                        &app,
-                        "List Files",
-                        &format!("Listed {} items in {:?}", file_entries.len(), path_to_list),
-                    )?;
+                    if debug {
+                        time_operation("list_files", start_time);
+                        send_debug_notification(&app, "List Files", &format!("Listed {} items in {:?}", file_entries.len(), path_to_list))?;
+                    }
                     Ok(json_string)
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to serialize file list for {:?}: {}", path_to_list, e);
-                    info!("[DEV_TOOL] Error: {}", err_msg);
+                    if debug {
+                        log_debug_operation("list_files", &format!("Error: {}", err_msg));
+                    }
                     Err(err_msg)
                 }
             }
         }
         Err(e) => {
             let err_msg = format!("Failed to read directory '{:?}': {}", path_to_list, e);
-            info!("[DEV_TOOL] Error: {}", err_msg);
-            send_dev_tool_notification(
-                &app,
-                "List Files Error",
-                &format!("Failed to read dir {:?}: {}", path_to_list, e),
-            )?;
+            if debug {
+                log_debug_operation("list_files", &format!("Error: {}", err_msg));
+                send_debug_notification(&app, "List Files Error", &format!("Failed to read dir {:?}: {}", path_to_list, e))?;
+            }
             Err(err_msg)
         }
     }
 }
 
 #[tauri::command]
-pub async fn dev_get_file_content(
+pub async fn get_file_content(
     app: AppHandle,
-    _state: State<'_, AppState>,
-    path_str: String, // Use path_str for consistency
+    state: State<'_, AppState>,
+    path_str: String,
+    debug_mode: Option<bool>
 ) -> Result<String, String> {
-    info!("[DEV_TOOL] Getting content for file: {}", path_str);
+    let debug = should_enable_debug(&state, debug_mode);
+
+    if debug {
+        log_debug_operation("get_file_content", &format!("Getting content for file: {}", path_str));
+    }
+
+    let start_time = std::time::Instant::now();
 
     let expanded_path = if path_str.starts_with("~") {
         match dirs::home_dir() {
             Some(home) => {
                 if path_str == "~" {
-                    // Technically, listing home dir as file content is an error, but path expansion is generic.
-                    // The function should ideally check if it's a file before reading.
-                    // For now, let it proceed and fail at read_to_string if it's a directory.
                     home
-                } else if path_str.starts_with("~/" ){
+                } else if path_str.starts_with("~/") {
                     home.join(&path_str[2..])
                 } else {
                     PathBuf::from(path_str.clone())
@@ -150,8 +160,10 @@ pub async fn dev_get_file_content(
             }
             None => {
                 let err_msg = "Failed to resolve home directory for path starting with ~".to_string();
-                info!("[DEV_TOOL] Error: {}", err_msg);
-                send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+                if debug {
+                    log_debug_operation("get_file_content", &format!("Error: {}", err_msg));
+                    send_debug_notification(&app, "Get Content Error", &err_msg)?;
+                }
                 return Err(err_msg);
             }
         }
@@ -159,60 +171,73 @@ pub async fn dev_get_file_content(
         PathBuf::from(path_str.clone())
     };
 
-    info!("[DEV_TOOL] Expanded path to read: {:?}", expanded_path);
     let file_path = expanded_path.as_path();
 
     if !file_path.exists() {
         let err_msg = format!("File does not exist: {:?}", file_path);
-        info!("[DEV_TOOL] Error: {}", err_msg);
-        send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+        if debug {
+            log_debug_operation("get_file_content", &format!("Error: {}", err_msg));
+            send_debug_notification(&app, "Get Content Error", &err_msg)?;
+        }
         return Err(err_msg);
     }
 
     if file_path.is_dir() {
         let err_msg = format!("Path is a directory, not a file: {:?}", file_path);
-        info!("[DEV_TOOL] Error: {}", err_msg);
-        send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+        if debug {
+            log_debug_operation("get_file_content", &format!("Error: {}", err_msg));
+            send_debug_notification(&app, "Get Content Error", &err_msg)?;
+        }
         return Err(err_msg);
     }
 
     match fs::read_to_string(file_path) {
         Ok(content) => {
-            send_dev_tool_notification(
-                &app,
-                "Get File Content",
-                &format!("Read content from {:?}", file_path),
-            )?;
+            if debug {
+                time_operation("get_file_content", start_time);
+                log_debug_operation("get_file_content", &format!("Successfully read {} bytes", content.len()));
+                send_debug_notification(&app, "Get File Content", &format!("Read content from {:?}", file_path))?;
+            }
             Ok(content)
         }
         Err(e) => {
             let err_msg = format!("Failed to read file '{:?}': {}", file_path, e);
-            info!("[DEV_TOOL] Error: {}", err_msg);
-            send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+            if debug {
+                log_debug_operation("get_file_content", &format!("Error: {}", err_msg));
+                send_debug_notification(&app, "Get Content Error", &err_msg)?;
+            }
             Err(err_msg)
         }
     }
 }
 
 #[tauri::command]
-pub async fn dev_set_file_content(
+pub async fn set_file_content(
     app: AppHandle,
-    _state: State<'_, AppState>,
-    path_str: String, // Use path_str for consistency
+    state: State<'_, AppState>,
+    path_str: String,
     content: String,
+    debug_mode: Option<bool>
 ) -> Result<(), String> {
-    info!("[DEV_TOOL] Setting content for file: {}", path_str);
+    let debug = should_enable_debug(&state, debug_mode);
+
+    if debug {
+        log_debug_operation("set_file_content", &format!("Setting content for file: {} ({} bytes)", path_str, content.len()));
+    }
+
+    let start_time = std::time::Instant::now();
 
     let expanded_path = if path_str.starts_with("~") {
         match dirs::home_dir() {
             Some(home) => {
                 if path_str == "~" {
-                     // Cannot write content to home directory directly like this
                     let err_msg = "Cannot set content for home directory '~' as if it were a file.".to_string();
-                    info!("[DEV_TOOL] Error: {}", err_msg);
-                    send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                    if debug {
+                        log_debug_operation("set_file_content", &format!("Error: {}", err_msg));
+                        send_debug_notification(&app, "Set Content Error", &err_msg)?;
+                    }
                     return Err(err_msg);
-                } else if path_str.starts_with("~/" ){
+                } else if path_str.starts_with("~/") {
                     home.join(&path_str[2..])
                 } else {
                     PathBuf::from(path_str.clone())
@@ -220,8 +245,10 @@ pub async fn dev_set_file_content(
             }
             None => {
                 let err_msg = "Failed to resolve home directory for path starting with ~".to_string();
-                info!("[DEV_TOOL] Error: {}", err_msg);
-                send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                if debug {
+                    log_debug_operation("set_file_content", &format!("Error: {}", err_msg));
+                    send_debug_notification(&app, "Set Content Error", &err_msg)?;
+                }
                 return Err(err_msg);
             }
         }
@@ -229,7 +256,6 @@ pub async fn dev_set_file_content(
         PathBuf::from(path_str.clone())
     };
 
-    info!("[DEV_TOOL] Expanded path to write: {:?}", expanded_path);
     let file_path = expanded_path.as_path();
 
     // Optional: Create parent directories if they don't exist
@@ -237,39 +263,69 @@ pub async fn dev_set_file_content(
         if !parent_dir.exists() {
             if let Err(e) = fs::create_dir_all(parent_dir) {
                 let err_msg = format!("Failed to create parent directories for '{:?}': {}", file_path, e);
-                info!("[DEV_TOOL] Error: {}", err_msg);
-                send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                if debug {
+                    log_debug_operation("set_file_content", &format!("Error: {}", err_msg));
+                    send_debug_notification(&app, "Set Content Error", &err_msg)?;
+                }
                 return Err(err_msg);
             }
-            info!("[DEV_TOOL] Created parent directories for {:?}", file_path);
+            if debug {
+                log_debug_operation("set_file_content", &format!("Created parent directories for {:?}", file_path));
+            }
         }
     }
 
     // If it's a directory, we shouldn't write to it as if it's a file.
     if file_path.is_dir() {
         let err_msg = format!("Path is a directory, cannot write file content: {:?}", file_path);
-        info!("[DEV_TOOL] Error: {}", err_msg);
-        send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+        if debug {
+            log_debug_operation("set_file_content", &format!("Error: {}", err_msg));
+            send_debug_notification(&app, "Set Content Error", &err_msg)?;
+        }
         return Err(err_msg);
     }
 
     match fs::write(file_path, content) {
         Ok(_) => {
-            send_dev_tool_notification(
-                &app,
-                "Set File Content",
-                &format!("Wrote content to {:?}", file_path),
-            )?;
+            if debug {
+                time_operation("set_file_content", start_time);
+                send_debug_notification(&app, "Set File Content", &format!("Wrote content to {:?}", file_path))?;
+            }
             Ok(())
         }
         Err(e) => {
             let err_msg = format!("Failed to write file '{:?}': {}", file_path, e);
-            info!("[DEV_TOOL] Error: {}", err_msg);
-            send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+            if debug {
+                log_debug_operation("set_file_content", &format!("Error: {}", err_msg));
+                send_debug_notification(&app, "Set Content Error", &err_msg)?;
+            }
             Err(err_msg)
         }
     }
 }
+
+// =============================================================================
+// BACKWARD COMPATIBILITY WRAPPERS
+// =============================================================================
+
+#[tauri::command]
+pub async fn dev_list_files(app: AppHandle, state: State<'_, AppState>, path_str: String) -> Result<String, String> {
+    list_files(app, state, path_str, Some(true)).await
+}
+
+#[tauri::command]
+pub async fn dev_get_file_content(app: AppHandle, state: State<'_, AppState>, path_str: String) -> Result<String, String> {
+    get_file_content(app, state, path_str, Some(true)).await
+}
+
+#[tauri::command]
+pub async fn dev_set_file_content(app: AppHandle, state: State<'_, AppState>, path_str: String, content: String) -> Result<(), String> {
+    set_file_content(app, state, path_str, content, Some(true)).await
+}
+
+// =============================================================================
+// EXISTING IMPLEMENTATIONS (TO BE REMOVED AFTER MIGRATION)
+// =============================================================================
 
 #[tauri::command]
 pub async fn save_agent_response(
