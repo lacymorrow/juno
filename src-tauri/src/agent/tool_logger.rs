@@ -1254,8 +1254,8 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
         // Register escape key for TTS cancellation
         crate::tts::register_tts_escape_key(&app_handle).await;
 
-        // Call TTS with fallback directly instead of going through the command interface
-        match crate::tts::invoke_tts_with_fallback(filtered_text, &tts_provider).await {
+        // Use invoke_tts_with_fallback to ensure reliability with automatic fallback to system TTS
+        match crate::tts::invoke_tts_with_fallback(filtered_text, None, &tts_provider).await {
             Ok(audio_result) => {
                 if audio_result != "TTS_DISABLED_BY_SETTING"
                     && audio_result != "TTS_CONTENT_FILTERED"
