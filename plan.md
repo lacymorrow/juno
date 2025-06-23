@@ -677,3 +677,223 @@ pub struct TimerEventConfig {
 - Comprehensive monitoring and alerting
 - Clear rollback procedures
 - User feedback collection and response
+
+# Dev Command Architecture Refactoring Plan
+
+## Executive Summary
+
+The current codebase has 33 `dev_` prefixed commands that are unnecessary wrappers around production functions. This creates maintenance overhead, architectural confusion, and defeats the purpose of development testing. This plan outlines a systematic approach to eliminate these wrappers and consolidate functionality into production commands with optional debug features.
+
+## Problem Analysis
+
+### Current State
+- **33 dev_ commands** across 8 files acting as wrappers
+- Production commands exist but agents call dev wrappers instead
+- Unnecessary performance overhead and code duplication
+- False confidence in development testing
+
+### Root Cause
+The architecture violates the principle that **development should test production code**. Instead of using the same code paths, we have separate wrapper functions that might behave differently.
+
+## Strategic Approach
+
+### Phase 1: Analysis and Preparation (Day 1)
+1. **Complete Audit**
+   - Document all 33 dev_ commands and their production counterparts
+   - Identify which commands have existing production versions
+   - Map all callers of dev_ commands across the codebase
+
+2. **Design New Architecture**
+   - Create unified command signatures with optional debug parameters
+   - Design debug mode configuration system
+   - Plan backward compatibility strategy
+
+### Phase 2: Infrastructure Setup (Day 1-2)
+1. **Debug Mode System**
+   - Enhance AppState with debug mode configuration
+   - Create debug feature flags using `cfg!(debug_assertions)`
+   - Implement runtime debug mode toggling
+
+2. **Utility Functions**
+   - Create shared debug logging utilities
+   - Implement notification helpers for debug mode
+   - Design visualization system for debug operations
+
+### Phase 3: Command Consolidation (Day 2-4)
+1. **Core Commands** (Priority 1)
+   - Merge dev_get_clipboard, dev_set_clipboard, dev_wait into production
+   - Consolidate dev_bash_command with production shell commands
+
+2. **Mouse Commands** (Priority 2)
+   - Merge 13 mouse dev_ commands into production versions
+   - Preserve click visualization and focus management as debug features
+
+3. **Keyboard Commands** (Priority 3)
+   - Consolidate 5 keyboard dev_ commands
+   - Maintain validation and logging as debug features
+
+4. **Remaining Commands** (Priority 4)
+   - Window management, element interaction, text editor, filesystem, app control
+   - Systematic consolidation with debug feature preservation
+
+### Phase 4: Caller Updates (Day 4-5)
+1. **Agent System Updates**
+   - Update all agent implementations to use production commands
+   - Remove dev_ command references from tool mappings
+   - Update command registry
+
+2. **Tool System Updates**
+   - Modify desktop_tools.rs, anthropic_computer_use.rs
+   - Update MCP integration points
+   - Fix orchestrator command references
+
+### Phase 5: Cleanup and Testing (Day 5-6)
+1. **Remove Dev Commands**
+   - Delete all dev_ command implementations
+   - Remove from lib.rs registration
+   - Clean up imports and references
+
+2. **Comprehensive Testing**
+   - Test all production commands in debug mode
+   - Verify agent functionality
+   - Validate MCP integration
+   - Run compilation checks
+
+## Implementation Details
+
+### New Command Architecture
+
+```rust
+// BEFORE (Wrong)
+pub async fn dev_left_click(x: f64, y: f64, ...) -> Result<(), String> {
+    info!("Debug click...");
+    state.desktop.left_click(x, y, modifier)
+}
+
+pub async fn left_click(x: f64, y: f64, ...) -> Result<(), String> {
+    state.desktop.left_click(x, y, modifier)
+}
+
+// AFTER (Correct)
+pub async fn left_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64, 
+    y: f64,
+    modifier: Option<String>,
+    debug_mode: Option<bool>
+) -> Result<(), String> {
+    let debug = debug_mode.unwrap_or_else(|| state.is_debug_mode());
+    
+    if debug {
+        info!("[DEBUG] Left clicking at ({}, {})", x, y);
+        create_click_visualization(&app, x, y, "#FF0000")?;
+        ensure_main_window_focus(&app).await?;
+    }
+    
+    let result = state.desktop.left_click(x, y, modifier.as_deref());
+    
+    if debug && result.is_ok() {
+        send_dev_tool_notification(&app, "Left Click", 
+            &format!("Clicked at ({}, {})", x, y))?;
+    }
+    
+    result
+}
+```
+
+### Debug Mode Configuration
+
+```rust
+// AppState enhancement
+impl AppState {
+    pub fn is_debug_mode(&self) -> bool {
+        // Check multiple sources in priority order:
+        // 1. Runtime debug mode setting
+        // 2. Build-time debug assertions
+        // 3. Environment variable
+        self.debug_mode.load(Ordering::Relaxed) || 
+        cfg!(debug_assertions) ||
+        std::env::var("JUNO_DEBUG").is_ok()
+    }
+    
+    pub fn set_debug_mode(&self, enabled: bool) {
+        self.debug_mode.store(enabled, Ordering::Relaxed);
+    }
+}
+```
+
+### Migration Strategy
+
+1. **Gradual Migration**: Update commands in priority order to minimize disruption
+2. **Backward Compatibility**: Maintain dev_ command names as aliases during transition
+3. **Feature Preservation**: Ensure all debug features are preserved in production commands
+4. **Testing First**: Validate each command works in both debug and release modes
+
+## Risk Mitigation
+
+### Potential Issues
+1. **Breaking Changes**: Callers might expect dev_ command signatures
+2. **Feature Loss**: Debug features might be accidentally removed
+3. **Performance Impact**: Debug checks might slow production
+4. **Testing Gaps**: Some edge cases might not be covered
+
+### Mitigation Strategies
+1. **Phased Rollout**: Implement changes incrementally with testing
+2. **Feature Audit**: Document all debug features before migration
+3. **Performance Testing**: Benchmark commands before/after changes
+4. **Comprehensive Testing**: Test both debug and release modes thoroughly
+
+## Success Metrics
+
+### Quantitative Goals
+- **Reduce codebase size**: Eliminate 33 dev_ commands (~2000 lines of code)
+- **Improve maintainability**: Single implementation per function
+- **Performance**: No measurable performance degradation in production
+- **Test coverage**: 100% of existing functionality preserved
+
+### Qualitative Goals
+- **Cleaner architecture**: Clear separation of concerns
+- **Better debugging**: Unified debug experience across all commands
+- **Easier maintenance**: Single code path to maintain
+- **True development testing**: Development tests production code
+
+## Timeline
+
+### Week 1
+- **Day 1**: Complete audit and design new architecture
+- **Day 2**: Setup debug infrastructure and start core commands
+- **Day 3**: Continue command consolidation (mouse, keyboard)
+- **Day 4**: Finish remaining commands and start caller updates
+- **Day 5**: Complete caller updates and begin cleanup
+- **Day 6**: Final testing and validation
+
+### Deliverables
+1. **Architecture Document**: New command structure and debug system
+2. **Migration Guide**: Step-by-step process for future similar refactoring
+3. **Test Suite**: Comprehensive tests for debug/release modes
+4. **Performance Report**: Before/after performance comparison
+5. **Clean Codebase**: Eliminated dev_ commands with preserved functionality
+
+## Post-Implementation
+
+### Monitoring
+- Track any regressions in agent functionality
+- Monitor performance metrics
+- Collect developer feedback on debug experience
+
+### Documentation
+- Update development guidelines to prevent similar issues
+- Document new debug mode usage
+- Create troubleshooting guide for debug features
+
+### Future Improvements
+- Consider additional debug visualizations
+- Explore automated testing for debug features
+- Evaluate debug mode performance optimizations
+
+## Conclusion
+
+This refactoring will significantly improve the codebase architecture by eliminating unnecessary wrapper functions and consolidating debug features into production commands. The result will be a cleaner, more maintainable system that truly tests production code during development while preserving all existing debug capabilities.
+
+The key insight is that **development should test production code**, not wrapper functions. By implementing this plan, we ensure that development testing provides real confidence in production reliability while maintaining the excellent debug experience developers expect.

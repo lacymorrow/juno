@@ -177,29 +177,185 @@ pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
     state.is_desktop_available()
 }
 
+/// Wait for a specified duration with optional debug features
 #[tauri::command]
-pub(crate) async fn dev_wait(duration_sec: f64, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn wait(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    duration_sec: f64,
+    debug_mode: Option<bool>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        should_enable_debug, log_operation_start, log_operation_complete,
+        validate_duration, DebugTimer, send_debug_notification
+    };
+
+    let debug = should_enable_debug(debug_mode, &state);
     let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
-    info!("Executing dev_wait for {} seconds ({} ms)", duration_sec, duration_ms);
+
+    if debug {
+        log_operation_start("wait", &format!("{} seconds ({} ms)", duration_sec, duration_ms));
+
+        // Validate duration in debug mode
+        if let Some(error) = validate_duration(Some(duration_ms)) {
+            tracing::warn!("[DEBUG] Duration warning for wait: {}", error);
+        }
+    }
+
+    let timer = if debug { Some(DebugTimer::start("wait")) } else { None };
+
     let desktop = state.get_desktop()?;
-    desktop.wait(duration_ms)
-        .map_err(|e| format!("Error during wait: {}", e))
+    let result = desktop.wait(duration_ms)
+        .map_err(|e| format!("Error during wait: {}", e));
+
+    if debug {
+        if let Some(timer) = timer {
+            timer.finish_with_result(&result);
+        }
+
+        if result.is_ok() {
+            let _ = send_debug_notification(&app, "Wait",
+                &format!("Waited for {} seconds", duration_sec));
+        }
+    }
+
+    result
 }
 
+// DEPRECATED: Backward compatibility alias - will be removed in Phase 5
+#[tauri::command]
+pub(crate) async fn dev_wait(duration_sec: f64, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::commands::debug_utils::{log_operation_start, validate_duration, DebugTimer};
+
+    let duration_ms = (duration_sec * 1000.0).max(0.0) as u64;
+
+    // Maintain the old debug behavior
+    let timer = DebugTimer::start("dev_wait");
+    log_operation_start("dev_wait", &format!("{} seconds ({} ms)", duration_sec, duration_ms));
+
+    // Validate duration like the old dev command did
+    if let Some(error) = validate_duration(Some(duration_ms)) {
+        tracing::warn!("[DEBUG] Duration warning for dev_wait: {}", error);
+    }
+
+    let desktop = state.get_desktop()?;
+    let result = desktop.wait(duration_ms)
+        .map_err(|e| format!("Error during wait: {}", e));
+
+    timer.finish_with_result(&result);
+    result
+}
+
+/// Get clipboard content with optional debug features
+#[tauri::command]
+pub(crate) async fn get_clipboard(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    debug_mode: Option<bool>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{should_enable_debug, log_operation_start, log_operation_complete, DebugTimer, send_debug_notification};
+
+    let debug = should_enable_debug(debug_mode, &state);
+    let timer = if debug { Some(DebugTimer::start("get_clipboard")) } else { None };
+
+    if debug {
+        log_operation_start("get_clipboard", "");
+    }
+
+    let desktop = state.get_desktop()?;
+    let result = desktop.get_clipboard_content()
+        .map_err(|e| format!("Error getting clipboard content: {}", e));
+
+    if debug {
+        if let Some(timer) = timer {
+            timer.finish_with_result(&result);
+        }
+
+        if result.is_ok() {
+            let _ = send_debug_notification(&app, "Clipboard", "Clipboard content retrieved successfully");
+        }
+    }
+
+    result
+}
+
+/// Set clipboard content with optional debug features
+#[tauri::command]
+pub(crate) async fn set_clipboard(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    content: String,
+    debug_mode: Option<bool>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        should_enable_debug, log_operation_start, log_operation_complete,
+        validate_input_with_debug, validate_clipboard_content,
+        DebugTimer, send_debug_notification
+    };
+
+    let debug = should_enable_debug(debug_mode, &state);
+    let timer = if debug { Some(DebugTimer::start("set_clipboard")) } else { None };
+
+    if debug {
+        log_operation_start("set_clipboard", &format!("content length: {}", content.len()));
+
+        // Validate input in debug mode
+        validate_input_with_debug(&content, validate_clipboard_content, "set_clipboard")?;
+    }
+
+    let desktop = state.get_desktop()?;
+    let result = desktop.set_clipboard_content(&content)
+        .map_err(|e| format!("Error setting clipboard content: {}", e));
+
+    if debug {
+        if let Some(timer) = timer {
+            timer.finish_with_result(&result);
+        }
+
+        if result.is_ok() {
+            let _ = send_debug_notification(&app, "Clipboard",
+                &format!("Clipboard content set ({} chars)", content.len()));
+        }
+    }
+
+    result
+}
+
+// DEPRECATED: Backward compatibility aliases - these will be removed in Phase 5
+// These maintain the old signatures while internally using the new consolidated functions
 #[tauri::command]
 pub(crate) async fn dev_get_clipboard(state: State<'_, AppState>) -> Result<String, String> {
-    info!("Executing dev_get_clipboard");
+    use crate::commands::debug_utils::{log_operation_start, log_operation_complete, DebugTimer};
+
+    // Maintain the old debug behavior for backward compatibility
+    let timer = DebugTimer::start("dev_get_clipboard");
+    log_operation_start("dev_get_clipboard", "");
+
     let desktop = state.get_desktop()?;
-    desktop.get_clipboard_content()
-        .map_err(|e| format!("Error getting clipboard content: {}", e))
+    let result = desktop.get_clipboard_content()
+        .map_err(|e| format!("Error getting clipboard content: {}", e));
+
+    timer.finish_with_result(&result);
+    result
 }
 
 #[tauri::command]
 pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState>) -> Result<(), String> {
-    info!("Executing dev_set_clipboard {}", content);
+    use crate::commands::debug_utils::{log_operation_start, log_operation_complete, DebugTimer, validate_input_with_debug, validate_clipboard_content};
+
+    // Maintain the old debug behavior for backward compatibility
+    let timer = DebugTimer::start("dev_set_clipboard");
+    log_operation_start("dev_set_clipboard", &format!("content length: {}", content.len()));
+
+    // Validate input like the old dev command did
+    validate_input_with_debug(&content, validate_clipboard_content, "dev_set_clipboard")?;
+
     let desktop = state.get_desktop()?;
-    desktop.set_clipboard_content(&content)
-        .map_err(|e| format!("Error setting clipboard content: {}", e))
+    let result = desktop.set_clipboard_content(&content)
+        .map_err(|e| format!("Error setting clipboard content: {}", e));
+
+    timer.finish_with_result(&result);
+    result
 }
 
 /// Get a list of available AI providers

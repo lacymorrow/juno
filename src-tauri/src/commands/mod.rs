@@ -10,6 +10,7 @@ pub mod registry;
 pub mod app_url;
 pub mod autostart;
 pub mod core;
+pub mod debug_utils; // Shared debug utilities for consolidated commands
 pub mod dev;
 pub mod dictation;
 // Removed deprecated dictation_reset module
@@ -72,6 +73,7 @@ pub use self::floating_bar::{
 };
 pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
+pub use self::keyboard::{type_text, press_key, global_type_text, hold_key, release_key};
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;
