@@ -249,12 +249,13 @@ export function useBackendEvents({
         };
     }, [stopCurrentAudio]);
 
-    // Listen for agent events (thinking, tool calls, etc.)
+    // Listen for agent events (thinking, tool calls, etc.) - MERGED VERSION
     useEffect(() => {
         const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
             const { type, payload } = event.payload;
             const currentTime = Date.now();
 
+            // Handle conversation messages
             setConversationWithPruning((prev) => {
                 let newMessage: ChatMessage | null = null;
 
@@ -298,12 +299,82 @@ export function useBackendEvents({
                 }
                 return prev;
             });
+
+            // Handle toast notifications
+            switch (type) {
+                case "tool_call_request": {
+                    const notificationLevel = payload.notification_level || "standard";
+
+                    if (notificationLevel !== "silent") {
+                        const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
+                        const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
+
+                        toast.info(message, {
+                            duration,
+                            className: getNotificationClassName(payload.tool_category, "request"),
+                        });
+                    }
+                    break;
+                }
+
+                case "tool_call_result": {
+                    const notificationLevel = payload.notification_level || "standard";
+                    const success = payload.success ?? true;
+
+                    if (notificationLevel !== "silent") {
+                        const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
+                        const duration = getNotificationDuration(notificationLevel);
+                        const toastType = success ? "success" : "error";
+
+                        toast[toastType](message, {
+                            duration,
+                            className: getNotificationClassName(payload.tool_category, "result", success),
+                        });
+
+                        if (payload.screenshot_base64 && success) {
+                            console.log("📸 Screenshot detected in tool result:", payload.tool_name);
+                            toast.success("📸 Screenshot captured", {
+                                duration: 3000,
+                                className: "screenshot-notification",
+                            });
+                        }
+                    }
+                    break;
+                }
+
+                case "thinking": {
+                    if (payload.content) {
+                        toast.info(`💭 ${payload.content}`, {
+                            duration: 2000,
+                            className: "thinking-notification",
+                        });
+                    }
+                    break;
+                }
+
+                case "screenshot": {
+                    toast.success("📸 Screenshot captured", {
+                        duration: 3000,
+                        className: "screenshot-notification",
+                    });
+                    break;
+                }
+
+                default:
+                    // Handle any other event types silently
+                    break;
+            }
+
+            // Auto-scroll to show new messages
+            if (type === "tool_call_result" || type === "tool_call_request" || type === "thinking") {
+                throttledAutoScroll();
+            }
         });
 
         return () => {
             unlistenPromise.then((unlistenFn) => unlistenFn());
         };
-    }, [setConversationWithPruning]);
+    }, [setConversationWithPruning, throttledAutoScroll]);
 
     // Listen for streaming events
     useEffect(() => {
@@ -387,87 +458,6 @@ export function useBackendEvents({
             streamEndListener.then((unlistenFn) => unlistenFn());
         };
     }, [setConversationWithPruning, throttledAutoScroll, setIsProcessing]);
-
-    // Enhanced agent event listener for dynamic tool notifications
-    useEffect(() => {
-        const unlistenAgentEvent = listen<AgentEventTauri>("agent-event", (event) => {
-            const { type: eventType, payload } = event.payload;
-
-            // Handle different event types with dynamic metadata
-            switch (eventType) {
-                case "tool_call_request": {
-                    const notificationLevel = payload.notification_level || "standard";
-
-                    if (notificationLevel !== "silent") {
-                        const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
-                        const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
-
-                        toast.info(message, {
-                            duration,
-                            className: getNotificationClassName(payload.tool_category, "request"),
-                        });
-                    }
-                    break;
-                }
-
-                case "tool_call_result": {
-                    const notificationLevel = payload.notification_level || "standard";
-                    const success = payload.success ?? true;
-
-                    if (notificationLevel !== "silent") {
-                        const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
-                        const duration = getNotificationDuration(notificationLevel);
-                        const toastType = success ? "success" : "error";
-
-                        toast[toastType](message, {
-                            duration,
-                            className: getNotificationClassName(payload.tool_category, "result", success),
-                        });
-
-                        if (payload.screenshot_base64 && success) {
-                            toast.success("📸 Screenshot captured", {
-                                duration: 3000,
-                                className: "screenshot-notification",
-                            });
-                        }
-                    }
-                    break;
-                }
-
-                case "thinking": {
-                    if (payload.content) {
-                        toast.info(`💭 ${payload.content}`, {
-                            duration: 2000,
-                            className: "thinking-notification",
-                        });
-                    }
-                    break;
-                }
-
-                case "screenshot": {
-                    toast.success("📸 Screenshot captured", {
-                        duration: 3000,
-                        className: "screenshot-notification",
-                    });
-                    break;
-                }
-
-                case "generic_content": {
-                    if (payload.content) {
-                        toast.info(payload.content, {
-                            duration: 4000,
-                            className: "generic-content-notification",
-                        });
-                    }
-                    break;
-                }
-            }
-        });
-
-        return () => {
-            unlistenAgentEvent.then((unlisten) => unlisten());
-        };
-    }, []);
 
     // Listen for agent error events
     useEffect(() => {
