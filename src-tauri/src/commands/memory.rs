@@ -67,6 +67,18 @@ pub async fn clean_orphaned_tool_calls(state: State<'_, AppState>) -> Result<Str
     Ok("Orphaned tool calls cleaned successfully".to_string())
 }
 
+/// Clean orphaned tool results that have no corresponding tool calls
+#[tauri::command]
+pub async fn clean_orphaned_tool_results(state: State<'_, AppState>) -> Result<String, String> {
+    let memory_manager = state.get_memory_manager().await;
+    let mut memory_guard = memory_manager.lock().await;
+
+    let cleaned_count = memory_guard.clean_orphaned_tool_results().await
+        .map_err(|e| format!("Failed to clean orphaned tool results: {}", e))?;
+
+    Ok(format!("Cleaned {} orphaned tool results successfully", cleaned_count))
+}
+
 /// Get conversation messages (basic implementation)
 #[tauri::command]
 pub async fn get_conversation_messages(state: State<'_, AppState>) -> Result<Vec<crate::agent::structs::Message>, String> {

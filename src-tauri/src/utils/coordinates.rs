@@ -87,6 +87,7 @@ pub fn update_scaling_info_with_separate_factors(
 }
 
 /// Updates the scaling information when a screenshot is processed (legacy function)
+/// Uses the provided scale_factor uniformly for both X and Y axes
 pub fn update_scaling_info(
     original_width: u32,
     original_height: u32,
@@ -94,27 +95,22 @@ pub fn update_scaling_info(
     scaled_height: u32,
     scale_factor: f32
 ) {
-    // Calculate separate X and Y scale factors
-    let scale_factor_x = if original_width > 0 {
-        scaled_width as f32 / original_width as f32
+    // Validate scale factor to prevent division by zero and infinite values
+    let safe_scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
     } else {
+        tracing::warn!("Invalid scale factor: {}, using 1.0", scale_factor);
         1.0
     };
 
-    let scale_factor_y = if original_height > 0 {
-        scaled_height as f32 / original_height as f32
-    } else {
-        1.0
-    };
-
-    // Use the new separate factors function
+    // Use the provided scale_factor for both X and Y axes (uniform scaling)
     update_scaling_info_with_separate_factors(
         original_width,
         original_height,
         scaled_width,
         scaled_height,
-        scale_factor_x,
-        scale_factor_y,
+        safe_scale_factor,
+        safe_scale_factor,
     );
 }
 
