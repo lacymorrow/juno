@@ -87,7 +87,9 @@ pub fn update_scaling_info_with_separate_factors(
 }
 
 /// Updates the scaling information when a screenshot is processed (legacy function)
-/// Uses the provided scale_factor uniformly for both X and Y axes
+/// IMPORTANT: This function uses the provided scale_factor parameter as-is for both X and Y axes.
+/// It does NOT calculate scale factors from the provided dimensions.
+/// If you need scale factors calculated from dimensions, use update_scaling_info_with_separate_factors directly.
 pub fn update_scaling_info(
     original_width: u32,
     original_height: u32,
@@ -104,6 +106,7 @@ pub fn update_scaling_info(
     };
 
     // Use the provided scale_factor for both X and Y axes (uniform scaling)
+    // The dimensions are stored for reference but scale factors come from the parameter
     update_scaling_info_with_separate_factors(
         original_width,
         original_height,
@@ -112,6 +115,9 @@ pub fn update_scaling_info(
         safe_scale_factor,
         safe_scale_factor,
     );
+
+    info!("Legacy scaling update: using provided scale_factor {:.3} for both axes (dimensions: {}x{} → {}x{})",
+        safe_scale_factor, original_width, original_height, scaled_width, scaled_height);
 }
 
 /// Transforms coordinates from scaled screenshot space to original screen space
