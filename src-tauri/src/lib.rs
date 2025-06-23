@@ -215,7 +215,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{
     always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
-    error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
+    error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_token_selection::*, window::*,
 };
@@ -250,6 +250,16 @@ use crate::commands::{
     get_escape_key_status, get_keyboard_shortcuts, get_shortcut_best_practices,
     get_shortcut_suggestions, reset_keyboard_shortcuts, set_keyboard_shortcut,
     set_keyboard_shortcuts, validate_keyboard_shortcut,
+};
+
+// Import keyboard functions directly from keyboard module
+use crate::commands::keyboard::{
+    type_text, press_key, global_type_text, hold_key, release_key,
+};
+
+// Import dev keyboard functions from dev module
+use crate::commands::dev::keyboard::{
+    dev_type_text, dev_press_key, dev_global_type_text, dev_hold_key, dev_release_key,
 };
 
 // Import MCP commands explicitly
@@ -467,18 +477,11 @@ pub fn run() {
             hold_key,
             release_key,
             // Development keyboard functions
-            // Keyboard Commands - Consolidated with debug features
-            type_text,
-            press_key,
-            global_type_text,
-            hold_key,
-            release_key,
-            // DEPRECATED: Backward compatibility dev_ commands (will be removed)
-            commands::keyboard::dev_type_text,
-            commands::keyboard::dev_press_key,
-            commands::keyboard::dev_global_type_text,
-            commands::keyboard::dev_hold_key,
-            commands::keyboard::dev_release_key,
+            dev_type_text,
+            dev_press_key,
+            dev_global_type_text,
+            dev_hold_key,
+            dev_release_key,
             dev_open_application,
             dev_open_url,
             dev_scroll_window,

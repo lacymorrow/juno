@@ -143,7 +143,7 @@ impl DesktopAgent {
                     })?;
 
                 let result =
-                    commands::app_url::dev_open_application(app_name.to_string(), state).await;
+                    commands::app_url::dev_open_application(app_name.to_string(), state, self.app_handle.clone()).await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {

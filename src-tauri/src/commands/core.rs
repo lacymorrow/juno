@@ -300,7 +300,7 @@ pub(crate) async fn set_clipboard(
         log_operation_start("set_clipboard", &format!("content length: {}", content.len()));
 
         // Validate input in debug mode
-        validate_input_with_debug(&content, validate_clipboard_content, "set_clipboard")?;
+        validate_input_with_debug(&content, |c| validate_clipboard_content(c), "set_clipboard")?;
     }
 
     let desktop = state.get_desktop()?;
@@ -348,7 +348,7 @@ pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState
     log_operation_start("dev_set_clipboard", &format!("content length: {}", content.len()));
 
     // Validate input like the old dev command did
-    validate_input_with_debug(&content, validate_clipboard_content, "dev_set_clipboard")?;
+    validate_input_with_debug(&content, |c| validate_clipboard_content(c), "dev_set_clipboard")?;
 
     let desktop = state.get_desktop()?;
     let result = desktop.set_clipboard_content(&content)

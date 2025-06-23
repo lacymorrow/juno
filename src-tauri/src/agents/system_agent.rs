@@ -188,7 +188,7 @@ impl SystemAgent {
                     })?;
 
                 let result =
-                    commands::text_editor::dev_text_editor_view(file_path.to_string()).await;
+                    commands::text_editor::dev_text_editor_view(file_path.to_string(), state).await;
 
                 match result {
                     Ok(content) => Ok(ToolResult {

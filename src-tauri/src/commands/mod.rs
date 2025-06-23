@@ -73,7 +73,8 @@ pub use self::floating_bar::{
 };
 pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
-pub use self::keyboard::{type_text, press_key, global_type_text, hold_key, release_key};
+// Keyboard functions are pub(crate) and cannot be re-exported - use them directly from keyboard module
+// pub use self::keyboard::{type_text, press_key, global_type_text, hold_key, release_key};
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;

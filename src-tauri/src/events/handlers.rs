@@ -187,6 +187,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
                 trimmed_text.to_string(),
                 app_handle.clone(),
                 app_state.clone(),
+                None,
             )
             .await
             {

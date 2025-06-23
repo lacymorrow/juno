@@ -26,7 +26,7 @@ pub(crate) async fn type_text(
             text.chars().take(50).collect::<String>(), text.len()));
 
         // Validate input in debug mode
-        validate_input_with_debug(&text, validate_text_input, "type_text")?;
+        validate_input_with_debug(&text, |t| validate_text_input(t), "type_text")?;
     }
 
     let timer = if debug { Some(DebugTimer::start("type_text")) } else { None };
@@ -91,7 +91,7 @@ pub(crate) async fn press_key(
         log_operation_start("press_key", &format!("key: '{}', modifier: {:?}", key, modifier));
 
         // Validate key input in debug mode
-        validate_input_with_debug(&key, validate_key_input, "press_key")?;
+        validate_input_with_debug(&key, |k| validate_key_input(k), "press_key")?;
     } else {
         info!("Executing press_key for key: '{}' with modifier: {:?}", key, modifier);
     }
@@ -174,7 +174,7 @@ pub(crate) async fn global_type_text(
             text.chars().take(50).collect::<String>(), text.len()));
 
         // Validate input in debug mode
-        validate_input_with_debug(&text, validate_text_input, "global_type_text")?;
+        validate_input_with_debug(&text, |t| validate_text_input(t), "global_type_text")?;
     } else {
         info!("Executing global_type_text for text: '{}'", text);
     }
@@ -235,7 +235,7 @@ pub(crate) async fn hold_key(
         log_operation_start("hold_key", &format!("key: '{}', duration: {:?} ms", key, duration_ms));
 
         // Validate inputs in debug mode
-        validate_input_with_debug(&key, validate_key_input, "hold_key")?;
+        validate_input_with_debug(&key, |k| validate_key_input(k), "hold_key")?;
         if let Some(error) = validate_duration(duration_ms) {
             tracing::warn!("[DEBUG] Duration warning for hold_key: {}", error);
         }
@@ -306,7 +306,7 @@ pub(crate) async fn release_key(
         log_operation_start("release_key", &format!("key: '{}'", key));
 
         // Validate input in debug mode
-        validate_input_with_debug(&key, validate_key_input, "release_key")?;
+        validate_input_with_debug(&key, |k| validate_key_input(k), "release_key")?;
     } else {
         info!("Executing release_key for key: '{}'", key);
     }
@@ -355,35 +355,4 @@ pub(crate) async fn release_key(
     }
 }
 
-// DEPRECATED: Backward compatibility functions for dev_ commands
-// These will be removed in Phase 5 of the refactoring
-
-/// DEPRECATED: Use type_text with debug_mode parameter instead
-#[tauri::command]
-pub(crate) async fn dev_type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    type_text(text, app_handle, state, Some(true)).await
-}
-
-/// DEPRECATED: Use press_key with debug_mode parameter instead
-#[tauri::command]
-pub(crate) async fn dev_press_key(key: String, modifier: Option<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    press_key(key, modifier, app_handle, state, Some(true)).await
-}
-
-/// DEPRECATED: Use global_type_text with debug_mode parameter instead
-#[tauri::command]
-pub(crate) async fn dev_global_type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    global_type_text(text, app_handle, state, Some(true)).await
-}
-
-/// DEPRECATED: Use hold_key with debug_mode parameter instead
-#[tauri::command]
-pub(crate) async fn dev_hold_key(key: String, duration_ms: Option<u64>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    hold_key(key, duration_ms, app_handle, state, Some(true)).await
-}
-
-/// DEPRECATED: Use release_key with debug_mode parameter instead
-#[tauri::command]
-pub(crate) async fn dev_release_key(key: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    release_key(key, app_handle, state, Some(true)).await
-}
+// NOTE: dev_ functions are implemented in dev/keyboard.rs to avoid duplication
