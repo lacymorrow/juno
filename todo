@@ -14,6 +14,10 @@ Can we show a canceling state when we have initiated a cancel with esc but the a
 
 2025-06-23T18:20:59.258309Z ERROR [StateManager] Invalid state transition from Idle to Idle
 
+2025-06-23T18:31:55.653362Z  INFO [Menu] Unhandled menu event: developer-tools
+
+2025-06-23T18:29:38.881449Z  INFO Tool execution plan: 5 tools organized into 5 batch(es)
+
 # TODO
 
 ## ✅ COMPLETED: Tauri Store Pattern Migration (Successfully Fixed!)

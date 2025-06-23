@@ -87,6 +87,13 @@ impl DictationStateManager {
         let previous_state = {
             let mut current = self.current_state.write().await;
             let prev = current.clone();
+
+            // Skip transition if already in target state (optimization and reduces log noise)
+            if std::mem::discriminant(&prev) == std::mem::discriminant(&new_state) {
+                debug!("[StateManager] Already in target state {:?}, skipping transition", new_state);
+                return Ok(());
+            }
+
             *current = new_state.clone();
             prev
         };
@@ -394,6 +401,8 @@ impl DictationStateManager {
     fn is_valid_transition(&self, from: &DictationState, to: &DictationState) -> bool {
         use DictationState::*;
         match (from, to) {
+            // Allow idempotent Idle -> Idle transitions (for cleanup operations)
+            (Idle, Idle) => true,
             (Idle, Starting) => true,
             (Starting, Active { .. }) => true,
             (Starting, Error { .. }) => true,
