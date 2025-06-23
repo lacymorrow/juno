@@ -107,7 +107,7 @@ export default function ModularSettingsWindow() {
       case "network":
         return <NetworkSettings settings={settings} />;
       case "security":
-        return <SecuritySettings settings={settings} />;
+        return <SecuritySettings />;
       case "shortcuts":
         return <ShortcutsSettings settings={settings} />;
       case "advanced":
