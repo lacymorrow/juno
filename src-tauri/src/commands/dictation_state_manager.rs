@@ -88,9 +88,9 @@ impl DictationStateManager {
             let mut current = self.current_state.write().await;
             let prev = current.clone();
 
-            // Skip transition if already in target state (optimization and reduces log noise)
-            if std::mem::discriminant(&prev) == std::mem::discriminant(&new_state) {
-                debug!("[StateManager] Already in target state {:?}, skipping transition", new_state);
+            // Skip transition if already in exact same state (optimization and reduces log noise)
+            if prev == new_state {
+                debug!("[StateManager] Already in exact target state {:?}, skipping transition", new_state);
                 return Ok(());
             }
 
