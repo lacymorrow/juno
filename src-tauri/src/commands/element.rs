@@ -22,7 +22,7 @@ pub(crate) async fn get_focused_element_info(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("get_focused_element_info", "Getting focused element info using NSWorkspace");
@@ -44,7 +44,7 @@ pub(crate) async fn get_focused_element_info(
             })?;
 
             if debug {
-                time_operation("get_focused_element_info", start_time);
+                time_operation(start_time);
                 send_debug_notification(&app, "Focus Info", "Focused element info retrieved.")?;
             }
 
@@ -66,7 +66,7 @@ pub(crate) async fn click_focused_element(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("click_focused_element", "Attempting to click focused element");
@@ -86,7 +86,7 @@ pub(crate) async fn click_focused_element(
         })?;
 
         if debug {
-            time_operation("click_focused_element", start_time);
+            time_operation(start_time);
             send_debug_notification(&app, "Click", "Clicked focused element.")?;
         }
 
@@ -105,7 +105,7 @@ pub(crate) async fn find_element_by_selector(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("find_element_by_selector", &format!("Finding element by selector: {}", selector_str));
@@ -127,7 +127,7 @@ pub(crate) async fn find_element_by_selector(
             })?;
 
             if debug {
-                time_operation("find_element_by_selector", start_time);
+                time_operation(start_time);
                 log_debug_operation("find_element_by_selector", &format!("Found element: {:?}", attrs));
             }
 
@@ -157,7 +157,7 @@ pub(crate) async fn click_element_by_selector(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("click_element_by_selector", &format!("Clicking element by selector: {}", selector_str));
@@ -178,7 +178,7 @@ pub(crate) async fn click_element_by_selector(
             })?;
 
             if debug {
-                time_operation("click_element_by_selector", start_time);
+                time_operation(start_time);
                 let click_msg = format!("Clicked element matching: {}", selector_str);
                 send_debug_notification(&app, "Click Element", &click_msg)?;
             }
@@ -208,7 +208,7 @@ pub(crate) async fn get_selected_text(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("get_selected_text", "Getting selected text from focused element");
@@ -227,7 +227,7 @@ pub(crate) async fn get_selected_text(
         let selected_text = attrs.value.unwrap_or_else(|| "".to_string());
 
         if debug {
-            time_operation("get_selected_text", start_time);
+            time_operation(start_time);
             log_debug_operation("get_selected_text", &format!("Retrieved text: '{}'", selected_text));
             send_debug_notification(&app, "Selected Text", "Retrieved selected text.")?;
         }

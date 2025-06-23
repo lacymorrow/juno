@@ -16,7 +16,7 @@ pub(crate) async fn open_application(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("open_application", &format!("Opening application: {}", app_name));
@@ -28,7 +28,7 @@ pub(crate) async fn open_application(
     match desktop.open_application(&app_name) {
         Ok(_) => {
             if debug {
-                time_operation("open_application", start_time);
+                time_operation(start_time);
                 log_debug_operation("open_application", &format!("Successfully opened application: {}", app_name));
                 send_debug_notification(&app, "Application", &format!("Opened application: {}", app_name))?;
             }
@@ -51,7 +51,7 @@ pub(crate) async fn open_url(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("open_url", &format!("Opening URL: {}", url));
@@ -63,7 +63,7 @@ pub(crate) async fn open_url(
     match desktop.open_url(&url, None) {
         Ok(_) => {
             if debug {
-                time_operation("open_url", start_time);
+                time_operation(start_time);
                 log_debug_operation("open_url", &format!("Successfully opened URL: {}", url));
                 send_debug_notification(&app, "URL", &format!("Opened URL: {}", url))?;
             }

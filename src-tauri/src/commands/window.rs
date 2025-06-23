@@ -55,7 +55,7 @@ pub async fn scroll_window(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     // Validate direction
@@ -127,7 +127,7 @@ pub async fn get_window_list(
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -195,7 +195,7 @@ pub async fn get_window_info(
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -267,7 +267,7 @@ pub async fn focus_window(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {

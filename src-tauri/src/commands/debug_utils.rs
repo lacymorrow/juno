@@ -42,6 +42,23 @@ pub fn log_debug_info(operation: &str, details: &str) {
     debug!("[DEBUG] {}: {}", operation, details);
 }
 
+/// Log debug operation with consistent formatting (alias for compatibility)
+pub fn log_debug_operation(operation: &str, details: &str) {
+    info!("[DEBUG] {}: {}", operation, details);
+}
+
+/// Calculate elapsed time from start_time and return in milliseconds
+pub fn time_operation(start_time: std::time::Instant) -> f64 {
+    start_time.elapsed().as_secs_f64() * 1000.0
+}
+
+/// Calculate elapsed time with operation name (compatibility overload)
+pub fn time_operation_with_name(operation: &str, start_time: std::time::Instant) -> f64 {
+    let duration = start_time.elapsed().as_secs_f64() * 1000.0;
+    debug!("[TIMING] {} completed in {:.2}ms", operation, duration);
+    duration
+}
+
 /// Log debug operation start with timing
 pub fn log_operation_start(operation: &str, params: &str) {
     info!("[DEBUG] Starting {}: {}", operation, params);

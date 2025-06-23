@@ -184,7 +184,7 @@ pub async fn bash_command(
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
     let effective_restart = restart.unwrap_or(false);
     let session_id = "default".to_string(); // For now we use a default session, could be parameterized later

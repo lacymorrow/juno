@@ -28,7 +28,7 @@ pub async fn list_files(
     path_str: String,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("list_files", &format!("Listing files for path: {}", path_str));
@@ -107,7 +107,7 @@ pub async fn list_files(
             match serde_json::to_string_pretty(&file_entries) {
                 Ok(json_string) => {
                     if debug {
-                        time_operation("list_files", start_time);
+                        time_operation(start_time);
                         send_debug_notification(&app, "List Files", &format!("Listed {} items in {:?}", file_entries.len(), path_to_list))?;
                     }
                     Ok(json_string)
@@ -139,7 +139,7 @@ pub async fn get_file_content(
     path_str: String,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("get_file_content", &format!("Getting content for file: {}", path_str));
@@ -194,7 +194,7 @@ pub async fn get_file_content(
     match fs::read_to_string(file_path) {
         Ok(content) => {
             if debug {
-                time_operation("get_file_content", start_time);
+                time_operation(start_time);
                 log_debug_operation("get_file_content", &format!("Successfully read {} bytes", content.len()));
                 send_debug_notification(&app, "Get File Content", &format!("Read content from {:?}", file_path))?;
             }
@@ -219,7 +219,7 @@ pub async fn set_file_content(
     content: String,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("set_file_content", &format!("Setting content for file: {} ({} bytes)", path_str, content.len()));
@@ -288,7 +288,7 @@ pub async fn set_file_content(
     match fs::write(file_path, content) {
         Ok(_) => {
             if debug {
-                time_operation("set_file_content", start_time);
+                time_operation(start_time);
                 send_debug_notification(&app, "Set File Content", &format!("Wrote content to {:?}", file_path))?;
             }
             Ok(())

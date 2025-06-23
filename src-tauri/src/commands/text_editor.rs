@@ -30,7 +30,7 @@ pub(crate) async fn text_editor_view(
     state: State<'_, AppState>,
     debug_mode: Option<bool>
 ) -> Result<String, String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("text_editor_view", &format!("Reading file content: {}", Path::new(&path).display()));
@@ -41,7 +41,7 @@ pub(crate) async fn text_editor_view(
     match fs::read_to_string(&path) {
         Ok(content) => {
             if debug {
-                time_operation("text_editor_view", start_time);
+                time_operation(start_time);
                 log_debug_operation("text_editor_view", &format!("Successfully read {} bytes", content.len()));
             }
             Ok(content)
@@ -64,7 +64,7 @@ pub(crate) async fn text_editor_create(
     content: String,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let path_buf: PathBuf = path.into();
 
     if debug {
@@ -84,7 +84,7 @@ pub(crate) async fn text_editor_create(
     match fs::write(&path_buf, &content) {
         Ok(_) => {
             if debug {
-                time_operation("text_editor_create", start_time);
+                time_operation(start_time);
                 send_debug_notification(&app, "File Operation", &format!("File '{}' created/updated.", path_buf.display()))?;
             }
             Ok(())
@@ -108,7 +108,7 @@ pub(crate) async fn text_editor_str_replace(
     replace: String,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let path_buf: PathBuf = path.into();
 
     if debug {
@@ -133,7 +133,7 @@ pub(crate) async fn text_editor_str_replace(
     match fs::write(&path_buf, modified_content) {
         Ok(_) => {
             if debug {
-                time_operation("text_editor_str_replace", start_time);
+                time_operation(start_time);
                 send_debug_notification(&app, "File Operation", &format!("String replaced in '{}'.", path_buf.display()))?;
             }
             Ok(())
@@ -157,7 +157,7 @@ pub(crate) async fn text_editor_insert(
     text: String,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let path_buf: PathBuf = path.into();
 
     if debug {
@@ -205,7 +205,7 @@ pub(crate) async fn text_editor_insert(
     match fs::write(&path_buf, modified_content) {
         Ok(_) => {
             if debug {
-                time_operation("text_editor_insert", start_time);
+                time_operation(start_time);
                 send_debug_notification(&app, "File Operation", &format!("Text inserted into '{}' at line {}.", path_buf.display(), line_number))?;
             }
             Ok(())
@@ -226,7 +226,7 @@ pub(crate) async fn text_editor_undo_edit(
     app: AppHandle,
     debug_mode: Option<bool>
 ) -> Result<(), String> {
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
 
     if debug {
         log_debug_operation("text_editor_undo_edit", "Undoing last text editor operation");
@@ -248,7 +248,7 @@ pub(crate) async fn text_editor_undo_edit(
                 match fs::write(&path, &content_to_restore) {
                     Ok(_) => {
                         if debug {
-                            time_operation("text_editor_undo_edit", start_time);
+                            time_operation(start_time);
                             send_debug_notification(&app, "File Operation", &format!("Undo: Restored '{}'.", path.display()))?;
                         }
                         Ok(())
@@ -269,7 +269,7 @@ pub(crate) async fn text_editor_undo_edit(
                 match fs::remove_file(&path) {
                     Ok(_) => {
                         if debug {
-                            time_operation("text_editor_undo_edit", start_time);
+                            time_operation(start_time);
                             send_debug_notification(&app, "File Operation", &format!("Undo: Deleted '{}'.", path.display()))?;
                         }
                         Ok(())

@@ -365,7 +365,7 @@ pub async fn left_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -404,7 +404,7 @@ pub async fn right_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -443,7 +443,7 @@ pub async fn middle_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -482,7 +482,7 @@ pub async fn double_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -521,7 +521,7 @@ pub async fn triple_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -559,7 +559,7 @@ pub async fn mouse_move(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -595,7 +595,7 @@ pub async fn left_mouse_down(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -631,7 +631,7 @@ pub async fn left_mouse_up(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -669,7 +669,7 @@ pub async fn left_click_drag(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -703,7 +703,7 @@ pub async fn get_cursor_position(
 ) -> Result<(f64, f64), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -742,7 +742,7 @@ pub async fn window_relative_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {
@@ -781,7 +781,7 @@ pub async fn focused_window_relative_click(
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{should_enable_debug, log_debug_operation, send_debug_notification, time_operation};
 
-    let debug = should_enable_debug(&state, debug_mode);
+    let debug = should_enable_debug(debug_mode, &state);
     let start_time = std::time::Instant::now();
 
     if debug {

@@ -201,4 +201,107 @@ impl DesktopWrapper {
     pub fn try_get_desktop(&self) -> Option<&Arc<Desktop>> {
         self.desktop.as_ref()
     }
+
+    pub fn window_relative_click(
+        &self,
+        window_id: &str,
+        x: f64,
+        y: f64,
+        click_type: Option<&str>,
+        modifier: Option<&str>,
+    ) -> Result<(), String> {
+        match &self.desktop {
+            Some(desktop) => {
+                // Find the window by ID
+                let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
+
+                let target_window = windows
+                    .into_iter()
+                    .find(|window| {
+                        window.id().map_or(false, |id| id == window_id)
+                    })
+                    .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
+
+                // Convert window-relative coordinates to global coordinates
+                let (window_x, window_y, _width, _height) = target_window.bounds()
+                    .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+                let global_x = window_x + x;
+                let global_y = window_y + y;
+
+                // Perform the click using existing functionality
+                match click_type.unwrap_or("left") {
+                    "left" => self.left_click(global_x, global_y, modifier),
+                    "right" => self.right_click(global_x, global_y, modifier),
+                    "double" => self.double_click(global_x, global_y, modifier),
+                    "middle" => self.middle_click(global_x, global_y, modifier),
+                    "triple" => self.triple_click(global_x, global_y, modifier),
+                    unknown => Err(format!("Unsupported click type: {}", unknown)),
+                }
+            }
+            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+        }
+    }
+
+    pub fn focused_window_relative_click(
+        &self,
+        x: f64,
+        y: f64,
+        click_type: Option<&str>,
+        modifier: Option<&str>,
+    ) -> Result<(), String> {
+        match &self.desktop {
+            Some(desktop) => {
+                // Get the focused element first
+                let focused_element = desktop.focused_element()
+                    .map_err(|e| format!("Failed to get focused element: {}", e))?;
+
+                // Check if the focused element is a window, if not try to get its window
+                let window_element = {
+                    let attrs = focused_element.attributes();
+                    if attrs.role == "AXWindow" {
+                        focused_element
+                    } else {
+                        // Try to traverse up to find the window
+                        let mut current = focused_element;
+                        loop {
+                            match current.parent() {
+                                Ok(Some(parent)) => {
+                                    let parent_attrs = parent.attributes();
+                                    if parent_attrs.role == "AXWindow" {
+                                        current = parent;
+                                        break;
+                                    }
+                                    current = parent;
+                                }
+                                Ok(None) => {
+                                    return Err("No window found in element hierarchy".to_string());
+                                }
+                                Err(e) => {
+                                    return Err(format!("Error traversing element hierarchy: {}", e));
+                                }
+                            }
+                        }
+                        current
+                    }
+                };
+
+                // Convert window-relative coordinates to global coordinates
+                let (window_x, window_y, _width, _height) = window_element.bounds()
+                    .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+                let global_x = window_x + x;
+                let global_y = window_y + y;
+
+                // Perform the click using existing functionality
+                match click_type.unwrap_or("left") {
+                    "left" => self.left_click(global_x, global_y, modifier),
+                    "right" => self.right_click(global_x, global_y, modifier),
+                    "double" => self.double_click(global_x, global_y, modifier),
+                    "middle" => self.middle_click(global_x, global_y, modifier),
+                    "triple" => self.triple_click(global_x, global_y, modifier),
+                    unknown => Err(format!("Unsupported click type: {}", unknown)),
+                }
+            }
+            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+        }
+    }
 }
