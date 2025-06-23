@@ -8,11 +8,15 @@ src-tauri/src/anthropic.rs
 
 src-tauri/src/agent/tool_logger.rs
 
-
 If an agent is asked to do multiple things in quick succession, we need to handle that.
 
+Can we show a canceling state when we have initiated a cancel with esc but the agent has not stopped yet?
 
+2025-06-23T18:20:59.258309Z ERROR [StateManager] Invalid state transition from Idle to Idle
 
+2025-06-23T18:31:55.653362Z  INFO [Menu] Unhandled menu event: developer-tools
+
+2025-06-23T18:29:38.881449Z  INFO Tool execution plan: 5 tools organized into 5 batch(es)
 
 # TODO
 
@@ -75,7 +79,7 @@ All inconsistencies have been successfully migrated to use the established Tauri
 
 ## 📂 URGENT: Tauri Store Pattern Migration (Identified Inconsistencies)
 
-### Files Using Direct File I/O Instead of Established Tauri Store Pattern:
+### Files Using Direct File I/O Instead of Established Tauri Store Pattern
 
 1. **`src-tauri/src/commands/floating_bar.rs`**
    - Currently uses: `tokio::fs::write()`, `tokio::fs::read_to_string()`, `get_config_path()`
@@ -97,7 +101,8 @@ All inconsistencies have been successfully migrated to use the established Tauri
    - Should use: `app.store("prompts.json")` pattern
    - Impact: Medium - Prompt customizations separate from other settings
 
-### Migration Benefits (Demonstrated by Recent Tool Config Fix):
+### Migration Benefits (Demonstrated by Recent Tool Config Fix)
+
 - ✅ **Consistency** - All settings use same persistence pattern
 - ✅ **Reliability** - Atomic operations prevent corruption
 - ✅ **Thread Safety** - Built-in synchronization
@@ -105,7 +110,8 @@ All inconsistencies have been successfully migrated to use the established Tauri
 - ✅ **Platform Support** - Cross-platform storage locations
 - ✅ **Integration** - Works with existing settings loading in `state_management.rs`
 
-### Pattern to Follow:
+### Pattern to Follow
+
 Reference the recently fixed `src-tauri/src/agent/tools/tool_config.rs` which was successfully migrated from direct file I/O to Tauri store pattern.
 
 ---
