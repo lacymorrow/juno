@@ -298,10 +298,15 @@ async fn register_additional_computer_use_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input for down: {}", e))?;
+
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Left mouse down at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_mouse_down(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_left_mouse_down(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error pressing left mouse down: {}", e))?;
@@ -331,10 +336,15 @@ async fn register_additional_computer_use_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input for up: {}", e))?;
+
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Left mouse up at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_mouse_up(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_left_mouse_up(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error releasing left mouse up: {}", e))?;
@@ -369,10 +379,14 @@ async fn register_additional_computer_use_tools(
             let args = serde_json::from_value::<ClickInput>(input)
                 .map_err(|e| format!("Failed to parse triple_click input: {}", e))?;
 
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Triple click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_triple_click(app.clone(), state_manager, args.x, args.y, args.modifier).await
+                    commands::mouse::dev_triple_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
                 })
             });
             inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
@@ -688,10 +702,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<DesktopClickArgs>(input)
                 .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
 
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Desktop click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, args.modifier).await
+                    commands::mouse::dev_left_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
                 })
             });
             inner_result.map_err(|e| format!("Error clicking: {}", e))?;
@@ -759,13 +777,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Mouse move at ({}, {}) - no transformation applied", args.x, args.y);
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Mouse move at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_mouse_move(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_mouse_move(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error moving mouse: {}", e))?;
@@ -803,13 +822,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Left click at ({}, {}) - no transformation applied", args.x, args.y);
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Left click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, None).await
+                    commands::mouse::dev_left_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error left clicking: {}", e))?;
@@ -847,13 +867,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Right click at ({}, {}) - no transformation applied", args.x, args.y);
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Right click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_right_click(app.clone(), state_manager, args.x, args.y, None).await
+                    commands::mouse::dev_right_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error right clicking: {}", e))?;
@@ -891,13 +912,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Middle click at ({}, {}) - no transformation applied", args.x, args.y);
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Middle click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_middle_click(app.clone(), state_manager, args.x, args.y, None).await
+                    commands::mouse::dev_middle_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error middle clicking: {}", e))?;
@@ -935,13 +957,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Double click at ({}, {}) - no transformation applied", args.x, args.y);
+            // Transform coordinates from screenshot space to screen space
+            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
+            info!("Double click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_double_click(app.clone(), state_manager, args.x, args.y, None).await
+                    commands::mouse::dev_double_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error double clicking: {}", e))?;
@@ -981,9 +1004,11 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<DragInput>(input)
                 .map_err(|e| format!("Failed to parse drag input: {}", e))?;
 
-            // info! message from HEAD
-            info!("Click and drag from ({}, {}) to ({}, {}) - no transformation applied",
-                args.start_x, args.start_y, args.end_x, args.end_y);
+            // Transform coordinates from screenshot space to screen space
+            let (start_screen_x, start_screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.start_x, args.start_y);
+            let (end_screen_x, end_screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.end_x, args.end_y);
+            info!("Click and drag from screenshot ({}, {}) -> screen ({}, {}) to screenshot ({}, {}) -> screen ({}, {})",
+                args.start_x, args.start_y, start_screen_x, start_screen_y, args.end_x, args.end_y, end_screen_x, end_screen_y);
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
@@ -991,10 +1016,10 @@ pub async fn register_desktop_tools(
                     commands::mouse::dev_left_click_drag(
                         app.clone(),
                         state_manager,
-                        args.start_x,
-                        args.start_y,
-                        args.end_x,
-                        args.end_y
+                        start_screen_x,
+                        start_screen_y,
+                        end_screen_x,
+                        end_screen_y
                     ).await
                 })
             });

@@ -9,6 +9,8 @@ use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
 use crate::settings::{manager::SettingsManager, AgentSettings};
+use base64::prelude::*;
+use image;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -23,6 +25,42 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
         Ok(base64_string) => {
             // Send notification on success
             send_dev_tool_notification(&app, "Screenshot", "Screenshot captured successfully.")?;
+
+            // DEBUG: Log display bounds and screenshot resolution for coordinate transformation troubleshooting
+            use computer_use_ai_sdk::platforms::macos::display::get_main_display;
+            if let Ok(display_info) = get_main_display() {
+                tracing::info!("Display bounds: {}x{} at ({}, {})",
+                    display_info.bounds.size.width, display_info.bounds.size.height,
+                    display_info.bounds.origin.x, display_info.bounds.origin.y);
+
+                // Decode the base64 to get actual screenshot dimensions
+                if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(&base64_string) {
+                    if let Ok(img) = image::load_from_memory(&decoded) {
+                        let screenshot_width = img.width();
+                        let screenshot_height = img.height();
+                        tracing::info!("Screenshot resolution: {}x{}", screenshot_width, screenshot_height);
+
+                        // Calculate and log scale factor
+                        let scale_x = screenshot_width as f64 / display_info.bounds.size.width;
+                        let scale_y = screenshot_height as f64 / display_info.bounds.size.height;
+                        tracing::info!("Scale factors: X={:.2}, Y={:.2}", scale_x, scale_y);
+
+                        // Update the global scaling info if we have proper scale factor
+                        if scale_x > 1.0 || scale_y > 1.0 {
+                            let scale_factor = scale_x.max(scale_y) as f32;
+                            crate::utils::coordinates::update_scaling_info(
+                                display_info.bounds.size.width as u32,
+                                display_info.bounds.size.height as u32,
+                                screenshot_width,
+                                screenshot_height,
+                                scale_factor
+                            );
+                            tracing::info!("Updated coordinate scaling info with factor: {}", scale_factor);
+                        }
+                    }
+                }
+            }
+
             Ok(base64_string)
         }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
