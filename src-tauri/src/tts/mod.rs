@@ -257,7 +257,7 @@ pub async fn get_tts_provider_command(
     Ok(audio_settings.tts_provider)
 }
 
-// Central TTS invocation function with escape key registration
+// Central TTS invocation function with escape key registration and fallback logic
 #[tauri::command]
 pub async fn invoke_tts(
     text: String,
@@ -267,18 +267,18 @@ pub async fn invoke_tts(
     // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
     info!("New TTS request received, stopping any existing TTS to prevent token waste");
     stop_speech();
-    
+
     // Brief pause to allow existing TTS operations to detect the stop signal
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    
+
     // Reset stop flag for the new TTS request
     reset_tts_stop_flag();
 
-    let provider_from_state = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
+    let provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
 
-    if provider_from_state.is_empty() || provider_from_state.to_lowercase() == "off" {
+    if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
-        info!("TTS is set to '{}'. Skipping TTS for text: {}...", provider_from_state, short_text);
+        info!("TTS is set to '{}'. Skipping TTS for text: {}...", provider, short_text);
         return Ok("TTS_DISABLED_BY_SETTING".to_string());
     }
 
@@ -294,15 +294,111 @@ pub async fn invoke_tts(
     // Register escape key for TTS cancellation
     register_tts_escape_key(&app_handle).await;
 
-    info!("Using TTS provider from state: {}", provider_from_state);
+    info!("Using TTS provider from state: {}", provider);
 
-    // Use fallback mechanism to try alternative providers if the primary fails
-    let result = invoke_tts_with_fallback(filtered_text, &provider_from_state).await;
+    // Check if stop was requested during initialization (edge case)
+    if is_tts_stop_requested() {
+        info!("TTS stop was requested during initialization, aborting");
+        unregister_tts_escape_key(&app_handle).await;
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
 
-    // Unregister escape key after TTS completion (success or failure)
+    // Check network connectivity for cloud-based providers
+    let is_cloud_provider = matches!(provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
+
+    // If it's a cloud provider, do a quick network check first
+    if is_cloud_provider {
+        info!("Cloud TTS provider detected, checking network connectivity...");
+        let is_online = crate::utils::network::is_online().await;
+        if !is_online {
+            warn!("Device appears offline, skipping cloud TTS providers and using system TTS directly");
+            let result = invoke_tts_for_provider(filtered_text, None, "system").await;
+            unregister_tts_escape_key(&app_handle).await;
+            return result;
+        }
+    }
+
+    // Define the provider fallback order based on the primary provider
+    let fallback_providers = match provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "system"], // Prioritize system over other cloud providers when offline
+        "elevenlabs" => vec!["elevenlabs", "system"], // Prioritize system over other cloud providers when offline
+        "system" => vec!["system"], // System only, no cloud fallbacks needed
+        "off" => {
+            unregister_tts_escape_key(&app_handle).await;
+            return Ok("TTS_DISABLED_BY_SETTING".to_string());
+        }
+        _ => {
+            warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", provider);
+            vec!["system"] // Default to system for unknown providers
+        }
+    };
+
+    let mut last_error = String::new();
+
+    for (index, fallback_provider) in fallback_providers.iter().enumerate() {
+        // Check if stop was requested before each attempt
+        if is_tts_stop_requested() {
+            info!("TTS stop was requested during fallback attempts, aborting");
+            unregister_tts_escape_key(&app_handle).await;
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+
+        let is_primary = index == 0;
+        info!("Attempting TTS with provider: {} ({})", fallback_provider, if is_primary { "primary" } else { "fallback" });
+
+        match invoke_tts_for_provider(filtered_text.clone(), None, fallback_provider).await {
+            Ok(result) => {
+                if result == "TTS_STOPPED_BY_USER" {
+                    unregister_tts_escape_key(&app_handle).await;
+                    return Ok(result);
+                }
+                if !is_primary {
+                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", provider, fallback_provider);
+                }
+
+                // Unregister escape key after successful TTS
+                unregister_tts_escape_key(&app_handle).await;
+                return Ok(result);
+            }
+            Err(e) => {
+                last_error = e.clone();
+
+                // Check if this is a network-related error
+                let is_network_error = crate::utils::network::is_network_error(&e);
+
+                if is_primary {
+                    if is_network_error {
+                        warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
+                        // For network errors, skip other cloud providers and go straight to system
+                        match invoke_tts_for_provider(filtered_text.clone(), None, "system").await {
+                            Ok(system_result) => {
+                                warn!("Network error detected, successfully fell back to system TTS");
+                                unregister_tts_escape_key(&app_handle).await;
+                                return Ok(system_result);
+                            }
+                            Err(system_error) => {
+                                error!("Even system TTS failed: {}", system_error);
+                                unregister_tts_escape_key(&app_handle).await;
+                                return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                            }
+                        }
+                    } else {
+                        warn!("Primary TTS provider '{}' failed: {}", fallback_provider, e);
+                    }
+                } else {
+                    warn!("Fallback TTS provider '{}' also failed: {}", fallback_provider, e);
+                }
+            }
+        }
+    }
+
+    let final_error = format!("All TTS providers failed. Last error: {}", last_error);
+    error!("{}", final_error);
+
+    // Unregister escape key after TTS failure
     unregister_tts_escape_key(&app_handle).await;
 
-    result
+    Err(final_error)
 }
 
 // Invoke TTS for a specific provider name
@@ -332,113 +428,6 @@ pub async fn invoke_tts_for_provider(
             Err(format!("Unknown TTS provider: {}", provider))
         }
     }
-}
-
-// Invoke TTS with automatic fallback to alternative providers
-pub async fn invoke_tts_with_fallback(
-    text: String,
-    primary_provider: &str,
-) -> Result<String, String> {
-    info!("Invoking TTS with fallback, primary provider: {}", primary_provider);
-
-    // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
-    // This prevents multiple TTS requests from running concurrently during streaming
-    stop_speech();
-    
-    // Brief pause to allow existing TTS operations to detect the stop signal
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    
-    // Reset stop flag for the new TTS request
-    reset_tts_stop_flag();
-
-    // Check if stop was requested during the brief pause (edge case)
-    if is_tts_stop_requested() {
-        info!("TTS stop was requested during initialization, aborting");
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-
-    // Check network connectivity for cloud-based providers
-    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
-
-    // If it's a cloud provider, do a quick network check first
-    if is_cloud_provider {
-        info!("Cloud TTS provider detected, checking network connectivity...");
-        let is_online = crate::utils::network::is_online().await;
-        if !is_online {
-            warn!("Device appears offline, skipping cloud TTS providers and using system TTS directly");
-            return invoke_tts_for_provider(text, None, "system").await;
-        }
-    }
-
-    // Define the provider fallback order based on the primary provider
-    let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "system"], // Prioritize system over other cloud providers when offline
-        "elevenlabs" => vec!["elevenlabs", "system"], // Prioritize system over other cloud providers when offline
-        "system" => vec!["system"], // System only, no cloud fallbacks needed
-        "off" => {
-            return Ok("TTS_DISABLED_BY_SETTING".to_string());
-        }
-        _ => {
-            warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", primary_provider);
-            vec!["system"] // Default to system for unknown providers
-        }
-    };
-
-    let mut last_error = String::new();
-
-    for (index, provider) in fallback_providers.iter().enumerate() {
-        // Check if stop was requested before each attempt
-        if is_tts_stop_requested() {
-            info!("TTS stop was requested during fallback attempts, aborting");
-            return Ok("TTS_STOPPED_BY_USER".to_string());
-        }
-
-        let is_primary = index == 0;
-        info!("Attempting TTS with provider: {} ({})", provider, if is_primary { "primary" } else { "fallback" });
-
-        match invoke_tts_for_provider(text.clone(), None, provider).await {
-            Ok(result) => {
-                if result == "TTS_STOPPED_BY_USER" {
-                    return Ok(result);
-                }
-                if !is_primary {
-                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", primary_provider, provider);
-                }
-                return Ok(result);
-            }
-            Err(e) => {
-                last_error = e.clone();
-
-                // Check if this is a network-related error
-                let is_network_error = crate::utils::network::is_network_error(&e);
-
-                if is_primary {
-                    if is_network_error {
-                        warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", provider, e);
-                        // For network errors, skip other cloud providers and go straight to system
-                        match invoke_tts_for_provider(text.clone(), None, "system").await {
-                            Ok(system_result) => {
-                                warn!("Network error detected, successfully fell back to system TTS");
-                                return Ok(system_result);
-                            }
-                            Err(system_error) => {
-                                error!("Even system TTS failed: {}", system_error);
-                                return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
-                            }
-                        }
-                    } else {
-                        warn!("Primary TTS provider '{}' failed: {}", provider, e);
-                    }
-                } else {
-                    warn!("Fallback TTS provider '{}' also failed: {}", provider, e);
-                }
-            }
-        }
-    }
-
-    let final_error = format!("All TTS providers failed. Last error: {}", last_error);
-    error!("{}", final_error);
-    Err(final_error)
 }
 
 #[cfg(test)]
