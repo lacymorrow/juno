@@ -1100,7 +1100,7 @@ async fn execute_specialized_agent_task(
             // 1. The result contains JSX content (visual components for user)
             // 2. The result contains substantial text content (more than just status messages)
             // 3. The result is not just a simple success/failure indicator
-            let user_communication_handled = is_jsx || (result.len() > 50 && !result.trim().is_empty());
+            let user_communication_handled = is_jsx || !result.trim().is_empty();
 
             if is_jsx {
                 // If the result contains JSX, return it directly to preserve JSX rendering
