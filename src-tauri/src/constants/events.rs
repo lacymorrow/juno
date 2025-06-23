@@ -58,6 +58,9 @@ pub mod ui {
     pub const REQUEST_AUDIO_PLAYBACK_TEST: &str = "request-audio-playback-test";
     pub const KEY_PRESS_VISUALIZATION: &str = "key-press-visualization";
     pub const CLICK_VISUALIZATION: &str = "click-visualization";
+    pub const UI_CURSOR_HIGHLIGHT_START: &str = "ui-cursor-highlight-start";
+    pub const UI_CURSOR_HIGHLIGHT_MOVE: &str = "ui-cursor-highlight-move";
+    pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
 }
 
 /// Menu and navigation events

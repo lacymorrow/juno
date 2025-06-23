@@ -786,10 +786,18 @@ pub async fn register_anthropic_computer_use_tools(
                     info!("Agent mouse-move coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
                           screenshot_x, screenshot_y, screen_x, screen_y);
 
-                    state_manager
-                        .desktop
-                        .mouse_move(screen_x, screen_y)
-                        .map_err(|e| format!("Mouse move failed: {}", e))?;
+                    tokio::task::block_in_place(|| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(async {
+                            crate::commands::mouse::dev_mouse_move(
+                                app.clone(),
+                                app.clone().state(),
+                                screen_x,
+                                screen_y,
+                            )
+                            .await
+                        })
+                    }).map_err(|e| format!("Mouse move failed: {}", e))?;
                     Ok(json!({"success": true}))
                 }
                 "left_mouse_down" => {
@@ -811,10 +819,18 @@ pub async fn register_anthropic_computer_use_tools(
                     info!("Agent left-mouse-down coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
                           screenshot_x, screenshot_y, screen_x, screen_y);
 
-                    state_manager
-                        .desktop
-                        .left_mouse_down(screen_x, screen_y)
-                        .map_err(|e| format!("Left mouse down failed: {}", e))?;
+                    tokio::task::block_in_place(|| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(async {
+                            crate::commands::mouse::dev_left_mouse_down(
+                                app.clone(),
+                                app.clone().state(),
+                                screen_x,
+                                screen_y,
+                            )
+                            .await
+                        })
+                    }).map_err(|e| format!("Left mouse down failed: {}", e))?;
                     Ok(json!({"success": true}))
                 }
                 "left_mouse_up" => {
@@ -836,10 +852,18 @@ pub async fn register_anthropic_computer_use_tools(
                     info!("Agent left-mouse-up coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
                           screenshot_x, screenshot_y, screen_x, screen_y);
 
-                    state_manager
-                        .desktop
-                        .left_mouse_up(screen_x, screen_y)
-                        .map_err(|e| format!("Left mouse up failed: {}", e))?;
+                    tokio::task::block_in_place(|| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(async {
+                            crate::commands::mouse::dev_left_mouse_up(
+                                app.clone(),
+                                app.clone().state(),
+                                screen_x,
+                                screen_y,
+                            )
+                            .await
+                        })
+                    }).map_err(|e| format!("Left mouse up failed: {}", e))?;
                     Ok(json!({"success": true}))
                 }
                 "left_click" => {
@@ -866,7 +890,7 @@ pub async fn register_anthropic_computer_use_tools(
                           screenshot_x, screenshot_y, screen_x, screen_y);
 
                     let click_result = if use_focused_window {
-                        // Use focused window relative click
+                        // Use focused window relative click with smooth movement
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
@@ -882,7 +906,7 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else if let Some(window_id_str) = window_id {
-                        // Use window relative click
+                        // Use window relative click with smooth movement
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
@@ -899,10 +923,20 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        // Use global coordinates (default behavior) - now with transformed coordinates
-                        state_manager
-                            .desktop
-                            .left_click(screen_x, screen_y, modifiers)
+                        // Use global coordinates with smooth movement
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_left_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                    modifiers.map(|s| s.to_string()),
+                                )
+                                .await
+                            })
+                        })
                     };
 
                     click_result.map_err(|e| format!("Left click failed: {}", e))?;
@@ -983,9 +1017,19 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        state_manager
-                            .desktop
-                            .right_click(screen_x, screen_y, modifiers)
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_right_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                    modifiers.map(|s| s.to_string()),
+                                )
+                                .await
+                            })
+                        })
                     };
 
                     click_result.map_err(|e| format!("Right click failed: {}", e))?;
@@ -1045,9 +1089,19 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        state_manager
-                            .desktop
-                            .middle_click(screen_x, screen_y, modifiers)
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_middle_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                    modifiers.map(|s| s.to_string()),
+                                )
+                                .await
+                            })
+                        })
                     };
 
                     click_result.map_err(|e| format!("Middle click failed: {}", e))?;
@@ -1107,9 +1161,19 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        state_manager
-                            .desktop
-                            .double_click(screen_x, screen_y, modifiers)
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_double_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                    modifiers.map(|s| s.to_string()),
+                                )
+                                .await
+                            })
+                        })
                     };
 
                     click_result.map_err(|e| format!("Double click failed: {}", e))?;
@@ -1190,9 +1254,19 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        state_manager
-                            .desktop
-                            .triple_click(screen_x, screen_y, modifiers)
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_triple_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                    modifiers.map(|s| s.to_string()),
+                                )
+                                .await
+                            })
+                        })
                     };
 
                     click_result.map_err(|e| format!("Triple click failed: {}", e))?;
@@ -1257,10 +1331,20 @@ pub async fn register_anthropic_computer_use_tools(
                           screenshot_start_x, screenshot_start_y, screen_start_x, screen_start_y,
                           screenshot_end_x, screenshot_end_y, screen_end_x, screen_end_y);
 
-                    state_manager
-                        .desktop
-                        .left_click_drag(screen_start_x, screen_start_y, screen_end_x, screen_end_y)
-                        .map_err(|e| format!("Left click drag failed: {}", e))?;
+                    tokio::task::block_in_place(|| {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(async {
+                            crate::commands::mouse::dev_left_click_drag(
+                                app.clone(),
+                                app.clone().state(),
+                                screen_start_x,
+                                screen_start_y,
+                                screen_end_x,
+                                screen_end_y,
+                            )
+                            .await
+                        })
+                    }).map_err(|e| format!("Left click drag failed: {}", e))?;
                     Ok(json!({"success": true}))
                 }
                 "scroll" => {
