@@ -214,6 +214,7 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
+/// TODO: REWRITE THIS
 /// Simple JSX content detection
 fn is_jsx_content(content: &str) -> bool {
     // Check for common JSX patterns
@@ -232,6 +233,113 @@ fn is_jsx_content(content: &str) -> bool {
             || content.contains("className=")
             || content.contains("jsx")
             || content.contains("React"))
+}
+
+/// TODO: REWRITE THIS
+/// Determine if text content represents substantial user communication
+/// rather than simple status messages or internal responses
+fn is_substantial_user_communication(content: &str) -> bool {
+    let trimmed = content.trim();
+
+    // Empty or very short content is not substantial
+    if trimmed.is_empty() || trimmed.len() < 20 {
+        return false;
+    }
+
+    // Convert to lowercase for pattern matching
+    let lower_content = trimmed.to_lowercase();
+
+    // Common simple status message patterns that should NOT be considered user communication
+    let simple_status_patterns = [
+        "task completed",
+        "operation successful",
+        "done",
+        "finished",
+        "success",
+        "failed",
+        "error",
+        "completed successfully",
+        "operation completed",
+        "task finished",
+        "file saved",
+        "file created",
+        "file deleted",
+        "command executed",
+        "action completed",
+        "processed successfully",
+        "unable to",
+        "couldn't",
+        "can't",
+        "not found",
+        "already exists",
+    ];
+
+    // If the content is primarily a simple status message, it's not substantial user communication
+    for pattern in &simple_status_patterns {
+        if lower_content.contains(pattern) && trimmed.len() < 100 {
+            // For short messages containing status patterns, check if it's ONLY a status message
+            let words: Vec<&str> = trimmed.split_whitespace().collect();
+            if words.len() <= 10 {
+                return false;
+            }
+        }
+    }
+
+    // Check for indicators of substantial content:
+    // 1. Multiple sentences (contains multiple periods, question marks, or exclamation marks)
+    let sentence_endings = trimmed.matches(&['.', '?', '!']).count();
+    if sentence_endings >= 2 {
+        return true;
+    }
+
+    // 2. Long single sentence with substantial content (over 80 characters)
+    if trimmed.len() > 80 && sentence_endings >= 1 {
+        return true;
+    }
+
+    // 3. Contains detailed information (multiple lines or complex structure)
+    if trimmed.lines().count() > 2 {
+        return true;
+    }
+
+    // 4. Contains specific technical details or explanations
+    let content_indicators = [
+        "here's",
+        "i found",
+        "i've",
+        "discovered",
+        "located",
+        "retrieved",
+        "extracted",
+        "analysis",
+        "results show",
+        "data indicates",
+        "information",
+        "details",
+        "explanation",
+        "because",
+        "since",
+        "therefore",
+        "however",
+        "additionally",
+        "furthermore",
+    ];
+
+    for indicator in &content_indicators {
+        if lower_content.contains(indicator) {
+            return true;
+        }
+    }
+
+    // 5. Word count threshold for substantial content
+    let word_count = trimmed.split_whitespace().count();
+    if word_count > 15 {
+        return true;
+    }
+
+    // Default: if none of the substantial content indicators are met,
+    // treat as simple status message
+    false
 }
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
@@ -1100,7 +1208,7 @@ async fn execute_specialized_agent_task(
             // 1. The result contains JSX content (visual components for user)
             // 2. The result contains substantial text content (more than just status messages)
             // 3. The result is not just a simple success/failure indicator
-            let user_communication_handled = is_jsx || !result.trim().is_empty();
+            let user_communication_handled = is_jsx || is_substantial_user_communication(&result);
 
             if is_jsx {
                 // If the result contains JSX, return it directly to preserve JSX rendering
@@ -1245,5 +1353,42 @@ pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<()
             error!("Failed to clear conversation history: {}", e);
             Err(format!("Failed to clear conversation history: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_substantial_user_communication() {
+        // Test cases that should NOT be considered substantial user communication
+        assert!(!is_substantial_user_communication(""));
+        assert!(!is_substantial_user_communication("   "));
+        assert!(!is_substantial_user_communication("Done"));
+        assert!(!is_substantial_user_communication("Task completed"));
+        assert!(!is_substantial_user_communication("Operation successful"));
+        assert!(!is_substantial_user_communication("File saved successfully"));
+        assert!(!is_substantial_user_communication("Command executed"));
+        assert!(!is_substantial_user_communication("Finished"));
+        assert!(!is_substantial_user_communication("Unable to complete"));
+        assert!(!is_substantial_user_communication("Error occurred"));
+        assert!(!is_substantial_user_communication("Not found"));
+        assert!(!is_substantial_user_communication("Short message"));
+
+        // Test cases that SHOULD be considered substantial user communication
+        assert!(is_substantial_user_communication("I found several files that match your criteria. Here are the results: file1.txt, file2.txt, and file3.txt."));
+        assert!(is_substantial_user_communication("The analysis shows that the system is performing well. CPU usage is at 45% and memory usage is at 60%."));
+        assert!(is_substantial_user_communication("Here's what I discovered while searching through the codebase. The main function is located in the src directory."));
+        assert!(is_substantial_user_communication("I've successfully completed the task.\n\nThe file has been created with the following content:\n- Line 1\n- Line 2\n- Line 3"));
+        assert!(is_substantial_user_communication("Based on my analysis, there are several improvements that can be made to optimize performance."));
+        assert!(is_substantial_user_communication("The search results indicate that there are multiple matches for your query across different files."));
+        assert!(is_substantial_user_communication("I located the configuration file you requested. It contains important settings for the application."));
+        assert!(is_substantial_user_communication("After reviewing the logs, I found several error messages that need attention."));
+
+        // Test edge cases
+        assert!(is_substantial_user_communication("This is a longer message that provides detailed information about the task that was completed and what the user should know about the results."));
+        assert!(!is_substantial_user_communication("Task completed. Done."));
+        assert!(is_substantial_user_communication("Task completed. Here are the detailed results of the operation including all the files that were processed."));
     }
 }
