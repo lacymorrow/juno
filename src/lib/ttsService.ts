@@ -192,6 +192,11 @@ export const synthesizeSpeech = async (
 		return;
 	}
 
+	// CRITICAL FIX: Stop any existing TTS before starting new one to prevent conflicts
+	// This ensures clean cancellation of previous speech/audio before new request
+	logFn("Stopping any existing TTS before starting new speech", "info");
+	await stopTTS(logFn);
+
 	if (mode === 'api') {
 		if (!navigator.onLine) {
 			const errorMsg = "Offline. Cannot use API TTS.";
