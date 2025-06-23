@@ -19,13 +19,92 @@ use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consist
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
+    use crate::utils::coordinates;
+    use base64::Engine;
+    use image::ImageFormat;
+
     match macos_utils::capture_and_encode_screenshot() {
         Ok(base64_string) => {
+            // Parse the screenshot to get its dimensions
+            let engine = base64::engine::general_purpose::STANDARD;
+            if let Ok(image_data) = engine.decode(&base64_string) {
+                if let Ok(img) = image::load_from_memory(&image_data) {
+                    let screenshot_width = img.width();
+                    let screenshot_height = img.height();
+
+                    // Get display information to calculate proper scaling
+                    match get_display_dimensions() {
+                        Ok((display_width, display_height)) => {
+                            // Calculate scaling factors for both dimensions
+                            let scale_x = if display_width > 0 {
+                                screenshot_width as f32 / display_width as f32
+                            } else {
+                                1.0
+                            };
+                            let scale_y = if display_height > 0 {
+                                screenshot_height as f32 / display_height as f32
+                            } else {
+                                1.0
+                            };
+
+                            // Use separate scale factors for proper non-uniform scaling support
+                            // Update scaling information with separate X and Y scale factors
+                            coordinates::update_scaling_info_with_separate_factors(
+                                display_width,
+                                display_height,
+                                screenshot_width,
+                                screenshot_height,
+                                scale_x,
+                                scale_y,
+                            );
+
+                            info!("Screenshot scaling updated: display {}x{} → screenshot {}x{}, scale_x: {:.3}, scale_y: {:.3}",
+                                display_width, display_height, screenshot_width, screenshot_height, scale_x, scale_y);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to get display dimensions for scaling: {}", e);
+                            // Fallback: assume no scaling needed
+                            coordinates::update_scaling_info(
+                                screenshot_width,
+                                screenshot_height,
+                                screenshot_width,
+                                screenshot_height,
+                                1.0,
+                            );
+                        }
+                    }
+                } else {
+                    tracing::warn!("Failed to decode screenshot image for scaling calculation");
+                }
+            } else {
+                tracing::warn!("Failed to decode base64 screenshot for scaling calculation");
+            }
+
             // Send notification on success
             send_dev_tool_notification(&app, "Screenshot", "Screenshot captured successfully.")?;
             Ok(base64_string)
         }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
+    }
+}
+
+/// Get display dimensions using macOS Core Graphics
+#[cfg(target_os = "macos")]
+fn get_display_dimensions() -> Result<(u32, u32), String> {
+    use computer_use_ai_sdk::platforms::macos::display::get_main_display;
+
+    match get_main_display() {
+        Ok(display_info) => {
+            let width = display_info.bounds.size.width as u32;
+            let height = display_info.bounds.size.height as u32;
+
+            if width == 0 || height == 0 {
+                return Err("Invalid display dimensions".to_string());
+            }
+
+            Ok((width, height))
+        }
+        Err(e) => Err(format!("Failed to get display info: {}", e))
     }
 }
 
@@ -550,4 +629,53 @@ pub async fn set_agent_execution_progress(
 
     info!("Agent execution progress updated successfully");
     Ok(())
+}
+
+/// Get current screenshot scaling information for debugging
+#[tauri::command]
+pub async fn get_screenshot_scaling_info() -> Result<serde_json::Value, String> {
+    use crate::utils::coordinates;
+
+    match coordinates::get_scaling_info() {
+        Ok(scaling_info) => {
+            Ok(serde_json::to_value(scaling_info).unwrap_or(serde_json::Value::Null))
+        }
+        Err(e) => Err(format!("Failed to get scaling info: {}", e))
+    }
+}
+
+/// Reset screenshot scaling information to defaults
+#[tauri::command]
+pub async fn reset_screenshot_scaling() -> Result<(), String> {
+    use crate::utils::coordinates;
+
+    coordinates::reset_scaling_info();
+    info!("Screenshot scaling information reset to defaults");
+    Ok(())
+}
+
+/// Test coordinate transformation with current scaling
+#[tauri::command]
+pub async fn test_coordinate_transformation(
+    screenshot_x: f64,
+    screenshot_y: f64,
+) -> Result<serde_json::Value, String> {
+    use crate::utils::coordinates;
+
+    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_to_scaled_coordinates(screen_x, screen_y);
+
+    let roundtrip_error_x = (screenshot_x - back_to_screenshot_x).abs();
+    let roundtrip_error_y = (screenshot_y - back_to_screenshot_y).abs();
+
+    let result = serde_json::json!({
+        "input_screenshot": { "x": screenshot_x, "y": screenshot_y },
+        "calculated_screen": { "x": screen_x, "y": screen_y },
+        "roundtrip_screenshot": { "x": back_to_screenshot_x, "y": back_to_screenshot_y },
+        "roundtrip_error": { "x": roundtrip_error_x, "y": roundtrip_error_y },
+        "is_accurate": roundtrip_error_x < 1.0 && roundtrip_error_y < 1.0,
+        "scaling_info": coordinates::get_scaling_info().unwrap_or_default()
+    });
+
+    Ok(result)
 }

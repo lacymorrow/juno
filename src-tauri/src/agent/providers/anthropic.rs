@@ -715,8 +715,56 @@ impl AgentBrain for AnthropicBrain {
 
         // Track tool calls that need results to validate message ordering
         let mut pending_tool_calls: Vec<String> = Vec::new();
+        let mut resolved_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // First pass: collect all tool call IDs and tool result IDs
+        for message in messages {
+            match message.role {
+                Role::Assistant => {
+                    if let Some(tool_calls) = &message.tool_calls {
+                        for tool_call in tool_calls {
+                            pending_tool_calls.push(tool_call.id.clone());
+                        }
+                    }
+                }
+                Role::Tool => {
+                    if let Some(tool_call_id) = &message.tool_call_id {
+                        resolved_tool_calls.insert(tool_call_id.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Validate conversation consistency - remove orphaned tool results
+        let mut valid_messages = Vec::new();
+        let mut orphaned_results_found = false;
 
         for message in messages {
+            match message.role {
+                Role::Tool => {
+                    if let Some(tool_call_id) = &message.tool_call_id {
+                        // Check if this tool result has a corresponding tool call
+                        if !pending_tool_calls.contains(tool_call_id) {
+                            log::warn!("Removing orphaned tool result with ID: {} - no corresponding tool_use found", tool_call_id);
+                            orphaned_results_found = true;
+                            continue; // Skip this message
+                        }
+                    }
+                }
+                _ => {}
+            }
+            valid_messages.push(message.clone());
+        }
+
+        if orphaned_results_found {
+            log::info!("Cleaned up orphaned tool results from conversation before sending to Anthropic API");
+        }
+
+        // Reset tracking for the cleaned messages
+        pending_tool_calls.clear();
+
+        for message in &valid_messages {
             match message.role {
                 Role::Assistant => {
                     // Convert assistant message normally
@@ -750,7 +798,11 @@ impl AgentBrain for AnthropicBrain {
 
                     // Check if this tool call ID is expected
                     if !pending_tool_calls.contains(&tool_call_id) {
-                        log::warn!("Received tool result for unexpected tool call ID: {}. This may cause API ordering issues.", tool_call_id);
+                        log::error!("CRITICAL: Tool result for ID {} has no corresponding tool_use - this should have been filtered out", tool_call_id);
+                        return Err(AgentError::LlmError(format!(
+                            "Conversation consistency error: tool result {} has no corresponding tool_use block",
+                            tool_call_id
+                        )));
                     } else {
                         // Remove from pending list
                         pending_tool_calls.retain(|id| id != &tool_call_id);
@@ -839,6 +891,8 @@ impl AgentBrain for AnthropicBrain {
                 pending_tool_calls
             )));
         }
+
+        log::info!("Conversation validation passed: {} messages prepared for Anthropic API", api_messages.len());
 
         let api_tools = if available_tools.is_empty() {
             None

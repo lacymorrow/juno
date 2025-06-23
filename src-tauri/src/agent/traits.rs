@@ -25,6 +25,13 @@ pub trait MemoryManager: Send + Sync {
         Ok(()) // Default no-op implementation
     }
 
+    /// Removes orphaned tool results that don't have corresponding tool calls.
+    /// This should be implemented by memory managers that track tool result consistency.
+    /// Default implementation does nothing (for backward compatibility).
+    async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
+        Ok(0) // Default no-op implementation returns 0 cleaned items
+    }
+
     // Potential future additions:
     // async fn summarize_memory(&self) -> Result<String, AgentError>;
     // async fn prune_memory(&mut self, max_tokens: usize) -> Result<(), AgentError>;
