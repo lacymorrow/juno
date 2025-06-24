@@ -146,9 +146,33 @@ pub async fn load_audio_settings_from_centralized_settings(
     let audio_settings = settings_manager.get_audio_settings().await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
-    // Update AppState with centralized settings values
-    if let Ok(mut tts_provider) = state.tts_provider.lock() {
-        *tts_provider = audio_settings.tts_provider;
+    // CRITICAL FIX: Only update AppState if centralized settings has valid non-empty TTS provider
+    // This prevents empty/uninitialized centralized settings from overriding correct AppState defaults
+    let should_update_centralized_settings = {
+        let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
+        if !audio_settings.tts_provider.is_empty() && audio_settings.tts_provider != "off" {
+            tracing::info!("Loading TTS provider from centralized settings: {}", audio_settings.tts_provider);
+            *tts_provider = audio_settings.tts_provider.clone();
+            None // No need to update centralized settings
+        } else {
+            tracing::warn!("Centralized settings TTS provider is empty or 'off' ('{}'), keeping AppState default: {}",
+                audio_settings.tts_provider, &*tts_provider);
+
+            // Return the current valid AppState value for updating centralized settings
+            Some(tts_provider.clone())
+        }
+    };
+
+    // Handle updating centralized settings outside the mutex scope
+    if let Some(valid_tts_provider) = should_update_centralized_settings {
+        let mut updated_audio_settings = audio_settings.clone();
+        updated_audio_settings.tts_provider = valid_tts_provider.clone();
+
+        if let Err(e) = settings_manager.set_audio_settings(&updated_audio_settings).await {
+            tracing::warn!("Failed to update centralized settings with correct TTS provider: {}", e);
+        } else {
+            tracing::info!("Updated centralized settings with correct TTS provider: {}", valid_tts_provider);
+        }
     }
 
     if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
@@ -182,6 +206,7 @@ pub async fn save_audio_settings_to_centralized_settings(
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Update centralized settings with current AppState values
+    // Extract values from AppState locks before any await points
     if let Ok(tts_provider) = state.tts_provider.lock() {
         audio_settings.tts_provider = tts_provider.clone();
     }
@@ -198,6 +223,7 @@ pub async fn save_audio_settings_to_centralized_settings(
         audio_settings.always_listening_wake_words = always_listening_wake_words.clone();
     }
 
+    // All mutex guards are automatically dropped here before the await
     settings_manager.set_audio_settings(&audio_settings).await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
