@@ -26,6 +26,7 @@ interface CachedValue<T> {
 interface SettingsCache {
 	ttsProvider?: CachedValue<string>;
 	dictationClipboardEnabled?: CachedValue<boolean>;
+	dictationTriggerMode?: CachedValue<string>;
 	soundEnabled?: CachedValue<boolean>;
 	toolConfigurations?: CachedValue<Record<string, ToolCategory>>;
 	providers?: CachedValue<ProviderInfo[]>;
@@ -114,6 +115,7 @@ export function useSettings() {
 
 	// Dictation Settings
 	const [dictationClipboardEnabled, setDictationClipboardEnabled] = useState<boolean>(true);
+	const [dictationTriggerMode, setDictationTriggerMode] = useState<string>("hold"); // Default to existing hold behavior
 
 	// Sound Settings
 	const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -261,6 +263,7 @@ export function useSettings() {
 				currentAgentMode,
 				currentAgentTriggerMode,
 				currentClipboardEnabled,
+				currentDictationTriggerMode,
 				currentSoundEnabled,
 				currentPerformanceMonitoringEnabled,
 				alwaysListeningStatus,
@@ -273,6 +276,7 @@ export function useSettings() {
 				getCachedOrFetch('agentMode', () => invokeCommand<string>("get_agent_mode")),
 				getCachedOrFetch('agentTriggerMode', () => invokeCommand<string>("get_agent_trigger_mode")),
 				getCachedOrFetch('dictationClipboardEnabled', () => invokeCommand<boolean>("get_dictation_clipboard_enabled")),
+				getCachedOrFetch('dictationTriggerMode', () => invokeCommand<string>("get_dictation_trigger_mode")),
 				getCachedOrFetch('soundEnabled', () => invokeCommand<boolean>("get_sound_enabled")),
 				getCachedOrFetch('performanceMonitoringEnabled', () => invokeCommand<boolean>("get_performance_monitoring")),
 				getCachedOrFetch('alwaysListeningActive', () => invokeCommand<boolean>("get_always_listening_status")),
@@ -287,6 +291,7 @@ export function useSettings() {
 			setAgentMode(currentAgentMode);
 			setAgentTriggerMode(currentAgentTriggerMode);
 			setDictationClipboardEnabled(currentClipboardEnabled);
+			setDictationTriggerMode(currentDictationTriggerMode);
 			setSoundEnabled(currentSoundEnabled);
 			setPerformanceMonitoringEnabled(currentPerformanceMonitoringEnabled);
 			setAlwaysListeningActive(alwaysListeningStatus);
@@ -589,6 +594,17 @@ export function useSettings() {
 		}
 	};
 
+	const handleDictationTriggerModeChange = async (newMode: string) => {
+		try {
+			await invoke("set_dictation_trigger_mode", { mode: newMode });
+			setDictationTriggerMode(newMode);
+			toast.success(`Dictation trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
+		} catch (error) {
+			console.error("Failed to set dictation trigger mode:", error);
+			toast.error("Failed to set dictation trigger mode");
+		}
+	};
+
 	const handleAlwaysListeningToggle = async () => {
 		try {
 			const newState = await invoke<boolean>("toggle_always_listening_mode");
@@ -639,6 +655,7 @@ export function useSettings() {
 		agentMode,
 		agentTriggerMode,
 		dictationClipboardEnabled,
+		dictationTriggerMode,
 		soundEnabled,
 		performanceMonitoringEnabled,
 		alwaysListeningActive,
@@ -673,6 +690,7 @@ export function useSettings() {
 		handleAgentModeChange,
 		handleAgentTriggerModeChange,
 		handleDictationClipboardChange,
+		handleDictationTriggerModeChange,
 		handleAlwaysListeningToggle,
 		handleSensitivityChange,
 		handleWakeWordsChange,

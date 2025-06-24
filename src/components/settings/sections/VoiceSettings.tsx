@@ -55,7 +55,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             Configure voice input and transcription
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="dictation-clipboard">
@@ -70,6 +70,29 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
               checked={settings.dictationClipboardEnabled}
               onCheckedChange={settings.handleDictationClipboardChange}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="dictation-trigger-mode">Trigger Mode</Label>
+            <Select
+              value={settings.dictationTriggerMode}
+              onValueChange={settings.handleDictationTriggerModeChange}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select trigger mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tap">Tap to Toggle</SelectItem>
+                <SelectItem value="hold">Hold to Activate (Default)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-500">
+              <strong>Tap to Toggle:</strong> Press and release to toggle
+              dictation mode on/off.
+              <br />
+              <strong>Hold to Activate:</strong> Hold key to activate dictation,
+              release to stop (traditional dictation behavior).
+            </p>
           </div>
         </CardContent>
       </Card>
