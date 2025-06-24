@@ -131,7 +131,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_open_application" | "desktop_open_app" => {
+            "open_application" | "dev_open_application" | "desktop_open_app" => {
                 let app_name = tool_call
                     .input
                     .get("app_name")
@@ -142,8 +142,12 @@ impl DesktopAgent {
                         )
                     })?;
 
-                let result =
-                    commands::app_url::dev_open_application(app_name.to_string(), state).await;
+                let result = commands::app_url::open_application(
+                    self.app_handle.clone(),
+                    state,
+                    app_name.to_string(),
+                    Some(true), // Enable debug mode for agent usage
+                ).await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {

@@ -47,7 +47,7 @@ impl SystemAgent {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
-            "dev_bash_command" | "system_exec" => {
+            "bash_command" | "dev_bash_command" | "system_exec" => {
                 let command = tool_call
                     .input
                     .get("command")
@@ -61,12 +61,13 @@ impl SystemAgent {
                     .and_then(|v| v.as_u64());
                 let restart = tool_call.input.get("restart").and_then(|v| v.as_bool());
 
-                let result = commands::shell::dev_bash_command(
+                let result = commands::shell::bash_command(
                     self.app_handle.clone(),
                     state,
                     command.to_string(),
                     timeout_seconds,
                     restart,
+                    Some(true), // Enable debug mode for agent usage
                 )
                 .await;
 
@@ -82,17 +83,18 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_list_files" | "system_list_files" => {
+            "list_files" | "dev_list_files" | "system_list_files" => {
                 let path = tool_call
                     .input
                     .get("path")
                     .and_then(|v| v.as_str())
                     .unwrap_or(".");
 
-                let result = commands::filesystem::dev_list_files(
+                let result = commands::filesystem::list_files(
                     self.app_handle.clone(),
                     state,
                     path.to_string(),
+                    Some(true), // Enable debug mode for agent usage
                 )
                 .await;
 
@@ -108,7 +110,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_get_file_content" | "system_read_file" => {
+            "get_file_content" | "dev_get_file_content" | "system_read_file" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -119,10 +121,11 @@ impl SystemAgent {
                         )
                     })?;
 
-                let result = commands::filesystem::dev_get_file_content(
+                let result = commands::filesystem::get_file_content(
                     self.app_handle.clone(),
                     state,
                     file_path.to_string(),
+                    Some(true), // Enable debug mode for agent usage
                 )
                 .await;
 
@@ -138,7 +141,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_set_file_content" | "system_write_file" => {
+            "set_file_content" | "dev_set_file_content" | "system_write_file" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -156,11 +159,12 @@ impl SystemAgent {
                         AgentError::InputError("Missing or invalid 'content' parameter".to_string())
                     })?;
 
-                let result = commands::filesystem::dev_set_file_content(
+                let result = commands::filesystem::set_file_content(
                     self.app_handle.clone(),
                     state,
                     file_path.to_string(),
                     content.to_string(),
+                    Some(true), // Enable debug mode for agent usage
                 )
                 .await;
 

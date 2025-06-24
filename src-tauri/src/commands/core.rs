@@ -1,7 +1,7 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
 use tauri::State;
-use tracing::info;
+use tracing::{info, error};
 use crate::state::AppState;
 use tauri::AppHandle;
 use tracing::warn;
@@ -678,4 +678,119 @@ pub async fn test_coordinate_transformation(
     });
 
     Ok(result)
+}
+
+// --- PRODUCTION CORE FUNCTIONS WITH DEBUG CAPABILITIES ---
+// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
+
+#[tauri::command]
+pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_duration_seconds(duration_sec)?;
+    }
+
+    let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
+
+    log_debug_operation("wait", &format!("Waiting for {} seconds ({} ms)", duration_sec, duration_ms), &debug_config);
+    info!("Executing wait for {} seconds ({} ms)", duration_sec, duration_ms);
+
+    let desktop = state.get_desktop()?;
+    match desktop.wait(duration_ms) {
+        Ok(_) => {
+            info!("Successfully completed wait for {} seconds", duration_sec);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Wait", &format!("Waited for {} seconds", duration_sec));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Error during wait: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    log_debug_operation("get_clipboard", "Getting clipboard content", &debug_config);
+    info!("Executing get_clipboard");
+
+    let desktop = state.get_desktop()?;
+    match desktop.get_clipboard_content() {
+        Ok(content) => {
+            info!("Successfully retrieved clipboard content (length: {})", content.len());
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let preview = if content.len() > 50 {
+                    format!("{}...", &content[..50])
+                } else {
+                    content.clone()
+                };
+                let _ = send_debug_notification(&app, "Get Clipboard", &format!("Retrieved: {}", preview));
+            }
+
+            Ok(content)
+        }
+        Err(e) => {
+            let error_msg = format!("Error getting clipboard content: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&content)?;
+    }
+
+    log_debug_operation("set_clipboard", &format!("Setting clipboard content (length: {})", content.len()), &debug_config);
+    info!("Executing set_clipboard with content length: {}", content.len());
+
+    let desktop = state.get_desktop()?;
+    match desktop.set_clipboard_content(&content) {
+        Ok(_) => {
+            info!("Successfully set clipboard content");
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let preview = if content.len() > 50 {
+                    format!("{}...", &content[..50])
+                } else {
+                    content.clone()
+                };
+                let _ = send_debug_notification(&app, "Set Clipboard", &format!("Set: {}", preview));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Error setting clipboard content: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
 }

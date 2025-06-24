@@ -95,8 +95,8 @@ macro_rules! generate_invoke_handler {
             dev_get_window_list,
             dev_get_window_info,
             dev_focus_window,
-            dev_open_application,
-            dev_open_url,
+            open_application,
+            open_url,
             dev_scroll_window,
 
             // Clipboard Commands
@@ -117,9 +117,9 @@ macro_rules! generate_invoke_handler {
             capture_focused_window_screenshot_command,
 
             // File System Commands
-            dev_list_files,
-            dev_get_file_content,
-            dev_set_file_content,
+            list_files,
+            get_file_content,
+            set_file_content,
 
             // Text Editor Commands
             dev_text_editor_view,
@@ -129,7 +129,7 @@ macro_rules! generate_invoke_handler {
             dev_text_editor_undo_edit,
 
             // Shell Commands
-            dev_bash_command,
+            bash_command,
             dev_wait,
 
             // Provider Commands
