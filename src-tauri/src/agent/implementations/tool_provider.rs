@@ -1577,6 +1577,31 @@ impl ToolProvider for LocalToolProvider {
 
         all_tools = unique_tools;
 
+        // Filter out disabled tools based on configuration
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            let config_manager = state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
+
+            let mut enabled_tools = Vec::new();
+            let mut disabled_count = 0;
+
+            for tool in all_tools {
+                if config_guard.is_tool_enabled(&tool.name) {
+                    enabled_tools.push(tool);
+                } else {
+                    disabled_count += 1;
+                    debug!("Tool '{}' is disabled, excluding from available tools", tool.name);
+                }
+            }
+
+            if disabled_count > 0 {
+                info!("Filtered out {} disabled tools", disabled_count);
+            }
+
+            all_tools = enabled_tools;
+        }
+
         Ok(all_tools)
     }
 
@@ -1599,6 +1624,30 @@ impl ToolProvider for LocalToolProvider {
                 "id": command_id
             })) {
                 error!("Failed to emit command-execution-start event: {}", e);
+            }
+        }
+
+        // Check if tool is enabled before execution
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            let config_manager = state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
+
+            if !config_guard.is_tool_enabled(&tool_name) {
+                let error_msg = format!("Tool '{}' is disabled and cannot be executed", tool_name);
+                warn!("{}", error_msg);
+
+                // Emit execution end event with error
+                if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+                    "id": command_id,
+                    "success": false,
+                    "duration": start_time.elapsed().as_millis() as u64,
+                    "error": error_msg
+                })) {
+                    error!("Failed to emit command-execution-end event: {}", e);
+                }
+
+                return Err(AgentError::ToolDisabled(tool_name));
             }
         }
 

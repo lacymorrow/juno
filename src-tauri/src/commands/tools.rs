@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tracing::info;
 
 use crate::state::AppState;
-use crate::agent::tools::ToolCategory;
+use crate::agent::tools::{ToolCategory, tool_config::ToolConfigManager};
 
 /// Get all tool configurations organized by category
 #[tauri::command]
@@ -48,7 +48,7 @@ pub async fn get_tool_configurations(
             "tools": category_tools
     });
 
-        result.insert(category.display_name().to_string(), category_info);
+        result.insert(ToolConfigManager::format_tool_category(&category), category_info);
     }
 
     Ok(Value::Object(result))
@@ -111,16 +111,9 @@ pub async fn set_tool_category_enabled(
 ) -> Result<(), String> {
     info!("Setting category {} enabled: {}", category, enabled);
 
-    // Parse category from string
-    let tool_category = match category.as_str() {
-        "AnthropicComputerUse" => ToolCategory::AnthropicComputerUse,
-        "Desktop" => ToolCategory::Desktop,
-        "Browser" => ToolCategory::Browser,
-        "Timer" => ToolCategory::Timer,
-        "Basic" => ToolCategory::Basic,
-        "MCP" => ToolCategory::MCP,
-        _ => return Err(format!("Unknown category: {}", category)),
-    };
+    // Parse category from string using the proper parsing method
+    let tool_category = ToolConfigManager::parse_tool_category(&category)
+        .map_err(|e| format!("Failed to parse category '{}': {}", category, e))?;
 
     let config_manager = state.get_tool_config_manager().await;
     {
