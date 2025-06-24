@@ -17,6 +17,22 @@ Can we show a canceling state when we have initiated a cancel with esc but the a
 This line logged out always shows the same amount of number of tools and the same amount of batches. Why is that?
 2025-06-23T18:29:38.881449Z  INFO Tool execution plan: 5 tools organized into 5 batch(es)
 
+2025-06-24T04:25:05.389477Z  INFO Entering MacOSEngine::get_focused_element (using safe implementation)
+2025-06-24T04:25:05.389775Z  WARN NSWorkspace method failed: PlatformError("Failed to get focused UI element for PID 1025: Ax(-25204)")
+2025-06-24T04:25:05.389895Z  WARN System-wide method also failed: NoFocusedElement("No system-wide focused element: Ax(-25204)")
+2025-06-24T04:25:07.402336Z  INFO System context gathered successfully
+2025-06-24T04:25:16.544482Z  WARN Tool call capture_screenshot (toolu_01MeWAj3cqjHnBmiiCzYxEnh) has empty JSON input, using empty object
+
+2025-06-24T04:25:12.659527Z  INFO Memory: Added message. Role=Assistant, Total_count=2, Pending_tool_calls=1
+2025-06-24T04:25:12.659581Z  INFO Tool execution plan: 1 tools organized into 1 batch(es)
+2025-06-24T04:25:12.659698Z  INFO Executing tool: delegate_to_desktop_agent with ID: toolu_01EUk7ohvtAryTFNi59C9wQo
+2025-06-24T04:25:12.659745Z  INFO Emitting agent-event: AgentEvent { event_type: "tool_call_request", payload: ToolCallRequest(ToolCallRequestPayload { tool_name: "delegate_to_desktop_agent", tool_args: Object {"context": String("The Chess application is currently running and appears to be the focused application. This is the start of a new game and I need to make the opening move as white."), "task": String("Make the first move in the Chess application. Since I'm going first as white, make a standard opening move like e4 (king's pawn two squares forward) or d4 (queen's pawn two squares forward). Click on the appropriate piece and then click on the destination square to make the move.")}, content: Some("Executing tool: delegate_to_desktop_agent"), tool_category: None, tool_description: None, notification_level: "standard", estimated_duration: None }) }
+2025-06-24T04:25:12.660317Z  INFO Executing desktop agent task: Make the first move in the Chess application. Since I'm going first as white, make a standard opening move like e4 (king's pawn two squares forward) or d4 (queen's pawn two squares forward). Click on the appropriate piece and then click on the destination square to make the move.
+2025-06-24T04:25:12.660392Z  WARN Removing orphaned Assistant message with unresolved tool calls: ["toolu_01EUk7ohvtAryTFNi59C9wQo"]
+2025-06-24T04:25:12.660436Z  INFO Cleaned up 1 orphaned tool calls: {"toolu_01EUk7ohvtAryTFNi59C9wQo"}
+2025-06-24T04:25:12.661399Z  INFO Loaded prompt configuration from centralized settings
+2025-06-24T04:25:12.661722Z  INFO Attempting to use AI provider: anthropic with custom system prompt
+
 # TODO
 
 ## ✅ COMPLETED: Tauri Store Pattern Migration (Successfully Fixed!)
