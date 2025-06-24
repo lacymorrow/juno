@@ -29,6 +29,8 @@ pub enum AgentError {
     OutputError(String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
+    #[error("Tool disabled: {0}")]
+    ToolDisabled(String),
     #[error("Agent terminated")]
     Terminated,
     #[error("Permission denied: {0}")]

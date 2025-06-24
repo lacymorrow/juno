@@ -625,6 +625,10 @@ export function useSettings() {
 		}
 	};
 
+	const invalidateToolConfigCache = useCallback(() => {
+		invalidateCache('toolConfigurations');
+	}, []);
+
 	return {
 		// State
 		ttsProvider,
@@ -675,6 +679,8 @@ export function useSettings() {
 		loadPermissionsStatus,
 		loadKeyboardShortcuts,
 		loadToolConfigurations,
+		setToolConfigurations,
+		invalidateToolConfigCache,
 		loadMcpServers,
 		debugSettings,
 	};
