@@ -1199,7 +1199,7 @@ async fn execute_specialized_agent_task(
 
     // Create specialist agent runner with the shared memory (conversation context preserved)
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
-        cloned_memory,
+        specialist_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
         specialist_brain,
         agent::config::MAX_ITERATIONS, // Use same max iterations as orchestrator

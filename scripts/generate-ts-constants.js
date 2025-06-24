@@ -251,14 +251,6 @@ ${Object.entries(constants.ui)
     .join('\n')}
 } as const;
 
-// Type helpers
-export type EventName = typeof EVENTS[keyof typeof EVENTS];
-export type WindowLabel = typeof WINDOW_LABELS[keyof typeof WINDOW_LABELS];
-export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
-export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS];
-export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
-export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
-
 // Frontend-specific constants (not duplicated from Rust)
 export const CSS_CLASSES = {
   HIDDEN: 'hidden',
@@ -329,23 +321,6 @@ export const SUCCESS_MESSAGES = {
   SYNC_SUCCESS: 'Synchronized successfully',
 } as const;
 
-// Validation helpers
-export const validateEmail = (email: string): boolean => REGEX_PATTERNS.EMAIL.test(email);
-export const validateUrl = (url: string): boolean => REGEX_PATTERNS.URL.test(url);
-export const validateWakeWord = (word: string): boolean => REGEX_PATTERNS.WAKE_WORD.test(word);
-
-// Development mode helpers
-export const isDevelopment = (): boolean => {
-  try {
-    return typeof window !== 'undefined' &&
-           // @ts-ignore - Vite environment variable
-           (window as any).import?.meta?.env?.MODE === 'development';
-  } catch {
-    return false;
-  }
-};
-
-// Default configuration
 export const DEFAULT_CONFIG = {
   theme: 'system',
   language: 'en',
@@ -357,31 +332,14 @@ export const DEFAULT_CONFIG = {
   debugMode: false,
 } as const;
 
+// Type helpers
+export type EventName = typeof EVENTS[keyof typeof EVENTS];
+export type WindowLabel = typeof WINDOW_LABELS[keyof typeof WINDOW_LABELS];
+export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
+export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS];
+export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
+export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
-
-// Utility functions for common operations
-export const formatTimeout = (ms: number): string => {
-  if (ms < 1000) return \`\${ms}ms\`;
-  if (ms < 60000) return \`\${(ms / 1000).toFixed(1)}s\`;
-  return \`\${(ms / 60000).toFixed(1)}m\`;
-};
-
-export const getFileExtension = (filename: string): string => {
-  const lastDot = filename.lastIndexOf('.');
-  return lastDot === -1 ? '' : filename.substring(lastDot);
-};
-
-// Development mode helpers
-export const getDevServerUrl = (): string => {
-  return \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${PORTS.VITE_DEV_PORT}\`;
-};
-
-// Chrome debug URL helpers
-export const getChromeDebugUrls = (): string[] => [
-  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.PRIMARY}\`,
-  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.ALT1}\`,
-  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.ALT2}\`,
-];
 `;
 }
 
