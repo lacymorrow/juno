@@ -15,13 +15,6 @@ use crate::agent::tool_logger; // Added for logging
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 
-/// Simple execution groups - either single tools or MCP batches
-#[derive(Debug)]
-enum ExecutionGroup {
-    Single(crate::agent::structs::ToolCall),
-    MCPBatch(Vec<crate::agent::structs::ToolCall>),
-}
-
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
 pub struct DefaultAgentRunner<M, T>
@@ -146,143 +139,44 @@ where
         // TODO: Emit state change events if needed (e.g., for UI updates)
     }
 
-    /// Execute tools sequentially, with simple MCP batching for consecutive same-server tools
+    /// Enhanced tool execution with intelligent batching support
+    /// Execute tools sequentially with proper error handling and cancellation support.
+    /// Simple, reliable tool execution without unnecessary batching complexity.
     async fn execute_tools_sequentially(
         &mut self,
         tool_calls: Vec<crate::agent::structs::ToolCall>,
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<(), AgentError> {
         if tool_calls.is_empty() {
+            log::debug!("No tools to execute");
             return Ok(());
         }
 
-        log::info!("Executing {} tools with smart MCP batching", tool_calls.len());
+        log::info!("Executing {} tool(s) sequentially", tool_calls.len());
 
-        // Group consecutive MCP tools from same server, keep others individual
-        let execution_groups = self.create_simple_execution_groups(tool_calls).await;
-
-        log::info!("Organized into {} execution group(s)", execution_groups.len());
-
-        for group in execution_groups {
-            // Check cancellation before each group
+        // Execute each tool sequentially
+        for (index, tool_call) in tool_calls.iter().enumerate() {
+            // Check for cancellation before each tool
             if *cancel_rx.borrow() {
-                log::info!("Cancellation detected during tool execution");
+                log::info!("Cancellation detected before tool {} ({})", index + 1, tool_call.name);
                 return Err(AgentError::Terminated);
             }
 
-            match group {
-                ExecutionGroup::Single(tool_call) => {
-                    // Execute individual tool
-                    self.execute_single_tool(&tool_call, cancel_rx).await?;
+            log::debug!("Executing tool {} of {}: {}", index + 1, tool_calls.len(), tool_call.name);
+
+            // Execute the individual tool
+            match self.execute_single_tool(tool_call, cancel_rx).await {
+                Ok(_) => {
+                    log::debug!("Tool {} completed successfully", tool_call.name);
                 }
-                ExecutionGroup::MCPBatch(tools) => {
-                    // Execute MCP batch
-                    log::info!("Executing MCP batch of {} tools", tools.len());
-                    self.execute_mcp_batch(&tools).await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-
-
-    /// Create simple execution groups - batch consecutive MCP tools from same server
-    async fn create_simple_execution_groups(
-        &self,
-        tool_calls: Vec<crate::agent::structs::ToolCall>,
-    ) -> Vec<ExecutionGroup> {
-        let mut groups = Vec::new();
-        let mut current_batch: Vec<crate::agent::structs::ToolCall> = Vec::new();
-        let mut current_server: Option<String> = None;
-
-        for tool_call in tool_calls {
-            let server_id = self.get_mcp_server_for_tool(&tool_call.name).await;
-
-            match (&current_server, &server_id) {
-                // Same MCP server - add to current batch
-                (Some(current), Some(new)) if current == new => {
-                    current_batch.push(tool_call);
-                }
-                // Different server or non-MCP tool - finalize current batch and start new
-                _ => {
-                    // Finalize current batch if it exists
-                    if !current_batch.is_empty() {
-                        if current_batch.len() == 1 {
-                            groups.push(ExecutionGroup::Single(current_batch.into_iter().next().unwrap()));
-                        } else {
-                            groups.push(ExecutionGroup::MCPBatch(current_batch));
-                        }
-                        current_batch = Vec::new();
-                    }
-
-                    // Start new batch or single tool
-                    if server_id.is_some() {
-                        current_batch.push(tool_call);
-                        current_server = server_id;
-                    } else {
-                        // Non-MCP tool - execute individually
-                        groups.push(ExecutionGroup::Single(tool_call));
-                        current_server = None;
-                    }
+                Err(e) => {
+                    log::error!("Tool {} failed: {}", tool_call.name, e);
+                    return Err(e);
                 }
             }
         }
 
-        // Finalize any remaining batch
-        if !current_batch.is_empty() {
-            if current_batch.len() == 1 {
-                groups.push(ExecutionGroup::Single(current_batch.into_iter().next().unwrap()));
-            } else {
-                groups.push(ExecutionGroup::MCPBatch(current_batch));
-            }
-        }
-
-        groups
-    }
-
-    /// Get MCP server ID for a tool (returns None if not an MCP tool)
-    async fn get_mcp_server_for_tool(&self, tool_name: &str) -> Option<String> {
-        // Use the tool provider to check if this is an MCP tool
-        if let Some(mcp_manager) = self.tool_provider.get_mcp_manager() {
-            let manager = mcp_manager.lock().await;
-            let all_tools = manager.get_all_tools().await;
-            for tool_info in all_tools {
-                if tool_info.tool_definition.name == tool_name {
-                    return Some(tool_info.server_id);
-                }
-            }
-        }
-        None
-    }
-
-    /// Execute an MCP batch using the existing MCP batching system
-    async fn execute_mcp_batch(
-        &mut self,
-        tool_calls: &[crate::agent::structs::ToolCall],
-    ) -> Result<(), AgentError> {
-        log::info!("Executing MCP batch of {} tools from same server", tool_calls.len());
-
-        // Use existing MCP batch execution
-        let results = self.tool_provider.execute_batch_tools(tool_calls.to_vec()).await?;
-
-        // Add results to memory
-        for (tool_call, result) in tool_calls.iter().zip(results.into_iter()) {
-            // Emit tool result event to frontend
-            crate::agent::tool_logger::log_tool_call_result(
-                &self.app_handle,
-                &tool_call.name,
-                result.output.clone(),
-                true,
-                Some(format!("MCP batched tool {} executed successfully", tool_call.name)),
-                None, // MCP tools typically don't produce screenshots
-            );
-
-            // Add to memory
-            self.add_tool_result_to_memory(tool_call, Ok(result)).await?;
-        }
-
+        log::debug!("All tools executed successfully");
         Ok(())
     }
 
@@ -298,7 +192,7 @@ where
 
         if tool_approval_enabled {
             // Check for user approval
-            if !self.check_tool_approval(tool_call, cancel_rx).await? {
+        if !self.check_tool_approval(tool_call, cancel_rx).await? {
                 return Err(AgentError::ToolError("Tool execution denied by user".to_string()));
             }
         }
@@ -358,6 +252,15 @@ where
         self.add_tool_result_to_memory(tool_call, result).await
     }
 
+
+
+
+
+
+
+
+
+
     /// Add tool result to memory with proper error handling
     async fn add_tool_result_to_memory(
         &mut self,
@@ -387,6 +290,8 @@ where
         }
         Ok(())
     }
+
+
 
     /// Check individual tool approval (used by legacy sequential execution)
     async fn check_tool_approval(
@@ -902,4 +807,6 @@ mod tests {
         let should_continue = current_step < max_steps;
         assert!(should_continue, "Should handle large step counts");
     }
+
+
 }

@@ -55,11 +55,6 @@ pub trait ToolProvider: Send + Sync {
         }
         Ok(results)
     }
-
-    /// Get access to the MCP manager if available (for batching MCP tools)
-    fn get_mcp_manager(&self) -> Option<std::sync::Arc<tokio::sync::Mutex<crate::agent::tools::mcp_integration::MCPManager>>> {
-        None // Default implementation returns None
-    }
 }
 
 /// Represents the agent's "brain" - responsible for deciding the next action.

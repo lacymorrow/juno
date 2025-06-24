@@ -1496,10 +1496,6 @@ impl LocalToolProvider {
             false
         }
     }
-
-    fn get_mcp_manager(&self) -> Option<std::sync::Arc<tokio::sync::Mutex<crate::agent::tools::mcp_integration::MCPManager>>> {
-        self.mcp_manager.clone()
-    }
 }
 
 #[async_trait]
