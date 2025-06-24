@@ -597,6 +597,7 @@ export function useSettings() {
 	const handleDictationTriggerModeChange = async (newMode: string) => {
 		try {
 			await invoke("set_dictation_trigger_mode", { mode: newMode });
+			invalidateCache('dictationTriggerMode');
 			setDictationTriggerMode(newMode);
 			toast.success(`Dictation trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
 		} catch (error) {
