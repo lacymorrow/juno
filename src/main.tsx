@@ -8,6 +8,7 @@ import { Toaster } from "./components/ui/sonner";
 import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
+import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
 import "./styles/globals.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -20,6 +21,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/floating-bar" element={<FloatingBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
+          <Route
+            path="/desktop-cursor-overlay"
+            element={<DesktopCursorOverlay />}
+          />
         </Routes>
       </BrowserRouter>
       {/* Toast notifications */}

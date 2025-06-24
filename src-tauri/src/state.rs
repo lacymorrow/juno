@@ -31,7 +31,7 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::constants::app;
+use crate::constants::{app, audio};
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,7 +263,7 @@ impl AppState {
             always_listening_active: Arc::new(StdMutex::new(false)),
             always_listening_sensitivity: Arc::new(StdMutex::new(0.5)),
             always_listening_wake_words: Arc::new(StdMutex::new(
-                app::DEFAULT_WAKE_WORDS
+                audio::DEFAULT_WAKE_WORDS
                     .iter()
                     .map(|s| s.to_string())
                     .collect(),
@@ -1732,8 +1732,8 @@ mod tests {
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&app::DEFAULT_WAKE_WORDS[0].to_string()));
-            assert!(wake_words.contains(&app::DEFAULT_WAKE_WORDS[1].to_string()));
+            assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[0].to_string()));
+            assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[1].to_string()));
         }
 
         // Update configuration

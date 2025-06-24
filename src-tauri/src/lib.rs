@@ -704,6 +704,7 @@ pub fn run() {
             window_management::open_main_window,
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
+            window_management::open_desktop_cursor_overlay,
             // Onboarding Commands
             commands::check_onboarding_status,
             commands::complete_onboarding,

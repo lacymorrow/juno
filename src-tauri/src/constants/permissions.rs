@@ -2,15 +2,13 @@
 //!
 //! Permission types, descriptions, and instructions.
 
-// Permission types
+// Permission types (moved from frontend constants.ts)
 pub mod types {
     pub const ACCESSIBILITY: &str = "accessibility";
     pub const SCREEN_RECORDING: &str = "screen_recording";
     pub const MICROPHONE: &str = "microphone";
     pub const INPUT_MONITORING: &str = "input_monitoring";
 }
-
-
 
 // Permission descriptions
 pub mod descriptions {
@@ -29,12 +27,14 @@ pub mod instructions {
     pub const INPUT_MONITORING_INSTRUCTIONS: &str = "Optional: Go to System Preferences > Privacy & Security > Input Monitoring and add Juno to enable global shortcuts";
 }
 
-// System preferences URLs
+// Permission-related URLs and paths
 pub mod urls {
-    pub const MICROPHONE_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
-    pub const SCREEN_RECORDING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-    pub const INPUT_MONITORING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
-    pub const ACCESSIBILITY_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    pub const SYSTEM_PREFERENCES_SECURITY: &str = "x-apple.systempreferences:com.apple.preference.security";
+    pub const SYSTEM_PREFERENCES_PRIVACY: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy";
+    pub const ACCESSIBILITY_PANEL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    pub const SCREEN_RECORDING_PANEL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    pub const MICROPHONE_PANEL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+    pub const INPUT_MONITORING_PANEL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
 }
 
 

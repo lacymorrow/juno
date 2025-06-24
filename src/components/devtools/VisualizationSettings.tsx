@@ -9,7 +9,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MonitorSpeaker, Eye, AlertCircle, TestTube } from "lucide-react";
+import {
+  MonitorSpeaker,
+  Eye,
+  AlertCircle,
+  TestTube,
+  MousePointer,
+} from "lucide-react";
 import { toast } from "sonner";
 
 const VisualizationSettings = () => {
@@ -22,6 +28,10 @@ const VisualizationSettings = () => {
   const [showClickVisualization, setShowClickVisualization] = useState(
     localStorage.getItem("juno-show-click-visualization") !== "false" // Default to true
   );
+  const [showDesktopCursorVisualization, setShowDesktopCursorVisualization] =
+    useState(
+      localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false" // Default to true
+    );
 
   const visualizationSettings = [
     {
@@ -53,6 +63,17 @@ const VisualizationSettings = () => {
       setValue: setShowClickVisualization,
       location: "At click locations",
       icon: <TestTube className="h-4 w-4" />,
+    },
+    {
+      key: "desktop-cursor",
+      title: "Desktop Cursor Overlay",
+      description:
+        "Show desktop-level cursor visualization with circles and ripples",
+      storageKey: "juno-show-desktop-cursor-visualization",
+      value: showDesktopCursorVisualization,
+      setValue: setShowDesktopCursorVisualization,
+      location: "Desktop-wide overlay",
+      icon: <MousePointer className="h-4 w-4" />,
     },
   ];
 
@@ -173,6 +194,10 @@ const VisualizationSettings = () => {
             <p>
               <strong>Click Visualization:</strong> Shows animated circles where
               mouse clicks occur
+            </p>
+            <p>
+              <strong>Desktop Cursor Overlay:</strong> Shows desktop-level
+              cursor visualization with pulsing circles and ripple effects
             </p>
             <p className="text-xs text-amber-600 mt-2">
               <AlertCircle className="h-3 w-3 inline mr-1" />
