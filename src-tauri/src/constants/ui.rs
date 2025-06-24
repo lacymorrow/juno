@@ -10,7 +10,7 @@ pub mod window_labels {
     pub const SETTINGS: &str = "settings";
 }
 
-// UI layout constants
+// UI layout constants (moved from frontend constants.ts)
 pub const MOBILE_BREAKPOINT: i32 = 768;
 pub const PERCENTAGE_MULTIPLIER: f64 = 100.0;
 pub const SCROLL_WHEEL_EVENT_LINE_SCROLL: i32 = 120;

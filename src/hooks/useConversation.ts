@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage } from "@/components/ChatMessage";
-import { LIMITS } from "@/lib/constants";
+import { LIMITS } from "@/lib/constants.generated";
 
 export function useConversation() {
     const [conversation, setConversation] = useState<ChatMessage[]>([]);

@@ -2,7 +2,7 @@
 /**
  * Generate TypeScript constants from Rust constants
  *
- * This script parses the Rust constants modules and generates a TypeScript
+ * This script parses ALL Rust constants modules and generates a comprehensive TypeScript
  * constants file, eliminating duplication and ensuring consistency.
  */
 
@@ -13,7 +13,7 @@ const RUST_CONSTANTS_DIR = 'src-tauri/src/constants';
 const TS_OUTPUT_FILE = 'src/lib/constants.generated.ts';
 
 /**
- * Parse Rust constant definitions
+ * Parse all Rust constant definitions
  */
 function parseRustConstants() {
     const constants = {
@@ -23,11 +23,57 @@ function parseRustConstants() {
         api: {},
         app: {},
         ui: {},
+        audio: {},
+        files: {},
+        permissions: {},
+        errors: {},
     };
 
-    // Parse events module
-    const eventsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'events.rs'), 'utf8');
-    constants.events = parseEventConstants(eventsFile);
+    // Parse each constants module
+    try {
+        // Parse events module
+        const eventsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'events.rs'), 'utf8');
+        constants.events = parseEventConstants(eventsFile);
+
+        // Parse timeouts module
+        const timeoutsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'timeouts.rs'), 'utf8');
+        constants.timeouts = parseSimpleConstants(timeoutsFile);
+
+        // Parse ports module
+        const portsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'ports.rs'), 'utf8');
+        constants.ports = parseSimpleConstants(portsFile);
+
+        // Parse API module
+        const apiFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'api.rs'), 'utf8');
+        constants.api = parseModuleConstants(apiFile);
+
+        // Parse app module
+        const appFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'app.rs'), 'utf8');
+        constants.app = parseSimpleConstants(appFile);
+
+        // Parse UI module
+        const uiFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'ui.rs'), 'utf8');
+        constants.ui = parseModuleConstants(uiFile);
+
+        // Parse audio module
+        const audioFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'audio.rs'), 'utf8');
+        constants.audio = parseModuleConstants(audioFile);
+
+        // Parse files module
+        const filesFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'files.rs'), 'utf8');
+        constants.files = parseModuleConstants(filesFile);
+
+        // Parse permissions module
+        const permissionsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'permissions.rs'), 'utf8');
+        constants.permissions = parseModuleConstants(permissionsFile);
+
+        // Parse errors module
+        const errorsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'errors.rs'), 'utf8');
+        constants.errors = parseModuleConstants(errorsFile);
+
+    } catch (error) {
+        console.warn(`Warning: Could not parse some constants files: ${error.message}`);
+    }
 
     return constants;
 }
@@ -53,8 +99,74 @@ function parseEventConstants(rustCode) {
     return events;
 }
 
+function parseSimpleConstants(rustCode) {
+    const constants = {};
+
+    // Parse simple constants: pub const NAME: type = value;
+    // Updated regex to handle underscores in numeric literals (e.g., 30_000)
+    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"([^"]+)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
+
+    let match;
+    while ((match = constRegex.exec(rustCode)) !== null) {
+        const [, name, stringValue, numericValue, boolValue, arrayValue] = match;
+
+        if (arrayValue !== undefined) {
+            // Parse array of strings: &["hey juno", "computer"]
+            const arrayElements = arrayValue.match(/"([^"]+)"/g);
+            if (arrayElements) {
+                constants[name] = arrayElements.map(el => el.slice(1, -1)); // Remove quotes
+            }
+        } else if (numericValue !== undefined) {
+            // Remove underscores from numeric literals before parsing
+            const cleanNumeric = numericValue.replace(/_/g, '');
+            constants[name] = parseFloat(cleanNumeric);
+        } else {
+            constants[name] = stringValue || boolValue;
+        }
+    }
+
+    return constants;
+}
+
+function parseModuleConstants(rustCode) {
+    const allConstants = {};
+
+    // Parse nested modules first
+    const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
+    let moduleMatch;
+
+    while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
+        const [, moduleName, moduleContent] = moduleMatch;
+        const moduleConstants = parseSimpleConstants(moduleContent);
+
+        // Prefix module constants with module name
+        Object.entries(moduleConstants).forEach(([key, value]) => {
+            allConstants[`${moduleName.toUpperCase()}_${key}`] = value;
+        });
+    }
+
+    // Also parse any top-level constants
+    const topLevelConstants = parseSimpleConstants(rustCode);
+    Object.assign(allConstants, topLevelConstants);
+
+    return allConstants;
+}
+
 /**
- * Generate TypeScript constants file
+ * Helper function to format values consistently for TypeScript generation
+ */
+function formatValue(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(v => `'${v}'`).join(', ')}]`;
+    } else if (typeof value === 'string') {
+        return `'${value}'`;
+    } else {
+        return value;
+    }
+}
+
+/**
+ * Generate comprehensive TypeScript constants file
  */
 function generateTypeScript(constants) {
     return `// Generated file - do not edit manually
@@ -67,8 +179,85 @@ ${Object.entries(constants.events)
     .join('\n')}
 } as const;
 
+export const TIMEOUTS = {
+${Object.entries(constants.timeouts)
+    .map(([key, value]) => `  ${key}: ${value},`)
+    .join('\n')}
+} as const;
+
+export const PORTS = {
+${Object.entries(constants.ports)
+    .map(([key, value]) => `  ${key}: ${value},`)
+    .join('\n')}
+} as const;
+
+export const API_ENDPOINTS = {
+${Object.entries(constants.api)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const APP_IDENTITY = {
+${Object.entries(constants.app)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const UI = {
+${Object.entries(constants.ui)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const AUDIO = {
+${Object.entries(constants.audio)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const FILE_EXTENSIONS = {
+${Object.entries(constants.files)
+    .filter(([key]) => key.includes('EXT'))
+    .map(([key, value]) => {
+        // Handle both _EXT and _EXTENSION suffixes correctly
+        let cleanKey = key;
+        if (cleanKey.endsWith('_EXTENSION')) {
+            cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
+        }
+        cleanKey = cleanKey.replace('_EXT', '');
+        return `  ${key}: '${value}',\n  ${cleanKey}: '${value}',`;
+    })
+    .join('\n')}
+} as const;
+
+export const PERMISSION_TYPES = {
+${Object.entries(constants.permissions)
+    .filter(([key]) => key.startsWith('TYPES_'))
+    .map(([key, value]) => `  ${key.replace('TYPES_', '')}: '${value}',`)
+    .join('\n')}
+} as const;
+
+export const CHROME_DEBUG = {
+${Object.entries(constants.ports)
+    .filter(([key]) => key.startsWith('CHROME_DEBUG_PORT_'))
+    .map(([key, value]) => `  ${key.replace('CHROME_DEBUG_PORT_', '')}: ${value},`)
+    .join('\n')}
+} as const;
+
+export const WINDOW_LABELS = {
+${Object.entries(constants.ui)
+    .filter(([key]) => key.startsWith('WINDOW_LABELS_'))
+    .map(([key, value]) => `  ${key.replace('WINDOW_LABELS_', '')}: '${value}',`)
+    .join('\n')}
+} as const;
+
 // Type helpers
 export type EventName = typeof EVENTS[keyof typeof EVENTS];
+export type WindowLabel = typeof WINDOW_LABELS[keyof typeof WINDOW_LABELS];
+export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
+export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS];
+export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
+export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
 
 // Frontend-specific constants (not duplicated from Rust)
 export const CSS_CLASSES = {
@@ -147,7 +336,13 @@ export const validateWakeWord = (word: string): boolean => REGEX_PATTERNS.WAKE_W
 
 // Development mode helpers
 export const isDevelopment = (): boolean => {
-  return import.meta.env.MODE === 'development';
+  try {
+    return typeof window !== 'undefined' &&
+           // @ts-ignore - Vite environment variable
+           (window as any).import?.meta?.env?.MODE === 'development';
+  } catch {
+    return false;
+  }
 };
 
 // Default configuration
@@ -163,6 +358,30 @@ export const DEFAULT_CONFIG = {
 } as const;
 
 export type DefaultConfig = typeof DEFAULT_CONFIG;
+
+// Utility functions for common operations
+export const formatTimeout = (ms: number): string => {
+  if (ms < 1000) return \`\${ms}ms\`;
+  if (ms < 60000) return \`\${(ms / 1000).toFixed(1)}s\`;
+  return \`\${(ms / 60000).toFixed(1)}m\`;
+};
+
+export const getFileExtension = (filename: string): string => {
+  const lastDot = filename.lastIndexOf('.');
+  return lastDot === -1 ? '' : filename.substring(lastDot);
+};
+
+// Development mode helpers
+export const getDevServerUrl = (): string => {
+  return \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${PORTS.VITE_DEV_PORT}\`;
+};
+
+// Chrome debug URL helpers
+export const getChromeDebugUrls = (): string[] => [
+  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.PRIMARY}\`,
+  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.ALT1}\`,
+  \`\${API_ENDPOINTS.LOCALHOST_BASE}:\${CHROME_DEBUG.ALT2}\`,
+];
 `;
 }
 
@@ -179,7 +398,16 @@ function main() {
         fs.writeFileSync(TS_OUTPUT_FILE, typescript);
 
         console.log(`✅ Generated ${TS_OUTPUT_FILE}`);
-        console.log(`📊 Generated ${Object.keys(constants.events).length} event constants`);
+        console.log(`📊 Generated constants from ${Object.keys(constants).length} Rust modules`);
+        console.log(`   - Events: ${Object.keys(constants.events).length}`);
+        console.log(`   - Timeouts: ${Object.keys(constants.timeouts).length}`);
+        console.log(`   - Ports: ${Object.keys(constants.ports).length}`);
+        console.log(`   - API: ${Object.keys(constants.api).length}`);
+        console.log(`   - App: ${Object.keys(constants.app).length}`);
+        console.log(`   - UI: ${Object.keys(constants.ui).length}`);
+        console.log(`   - Audio: ${Object.keys(constants.audio).length}`);
+        console.log(`   - Files: ${Object.keys(constants.files).length}`);
+        console.log(`   - Permissions: ${Object.keys(constants.permissions).length}`);
 
     } catch (error) {
         console.error('❌ Error generating constants:', error);
