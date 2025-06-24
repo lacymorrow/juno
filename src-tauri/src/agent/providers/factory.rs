@@ -481,11 +481,49 @@ impl BrainFactory {
     }
 
     /// Get current agent mode from configuration
-    pub fn get_agent_mode() -> AgentMode {
+    /// Get current agent mode from centralized settings with app handle
+    pub async fn get_agent_mode_with_app_handle(app_handle: &tauri::AppHandle) -> AgentMode {
+        // Try to read from centralized settings first
+        let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+            Ok(manager) => manager,
+            Err(e) => {
+                warn!("Failed to create settings manager for agent mode: {}. Using environment fallback.", e);
+                return Self::get_agent_mode_fallback();
+            }
+        };
+
+        match settings_manager.get_all_settings().await {
+            Ok(app_settings) => {
+                let mode = AgentMode::from_str(&app_settings.agent.execution_mode)
+                    .unwrap_or_else(|| {
+                        warn!("Invalid agent execution mode in settings: '{}'. Using default.", app_settings.agent.execution_mode);
+                        AgentMode::Multi
+                    });
+                info!("Loaded agent mode from centralized settings: {:?}", mode);
+                mode
+            }
+            Err(e) => {
+                warn!("Failed to load agent settings: {}. Using environment fallback.", e);
+                Self::get_agent_mode_fallback()
+            }
+        }
+    }
+
+    /// Fallback method that reads from environment (used when centralized settings unavailable)
+    fn get_agent_mode_fallback() -> AgentMode {
         let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
             "multi".to_string() // Default to multi-agent mode for new app
         });
         AgentMode::from_str(&mode_str).unwrap_or(AgentMode::Multi)
+    }
+
+    /// Get current agent mode from configuration (legacy method - now tries to use centralized settings)
+    pub fn get_agent_mode() -> AgentMode {
+        // This method is called from contexts where we don't have an app handle
+        // Fall back to environment variable reading for backward compatibility
+        // But log a warning to encourage migration to the new method
+        warn!("get_agent_mode() called without app handle - using environment fallback. Consider using get_agent_mode_with_app_handle() for proper settings integration.");
+        Self::get_agent_mode_fallback()
     }
 
     /// Get the current provider from configuration or environment
