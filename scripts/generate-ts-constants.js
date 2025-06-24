@@ -218,7 +218,15 @@ ${Object.entries(constants.audio)
 export const FILE_EXTENSIONS = {
 ${Object.entries(constants.files)
     .filter(([key]) => key.includes('EXT'))
-    .map(([key, value]) => `  ${key.replace('_EXT', '')}: '${value}',`)
+    .map(([key, value]) => {
+        // Handle both _EXT and _EXTENSION suffixes correctly
+        let cleanKey = key;
+        if (cleanKey.endsWith('_EXTENSION')) {
+            cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
+        }
+        cleanKey = cleanKey.replace('_EXT', '');
+        return `  ${key}: '${value}',\n  ${cleanKey}: '${value}',`;
+    })
     .join('\n')}
 } as const;
 
