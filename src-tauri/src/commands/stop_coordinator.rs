@@ -219,6 +219,21 @@ impl StopCoordinator {
         ).await;
         cleanup_results.push("Floating bar updated".to_string());
 
+        // 8. CRITICAL: Force unregister escape key to release it back to other applications
+        if let Some(escape_op_id) = self.try_register_operation("escape_key_cleanup").await {
+            info!("[StopCoordinator] Force unregistering escape key to release to other applications");
+
+            // Force reset the escape key coordinator to ensure complete cleanup
+            let escape_coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+            if let Err(e) = escape_coordinator.force_reset(app_handle).await {
+                warn!("[StopCoordinator] Failed to force reset escape key coordinator: {}", e);
+            } else {
+                cleanup_results.push("Escape key released to other applications".to_string());
+            }
+
+            self.unregister_operation(&escape_op_id).await;
+        }
+
         let result_summary = format!("Coordinated cleanup completed: [{}]", cleanup_results.join(", "));
         info!("[StopCoordinator] {}", result_summary);
         Ok(result_summary)
