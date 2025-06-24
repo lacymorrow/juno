@@ -1,0 +1,184 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Agent Prompt Guidelines
+
+## 🎯 **Prompt Architecture Principles**
+
+Agent prompts in Juno AI must provide **clear, actionable guidance** about tool usage while maintaining consistency with official API specifications. This rule ensures agents understand exactly which tools to use and how to use them correctly.
+
+## 📋 **Required Prompt Components**
+
+### **1. Official API Guidance**
+Every agent prompt MUST include official API guidance. See [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs):
+
+```rust
+PromptFragments::official_computer_use_api()
+```
+
+This fragment provides:
+- ✅ Exact JSON examples of correct tool usage
+- ✅ Clear action parameter specifications
+- ✅ Explicit guidance on which tools to use/avoid
+
+### **2. Tool Batching Optimization**
+Include batching guidance for performance:
+
+```rust
+PromptFragments::tool_batching_optimization()
+```
+
+Benefits:
+- 33% performance improvement for sequential operations
+- Better user experience with single approvals
+- Reduced API calls and faster execution
+
+### **3. Accessibility-First Strategy**
+For desktop agents, include accessibility guidance:
+
+```rust
+PromptFragments::accessibility_first_strategy()
+```
+
+Promotes:
+- More accurate UI interaction
+- Better semantic understanding
+- Fallback patterns when accessibility fails
+
+## ✅ **Correct Tool Usage Examples**
+
+### **Keyboard Operations**
+```markdown
+## 🎹 **KEYBOARD OPERATIONS** - Use ONLY computer tool
+
+✅ **CORRECT Examples**:
+- Press key: `{"name": "computer", "input": {"action": "key", "text": "Return"}}`
+- Key combo: `{"name": "computer", "input": {"action": "key", "text": "cmd+c"}}`
+- Hold key: `{"name": "computer", "input": {"action": "hold_key", "text": "shift", "duration": 2000}}`
+- Type text: `{"name": "computer", "input": {"action": "type", "text": "hello world"}}`
+
+❌ **FORBIDDEN Tools** (DO NOT USE):
+- press_key, hold_key, dev_press_key, dev_hold_key (REMOVED)
+```
+
+### **Tool Batching Examples**
+```markdown
+## 🚀 **TOOL BATCHING** - Generate multiple tool calls for sequential operations
+
+✅ **BATCH THESE PATTERNS**:
+- Type → Enter → Screenshot
+- Click → Screenshot
+- Mouse Move → Click → Screenshot
+
+Example:
+[
+  {"name": "computer", "input": {"action": "type", "text": "hello"}},
+  {"name": "computer", "input": {"action": "key", "text": "Return"}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+## 🚫 **Anti-Patterns to Avoid**
+
+### ❌ **Vague Tool Guidance**
+```markdown
+// BAD: No specific examples
+"Use appropriate keyboard tools for text input."
+
+// GOOD: Specific JSON examples
+"Use computer tool: {\"name\": \"computer\", \"input\": {\"action\": \"type\", \"text\": \"hello\"}}"
+```
+
+### ❌ **Outdated Tool References**
+```markdown
+// BAD: References removed tools
+"Use press_key for keyboard input"
+
+// GOOD: References official API
+"Use computer tool with action: 'key' for keyboard input"
+```
+
+### ❌ **Missing Batching Guidance**
+```markdown
+// BAD: No batching context
+"Take a screenshot after typing"
+
+// GOOD: Batching encouragement
+"Generate multiple tool calls: type text, press enter, then screenshot"
+```
+
+## 📋 **Prompt Template Patterns**
+
+### **Single Agent Prompts**
+See [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs) `system_default()`:
+
+```rust
+let content = format!(
+    "{}\\n\\n{}\\n\\n{}\\n\\n{}\\n\\n{}\\n\\n{}\\n\\n{}",
+    PromptFragments::core_personality(),
+    PromptFragments::tts_speech_format(),
+    PromptFragments::tool_batching_optimization(),
+    PromptFragments::official_computer_use_api(),
+    PromptFragments::accessibility_first_strategy(),
+    PromptFragments::mcp_capabilities(),
+    PromptFragments::jsx_capabilities(),
+    PromptFragments::macos_file_handling()
+);
+```
+
+### **Specialist Agent Prompts**
+For domain-specific agents (desktop, browser, etc.):
+
+```rust
+// Include role-specific guidance + official API compliance
+let content = format!(
+    r#"🖥️ **DESKTOP AUTOMATION EXPERT**
+
+{}
+
+{}
+
+{}"#,
+    role_specific_guidance(),
+    PromptFragments::official_computer_use_api(),
+    PromptFragments::accessibility_first_strategy()
+);
+```
+
+## 🔍 **Prompt Quality Checklist**
+
+Before deploying any agent prompt:
+- [ ] Includes official API guidance with concrete JSON examples
+- [ ] Explicitly forbids deprecated/removed tools
+- [ ] Encourages tool batching for sequential operations
+- [ ] Provides accessibility-first guidance for UI interaction
+- [ ] Uses consistent formatting and clear action items
+- [ ] References correct tool names and parameters
+
+## 🎯 **Benefits of Proper Prompts**
+
+1. **API Compliance**: Agents use correct tools consistently
+2. **Performance**: Better batching leads to 33% speed improvement
+3. **Reliability**: Clear guidance reduces tool usage errors
+4. **Maintainability**: Centralized fragments enable easy updates
+5. **User Experience**: Faster, more accurate agent responses
+
+## 📚 **Related Files**
+
+- [Prompt Templates](mdc:src-tauri/src/agent/prompts/templates.rs) - All prompt implementations
+- [Prompt Manager](mdc:src-tauri/src/agent/prompts/manager.rs) - Prompt selection logic
+- [Anthropic Computer Use](mdc:src-tauri/src/agent/tools/anthropic_computer_use.rs) - Tool implementation
+- [API Compliance Rule](mdc:.cursor/rules/anthropic-computer-use-api-compliance.mdc) - Tool usage requirements
+
+## 🚀 **Prompt Evolution Strategy**
+
+When updating prompts:
+1. **Update fragments first** - Changes propagate to all prompts
+2. **Test with real scenarios** - Verify agents follow guidance
+3. **Monitor tool usage** - Check for deprecated tool usage
+4. **Measure performance** - Validate batching improvements
+5. **Document changes** - Update related rules and documentation
+
+Remember: **Clear prompts create reliable agents.**

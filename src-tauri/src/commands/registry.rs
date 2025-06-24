@@ -81,9 +81,8 @@ macro_rules! generate_invoke_handler {
             global_type_text,
 
             // Dev Keyboard Commands (for devtools)
+            // REMOVED: dev_press_key, dev_hold_key - Use computer tool with official Anthropic API instead
             dev_type_text,
-            dev_press_key,
-            dev_hold_key,
             dev_release_key,
             dev_global_type_text,
 
@@ -332,8 +331,7 @@ pub mod categories {
     /// Development keyboard commands
     pub const DEV_KEYBOARD: &[&str] = &[
         "dev_type_text",
-        "dev_press_key",
-        "dev_hold_key",
+        // REMOVED: "dev_press_key", "dev_hold_key" - Use computer tool with official Anthropic API instead
         "dev_release_key",
         "dev_global_type_text"
     ];

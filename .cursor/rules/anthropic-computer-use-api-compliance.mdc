@@ -1,0 +1,80 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Anthropic Computer Use API Compliance
+
+## 🎯 **Official API Specification**
+
+Juno AI Computer Use Agent MUST comply with the official Anthropic Computer Use API specification. This rule ensures consistency, performance, and future compatibility.
+
+## ✅ **Required Keyboard Actions** (via `computer` tool only)
+
+### 1. **Key Press and Release**
+```json
+{"name": "computer", "input": {"action": "key", "text": "Return"}}
+{"name": "computer", "input": {"action": "key", "text": "cmd+c"}}
+{"name": "computer", "input": {"action": "key", "text": "shift+Tab"}}
+```
+
+### 2. **Hold Key with Duration**
+```json
+{"name": "computer", "input": {"action": "hold_key", "text": "shift", "duration": 2000}}
+{"name": "computer", "input": {"action": "hold_key", "text": "cmd", "duration": 1500}}
+```
+
+### 3. **Type Text**
+```json
+{"name": "computer", "input": {"action": "type", "text": "hello world"}}
+```
+
+## 🚫 **FORBIDDEN Tools** (DO NOT USE)
+
+These tools have been REMOVED to eliminate redundancy:
+- ❌ `press_key` - Use `computer` with `action: "key"`
+- ❌ `hold_key` - Use `computer` with `action: "hold_key"`
+- ❌ `dev_press_key` - Use `computer` with `action: "key"`
+- ❌ `dev_hold_key` - Use `computer` with `action: "hold_key"`
+
+## 📋 **Implementation Guidelines**
+
+### **For Agent Prompt Updates**
+- Reference [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs) for official API guidance
+- Include `PromptFragments::official_computer_use_api()` in relevant prompts
+- Provide concrete JSON examples of correct tool usage
+
+### **For Tool Registration**
+- Only register tools that comply with official Anthropic API
+- Document any exceptions (like `release_key`) with clear rationale
+- See [desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs) for implementation patterns
+
+### **For Agent Implementation**
+- Agents should ONLY use `computer` tool for keyboard operations
+- Remove any references to deprecated keyboard tools
+- Update [desktop_agent.rs](mdc:src-tauri/src/agents/desktop_agent.rs) patterns for new tools
+
+## 🎯 **Benefits of Compliance**
+
+1. **Better Tool Batching**: All keyboard operations use same tool type
+2. **Simplified Agent Logic**: Single decision path for keyboard operations
+3. **Future Compatibility**: Aligned with Anthropic API evolution
+4. **Performance**: 33% improvement in sequential operation batching
+
+## 🔍 **Verification Checklist**
+
+Before adding any keyboard-related functionality:
+- [ ] Uses only `computer` tool with official actions
+- [ ] Follows exact JSON format from examples above
+- [ ] Does not reference any forbidden tools
+- [ ] Includes proper error handling for computer tool
+- [ ] Documented in agent prompts with examples
+
+## 📚 **Related Files**
+
+- [Prompt Templates](mdc:src-tauri/src/agent/prompts/templates.rs) - Agent guidance
+- [Desktop Tools](mdc:src-tauri/src/agent/tools/desktop_tools.rs) - Tool registration
+- [Anthropic Computer Use](mdc:src-tauri/src/agent/tools/anthropic_computer_use.rs) - Core implementation
+- [Command Registry](mdc:src-tauri/src/commands/registry.rs) - Command organization
+
+Remember: **One tool, one way, official API compliance always.**

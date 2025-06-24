@@ -1,0 +1,185 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Clean Architecture Maintenance
+
+## 🎯 **Core Principle: Continuous Simplification**
+
+Juno AI Computer Use Agent follows a **clean, lean architecture** with zero tolerance for code bloat, redundancy, or backward compatibility layers. This rule ensures the codebase remains maintainable and performant as it evolves.
+
+## 🧹 **No Backward Compatibility Rule**
+
+As stated in the workspace rules, this is a **NEW APPLICATION BUILD**:
+
+### ❌ **Never Add These**
+- Magic strings/numbers (events, keys, delays, etc)
+- Backward compatibility layers
+- Legacy method wrappers
+- Deprecation warnings or notices
+- "Old" or "Legacy" event listeners
+- Transition helper functions
+- Compatibility shims
+- Dead code "just in case"
+- Multiple ways to do the same thing
+
+### ✅ **Always Do This**
+- **Breaking Changes Are OK** - This is a new build, breaking changes are expected
+- **Delete Old Code** - When refactoring, completely remove old implementation
+- **Single Pattern** - One way to do each thing, using the most current approach
+- **Clean Architecture** - Prefer clean, lean, maintainable code over compatibility
+
+## 📋 **Architecture Maintenance Patterns**
+
+### **1. Consolidation Over Addition**
+Before adding new functionality, always check:
+```rust
+// ❌ BAD: Adding yet another keyboard tool
+fn new_keyboard_function() -> Result<()> { ... }
+
+// ✅ GOOD: Extending existing canonical tool
+match computer_action {
+    ComputerAction::Key { text } => handle_key(text),
+    ComputerAction::NewKeyFeature { text, modifier } => handle_new_feature(text, modifier),
+}
+```
+
+### **2. Immediate Cleanup During Development**
+When implementing features:
+```rust
+// Step 1: Implement new approach
+let new_implementation = implement_new_way();
+
+// Step 2: Update all consumers
+update_all_consumers_to_new_way();
+
+// Step 3: DELETE old approach immediately
+// delete_old_implementation(); // ✅ DO THIS
+
+// ❌ DON'T keep both for "safety"
+// keep_old_implementation_just_in_case(); // NEVER DO THIS
+```
+
+### **3. Single Source of Truth Enforcement**
+Every concept should have exactly one implementation:
+```rust
+// ✅ GOOD: One canonical way
+pub async fn handle_keyboard_input(action: ComputerAction) -> Result<()> {
+    match action {
+        ComputerAction::Key { text } => press_key(text).await,
+        ComputerAction::Type { text } => type_text(text).await,
+        ComputerAction::HoldKey { text, duration } => hold_key(text, duration).await,
+    }
+}
+
+// ❌ BAD: Multiple ways to do same thing
+// pub async fn press_key_old() -> Result<()> { ... }
+// pub async fn press_key_new() -> Result<()> { ... }
+// pub async fn press_key_dev() -> Result<()> { ... }
+```
+
+## 🔍 **Code Review Checklist**
+
+Before merging any changes:
+- [ ] No duplicate functionality introduced
+- [ ] Old/deprecated code removed (not just commented out)
+- [ ] Single canonical implementation for each feature
+- [ ] No "just in case" code or compatibility layers
+- [ ] Constants used from centralized locations ([constants.generated.ts](mdc:src/lib/constants.generated.ts) or [src-tauri/src/constants/*](mdc:src-tauri/src/constants))
+- [ ] Clear documentation of why any exceptions exist
+
+## 📚 **Examples of Clean Architecture**
+
+### **Tool Registration** - [desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs)
+```rust
+// ✅ GOOD: Clean, documented tool registration
+let computer_def = ToolDefinition {
+    name: "computer".to_string(),
+    description: "Official Anthropic Computer Use API...".to_string(),
+    input_schema: json!({ /* comprehensive schema */ }),
+};
+
+// ❌ REMOVED: Redundant tools with clear documentation
+// let press_key_def = ToolDefinition { ... }; // Use computer tool instead
+```
+
+### **Command Registry** - [registry.rs](mdc:src-tauri/src/commands/registry.rs)
+```rust
+// ✅ GOOD: Clear removal documentation
+pub const DEV_KEYBOARD: &[&str] = &[
+    "dev_type_text",
+    // REMOVED: "dev_press_key", "dev_hold_key" - Use computer tool with official Anthropic API instead
+    "dev_release_key",
+    "dev_global_type_text",
+];
+```
+
+### **Agent Implementation** - [desktop_agent.rs](mdc:src-tauri/src/agents/desktop_agent.rs)
+```rust
+// ✅ GOOD: Single comprehensive handler
+"computer" => {
+    let action = tool_call.input.get("action")...;
+    match action {
+        "key" => handle_key_action(...),
+        "hold_key" => handle_hold_key_action(...),
+        "type" => handle_type_action(...),
+        _ => Err(AgentError::UnsupportedAction(action.to_string())),
+    }
+}
+
+// ❌ REMOVED: Redundant handlers completely eliminated
+// No trace of old press_key, hold_key handlers
+```
+
+## 🚫 **Anti-Patterns to Eliminate**
+
+### **Code Bloat Indicators**
+Watch for these warning signs:
+- Functions/tools with similar names (`tool_v1`, `tool_v2`, `legacy_tool`)
+- Multiple imports for same functionality
+- Commented-out code blocks "for reference"
+- Wrapper functions that add no value
+- Configuration options for deprecated features
+
+### **Maintenance Debt Patterns**
+Eliminate these immediately:
+- TODO comments about removing old code
+- Feature flags for deprecated functionality
+- "Temporary" compatibility layers
+- Multiple code paths for same operation
+- Unused imports or dependencies
+
+## 🎯 **Benefits of Clean Architecture**
+
+1. **Performance**: No overhead from unused code paths
+2. **Maintainability**: Changes only need to be made in one place
+3. **Reliability**: Fewer code paths = fewer bugs
+4. **Developer Experience**: Clear, predictable patterns
+5. **Future-Proofing**: Easy to extend without legacy constraints
+
+## 📚 **Related Files**
+
+- [Consolidation Summary](mdc:KEYBOARD_TOOL_CONSOLIDATION_SUMMARY.md) - Recent cleanup example
+- [Tool Consolidation Patterns](mdc:.cursor/rules/tool-consolidation-patterns.mdc) - Consolidation guidelines
+- [API Compliance](mdc:.cursor/rules/anthropic-computer-use-api-compliance.mdc) - Official API adherence
+- [Workspace Rules](mdc:.cursor/rules) - Core architectural principles
+
+## 🚀 **Continuous Improvement Process**
+
+### **Weekly Architecture Review**
+1. Identify any duplicate functionality
+2. Check for accumulating "temporary" code
+3. Validate all tools follow official APIs
+4. Remove any deprecated code patterns
+5. Update documentation to reflect current state
+
+### **Refactoring Guidelines**
+When refactoring:
+1. **Identify** the cleanest, most current pattern
+2. **Implement** the unified approach
+3. **Migrate** all consumers
+4. **Delete** old patterns completely
+5. **Document** the consolidation
+
+Remember: **Clean code is not written by following a set of rules. Clean code is written by cleanly implementing a solution.**
