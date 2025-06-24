@@ -306,7 +306,7 @@ async fn register_additional_computer_use_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_mouse_down(app.clone(), state_manager, screen_x, screen_y).await
+                    commands::mouse::left_mouse_down(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error pressing left mouse down: {}", e))?;
@@ -344,7 +344,7 @@ async fn register_additional_computer_use_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_mouse_up(app.clone(), state_manager, screen_x, screen_y).await
+                    commands::mouse::left_mouse_up(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error releasing left mouse up: {}", e))?;
@@ -386,7 +386,7 @@ async fn register_additional_computer_use_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_triple_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
+                    commands::mouse::triple_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
                 })
             });
             inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
@@ -609,7 +609,7 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             let state_manager = app.state::<AppState>();
-            match commands::core::dev_get_clipboard(state_manager).await {
+            match commands::core::get_clipboard(app.clone(), state_manager).await {
                 Ok(content) => Ok(json!({ "content": content })),
                 Err(e) => Err(format!("Error getting clipboard content: {}", e))
             }
@@ -651,7 +651,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::core::dev_set_clipboard(args.content, state_manager)
+                    commands::core::set_clipboard(args.content, app.clone(), state_manager)
                         .await
                 })
             });
@@ -709,7 +709,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
+                    commands::mouse::left_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
                 })
             });
             inner_result.map_err(|e| format!("Error clicking: {}", e))?;
@@ -784,7 +784,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_mouse_move(app.clone(), state_manager, screen_x, screen_y).await
+                    commands::mouse::mouse_move(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error moving mouse: {}", e))?;
@@ -829,7 +829,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, screen_x, screen_y, None).await
+                    commands::mouse::left_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error left clicking: {}", e))?;
@@ -874,7 +874,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_right_click(app.clone(), state_manager, screen_x, screen_y, None).await
+                    commands::mouse::right_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error right clicking: {}", e))?;
@@ -919,7 +919,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_middle_click(app.clone(), state_manager, screen_x, screen_y, None).await
+                    commands::mouse::middle_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error middle clicking: {}", e))?;
@@ -964,7 +964,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_double_click(app.clone(), state_manager, screen_x, screen_y, None).await
+                    commands::mouse::double_click(app.clone(), state_manager, screen_x, screen_y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error double clicking: {}", e))?;
@@ -1013,7 +1013,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click_drag(
+                    commands::mouse::left_click_drag(
                         app.clone(),
                         state_manager,
                         start_screen_x,
@@ -1055,7 +1055,7 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_get_cursor_position(app.clone(), state_manager).await
+                    commands::mouse::get_cursor_position(app.clone(), state_manager).await
                 })
             });
             let (x, y) = result.map_err(|e| format!("Error getting cursor position: {}", e))?;
@@ -1186,13 +1186,14 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<ExecuteCommandArgs>(input)
                 .map_err(|e| format!("Failed to parse execute_command input: {}", e))?;
 
-            // Use existing dev_bash_command implementation
-            let result = commands::shell::dev_bash_command(
+            // Use existing bash_command implementation
+            let result = commands::shell::bash_command(
                 app.clone(),
                 state_manager,
                 args.command.clone(),
                 args.timeout_seconds,
                 None, // restart parameter
+                Some(true), // Enable debug mode for agent usage
             ).await;
 
             match result {
@@ -1289,12 +1290,13 @@ pub async fn register_desktop_tools(
 
             // Step 3: Open file with default application (with timeout)
             let open_command = format!("open '{}'", args.file_path);
-            let open_result = commands::shell::dev_bash_command(
+            let open_result = commands::shell::bash_command(
                 app.clone(),
                 state_manager,
                 open_command,
                 Some(15), // Increased timeout for opening (15 seconds)
                 None,
+                Some(true), // Enable debug mode for agent usage
             ).await;
 
             if let Err(e) = open_result {
@@ -1443,7 +1445,7 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
 
             // Step 1: Save file with Cmd+S
-            let save_result = crate::commands::dev::keyboard::dev_press_key(
+            let save_result = crate::commands::keyboard::press_key(
                 "s".to_string(),
                 Some("cmd".to_string()),
                 app.clone(),
@@ -1459,7 +1461,7 @@ pub async fn register_desktop_tools(
 
             // Step 3: Close file with Cmd+W
             let state_manager = app.state::<AppState>();
-            let close_result = crate::commands::dev::keyboard::dev_press_key(
+            let close_result = crate::commands::keyboard::press_key(
                 "w".to_string(),
                 Some("cmd".to_string()),
                 app.clone(),
@@ -1521,7 +1523,7 @@ pub async fn register_desktop_tools(
 
             // Step 1: Set clipboard content
             let state_manager = app.state::<AppState>();
-            let clipboard_result = commands::core::dev_set_clipboard(args.text.clone(), state_manager).await;
+            let clipboard_result = commands::core::set_clipboard(args.text.clone(), app.clone(), state_manager).await;
 
             if let Err(e) = clipboard_result {
                 return Err(format!("Failed to set clipboard: {}", e));
@@ -1531,7 +1533,7 @@ pub async fn register_desktop_tools(
             if args.clear_selection.unwrap_or(false) {
                 // Press Escape to clear selection
                 let state_manager = app.state::<AppState>();
-                let _ = crate::commands::dev::keyboard::dev_press_key(
+                let _ = crate::commands::keyboard::press_key(
                     "Escape".to_string(),
                     None,
                     app.clone(),
@@ -1544,7 +1546,7 @@ pub async fn register_desktop_tools(
 
             // Step 3: Paste with Cmd+V
             let state_manager = app.state::<AppState>();
-            let paste_result = crate::commands::dev::keyboard::dev_press_key(
+            let paste_result = crate::commands::keyboard::press_key(
                 "v".to_string(),
                 Some("cmd".to_string()),
                 app.clone(),

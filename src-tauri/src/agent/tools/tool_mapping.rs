@@ -41,7 +41,8 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("dev_type_text", ToolCategory::Desktop);
     map.insert("dev_global_type_text", ToolCategory::Desktop);
     map.insert("dev_press_key", ToolCategory::Desktop);
-    map.insert("dev_open_application", ToolCategory::Desktop);
+            map.insert("open_application", ToolCategory::Desktop);
+        map.insert("open_url", ToolCategory::Desktop);
     map.insert("dev_focus_window", ToolCategory::Desktop);
     map.insert("dev_scroll_window", ToolCategory::Desktop);
     map.insert("capture_screenshot_command", ToolCategory::Desktop);
@@ -63,10 +64,10 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("manage_audio", ToolCategory::Desktop);
 
     // Basic tools (file operations, commands, etc.)
-    map.insert("dev_bash_command", ToolCategory::Basic);
-    map.insert("dev_list_files", ToolCategory::Basic);
-    map.insert("dev_get_file_content", ToolCategory::Basic);
-    map.insert("dev_set_file_content", ToolCategory::Basic);
+            map.insert("bash_command", ToolCategory::Basic);
+            map.insert("list_files", ToolCategory::Basic);
+        map.insert("get_file_content", ToolCategory::Basic);
+        map.insert("set_file_content", ToolCategory::Basic);
     map.insert("dev_text_editor_view", ToolCategory::Basic);
     map.insert("dev_text_editor_create", ToolCategory::Basic);
     map.insert("dev_text_editor_str_replace", ToolCategory::Basic);
@@ -287,7 +288,7 @@ mod tests {
     fn test_tool_categorization() {
         assert_eq!(ToolMappingService::get_tool_category("browser_navigate"), Some(ToolCategory::Browser));
         assert_eq!(ToolMappingService::get_tool_category("dev_left_click"), Some(ToolCategory::Desktop));
-        assert_eq!(ToolMappingService::get_tool_category("dev_bash_command"), Some(ToolCategory::Basic));
+        assert_eq!(ToolMappingService::get_tool_category("bash_command"), Some(ToolCategory::Basic));
         assert_eq!(ToolMappingService::get_tool_category("timer_create"), Some(ToolCategory::Timer));
         assert_eq!(ToolMappingService::get_tool_category("screenshot"), Some(ToolCategory::AnthropicComputerUse));
     }
@@ -296,7 +297,7 @@ mod tests {
     fn test_agent_routing() {
         assert_eq!(ToolMappingService::get_agent_for_tool("browser_navigate"), Some(AgentType::BrowserExpert));
         assert_eq!(ToolMappingService::get_agent_for_tool("dev_left_click"), Some(AgentType::DesktopExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool("dev_bash_command"), Some(AgentType::CodingExpert));
+        assert_eq!(ToolMappingService::get_agent_for_tool("bash_command"), Some(AgentType::CodingExpert));
         assert_eq!(ToolMappingService::get_agent_for_tool("timer_create"), Some(AgentType::GeneralExpert));
     }
 

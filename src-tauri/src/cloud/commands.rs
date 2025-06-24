@@ -489,7 +489,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing shell command functionality
-        match crate::commands::shell::dev_bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None).await {
+        match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
             Ok(output) => {
                 Ok(CommandResult {
                     success: true,

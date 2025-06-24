@@ -3,17 +3,38 @@
 use tauri::{State, AppHandle, Emitter};
 use crate::state::AppState;
 use crate::utils::key_parsing;
+use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
 use tracing::{info, error};
 use serde_json::json;
 
 #[tauri::command]
 pub(crate) async fn type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&text)?;
+        if text.len() > 10000 {
+            log_debug_operation("type_text", &format!("Very long text ({} chars) - may be slow", text.len()), &debug_config);
+        }
+    }
+
+    log_debug_operation("type_text", &format!("Typing text length: {}", text.len()), &debug_config);
     info!("Executing type_text for text: '{}'", text);
+
     let desktop = state.get_desktop()?;
     let result = desktop.type_text(&text);
+
     match result {
         Ok(_) => {
             info!("Successfully typed text: '{}'", text);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app_handle, "Type Text", &format!("Typed {} characters", text.len()));
+            }
+
             // Emit key press visualization for typing (show the text being typed)
             if let Err(e) = app_handle.emit("key-press-visualization", json!({
                 "key": format!("Type: {}", text.chars().take(20).collect::<String>()),
@@ -33,7 +54,17 @@ pub(crate) async fn type_text(text: String, app_handle: AppHandle, state: State<
 
 #[tauri::command]
 pub(crate) async fn press_key(key: String, modifier: Option<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&key)?;
+    }
+
+    log_debug_operation("press_key", &format!("Key: '{}', modifier: {:?}", key, modifier), &debug_config);
     info!("Executing press_key for key: '{}' with modifier: {:?}", key, modifier);
+
     let desktop = state.get_desktop()?;
 
     // Handle the case where key is a combination like "cmd+shift+a"
@@ -55,6 +86,12 @@ pub(crate) async fn press_key(key: String, modifier: Option<String>, app_handle:
     match desktop.press_key(&final_key, final_modifier.as_deref()) {
         Ok(_) => {
             info!("Successfully pressed key: '{}' with modifier: {:?}", final_key, final_modifier);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app_handle, "Press Key", &format!("Pressed '{}' with modifier: {:?}", final_key, final_modifier));
+            }
+
             // Emit key press visualization event
             if let Err(e) = app_handle.emit("key-press-visualization", json!({
                 "key": final_key,
@@ -74,11 +111,27 @@ pub(crate) async fn press_key(key: String, modifier: Option<String>, app_handle:
 
 #[tauri::command]
 pub(crate) async fn global_type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&text)?;
+    }
+
+    log_debug_operation("global_type_text", &format!("Global typing text length: {}", text.len()), &debug_config);
     info!("Executing global_type_text for text: '{}'", text);
+
     let desktop = state.get_desktop()?;
     let result = desktop.type_text(&text);
+
     match result {
         Ok(_) => {
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app_handle, "Global Type Text", &format!("Globally typed {} characters", text.len()));
+            }
+
             // Emit key press visualization for global typing
             if let Err(e) = app_handle.emit("key-press-visualization", json!({
                 "key": format!("Global: {}", text.chars().take(20).collect::<String>()),
@@ -94,7 +147,20 @@ pub(crate) async fn global_type_text(text: String, app_handle: AppHandle, state:
 
 #[tauri::command]
 pub(crate) async fn hold_key(key: String, duration_ms: Option<u64>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&key)?;
+        if let Some(duration) = duration_ms {
+            validators::reasonable_duration(duration)?;
+        }
+    }
+
+    log_debug_operation("hold_key", &format!("Key: '{}', duration: {:?}ms", key, duration_ms), &debug_config);
     info!("Executing hold_key for key: '{}', duration: {:?} ms", key, duration_ms);
+
     let desktop = state.get_desktop()?;
 
     // Parse key combinations for hold_key as well
@@ -108,6 +174,11 @@ pub(crate) async fn hold_key(key: String, duration_ms: Option<u64>, app_handle: 
     let result = desktop.hold_key(&parsed_key, duration_ms);
     match result {
         Ok(_) => {
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app_handle, "Hold Key", &format!("Held '{}' for {:?}ms", parsed_key, duration_ms));
+            }
+
             // Emit key press visualization for hold key
             if let Err(e) = app_handle.emit("key-press-visualization", json!({
                 "key": format!("Hold: {}", parsed_key),
@@ -123,7 +194,17 @@ pub(crate) async fn hold_key(key: String, duration_ms: Option<u64>, app_handle: 
 
 #[tauri::command]
 pub(crate) async fn release_key(key: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&key)?;
+    }
+
+    log_debug_operation("release_key", &format!("Key: '{}'", key), &debug_config);
     info!("Executing release_key for key: '{}'", key);
+
     let desktop = state.get_desktop()?;
 
     // Parse key combinations for release_key as well
@@ -137,6 +218,11 @@ pub(crate) async fn release_key(key: String, app_handle: AppHandle, state: State
     let result = desktop.release_key(&parsed_key);
     match result {
         Ok(_) => {
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app_handle, "Release Key", &format!("Released '{}'", parsed_key));
+            }
+
             // Emit key press visualization for release key
             if let Err(e) = app_handle.emit("key-press-visualization", json!({
                 "key": format!("Release: {}", parsed_key),
