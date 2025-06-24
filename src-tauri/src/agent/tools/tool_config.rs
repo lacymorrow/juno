@@ -314,7 +314,7 @@ impl ToolConfigManager {
     }
 
     /// Parse tool category string into ToolCategory enum.
-    fn parse_tool_category(category_str: &str) -> Result<ToolCategory, String> {
+    pub fn parse_tool_category(category_str: &str) -> Result<ToolCategory, String> {
         match category_str {
             "AnthropicComputerUse" => Ok(ToolCategory::AnthropicComputerUse),
             "Desktop" => Ok(ToolCategory::Desktop),
@@ -327,7 +327,7 @@ impl ToolConfigManager {
     }
 
     /// Format tool category enum into string.
-    fn format_tool_category(category: &ToolCategory) -> String {
+    pub fn format_tool_category(category: &ToolCategory) -> String {
         match category {
             ToolCategory::AnthropicComputerUse => "AnthropicComputerUse".to_string(),
             ToolCategory::Desktop => "Desktop".to_string(),
