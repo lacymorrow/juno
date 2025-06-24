@@ -12,9 +12,6 @@ If an agent is asked to do multiple things in quick succession, we need to handl
 
 Can we show a canceling state when we have initiated a cancel with esc but the agent has not stopped yet?
 
-This line logged out always shows the same amount of number of tools and the same amount of batches. Why is that?
-2025-06-23T18:29:38.881449Z  INFO Tool execution plan: 5 tools organized into 5 batch(es)
-
 2025-06-24T04:25:05.389477Z  INFO Entering MacOSEngine::get_focused_element (using safe implementation)
 2025-06-24T04:25:05.389775Z  WARN NSWorkspace method failed: PlatformError("Failed to get focused UI element for PID 1025: Ax(-25204)")
 2025-06-24T04:25:05.389895Z  WARN System-wide method also failed: NoFocusedElement("No system-wide focused element: Ax(-25204)")
