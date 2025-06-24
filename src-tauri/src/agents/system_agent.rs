@@ -192,7 +192,7 @@ impl SystemAgent {
                     })?;
 
                 let result =
-                    commands::text_editor::dev_text_editor_view(file_path.to_string()).await;
+                    commands::text_editor::text_editor_view(file_path.to_string()).await;
 
                 match result {
                     Ok(content) => Ok(ToolResult {
@@ -223,11 +223,11 @@ impl SystemAgent {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                let result = commands::text_editor::dev_text_editor_create(
-                    state,
-                    self.app_handle.clone(),
+                let result = commands::text_editor::text_editor_create(
                     file_path.to_string(),
                     file_text.to_string(),
+                    state,
+                    self.app_handle.clone(),
                 )
                 .await;
 
@@ -268,12 +268,12 @@ impl SystemAgent {
                         AgentError::InputError("Missing or invalid 'new_str' parameter".to_string())
                     })?;
 
-                let result = commands::text_editor::dev_text_editor_str_replace(
-                    state,
-                    self.app_handle.clone(),
+                let result = commands::text_editor::text_editor_str_replace(
                     file_path.to_string(),
                     old_str.to_string(),
                     new_str.to_string(),
+                    state,
+                    self.app_handle.clone(),
                 )
                 .await;
 

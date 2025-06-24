@@ -119,7 +119,7 @@ async fn register_additional_computer_use_tools(
                  let rt = tokio::runtime::Handle::current();
                  rt.block_on(async {
                      // Use the window command as seen elsewhere in this file
-                     window::dev_scroll_window(app.clone(), state_manager, args.direction, args.amount as f64, None, None)
+                     window::scroll_window(args.direction, args.amount as f64, None, None, app.clone(), state_manager)
                          .await
                  })
              });
@@ -460,7 +460,7 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::element::dev_get_focused_element_info(app.clone(), state_manager)
+                    commands::element::get_focused_element_info(app.clone(), state_manager)
                         .await
                 })
             }).map_err(|e| format!("Error getting focused element: {}", e))?;
@@ -1087,7 +1087,7 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             let state_manager = app.state::<AppState>();
-            match crate::commands::window::dev_get_window_list(app.clone(), state_manager).await {
+            match crate::commands::window::get_window_list(app.clone(), state_manager).await {
                 Ok(window_list_json) => {
                     // Try to parse the JSON to ensure it's valid, then return it
                     match serde_json::from_str::<Value>(&window_list_json) {
@@ -1128,7 +1128,7 @@ pub async fn register_desktop_tools(
                 .as_str()
                 .ok_or_else(|| "Missing or invalid 'window_id' parameter".to_string())?;
 
-            match crate::commands::window::dev_get_window_info(app.clone(), state_manager, window_id.to_string()).await {
+            match crate::commands::window::get_window_info(window_id.to_string(), app.clone(), state_manager).await {
                 Ok(window_info_json) => {
                     // Try to parse the JSON to ensure it's valid, then return it
                     match serde_json::from_str::<Value>(&window_info_json) {

@@ -163,8 +163,9 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
                 .unwrap_or(true);
 
             if clipboard_enabled {
-                match crate::commands::core::dev_set_clipboard(
+                match crate::commands::core::set_clipboard(
                     trimmed_text.to_string(),
+                    app_handle.clone(),
                     app_state.clone(),
                 )
                 .await

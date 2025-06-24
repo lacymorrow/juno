@@ -69,7 +69,7 @@ impl DesktopAgent {
                     .map(|s| s.to_string());
 
                 let result =
-                    commands::mouse::dev_left_click(self.app_handle.clone(), state, x, y, modifier)
+                    commands::mouse::left_click(self.app_handle.clone(), state, x, y, modifier)
                         .await;
 
                 match result {
@@ -90,7 +90,7 @@ impl DesktopAgent {
                     })?;
 
                 let result =
-                    commands::dev::dev_type_text(text.to_string(), self.app_handle.clone(), state)
+                    commands::keyboard::type_text(text.to_string(), self.app_handle.clone(), state)
                         .await;
 
                 match result {
@@ -115,7 +115,7 @@ impl DesktopAgent {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let result = commands::dev::dev_press_key(
+                let result = commands::keyboard::press_key(
                     key.to_string(),
                     modifier,
                     self.app_handle.clone(),
@@ -146,7 +146,7 @@ impl DesktopAgent {
                     self.app_handle.clone(),
                     state,
                     app_name.to_string(),
-                    Some(true), // Enable debug mode for agent usage
+                    Some(true),
                 ).await;
 
                 match result {
@@ -168,10 +168,10 @@ impl DesktopAgent {
                         )
                     })?;
 
-                let result = commands::window::dev_focus_window(
+                let result = commands::window::focus_window(
+                    window_id.to_string(),
                     self.app_handle.clone(),
                     state,
-                    window_id.to_string(),
                 )
                 .await;
 
@@ -201,13 +201,13 @@ impl DesktopAgent {
                 let x = tool_call.input.get("x").and_then(|v| v.as_f64());
                 let y = tool_call.input.get("y").and_then(|v| v.as_f64());
 
-                let result = commands::window::dev_scroll_window(
-                    self.app_handle.clone(),
-                    state,
+                let result = commands::window::scroll_window(
                     direction.to_string(),
                     scroll_amount,
                     x,
                     y,
+                    self.app_handle.clone(),
+                    state,
                 )
                 .await;
 
@@ -232,7 +232,7 @@ impl DesktopAgent {
                 }
             }
             "dev_get_clipboard" => {
-                let result = commands::core::dev_get_clipboard(state).await;
+                let result = commands::core::get_clipboard(self.app_handle.clone(), state).await;
 
                 match result {
                     Ok(clipboard_content) => Ok(ToolResult {
@@ -251,7 +251,7 @@ impl DesktopAgent {
                         AgentError::InputError("Missing or invalid 'content' parameter".to_string())
                     })?;
 
-                let result = commands::core::dev_set_clipboard(content.to_string(), state).await;
+                let result = commands::core::set_clipboard(content.to_string(), self.app_handle.clone(), state).await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -282,7 +282,7 @@ impl DesktopAgent {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let result = commands::mouse::dev_right_click(
+                let result = commands::mouse::right_click(
                     self.app_handle.clone(),
                     state,
                     x,
@@ -320,7 +320,7 @@ impl DesktopAgent {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let result = commands::mouse::dev_double_click(
+                let result = commands::mouse::double_click(
                     self.app_handle.clone(),
                     state,
                     x,
@@ -339,7 +339,7 @@ impl DesktopAgent {
             }
             "dev_get_window_list" => {
                 let result =
-                    commands::window::dev_get_window_list(self.app_handle.clone(), state).await;
+                    commands::window::get_window_list(self.app_handle.clone(), state).await;
 
                 match result {
                     Ok(windows) => Ok(ToolResult {
@@ -361,8 +361,8 @@ impl DesktopAgent {
                     })?;
 
                 let result =
-                    commands::element::dev_find_element_by_selector(selector.to_string(), state)
-                        .await;
+                    commands::element::find_element_by_selector(selector.to_string(), state)
+                    .await;
 
                 match result {
                     Ok(element_info) => Ok(ToolResult {
