@@ -1,21 +1,21 @@
 //! # Browser Tools Module
-//! 
+//!
 //! Browser automation tools for web-based computer use agents.
 //! Provides comprehensive web automation capabilities including navigation,
 //! content extraction, element interaction, and screenshot capture.
-//! 
+//!
 //! ## Core Capabilities:
 //! - Page navigation with wait conditions
 //! - Content extraction using CSS selectors
 //! - Element interaction (click, type, select, scroll)
 //! - URL detection and current page awareness
 //! - Screenshot capture (full page or element-specific)
-//! 
+//!
 //! ## Integration:
 //! - Works with browser controller for execution
 //! - Supports both headless and headed browser modes
 //! - Compatible with modern web applications and SPAs
-//! 
+//!
 //! ## Usage
 //! Used by: Web automation agents, browser-based tasks, web scraping workflows
 //! Registration: Tool definitions returned by `get_browser_tool_definitions()`
@@ -24,23 +24,23 @@ use crate::agent::structs::ToolDefinition;
 use serde_json::json;
 
 /// Returns the complete set of browser automation tool definitions.
-/// 
+///
 /// This function provides all browser interaction capabilities as ToolDefinition structures
 /// that can be registered with the tool provider. Each tool handles a specific aspect
 /// of browser automation from navigation to content extraction.
-/// 
+///
 /// Used by: Browser tool registration, agent initialization, web automation setup
-/// 
+///
 /// # Returns
 /// `Vec<ToolDefinition>` - Complete set of browser automation tools
-/// 
+///
 /// # Tools Provided
 /// - `browser_navigate`: Navigate to URLs with wait conditions
 /// - `browser_extract_content`: Extract page content using CSS selectors
 /// - `browser_interact`: Interact with page elements (click, type, select, scroll)
 /// - `browser_get_current_url`: Get current page URL
 /// - `browser_screenshot`: Take page or element screenshots
-/// 
+///
 /// # Example
 /// ```rust
 /// let browser_tools = get_browser_tool_definitions();
@@ -53,13 +53,13 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
         // Navigate to URLs with flexible wait conditions
         ToolDefinition {
             name: "browser_navigate".to_string(),
-            description: "Navigates the browser to a specified URL and returns the page content or title.".to_string(),
+            description: "Navigates the browser to a specified URL and returns the page content or title. Custom protocol URLs (mailto:, tel:, slack:, etc.) are automatically opened with the system's default handler instead of in the browser.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The URL to navigate to (e.g., 'https://example.com')."
+                        "description": "The URL to navigate to (e.g., 'https://example.com'). Custom protocol URLs (mailto:, tel:, slack:, etc.) will be opened with the system's default handler."
                     },
                     "wait_until": {
                         "type": "string",
