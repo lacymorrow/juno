@@ -679,3 +679,75 @@ pub async fn test_coordinate_transformation(
 
     Ok(result)
 }
+
+#[tauri::command]
+pub async fn test_coordinate_transformation_with_dock_fix(
+    screenshot_x: f64,
+    screenshot_y: f64,
+) -> Result<serde_json::Value, String> {
+    use crate::utils::coordinates;
+
+    // Get the macOS UI offsets to show in the result
+    #[cfg(target_os = "macos")]
+    let (menu_bar_height, dock_offset) = {
+        // Use the same function from coordinates.rs
+        // Since it's private, we'll recreate the logic here for testing
+        let menu_bar_height = 24.0; // Standard macOS menu bar height
+
+        // Check dock autohide setting
+        let dock_offset = match std::process::Command::new("defaults")
+            .args(&["read", "com.apple.dock", "autohide"])
+            .output()
+        {
+            Ok(result) => {
+                let autohide_enabled = String::from_utf8_lossy(&result.stdout).trim() == "1";
+                if !autohide_enabled {
+                    // Dock is visible, get its size
+                    match std::process::Command::new("defaults")
+                        .args(&["read", "com.apple.dock", "tilesize"])
+                        .output()
+                    {
+                        Ok(size_result) => {
+                            String::from_utf8_lossy(&size_result.stdout)
+                                .trim()
+                                .parse::<f64>()
+                                .unwrap_or(64.0) + 16.0 // Add margin
+                        }
+                        Err(_) => 64.0 + 16.0 // Default size + margin
+                    }
+                } else {
+                    0.0 // Hidden dock doesn't affect coordinates
+                }
+            }
+            Err(_) => 0.0
+        };
+        (menu_bar_height, dock_offset)
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let (menu_bar_height, dock_offset) = (0.0, 0.0);
+
+    // Transform coordinates using the new system
+    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_to_scaled_coordinates(screen_x, screen_y);
+
+    let roundtrip_error_x = (screenshot_x - back_to_screenshot_x).abs();
+    let roundtrip_error_y = (screenshot_y - back_to_screenshot_y).abs();
+
+    let result = serde_json::json!({
+        "input_screenshot": { "x": screenshot_x, "y": screenshot_y },
+        "calculated_screen": { "x": screen_x, "y": screen_y },
+        "roundtrip_screenshot": { "x": back_to_screenshot_x, "y": back_to_screenshot_y },
+        "roundtrip_error": { "x": roundtrip_error_x, "y": roundtrip_error_y },
+        "is_accurate": roundtrip_error_x < 1.0 && roundtrip_error_y < 1.0,
+        "macos_ui_offsets": {
+            "menu_bar_height": menu_bar_height,
+            "dock_offset": dock_offset,
+            "dock_autohide": dock_offset == 0.0
+        },
+        "coordinate_fix_applied": menu_bar_height > 0.0,
+        "scaling_info": coordinates::get_scaling_info().unwrap_or_default()
+    });
+
+    Ok(result)
+}
