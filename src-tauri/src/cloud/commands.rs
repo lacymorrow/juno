@@ -404,7 +404,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing mouse click functionality
-        match crate::commands::mouse::dev_left_click(self.app_handle.clone(), app_state, x, y, None).await {
+        match crate::commands::mouse::left_click(self.app_handle.clone(), app_state, x, y, None).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
@@ -489,7 +489,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing shell command functionality
-        match crate::commands::shell::dev_bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None).await {
+        match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
             Ok(output) => {
                 Ok(CommandResult {
                     success: true,

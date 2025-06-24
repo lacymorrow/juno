@@ -10,6 +10,7 @@ pub mod registry;
 pub mod app_url;
 pub mod autostart;
 pub mod core;
+pub mod debug_utils;
 pub mod dev;
 pub mod dictation;
 // Removed deprecated dictation_reset module
@@ -71,7 +72,7 @@ pub use self::floating_bar::{
     initialize_bar_manager
 };
 pub use self::floating_panel::*;
-pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
+pub use self::filesystem::{list_files, get_file_content, set_file_content, save_agent_response};
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;
