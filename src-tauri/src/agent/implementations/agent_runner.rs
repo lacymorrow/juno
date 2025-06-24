@@ -161,9 +161,62 @@ where
         // Execute the tools as provided - no special logic
         match self.execute_tool_batch(&tool_calls, cancel_rx, 0, &mut tool_results_cache).await? {
             true => {}, // Continue
-            false => return Err(AgentError::Terminated), // Cancelled
+            false => {
+                // Cancellation occurred - handle incomplete tool execution
+                self.handle_batch_cancellation(&tool_calls, &tool_results_cache).await?;
+                return Err(AgentError::Terminated);
+            }
         }
 
+        Ok(())
+    }
+
+    /// Handle cancellation by adding "cancelled" messages for unexecuted tools
+    /// This ensures conversation memory remains consistent even when execution is interrupted
+    async fn handle_batch_cancellation(
+        &mut self,
+        tool_calls: &[crate::agent::structs::ToolCall],
+        tool_results_cache: &[(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)],
+    ) -> Result<(), AgentError> {
+        log::info!("Handling batch cancellation for {} tool calls", tool_calls.len());
+
+        let mut cancelled_count = 0;
+        let mut mem = self.memory.lock().await;
+
+        // Check each tool call and add cancellation message if it wasn't executed
+        for (i, tool_call) in tool_calls.iter().enumerate() {
+            // Check if this tool was executed (has a result in cache)
+            let was_executed = if i < tool_results_cache.len() {
+                tool_results_cache[i].1.is_some()
+            } else {
+                false
+            };
+
+            if !was_executed {
+                // Add cancellation message to memory for this unexecuted tool
+                mem.add_message(crate::agent::structs::Message {
+                    role: crate::agent::structs::Role::Tool,
+                    content: "Tool execution was cancelled by user".to_string(),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                }).await?;
+
+                // Emit cancellation event to frontend
+                crate::agent::tool_logger::log_tool_call_result(
+                    &self.app_handle,
+                    &tool_call.name,
+                    serde_json::json!({"cancelled": true, "reason": "User cancelled execution"}),
+                    false,
+                    Some(format!("Tool {} was cancelled", tool_call.name)),
+                    None,
+                );
+
+                cancelled_count += 1;
+            }
+        }
+
+        log::info!("Added cancellation messages for {} unexecuted tools", cancelled_count);
         Ok(())
     }
 
@@ -213,6 +266,7 @@ where
     ) -> Result<bool, AgentError> {
         // Check cancellation
         if *cancel_rx.borrow() {
+            log::info!("Cancellation detected at start of MCP batch execution");
             return Ok(false);
         }
 
@@ -290,7 +344,7 @@ where
         for (i, tool_call) in batch.iter().enumerate() {
             // Check cancellation before each tool
             if *cancel_rx.borrow() {
-                log::info!("Cancellation detected during batch execution at tool {}", i);
+                log::info!("Cancellation detected during sequential batch execution at tool {} of {}", i, batch.len());
                 return Ok(false);
             }
 
@@ -948,7 +1002,19 @@ where
                 // This replaces the sequential loop with batch-aware execution
                 if let Err(e) = self.execute_tools_with_batching(tool_calls.clone(), &cancel_rx).await {
                     log::error!("Tool batch execution failed: {}", e);
-                    return Err(e);
+                    // The cancellation handling is already done in execute_tools_with_batching
+                    // for AgentError::Terminated, but we should handle other error types too
+                    match e {
+                        AgentError::Terminated => {
+                            // Cancellation was already handled in execute_tools_with_batching
+                            return Err(e);
+                        }
+                        _ => {
+                            // For other errors, we still need to ensure conversation consistency
+                            // but we don't call handle_batch_cancellation as this wasn't a user cancellation
+                            return Err(e);
+                        }
+                    }
                 }
 
                 // If we reach here, all tools were executed successfully
