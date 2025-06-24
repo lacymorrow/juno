@@ -578,7 +578,7 @@ async fn execute_agent_internal(
     }
 
     // --- Determine Agent Mode and Create Runtime ---
-    let agent_mode = BrainFactory::get_agent_mode();
+    let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
 
     let agent_result = match agent_mode {
