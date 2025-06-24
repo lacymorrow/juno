@@ -3,6 +3,9 @@ use once_cell::sync::Lazy;
 use tracing::info;
 use serde::Serialize;
 
+#[cfg(target_os = "macos")]
+use std::process::Command;
+
 // Global state to store the current screenshot scaling information
 pub static SCREENSHOT_SCALE: Lazy<RwLock<ScalingInfo>> = Lazy::new(|| {
     RwLock::new(ScalingInfo {
@@ -131,11 +134,20 @@ pub fn transform_to_screen_coordinates(scaled_x: f64, scaled_y: f64) -> (f64, f6
         }
 
         // Transform coordinates using separate X and Y scale factors
-        let original_x = scaled_x / scaling.scale_factor_x as f64;
-        let original_y = scaled_y / scaling.scale_factor_y as f64;
+        let mut original_x = scaled_x / scaling.scale_factor_x as f64;
+        let mut original_y = scaled_y / scaling.scale_factor_y as f64;
 
-        info!("Transformed coordinates: scaled ({}, {}) → original ({}, {}) using scale_x: {:.3}, scale_y: {:.3}",
-            scaled_x, scaled_y, original_x, original_y, scaling.scale_factor_x, scaling.scale_factor_y);
+        // Apply macOS system UI offsets to account for menu bar and dock
+        let (menu_bar_height, dock_offset) = get_macos_system_ui_offsets();
+
+        // Screenshots typically exclude the menu bar, so we need to add it back for global coordinates
+        original_y += menu_bar_height;
+
+        // Note: dock_offset is typically only relevant for bottom coordinates near the dock
+        // We don't automatically add it since most clicks aren't near the dock area
+
+        info!("Transformed coordinates: scaled ({}, {}) → screen ({}, {}) using scale_x: {:.3}, scale_y: {:.3}, menu_bar_offset: {:.1}",
+            scaled_x, scaled_y, original_x, original_y, scaling.scale_factor_x, scaling.scale_factor_y, menu_bar_height);
 
         (original_x, original_y)
     } else {
@@ -154,9 +166,16 @@ pub fn transform_to_scaled_coordinates(original_x: f64, original_y: f64) -> (f64
             return (original_x, original_y);
         }
 
+        // Apply reverse macOS system UI offsets
+        let (menu_bar_height, _dock_offset) = get_macos_system_ui_offsets();
+
+        // Remove menu bar offset since screenshots exclude it
+        let adjusted_x = original_x;
+        let adjusted_y = original_y - menu_bar_height;
+
         // Transform coordinates using separate X and Y scale factors
-        let scaled_x = original_x * scaling.scale_factor_x as f64;
-        let scaled_y = original_y * scaling.scale_factor_y as f64;
+        let scaled_x = adjusted_x * scaling.scale_factor_x as f64;
+        let scaled_y = adjusted_y * scaling.scale_factor_y as f64;
 
         (scaled_x, scaled_y)
     } else {
@@ -188,4 +207,87 @@ pub fn reset_scaling_info() {
     } else {
         tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for reset");
     }
+}
+
+#[cfg(target_os = "macos")]
+/// Get macOS system UI offsets (menu bar height, dock size)
+/// Returns (menu_bar_height, dock_height) in pixels
+fn get_macos_system_ui_offsets() -> (f64, f64) {
+    // Get menu bar height - standard on macOS is 24-28 pixels
+    // This is the most common source of coordinate offset issues
+    let menu_bar_height = 24.0; // Conservative estimate for macOS menu bar
+
+    // Get dock offset - this is trickier as it can be hidden/auto-hide
+    // For now, we'll detect if dock is visible and affecting coordinates
+    let dock_offset = if is_dock_affecting_coordinates() {
+        get_dock_size()
+    } else {
+        0.0
+    };
+
+    tracing::debug!("macOS UI offsets: menu_bar_height={}, dock_offset={}", menu_bar_height, dock_offset);
+    (menu_bar_height, dock_offset)
+}
+
+#[cfg(target_os = "macos")]
+/// Check if the dock is currently affecting coordinate calculations
+fn is_dock_affecting_coordinates() -> bool {
+    // Use defaults read to check dock autohide setting
+    let output = Command::new("defaults")
+        .args(&["read", "com.apple.dock", "autohide"])
+        .output();
+
+    match output {
+        Ok(result) => {
+            let autohide_enabled = String::from_utf8_lossy(&result.stdout).trim() == "1";
+
+            if autohide_enabled {
+                // If autohide is enabled, dock might still be visible
+                // We'd need to check if it's currently shown
+                false // For now, assume hidden dock doesn't affect coordinates
+            } else {
+                true // Dock is always visible, affects coordinates
+            }
+        }
+        Err(_) => false // Assume no dock interference if we can't determine
+    }
+}
+
+#[cfg(target_os = "macos")]
+/// Get dock size when it's affecting coordinates
+fn get_dock_size() -> f64 {
+    // Use defaults to get dock tile size and position
+    let tile_size_output = Command::new("defaults")
+        .args(&["read", "com.apple.dock", "tilesize"])
+        .output();
+
+    let orientation_output = Command::new("defaults")
+        .args(&["read", "com.apple.dock", "orientation"])
+        .output();
+
+    let tile_size = match tile_size_output {
+        Ok(result) => {
+            String::from_utf8_lossy(&result.stdout)
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(64.0) // Default macOS dock tile size
+        }
+        Err(_) => 64.0
+    };
+
+    let orientation = match orientation_output {
+        Ok(result) => String::from_utf8_lossy(&result.stdout).trim().to_string(),
+        Err(_) => "bottom".to_string()
+    };
+
+    // Dock affects coordinates differently based on position
+    match orientation.as_str() {
+        "left" | "right" => 0.0, // Side docks don't affect Y coordinates
+        "bottom" | _ => tile_size + 16.0, // Bottom dock + some margin
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_macos_system_ui_offsets() -> (f64, f64) {
+    (0.0, 0.0)
 }
