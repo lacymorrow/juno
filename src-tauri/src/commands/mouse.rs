@@ -820,7 +820,7 @@ pub(crate) async fn right_click(
     log_debug_operation("right_click", &format!("Right clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
     info!("Executing right_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
 
-    create_click_visualization(&app, x, y, "#00FF00")?; // Green for right click
+    create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
 
     match state.desktop.right_click(x, y, modifier.as_deref()) {
         Ok(_) => {
