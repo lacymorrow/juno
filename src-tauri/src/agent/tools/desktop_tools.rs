@@ -21,7 +21,7 @@
 //! Registration: Called via `register_desktop_tools()` and `setup_tools()` during agent setup
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::commands;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
@@ -211,126 +211,17 @@ async fn register_additional_computer_use_tools(
     info!("Registered tool: release_key");
 
 
-    // --- Left Mouse Down Tool ---
-    #[derive(serde::Deserialize)]
-    struct MousePositionInput { x: f64, y: f64 } // Re-use existing struct
-
-    let left_mouse_down_def = ToolDefinition {
-        name: "left_mouse_down".to_string(),
-        description: "Presses the left mouse button down at the specified coordinates (screen coordinates).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "Screen X coordinate." },
-                "y": { "type": "number", "description": "Screen Y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_mouse_down_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input for down: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Left mouse down at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::left_mouse_down(app.clone(), state_manager, screen_x, screen_y).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error pressing left mouse down: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_mouse_down_def, left_mouse_down_exec).await;
-    info!("Registered tool: left_mouse_down");
-
-    // --- Left Mouse Up Tool ---
-    let left_mouse_up_def = ToolDefinition {
-        name: "left_mouse_up".to_string(),
-        description: "Releases the left mouse button at the specified coordinates (screen coordinates).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "Screen X coordinate." },
-                "y": { "type": "number", "description": "Screen Y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_mouse_up_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input for up: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Left mouse up at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::left_mouse_up(app.clone(), state_manager, screen_x, screen_y).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error releasing left mouse up: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_mouse_up_def, left_mouse_up_exec).await;
-    info!("Registered tool: left_mouse_up");
-
-    // --- Triple Click Tool ---
-    let triple_click_def = ToolDefinition {
-        name: "triple_click".to_string(),
-        description: "Performs a triple left click at the specified coordinates (screen coordinates).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "Screen X coordinate." },
-                "y": { "type": "number", "description": "Screen Y coordinate." },
-                 "modifier": { "type": "string", "enum": ["shift", "ctrl", "alt", "cmd"], "description": "Optional modifier key." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    #[derive(serde::Deserialize)]
-    struct ClickInput { x: f64, y: f64, modifier: Option<String> } // Re-use for triple click
-
-    let app_handle_clone = app_handle.clone();
-    let triple_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<ClickInput>(input)
-                .map_err(|e| format!("Failed to parse triple_click input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Triple click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::triple_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(triple_click_def, triple_click_exec).await;
-    info!("Registered tool: triple_click");
+    // REMOVED: Redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
+    // The following tools have been consolidated into the computer tool:
+    // - desktop_click → computer tool with action: "click"
+    // - left_click → computer tool with action: "click"
+    // - right_click → computer tool with action: "right_click"
+    // - middle_click → computer tool with action: "middle_click"
+    // - double_click → computer tool with action: "double_click"
+    // - left_click_drag → computer tool with action: "drag"
+    //
+    // This eliminates redundancy and ensures 100% compliance with the official Anthropic specification.
+    // Agents should use the computer tool for ALL mouse operations.
 
     // TODO: Add other tools as needed, e.g., window management?
 
@@ -481,51 +372,10 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
     info!("Registered tool: capture_element_screenshot");
 
-    // Tool for typing text into the active desktop application.
-    // Used by: Text input automation, form filling, content creation
-    // type_text
-    #[derive(serde::Deserialize)]
-    #[allow(dead_code)] // Allow unused fields for now
-    struct TypeTextArgs { text: String, delay: Option<f64> }
-
-    let type_text_def = ToolDefinition {
-        name: "type_text".to_string(),
-        description: "Types the given text into the active desktop application, optionally with a delay between characters.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "text": { "type": "string" },
-                "delay": { "type": "number", "description": "Delay in seconds between keystrokes" }
-            },
-            "required": ["text"]
-        }),
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let type_text_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before typing text
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "type_text").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<TypeTextArgs>(input)
-                .map_err(|e| format!("Failed to parse type_text input: {}", e))?;
-
-            let result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::keyboard::type_text(args.text, app.clone(), state_manager).await
-                })
-            });
-            result.map_err(|e| format!("Error typing text: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(type_text_def, type_text_exec).await;
-    info!("Registered tool: type_text");
+    // REMOVED: type_text tool - Use computer tool with action: "type" instead
+    // This tool has been consolidated into the official Anthropic Computer Use API.
+    // Use: {"name": "computer", "input": {"action": "type", "text": "your text here"}}
+    // This eliminates redundancy and ensures 100% compliance with the official specification.
 
     // Tool for getting current clipboard text content.
     // Used by: Data extraction, clipboard monitoring, text analysis workflows
@@ -610,50 +460,11 @@ pub async fn register_desktop_tools(
         modifier: Option<String>,
     }
 
-    let desktop_click_def = ToolDefinition {
-        name: "desktop_click".to_string(),
-        description: "Performs a mouse click at specified desktop coordinates with optional click type and modifier key.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate to click at." },
-                "y": { "type": "number", "description": "The y coordinate to click at." },
-                "click_type": { "type": "string", "description": "Type of click: 'left', 'right', 'double', or 'triple'." },
-                "modifier": { "type": "string", "description": "Modifier key: 'cmd', 'shift', 'alt', or 'ctrl'." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let desktop_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before mouse clicks
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "desktop_click").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<DesktopClickArgs>(input)
-                .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Desktop click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::left_click(app.clone(), state_manager, screen_x, screen_y, args.modifier).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(desktop_click_def, desktop_click_exec).await;
-    info!("Registered tool: desktop_click");
+    // REMOVED: desktop_click tool - Use computer tool with action: "click" instead
+    // This tool has been consolidated into the official Anthropic Computer Use API.
+    // Use: {"name": "computer", "input": {"action": "click", "coordinate": [x, y]}}
+    // For modifier support: Use computer tool with appropriate key combinations.
+    // This eliminates redundancy and ensures 100% compliance with the official specification.
 
     // Add new computer use tools based on the Anthropic documentation
     // Handle the result of the registration
@@ -685,286 +496,17 @@ pub async fn register_desktop_tools(
 
     // Note: left_mouse_down and left_mouse_up tools are already registered in register_additional_computer_use_tools
 
-    // Tool for moving the mouse cursor to specified coordinates.
-    // Used by: Mouse positioning, cursor setup for subsequent actions
-    // mouse_move
-    let mouse_move_def = ToolDefinition {
-        name: "mouse_move".to_string(),
-        description: "Move the mouse cursor to the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate to move to." },
-                "y": { "type": "number", "description": "The y coordinate to move to." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let mouse_move_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before mouse movement
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "mouse_move").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Mouse move at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::dev_mouse_move(app.clone(), state_manager, screen_x, screen_y).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error moving mouse: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
-    info!("Registered tool: mouse_move");
-
-    // Tool for performing left mouse clicks at specified coordinates.
-    // Used by: Basic UI interaction, button clicking, element selection
-    // left_click
-    let left_click_def = ToolDefinition {
-        name: "left_click".to_string(),
-        description: "Perform a left click at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before left clicking
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "left_click").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Left click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::left_click(app.clone(), state_manager, screen_x, screen_y, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error left clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_click_def, left_click_exec).await;
-    info!("Registered tool: left_click");
-
-    // Tool for performing right mouse clicks (context menu activation).
-    // Used by: Context menu access, right-click interactions, alternate UI actions
-    // right_click
-    let right_click_def = ToolDefinition {
-        name: "right_click".to_string(),
-        description: "Perform a right click at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let right_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before right clicking
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "right_click").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Right click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::right_click(app.clone(), state_manager, screen_x, screen_y, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error right clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(right_click_def, right_click_exec).await;
-    info!("Registered tool: right_click");
-
-    // Tool for performing middle mouse clicks (scroll wheel click).
-    // Used by: Middle-click paste, opening links in new tabs, special interactions
-    // middle_click
-    let middle_click_def = ToolDefinition {
-        name: "middle_click".to_string(),
-        description: "Perform a middle click at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let middle_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before middle clicking
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "middle_click").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Middle click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::middle_click(app.clone(), state_manager, screen_x, screen_y, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error middle clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(middle_click_def, middle_click_exec).await;
-    info!("Registered tool: middle_click");
-
-    // Tool for performing double-clicks (rapid successive clicks).
-    // Used by: File opening, text selection, application launching
-    // double_click
-    let double_click_def = ToolDefinition {
-        name: "double_click".to_string(),
-        description: "Perform a double click at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let double_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before double clicking
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "double_click").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (screen_x, screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.x, args.y);
-            info!("Double click at screenshot ({}, {}) -> screen ({}, {})", args.x, args.y, screen_x, screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::double_click(app.clone(), state_manager, screen_x, screen_y, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error double clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(double_click_def, double_click_exec).await;
-    info!("Registered tool: double_click");
-
-    // Tool for performing click-and-drag operations.
-    // Used by: Object moving, selection areas, dragging items between locations
-    // left_click_drag
-    let left_click_drag_def = ToolDefinition {
-        name: "left_click_drag".to_string(),
-        description: "Perform a drag operation with the left mouse button from start coordinates to end coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "start_x": { "type": "number", "description": "The starting x coordinate." },
-                "start_y": { "type": "number", "description": "The starting y coordinate." },
-                "end_x": { "type": "number", "description": "The ending x coordinate." },
-                "end_y": { "type": "number", "description": "The ending y coordinate." }
-            },
-            "required": ["start_x", "start_y", "end_x", "end_y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_click_drag_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before drag operations
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "left_click_drag").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<DragInput>(input)
-                .map_err(|e| format!("Failed to parse drag input: {}", e))?;
-
-            // Transform coordinates from screenshot space to screen space
-            let (start_screen_x, start_screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.start_x, args.start_y);
-            let (end_screen_x, end_screen_y) = crate::utils::coordinates::transform_to_screen_coordinates(args.end_x, args.end_y);
-            info!("Click and drag from screenshot ({}, {}) -> screen ({}, {}) to screenshot ({}, {}) -> screen ({}, {})",
-                args.start_x, args.start_y, start_screen_x, start_screen_y, args.end_x, args.end_y, end_screen_x, end_screen_y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::left_click_drag(
-                        app.clone(),
-                        state_manager,
-                        start_screen_x,
-                        start_screen_y,
-                        end_screen_x,
-                        end_screen_y
-                    ).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error performing click and drag: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_click_drag_def, left_click_drag_exec).await;
-    info!("Registered tool: left_click_drag");
+    // REMOVED: Redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
+    // The following tools have been consolidated into the computer tool:
+    // - mouse_move → computer tool with action: "move" (or click with no action)
+    // - left_click → computer tool with action: "click"
+    // - right_click → computer tool with action: "right_click"
+    // - middle_click → computer tool with action: "middle_click"
+    // - double_click → computer tool with action: "double_click"
+    // - left_click_drag → computer tool with action: "drag"
+    //
+    // This eliminates redundancy and ensures 100% compliance with the official Anthropic specification.
+    // Agents should use the computer tool for ALL mouse operations.
 
     // Tool for getting current mouse cursor position.
     // Used by: Position tracking, relative movement calculations, cursor state queries

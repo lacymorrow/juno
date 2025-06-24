@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid;
 
-use crate::agent::structs::{
+use crate::agent::core::{
     AgentAction, AgentError, Message, Role, ToolDefinition,
 };
 use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
@@ -263,7 +263,7 @@ impl AgentBrain for MultiAgentOrchestrator {
         }
 
         // Return a tool execution action for routing to expert
-        use crate::agent::structs::ToolCall;
+        use crate::agent::core::ToolCall;
         Ok(AgentAction::ExecuteTool(vec![ToolCall {
             id: uuid::Uuid::new_v4().to_string(),
             name: "route_to_expert".to_string(),

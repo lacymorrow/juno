@@ -10,7 +10,7 @@ use crate::agent::providers::config::{apply_provider_settings_to_env, AgentMode,
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::state::AppState;

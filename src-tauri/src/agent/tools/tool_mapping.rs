@@ -35,14 +35,19 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("browser_form", ToolCategory::Browser);
 
     // Desktop tools
-    map.insert("dev_left_click", ToolCategory::Desktop);
-    map.insert("dev_right_click", ToolCategory::Desktop);
-    map.insert("dev_double_click", ToolCategory::Desktop);
-    map.insert("dev_type_text", ToolCategory::Desktop);
-    map.insert("dev_global_type_text", ToolCategory::Desktop);
-    // REMOVED: dev_press_key - Use computer tool with action: "key" instead
-            map.insert("open_application", ToolCategory::Desktop);
-        map.insert("open_url", ToolCategory::Desktop);
+    // REMOVED: Redundant tools - Use computer tool with official Anthropic Computer Use API instead
+    // dev_left_click → computer tool with action: "left_click"
+    // dev_right_click → computer tool with action: "right_click"
+    // dev_double_click → computer tool with action: "double_click"
+    // dev_type_text → computer tool with action: "type"
+    // dev_global_type_text → computer tool with action: "type"
+    // dev_press_key → computer tool with action: "key"
+    // desktop_click → computer tool with action: "left_click"
+    // desktop_type → computer tool with action: "type"
+    // This eliminates redundancy and ensures 100% compliance with the official specification.
+
+    map.insert("open_application", ToolCategory::Desktop);
+    map.insert("open_url", ToolCategory::Desktop);
     map.insert("dev_focus_window", ToolCategory::Desktop);
     map.insert("dev_scroll_window", ToolCategory::Desktop);
     map.insert("capture_screenshot_command", ToolCategory::Desktop);
@@ -50,8 +55,6 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("dev_set_clipboard", ToolCategory::Desktop);
     map.insert("dev_get_window_list", ToolCategory::Desktop);
     map.insert("dev_find_element_by_selector", ToolCategory::Desktop);
-    map.insert("desktop_click", ToolCategory::Desktop);
-    map.insert("desktop_type", ToolCategory::Desktop);
     map.insert("desktop_open_app", ToolCategory::Desktop);
     map.insert("desktop_focus_window", ToolCategory::Desktop);
     map.insert("desktop_scroll", ToolCategory::Desktop);

@@ -10,7 +10,7 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
 use crate::agent::providers::factory::model_ids;
-use crate::agent::structs::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //

@@ -20,7 +20,7 @@
 //! Used by: Self-improvement workflows, debugging, architecture understanding
 //! Registration: Called via `register_self_awareness_tools()` in debug mode only
 
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use serde_json::{json, Value};
 use std::process::Command;

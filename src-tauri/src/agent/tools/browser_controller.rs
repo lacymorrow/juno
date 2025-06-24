@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::agent::structs::{AgentError, ToolResult};
+use crate::agent::core::{AgentError, ToolResult};
 use crate::constants::{chrome_debug_urls, files::shell_commands, timeouts};
 
 // Helper type alias for brevity

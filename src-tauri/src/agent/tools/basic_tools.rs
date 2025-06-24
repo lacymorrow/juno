@@ -18,7 +18,7 @@
 //! Registration: Called via `register_basic_tools()` during agent initialization
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;

@@ -483,11 +483,12 @@ pub fn run() {
             find_element_by_selector,
             click_element_by_selector,
             get_selected_text,
-            // Production mouse functions with debug capabilities
-            left_click,
-            right_click,
-            mouse_move,
-            dev_test_click_visualization,
+            // REMOVED: Redundant mouse functions - Use computer tool with official Anthropic Computer Use API instead
+            // left_click → computer tool with action: "left_click"
+            // right_click → computer tool with action: "right_click"
+            // mouse_move → computer tool with action: "mouse_move"
+            // This eliminates redundancy and ensures 100% compliance with the official specification.
+            dev_test_click_visualization, // Keep for QA testing
             // Production shell function with debug capabilities
             bash_command,
             // Production filesystem functions with debug capabilities

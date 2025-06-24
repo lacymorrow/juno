@@ -13,7 +13,7 @@
 //! - **Rollback Capability**: Automatic backup and recovery system
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
