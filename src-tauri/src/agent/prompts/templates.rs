@@ -15,6 +15,8 @@ Try to be smart about your responses based on what their user is asking you to d
 
 You must complete all tasks to the best of your ability, go above and beyond what is asked of you. Example: If you are asked to 'play spotify', do more than opening the app: open the app, press play, and verify that the song is playing.
 
+**EFFICIENCY IS KEY**: When a task requires multiple steps (like moving the mouse in a pattern), provide ALL the tool calls in a single response. Don't make users wait through multiple thinking cycles for simple sequences.
+
 Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail. Try to fit your sentences into as few words as possible."#
     }
 
@@ -246,75 +248,79 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 
     /// **NEW: Tool batching optimization guidelines**
     pub fn tool_batching_optimization() -> &'static str {
-        r#"🚀 **INTELLIGENT TOOL BATCHING FOR PERFORMANCE**
+        r#"🚀 **EFFICIENT TOOL EXECUTION - MULTIPLE TOOLS PER RESPONSE**
 
-**CRITICAL**: Your system has advanced batching capabilities that can execute multiple related tools 33% faster. Use this intelligently to improve user experience.
+**⚠️ MANDATORY BEHAVIOR**: You MUST provide multiple tool calls in a single response when a task requires multiple steps. DO NOT execute one tool call per response when you can batch them together.
 
-**⚡ ALWAYS BATCH THESE OBVIOUS SEQUENCES**:
-```
-✅ Type text → Press Enter → Take screenshot
-✅ Click element → Take screenshot
-✅ Open app → Wait for load → Take screenshot
-✅ Navigate to folder → List contents → Create new file
-✅ Fill form field → Fill next field → Submit → Screenshot
-✅ Multiple read-only operations (get status, check files, etc.)
-```
+**CRITICAL**: You can provide multiple tool calls in a single response, and they will be executed efficiently as a batch with a single approval.
 
-**🎯 BATCHING DECISION FRAMEWORK**:
+**⚡ KEY PRINCIPLE**:
+When a task naturally requires multiple steps, provide ALL the tool calls you need in one response. The system will execute them in sequence automatically.
 
-**BATCH IMMEDIATELY** when you can predict the full sequence:
-- User asks: "Type 'hello world' and press enter"
-  → `[type_text("hello world"), key_press("Return"), screenshot()]`
-- User asks: "Open Calculator and take a screenshot"
-  → `[execute_command("open -a Calculator"), wait(2), screenshot()]`
-- User asks: "Fill out this form with my info"
-  → `[click(name_field), type("John"), click(email_field), type("john@email.com"), click(submit)]`
+**🎯 WHEN TO PROVIDE MULTIPLE TOOL CALLS**:
 
-**DON'T BATCH** when you need to see results first:
-- Complex UI navigation where next step depends on what appears
-- Conditional operations ("if the dialog appears, click OK")
-- Error-prone operations where failures change the plan
+✅ **Multi-step workflows** - Type text, press Enter, take screenshot
+✅ **Form interactions** - Click field, type text, click next field, type text
+✅ **File operations** - Create file, open file, edit file
+✅ **App workflows** - Open application, navigate to feature, perform action
+✅ **Verification sequences** - Perform action, take screenshot to verify
+✅ **Mouse movement patterns** - Move mouse to multiple positions in sequence
+✅ **Drawing/tracing operations** - Multiple mouse movements to create shapes or patterns
 
-**🔥 BATCHING EXAMPLES**:
+**📝 EXAMPLES**:
 
-**❌ SLOW (Individual calls)**:
-```
-User: "Type my name and press enter"
-→ Call: type_text("John")
-→ Wait for result...
-→ Call: key_press("Return")
-→ Wait for result...
-→ Call: screenshot()
+**User asks: "Type 'hello world' and press enter"**
+Your response should include these tool calls:
+```json
+[
+  {"name": "computer", "input": {"action": "type", "text": "hello world"}},
+  {"name": "computer", "input": {"action": "key", "text": "Return"}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
 ```
 
-**✅ FAST (Batched)**:
+**User asks: "Move the mouse in a square"**
+Your response should include ALL the movements:
+```json
+[
+  {"name": "cursor_position", "input": {}},
+  {"name": "mouse_move", "input": {"x": 500, "y": 300}},
+  {"name": "mouse_move", "input": {"x": 700, "y": 300}},
+  {"name": "mouse_move", "input": {"x": 700, "y": 500}},
+  {"name": "mouse_move", "input": {"x": 500, "y": 500}},
+  {"name": "mouse_move", "input": {"x": 500, "y": 300}}
+]
 ```
-User: "Type my name and press enter"
-→ Batch: [type_text("John"), key_press("Return"), screenshot()]
-→ All execute together with single approval!
+
+**User asks: "Fill out this login form"**
+Your response should include:
+```json
+[
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 100]}},
+  {"name": "computer", "input": {"action": "type", "text": "username"}},
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 150]}},
+  {"name": "computer", "input": {"action": "type", "text": "password"}},
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 200]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
 ```
 
-**🎯 PERFECT BATCHING SCENARIOS**:
+**🚫 DON'T OVERTHINK IT**:
+- No need to ask permission for obvious multi-step tasks
+- No need to break down simple workflows into individual responses
+- Trust that the system will handle the execution efficiently
+- **NEVER execute one mouse movement per response when you can batch them all**
 
-1. **Form Filling**: Multiple fields can be filled in sequence
-2. **File Operations**: Create folder, navigate to it, create file
-3. **App Workflows**: Open → Wait → Use → Screenshot
-4. **Text Entry**: Type → Format → Screenshot
-5. **MCP Read Operations**: Multiple status checks, searches, or data retrieval
+**💡 BENEFITS**:
+- **Faster execution** - Single approval for entire workflow
+- **Better user experience** - Smooth, uninterrupted task completion
+- **Reduced overhead** - No waiting between related steps
+- **Smooth animations** - Mouse movements flow naturally when batched
 
-**⚠️ BATCHING GUIDELINES**:
-- **Max 5 tools per batch** (system limitation)
-- **Related operations only** (don't batch unrelated tasks)
-- **Predictable sequences** (where you know all steps upfront)
-- **Include verification** (add screenshot to verify results)
+**🎯 SPECIFIC GUIDANCE FOR MOUSE PATTERNS**:
+When asked to move the mouse in patterns (squares, circles, lines, etc.), ALWAYS provide all the movement commands in a single response. Don't make the user wait through multiple agent thinking cycles for something that should be one fluid motion.
 
-**🚀 PERFORMANCE IMPACT**:
-- **33% faster execution** for batched operations
-- **Single approval** instead of individual confirmations
-- **Reduced network overhead** and context switching
-- **Better user experience** with smoother workflows
-
-**Remember**: When users give you clear multi-step instructions, they expect efficient execution. Use batching to deliver professional-grade performance!"#
+**Remember**: If you can predict the full sequence of steps needed, provide them all at once. The system is designed to handle this efficiently!"#
     }
 
     /// Concise JSX visual capabilities (much shorter)
