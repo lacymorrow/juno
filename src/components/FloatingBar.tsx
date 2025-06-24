@@ -82,7 +82,7 @@ export function FloatingBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // Load configuration from backend
+  // Load configuration from backend and ensure vibrancy is applied
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -94,7 +94,25 @@ export function FloatingBar() {
         console.error("Failed to load floating bar config:", error);
       }
     };
+
+    const ensureVibrancy = async () => {
+      try {
+        await invokeCommand("ensure_floating_bar_vibrancy");
+        console.log("✅ Vibrancy ensured for floating bar");
+      } catch (error) {
+        console.warn("Failed to ensure vibrancy:", error);
+      }
+    };
+
     loadConfig();
+    ensureVibrancy();
+
+    // Set up periodic vibrancy re-application to handle any system changes
+    const vibrancyInterval = setInterval(ensureVibrancy, 10000); // Every 10 seconds
+
+    return () => {
+      clearInterval(vibrancyInterval);
+    };
   }, [invokeCommand]);
 
   // Update window size based on bar state
@@ -131,30 +149,48 @@ export function FloatingBar() {
   }, []);
 
   // Listen for enhanced backend state updates
-  const handleBarStateUpdate = useCallback((data: BarStateData) => {
-    console.log("Received bar-state-update:", data);
+  const handleBarStateUpdate = useCallback(
+    (data: BarStateData) => {
+      console.log("Received bar-state-update:", data);
 
-    // Update all state from backend
-    setBarState(data.barState);
-    setInputValue(data.inputValue);
-    setLastSubmittedValue(data.lastSubmittedValue);
-    setCurrentError(data.currentError);
-    setTranscriptionText(data.transcriptionText);
-    setSpokenText(data.spokenText);
-    setIsAgentWorking(data.isAgentWorking);
-    setIsDictationMode(data.isDictationMode);
-    setIsAlwaysListening(data.isAlwaysListening);
-    setAudioLevel(data.audioLevel || 0);
-    setVoiceMode(data.voiceMode || "idle");
-    setAgentState(data.agentState || null);
+      // Update all state from backend
+      setBarState(data.barState);
+      setInputValue(data.inputValue);
+      setLastSubmittedValue(data.lastSubmittedValue);
+      setCurrentError(data.currentError);
+      setTranscriptionText(data.transcriptionText);
+      setSpokenText(data.spokenText);
+      setIsAgentWorking(data.isAgentWorking);
+      setIsDictationMode(data.isDictationMode);
+      setIsAlwaysListening(data.isAlwaysListening);
+      setAudioLevel(data.audioLevel || 0);
+      setVoiceMode(data.voiceMode || "idle");
+      setAgentState(data.agentState || null);
 
-    // Auto-focus input when in input state
-    if (data.barState === "input" && inputRef.current) {
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-    }
-  }, []);
+      // Auto-focus input when in input state
+      if (data.barState === "input" && inputRef.current) {
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
+      }
+
+      // Ensure vibrancy is maintained on significant state changes
+      if (["expanding", "input", "default"].includes(data.barState)) {
+        requestAnimationFrame(async () => {
+          try {
+            await invokeCommand("ensure_floating_bar_vibrancy");
+            console.log(
+              "🎨 Vibrancy ensured on state change to:",
+              data.barState
+            );
+          } catch (error) {
+            console.warn("Failed to ensure vibrancy on state change:", error);
+          }
+        });
+      }
+    },
+    [invokeCommand]
+  );
 
   useEventListener("bar-state-update", handleBarStateUpdate);
 
@@ -184,7 +220,7 @@ export function FloatingBar() {
   useEventListener("mouse-entered-window", handleMouseEnter, [barState]);
   useEventListener("mouse-left-window", handleMouseLeave);
 
-  // Listen for window focus changes
+  // Listen for window focus changes and ensure vibrancy
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
@@ -199,6 +235,17 @@ export function FloatingBar() {
               "Current bar state:",
               barState
             );
+
+            // Re-apply vibrancy when window gains focus to ensure it's maintained
+            if (isFocused) {
+              try {
+                await invokeCommand("ensure_floating_bar_vibrancy");
+                console.log("🎨 Vibrancy re-applied on window focus");
+              } catch (error) {
+                console.warn("Failed to re-apply vibrancy on focus:", error);
+              }
+            }
+
             await invokeCommand("floating_bar_focus_change", { isFocused });
           }
         );

@@ -68,7 +68,8 @@ pub use self::floating_bar::{
     handle_dictation_partial, handle_dictation_finished, handle_tts_started,
     handle_tts_finished, handle_dictation_mode_change, handle_always_listening_change,
     handle_agent_started, handle_agent_stopped, handle_agent_cancelled,
-    initialize_bar_manager
+    initialize_bar_manager, apply_floating_bar_vibrancy, remove_floating_bar_vibrancy,
+    ensure_floating_bar_vibrancy
 };
 pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};

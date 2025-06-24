@@ -617,6 +617,13 @@ pub async fn initialize_bar_manager(app_handle: AppHandle) {
     let mut global_manager = BAR_MANAGER.lock().await;
     *global_manager = Some(manager.clone());
 
+    // Apply vibrancy immediately after initialization
+    if let Err(e) = apply_floating_bar_vibrancy(app_handle.clone()) {
+        warn!("Failed to apply initial vibrancy to floating bar: {}", e);
+    } else {
+        debug!("✅ Successfully applied initial vibrancy to floating bar during initialization");
+    }
+
     // Set up event listeners for agent status changes
     setup_agent_event_listeners(app_handle, manager).await;
 }
@@ -945,4 +952,111 @@ pub async fn set_floating_bar_config(
 
     info!("Floating bar configuration updated successfully in centralized settings");
     Ok(())
+}
+
+/// Ensure vibrancy is applied to the floating bar window (idempotent)
+#[tauri::command]
+pub fn ensure_floating_bar_vibrancy(app: AppHandle) -> Result<(), String> {
+    apply_floating_bar_vibrancy(app)
+}
+
+/// Apply vibrancy to the floating bar window
+#[tauri::command]
+pub fn apply_floating_bar_vibrancy(app: AppHandle) -> Result<(), String> {
+    use crate::constants;
+    let window_label = constants::window_labels::FLOATING_BAR;
+
+    if let Some(window) = app.get_webview_window(window_label) {
+        // Apply vibrancy using window-vibrancy
+        #[cfg(target_os = "macos")]
+        {
+            use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+
+            match apply_vibrancy(
+                &window,
+                NSVisualEffectMaterial::HudWindow,
+                Some(NSVisualEffectState::Active),
+                Some(50.0) // Corner radius for pill shape
+            ) {
+                Ok(_) => {
+                    debug!("✅ Successfully applied vibrancy to floating bar: {}", window_label);
+                    debug!("🎨 Vibrancy material: HudWindow, State: Active, Corner radius: 50px");
+
+                    // Additional macOS-specific styling for better vibrancy effect
+                    #[cfg(target_os = "macos")]
+                    {
+                        use cocoa::base::{id as cocoa_id, NO, YES};
+
+                        if let Ok(ns_window_ptr) = window.ns_window() {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            unsafe {
+                                // Make window background clear for vibrancy effect
+                                use objc::runtime::Class;
+                                use objc::{msg_send, sel, sel_impl};
+
+                                let clear_color: cocoa_id = msg_send![Class::get("NSColor").unwrap(), clearColor];
+                                let _: () = msg_send![ns_window, setBackgroundColor: clear_color];
+
+                                // Set window to be non-opaque for vibrancy to work
+                                let _: () = msg_send![ns_window, setOpaque: NO];
+
+                                // Ensure the window has a shadow for better vibrancy effect
+                                let _: () = msg_send![ns_window, setHasShadow: YES];
+
+                                debug!("🎨 Applied additional macOS styling to floating bar for vibrancy");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to apply vibrancy to floating bar: {}", e);
+                    warn!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            debug!("Floating bar vibrancy applied via CSS for non-macOS");
+        }
+
+        Ok(())
+    } else {
+        Err(format!("Floating bar window '{}' not found", window_label))
+    }
+}
+
+/// Remove vibrancy from the floating bar window
+#[tauri::command]
+pub fn remove_floating_bar_vibrancy(app: AppHandle) -> Result<(), String> {
+    use crate::constants;
+    let window_label = constants::window_labels::FLOATING_BAR;
+
+    if let Some(window) = app.get_webview_window(window_label) {
+        #[cfg(target_os = "macos")]
+        {
+            use window_vibrancy::clear_vibrancy;
+
+            match clear_vibrancy(&window) {
+                Ok(_) => {
+                    debug!("✅ Successfully removed vibrancy from floating bar: {}", window_label);
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to remove vibrancy from floating bar: {}", e);
+                    warn!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            debug!("Floating bar vibrancy removed via CSS for non-macOS");
+        }
+
+        Ok(())
+    } else {
+        Err(format!("Floating bar window '{}' not found", window_label))
+    }
 }

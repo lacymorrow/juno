@@ -617,6 +617,9 @@ pub fn run() {
             floating_bar_submit,
             get_floating_bar_config,
             set_floating_bar_config,
+            apply_floating_bar_vibrancy,
+            remove_floating_bar_vibrancy,
+            ensure_floating_bar_vibrancy,
             // Floating Panel Commands
             set_floating_panel_click_through,
             enable_floating_panel_click_through,
