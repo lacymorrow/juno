@@ -53,32 +53,76 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     categoryName: string,
     enabled: boolean
   ) => {
+    // Optimistic update - update UI immediately
+    const updatedConfigs = { ...settings.toolConfigurations };
+    if (updatedConfigs[categoryName]) {
+      updatedConfigs[categoryName] = {
+        ...updatedConfigs[categoryName],
+        enabled,
+        // When disabling category, disable all tools; when enabling, keep individual tool states
+        tools: updatedConfigs[categoryName].tools.map(tool => ({
+          ...tool,
+          enabled: enabled ? tool.enabled : false
+        }))
+      };
+    }
+
+    // Update settings state optimistically (this prevents re-render/scroll reset)
+    settings.setToolConfigurations(updatedConfigs);
+
     try {
       await invoke("set_tool_category_enabled", { categoryName, enabled });
-      await settings.loadToolConfigurations();
+      // Invalidate cache for future loads but don't reload now
+      settings.invalidateToolConfigCache();
       toast.success(
         `${categoryName} tools ${enabled ? "enabled" : "disabled"}`
       );
     } catch (error) {
       console.error("Failed to toggle tool category:", error);
       toast.error("Failed to toggle tool category");
+      // Revert optimistic update on error
+      await settings.loadToolConfigurations();
     }
   };
 
   const handleToggleTool = async (toolName: string, enabled: boolean) => {
+    // Optimistic update - update UI immediately
+    const updatedConfigs = { ...settings.toolConfigurations };
+    for (const categoryKey in updatedConfigs) {
+      const category = updatedConfigs[categoryKey];
+      const toolIndex = category.tools.findIndex(tool => tool.name === toolName);
+      if (toolIndex !== -1) {
+        updatedConfigs[categoryKey] = {
+          ...category,
+          tools: category.tools.map((tool, index) =>
+            index === toolIndex ? { ...tool, enabled } : tool
+          )
+        };
+        break;
+      }
+    }
+
+    // Update settings state optimistically (this prevents re-render/scroll reset)
+    settings.setToolConfigurations(updatedConfigs);
+
     try {
       await invoke("set_tool_enabled", { toolName, enabled });
-      await settings.loadToolConfigurations();
+      // Invalidate cache for future loads but don't reload now
+      settings.invalidateToolConfigCache();
       toast.success(`${toolName} ${enabled ? "enabled" : "disabled"}`);
     } catch (error) {
       console.error("Failed to toggle tool:", error);
       toast.error("Failed to toggle tool");
+      // Revert optimistic update on error
+      await settings.loadToolConfigurations();
     }
   };
 
   const handleResetToolConfiguration = async () => {
     try {
       await invoke("reset_tool_configuration");
+      // Force refresh by invalidating cache and reloading
+      await settings.invalidateToolConfigCache();
       await settings.loadToolConfigurations();
       toast.success("Tool configuration reset to defaults");
     } catch (error) {
@@ -117,7 +161,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                 onCheckedChange={handleToggleToolApproval}
               />
             </div>
-            
+
             {toolApprovalRequired && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <div className="flex items-start gap-2">
@@ -125,7 +169,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                   <div className="text-sm text-amber-800">
                     <div className="font-medium">Approval Required Mode</div>
                     <div className="mt-1">
-                      The agent will pause before executing any tool and show you an approval dialog. 
+                      The agent will pause before executing any tool and show you an approval dialog.
                       This provides maximum control but may slow down agent operations.
                     </div>
                   </div>

@@ -9,6 +9,7 @@ import {
   Settings,
   Shield,
   Terminal,
+  Wrench,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -19,6 +20,7 @@ import {
   AdvancedSettings,
   NetworkSettings,
   ShortcutsSettings,
+  ToolsSettings,
 } from "./index";
 import { SettingsCategory } from "./types";
 
@@ -40,6 +42,12 @@ const settingsCategories: SettingsCategory[] = [
     name: "AI Provider",
     icon: <Brain className="w-8 h-8" />,
     description: "Configure AI models and providers",
+  },
+  {
+    id: "tools",
+    name: "Tools",
+    icon: <Wrench className="w-8 h-8" />,
+    description: "Enable/disable agent tools and categories",
   },
   {
     id: "network",
@@ -104,6 +112,8 @@ export default function ModularSettingsWindow() {
         return <VoiceSettings settings={settings} />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
+      case "tools":
+        return <ToolsSettings settings={settings} />;
       case "network":
         return <NetworkSettings settings={settings} />;
       case "security":
