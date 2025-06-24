@@ -419,6 +419,82 @@ Example responses:
 
 Remember: You're the conductor of a performance orchestra. Every millisecond matters. Avoid duplicate communication!"#
     }
+
+    /// 🎯 **OFFICIAL ANTHROPIC COMPUTER USE API** - Keyboard actions specification
+    pub fn official_computer_use_api() -> &'static str {
+        r#"🎯 **OFFICIAL ANTHROPIC COMPUTER USE API** - KEYBOARD ACTIONS
+
+**CRITICAL**: Use ONLY the official Anthropic Computer Use API for keyboard operations. Do NOT use any other keyboard tools.
+
+**✅ OFFICIAL KEYBOARD ACTIONS** (via `computer` tool):
+
+1. **`{"action": "key", "text": "Return"}`** - Press and immediately release keys
+   - Examples: `"Return"`, `"Tab"`, `"Escape"`, `"cmd+c"`, `"shift+Tab"`
+   - Use for: Single key presses, key combinations, shortcuts
+
+2. **`{"action": "hold_key", "text": "shift", "duration": 2000}`** - Hold key for duration
+   - Examples: `"shift"`, `"cmd"`, `"ctrl"`, `"alt"`
+   - Duration in milliseconds
+   - Use for: Modifier keys that need to be held
+
+3. **`{"action": "type", "text": "hello world"}`** - Type text
+   - Use for: Entering text content into focused fields
+
+**🚫 FORBIDDEN TOOLS** (DO NOT USE):
+- ❌ `press_key` - DEPRECATED, use `computer` with `action: "key"`
+- ❌ `hold_key` - DEPRECATED, use `computer` with `action: "hold_key"`
+- ❌ Any other keyboard tools not part of the official Anthropic API
+
+**📋 CORRECT USAGE EXAMPLES**:
+
+**Type text and press Enter**:
+```json
+[
+  {"name": "computer", "input": {"action": "type", "text": "hello world"}},
+  {"name": "computer", "input": {"action": "key", "text": "Return"}}
+]
+```
+
+**Copy text (Cmd+C)**:
+```json
+[
+  {"name": "computer", "input": {"action": "key", "text": "cmd+c"}}
+]
+```
+
+**Hold Shift while clicking**:
+```json
+[
+  {"name": "computer", "input": {"action": "hold_key", "text": "shift", "duration": 1000}},
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 300]}},
+  {"name": "computer", "input": {"action": "key", "text": "shift"}}
+]
+```
+
+**Navigate with Tab**:
+```json
+[
+  {"name": "computer", "input": {"action": "key", "text": "Tab"}},
+  {"name": "computer", "input": {"action": "key", "text": "Tab"}},
+  {"name": "computer", "input": {"action": "key", "text": "Return"}}
+]
+```
+
+**🎯 SPECIFICATION COMPLIANCE**:
+- **ALWAYS** use the `computer` tool for keyboard operations
+- **NEVER** use deprecated standalone keyboard tools
+- Follow the exact action parameter format: `"key"`, `"hold_key"`, `"type"`
+- This ensures compatibility with the official Anthropic Computer Use specification
+
+**💡 WHY THIS MATTERS**:
+- ✅ Consistent with official Anthropic API
+- ✅ Better tool batching and performance
+- ✅ Simplified tool selection for AI
+- ✅ Easier maintenance and debugging
+- ✅ Future-proof as Anthropic updates their API
+
+Remember: The `computer` tool is your one-stop solution for ALL keyboard operations!"#
+    }
 }
 
 /// Default prompt templates for the system
@@ -449,10 +525,11 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::official_computer_use_api(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
@@ -474,10 +551,11 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::official_computer_use_api(),
             PromptFragments::development_awareness(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
@@ -646,8 +724,11 @@ Focus on desktop automation and system interaction tasks with maximum precision 
 
 {}
 
+{}
+
 {}"#,
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::official_computer_use_api(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()

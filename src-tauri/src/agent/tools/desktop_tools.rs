@@ -165,88 +165,24 @@ async fn register_additional_computer_use_tools(
     provider.register_async_tool(wait_def, wait_exec).await;
     info!("Registered tool: wait");
 
-    // --- Press Key Tool --- (Corresponds to 'key' in Anthropic spec)
-    #[derive(serde::Deserialize)]
-    struct PressKeyInput { key: String, modifier: Option<String> }
-
-    let press_key_def = ToolDefinition {
-        name: "press_key".to_string(),
-        description: "Presses a single key or key combination (e.g., 'a', 'Return', 'cmd+c'). See xdotool key names.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "The key or key combination to press (e.g., 'a', 'Return', 'alt+Tab', 'ctrl+s')." },
-                "modifier": { "type": "string", "enum": ["shift", "ctrl", "alt", "cmd"], "description": "Optional modifier key to hold during the press." }
-            },
-            "required": ["key"]
-        }),
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let press_key_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<PressKeyInput>(input)
-                .map_err(|e| format!("Failed to parse press_key input: {}", e))?;
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::keyboard::press_key(args.key, args.modifier, app.clone(), state_manager)
-                        .await
-                })
-            });
-            inner_result.map_err(|e| format!("Error pressing key: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(press_key_def, press_key_exec).await;
-    info!("Registered tool: press_key");
-
-
-    // --- Hold Key Tool ---
-    #[derive(serde::Deserialize)]
-    struct HoldKeyInput { key: String, duration_ms: Option<u64> } // Match engine spec
-
-    let hold_key_def = ToolDefinition {
-        name: "hold_key".to_string(),
-        description: "Holds down a key for a specified duration (or until released).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "Key to hold down (e.g., 'Shift', 'Control')." },
-                "duration_ms": { "type": ["integer", "null"], "description": "Optional duration in milliseconds to hold the key. If null/omitted, key is held until 'release_key' is called." }
-            },
-            "required": ["key"]
-        }),
-    };
-
-    let app_handle_clone = app_handle.clone(); // Keep pattern even if app not directly used
-    let hold_key_exec = move |input: Value| {
-        let app = app_handle_clone.clone(); // Not strictly needed here
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<HoldKeyInput>(input)
-                .map_err(|e| format!("Failed to parse hold_key input: {}", e))?;
-
-            // Directly call the engine's hold_key method
-            match state_manager.desktop.hold_key(&args.key, args.duration_ms) {
-                Ok(_) => Ok(json!({"success": true})),
-                Err(e) => Err(format!("Error holding key '{}': {}", args.key, e)),
-            }
-        }
-    };
-    provider.register_async_tool(hold_key_def, hold_key_exec).await;
-    info!("Registered tool: hold_key");
+    // NOTE: Keyboard tools (press_key, hold_key) have been REMOVED to eliminate redundancy
+    // Use the official Anthropic Computer Use API via the 'computer' tool instead:
+    // - computer -> {"action": "key", "text": "Return"}
+    // - computer -> {"action": "hold_key", "text": "shift", "duration": 2000}
+    // - computer -> {"action": "type", "text": "hello world"}
+    //
+    // This ensures compliance with the official Anthropic specification and eliminates
+    // tool confusion where agents had multiple ways to perform the same keyboard operations.
 
     // --- Release Key Tool ---
+    // NOTE: This tool is KEPT as it provides functionality not available in the official Anthropic API
+    // Use this for releasing keys that were held indefinitely (without duration)
     #[derive(serde::Deserialize)]
     struct ReleaseKeyInput { key: String } // Match engine spec
 
     let release_key_def = ToolDefinition {
         name: "release_key".to_string(),
-        description: "Releases a previously held key.".to_string(),
+        description: "Releases a previously held key. Use this for keys held indefinitely (without duration). For timed key holds, use computer tool with hold_key action and duration parameter.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {

@@ -101,36 +101,8 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_press_key" => {
-                let key = tool_call
-                    .input
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'key' parameter".to_string())
-                    })?;
-                let modifier = tool_call
-                    .input
-                    .get("modifier")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let result = commands::keyboard::press_key(
-                    key.to_string(),
-                    modifier,
-                    self.app_handle.clone(),
-                    state,
-                )
-                .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "press_key", "key": key}),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
+            // REMOVED: "dev_press_key" - Use computer tool with action: "key" instead
+            // This eliminates redundancy and ensures compliance with official Anthropic Computer Use API
             "open_application" | "dev_open_application" | "desktop_open_app" => {
                 let app_name = tool_call
                     .input

@@ -40,7 +40,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("dev_double_click", ToolCategory::Desktop);
     map.insert("dev_type_text", ToolCategory::Desktop);
     map.insert("dev_global_type_text", ToolCategory::Desktop);
-    map.insert("dev_press_key", ToolCategory::Desktop);
+    // REMOVED: dev_press_key - Use computer tool with action: "key" instead
             map.insert("open_application", ToolCategory::Desktop);
         map.insert("open_url", ToolCategory::Desktop);
     map.insert("dev_focus_window", ToolCategory::Desktop);
