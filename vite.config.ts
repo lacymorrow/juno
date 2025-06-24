@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { defineConfig } from "vite";
-import { PORTS } from "./src/lib/constants";
+import { PORTS } from "./src/lib/constants.generated";
 
 const host = process.env.TAURI_DEV_HOST;
 

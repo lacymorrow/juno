@@ -69,6 +69,21 @@
         "alwaysOnTop": false
       },
       {
+        "label": "desktop-cursor-overlay",
+        "url": "/desktop-cursor-overlay",
+        "width": 1,
+        "height": 1,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false,
+        "center": false,
+        "fullscreen": false
+      },
+      {
         "label": "settings",
         "title": "Juno Settings",
         "url": "/settings",
