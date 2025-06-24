@@ -146,16 +146,17 @@ pub async fn load_audio_settings_from_centralized_settings(
     let audio_settings = settings_manager.get_audio_settings().await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
-    // CRITICAL FIX: Only update AppState if centralized settings has valid non-empty TTS provider
+    // CRITICAL FIX: Only update AppState if centralized settings has non-empty TTS provider
     // This prevents empty/uninitialized centralized settings from overriding correct AppState defaults
+    // Note: "off" is a valid user preference for disabling TTS and should be honored
     let should_update_centralized_settings = {
         let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
-        if !audio_settings.tts_provider.is_empty() && audio_settings.tts_provider != "off" {
+        if !audio_settings.tts_provider.is_empty() {
             tracing::info!("Loading TTS provider from centralized settings: {}", audio_settings.tts_provider);
             *tts_provider = audio_settings.tts_provider.clone();
             None // No need to update centralized settings
         } else {
-            tracing::warn!("Centralized settings TTS provider is empty or 'off' ('{}'), keeping AppState default: {}",
+            tracing::warn!("Centralized settings TTS provider is empty ('{}'), keeping AppState default: {}",
                 audio_settings.tts_provider, &*tts_provider);
 
             // Return the current valid AppState value for updating centralized settings
