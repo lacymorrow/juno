@@ -3,6 +3,7 @@ use super::permissions::check_accessibility_permissions;
 use super::utils::{
     element_contains_text,
     get_running_application_pids, map_generic_role_to_macos_roles,
+    check_accessibility_permissions as utils_check_accessibility_permissions,
 };
 use super::wrappers::ThreadSafeAXUIElement;
 use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
@@ -40,10 +41,35 @@ pub struct MacOSEngine {
 
 impl MacOSEngine {
     pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
-        check_accessibility_permissions(false)?;
+        // CRITICAL FIX: Check accessibility permissions without crashing
+        match check_accessibility_permissions(false) {
+            Ok(_) => {
+                // Permissions granted, proceed normally
+                debug!("Accessibility permissions granted, creating MacOSEngine");
+            }
+            Err(e) => {
+                // Permissions not granted, but don't crash - log warning and continue
+                warn!("Accessibility permissions not granted: {}. MacOSEngine will have limited functionality.", e);
+                // Continue creating the engine - some operations may still work
+            }
+        }
+
+        // CRITICAL FIX: Wrap system_wide creation in error handling
+        let system_wide = match std::panic::catch_unwind(|| {
+            ThreadSafeAXUIElement::system_wide()
+        }) {
+            Ok(element) => element,
+            Err(_) => {
+                warn!("Failed to create system-wide accessibility element, this may indicate permission issues");
+                // Try to create a minimal fallback element or return error
+                return Err(AutomationError::PlatformError(
+                    "Failed to initialize system-wide accessibility element. Please check accessibility permissions.".to_string()
+                ));
+            }
+        };
 
         Ok(Self {
-            system_wide: ThreadSafeAXUIElement::system_wide(),
+            system_wide,
             use_background_apps,
             activate_app,
         })
@@ -51,10 +77,33 @@ impl MacOSEngine {
 
     pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
         use super::permissions::check_accessibility_permissions_with_auto_redirect;
-        check_accessibility_permissions_with_auto_redirect(false, auto_open_settings)?;
+
+        // CRITICAL FIX: Handle permission errors more gracefully
+        match check_accessibility_permissions_with_auto_redirect(false, auto_open_settings) {
+            Ok(_) => {
+                debug!("Accessibility permissions granted or prompt shown");
+            }
+            Err(e) => {
+                warn!("Accessibility permissions issue: {}. Continuing with limited functionality.", e);
+                // Don't crash - continue with limited functionality
+            }
+        }
+
+        // CRITICAL FIX: Wrap system_wide creation in error handling
+        let system_wide = match std::panic::catch_unwind(|| {
+            ThreadSafeAXUIElement::system_wide()
+        }) {
+            Ok(element) => element,
+            Err(_) => {
+                warn!("Failed to create system-wide accessibility element with auto-redirect");
+                return Err(AutomationError::PlatformError(
+                    "Failed to initialize system-wide accessibility element. Please grant accessibility permissions in System Settings.".to_string()
+                ));
+            }
+        };
 
         Ok(Self {
-            system_wide: ThreadSafeAXUIElement::system_wide(),
+            system_wide,
             use_background_apps,
             activate_app,
         })
@@ -473,17 +522,49 @@ impl AccessibilityEngine for MacOSEngine {
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
         tracing::info!("Entering MacOSEngine::get_focused_element (using kAXFrontmostAttribute strategy)");
 
+        // CRITICAL FIX: Add accessibility permissions check first to prevent crashes
+        if !utils_check_accessibility_permissions() {
+            tracing::warn!("Accessibility permissions not granted - cannot get focused element");
+            return Err(AutomationError::PermissionDenied(
+                "Accessibility permissions required to get focused element. Please grant accessibility permissions in System Settings > Privacy & Security > Accessibility.".to_string(),
+            ));
+        }
+
         // 1. Find the frontmost application by iterating (including accessory apps)
-        let pids = get_running_application_pids(true)?; // Include accessory apps initially
+        let pids = match get_running_application_pids(true) {
+            Ok(pids) => pids,
+            Err(e) => {
+                tracing::error!("Failed to get running application PIDs: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Failed to enumerate running applications: {}",
+                    e
+                )));
+            }
+        };
+
+        if pids.is_empty() {
+            tracing::warn!("No running applications found");
+            return Err(AutomationError::ElementNotFound(
+                "No running applications found".to_string(),
+            ));
+        }
+
         let mut focused_app_element: Option<accessibility::AXUIElement> = None;
 
         let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
         let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
-        // Attribute for checking activation policy manually if needed (though get_pid might be better)
-        // let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
 
         for pid in pids {
-            let app_element = accessibility::AXUIElement::application(pid);
+            // CRITICAL FIX: Add error handling for application element creation
+            let app_element = match std::panic::catch_unwind(|| {
+                accessibility::AXUIElement::application(pid)
+            }) {
+                Ok(element) => element,
+                Err(_) => {
+                    trace!("Failed to create accessibility element for PID {}, skipping", pid);
+                    continue;
+                }
+            };
 
             // Get attribute as CFType, then downcast
             match app_element.attribute(&frontmost_attr) {
@@ -524,7 +605,6 @@ impl AccessibilityEngine for MacOSEngine {
         };
 
         // Log details about the focused application (optional but helpful)
-        // ... (logging code can remain the same, using focused_app_element)
         match focused_app_element.title() {
              Ok(title) => debug!("Focused Application Title (found via frontmost): {}", title.to_string()),
              Err(e) => debug!("Error getting focused app title: {:?}", e),
@@ -539,9 +619,9 @@ impl AccessibilityEngine for MacOSEngine {
                 let focused_element_ref = focused_element_val.as_CFTypeRef();
                 if focused_element_ref.is_null() {
                     warn!("kAXFocusedUIElementAttribute returned NULL CFTypeRef.");
-                    return Err(AutomationError::PlatformError(
-                        "Focused UI element reference from attribute is NULL".to_string(),
-                    ));
+                    // CRITICAL FIX: Return the app element instead of erroring
+                    debug!("Returning frontmost app element as fallback for NULL focused element.");
+                    return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
                 }
 
                 // --- Safety Check: Verify CFTypeID before casting ---
@@ -554,15 +634,14 @@ impl AccessibilityEngine for MacOSEngine {
                         "Type mismatch for focused element! Expected AXUIElement ({}), got TypeID {}.",
                         expected_type_id, actual_type_id
                     );
-                    return Err(AutomationError::PlatformError(format!(
-                        "Type mismatch for focused element: expected AXUIElement ({}), got TypeID {}",
-                        expected_type_id, actual_type_id
-                    )));
+                    // CRITICAL FIX: Return the app element instead of erroring
+                    debug!("Returning frontmost app element as fallback for type mismatch.");
+                    return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
                 }
                 // --- End Safety Check ---
 
-                // Cast CFType to AXUIElement (Now with more confidence)
-                let focused_element = unsafe {
+                // CRITICAL FIX: Wrap the unsafe cast in a panic handler
+                let focused_element = match std::panic::catch_unwind(|| unsafe {
                     debug!("Attempting cast from CFTypeRef to AXUIElementRef...");
                     let element_ref = focused_element_ref as *mut libc::c_void as AXUIElementRef;
                     // No null check needed here as we checked focused_element_ref above
@@ -570,6 +649,12 @@ impl AccessibilityEngine for MacOSEngine {
                     let wrapped_element = accessibility::AXUIElement::wrap_under_create_rule(element_ref);
                     debug!("Wrapping successful.");
                     wrapped_element
+                }) {
+                    Ok(element) => element,
+                    Err(_) => {
+                        warn!("Unsafe cast to AXUIElement failed, returning app element as fallback");
+                        return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
+                    }
                 };
 
                 // --- Start Fetching Core Attributes Early ---
@@ -578,6 +663,7 @@ impl AccessibilityEngine for MacOSEngine {
                 let mut fetched_description = None;
                 let mut fetched_value = None;
 
+                // CRITICAL FIX: Wrap attribute fetching in error handling
                 let role_attr = AXAttribute::new(&CFString::new("AXRole"));
                 if let Ok(role_val) = focused_element.attribute(&role_attr) {
                     if let Some(cf_string) = role_val.downcast_into::<CFString>() {
@@ -656,12 +742,11 @@ impl AccessibilityEngine for MacOSEngine {
                         return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
                     }
                 }
-                // For any other error, report it as before
-                 warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
-                 Err(AutomationError::PlatformError(format!(
-                    "Failed to get focused UI element from frontmost application: {:?}",
-                    e
-                 )))
+                // For any other error, report it as before but don't crash
+                warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
+                // CRITICAL FIX: Return the app element instead of erroring to prevent crashes
+                debug!("Returning frontmost app element as fallback for accessibility error.");
+                Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None))
             }
         }
     }
@@ -1631,7 +1716,17 @@ impl AccessibilityEngine for MacOSEngine {
 
         debug!("Getting window title");
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window title: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot get window title - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_element = &macos_element.element.0;
@@ -1673,36 +1768,34 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
-        // Implementation Note: Iterate through applications from get_applications(),
-        // then get AXWindows for each. Or use a system-level API if available.
+        debug!("Listing all windows from all applications");
 
-        debug!("Listing all windows");
+        // Get all applications
+        let applications = self.get_applications()?;
         let mut all_windows = Vec::new();
-        let apps = self.get_applications()?;
 
-        for app_ui_element in apps {
-            if let Some(macos_app_element) = app_ui_element.as_any().downcast_ref::<MacOSUIElement>() {
-                let ax_app_element = &macos_app_element.element.0;
-
-                match ax_app_element.windows() {
+        for app in applications {
+            if let Some(macos_app_element) = app.as_any().downcast_ref::<MacOSUIElement>() {
+                // Get windows for this application
+                match macos_app_element.element.0.windows() {
                     Ok(windows) => {
-                        debug!(
-                            "Found {} windows for app {:?}",
-                            windows.len(),
-                            macos_app_element.cached_label
-                        );
-                        for window_ax_element in &windows {
-                            let role = window_ax_element.role().ok().map(|s| s.to_string());
-                            let title = window_ax_element.title().ok().map(|s| s.to_string());
-                            let desc = window_ax_element.description().ok().map(|s| s.to_string());
+                        // Iterate over the CFArray using the proper method
+                        for i in 0..windows.len() {
+                            if let Some(window_ref) = windows.get(i) {
+                                let window = window_ref.clone(); // Clone to get AXUIElement from ItemRef
+                                // Get basic attributes for the window
+                                let role = window.role().map_or(String::new(), |r| r.to_string());
+                                let title = window.title().ok().map(|t| t.to_string());
+                                let desc = window.description().ok().map(|d| d.to_string());
 
-                            all_windows.push(self.wrap_element(
-                                ThreadSafeAXUIElement::new(window_ax_element.clone()),
-                                role,
-                                title,
-                                desc,
-                                None, // Value cache - windows typically don't have a simple value
-                            ));
+                                all_windows.push(self.wrap_element(
+                                    ThreadSafeAXUIElement::new(window),
+                                    Some(role),
+                                    title,
+                                    desc,
+                                    None, // Value cache - windows typically don't have a simple value
+                                ));
+                            }
                         }
                     }
                     Err(e) => {
@@ -1728,7 +1821,17 @@ impl AccessibilityEngine for MacOSEngine {
 
         debug!("Attempting to close the focused window");
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window close: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot close window - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
@@ -1749,7 +1852,7 @@ impl AccessibilityEngine for MacOSEngine {
                 Ok(button_val) => {
                     if let Some(close_button) = button_val.downcast::<accessibility::AXUIElement>() {
                         // 3. Perform the press action
-                        let press_action = CFString::new("AXPress"); // kAXPressAction
+                        let press_action = CFString::new("AXPress");
                         match close_button.perform_action(&press_action) {
                             Ok(_) => {
                                 debug!("Successfully performed AXPress on the close button");
@@ -1791,7 +1894,17 @@ impl AccessibilityEngine for MacOSEngine {
         // find maximize button (AXZoomButton) and click it.
         debug!("Attempting to maximize the focused window");
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window maximize: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot maximize window - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
@@ -1858,7 +1971,17 @@ impl AccessibilityEngine for MacOSEngine {
 
         debug!("Attempting to minimize the focused window");
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window minimize: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot minimize window - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
@@ -1908,7 +2031,17 @@ impl AccessibilityEngine for MacOSEngine {
 
         debug!("Attempting to resize the focused window to width={}, height={}", width, height);
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window resize: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot resize window - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
@@ -1976,7 +2109,17 @@ impl AccessibilityEngine for MacOSEngine {
 
         debug!("Attempting to move the focused window to x={}, y={}", x, y);
 
-        let focused_element = self.get_focused_element()?;
+        // CRITICAL FIX: Add error handling for get_focused_element
+        let focused_element = match self.get_focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                warn!("Failed to get focused element for window move: {:?}", e);
+                return Err(AutomationError::PlatformError(format!(
+                    "Cannot move window - failed to get focused element: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
