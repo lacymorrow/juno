@@ -103,7 +103,8 @@ function parseSimpleConstants(rustCode) {
     const constants = {};
 
     // Parse simple constants: pub const NAME: type = value;
-    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"([^"]+)"|(\d+(?:\.\d+)?)|(\w+)|&\[(.*?)\])/g;
+    // Updated regex to handle underscores in numeric literals (e.g., 30_000)
+    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"([^"]+)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
 
     let match;
     while ((match = constRegex.exec(rustCode)) !== null) {
@@ -115,8 +116,12 @@ function parseSimpleConstants(rustCode) {
             if (arrayElements) {
                 constants[name] = arrayElements.map(el => el.slice(1, -1)); // Remove quotes
             }
+        } else if (numericValue !== undefined) {
+            // Remove underscores from numeric literals before parsing
+            const cleanNumeric = numericValue.replace(/_/g, '');
+            constants[name] = parseFloat(cleanNumeric);
         } else {
-            constants[name] = stringValue || parseFloat(numericValue) || boolValue;
+            constants[name] = stringValue || boolValue;
         }
     }
 
@@ -148,6 +153,19 @@ function parseModuleConstants(rustCode) {
 }
 
 /**
+ * Helper function to format values consistently for TypeScript generation
+ */
+function formatValue(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(v => `'${v}'`).join(', ')}]`;
+    } else if (typeof value === 'string') {
+        return `'${value}'`;
+    } else {
+        return value;
+    }
+}
+
+/**
  * Generate comprehensive TypeScript constants file
  */
 function generateTypeScript(constants) {
@@ -175,13 +193,13 @@ ${Object.entries(constants.ports)
 
 export const API_ENDPOINTS = {
 ${Object.entries(constants.api)
-    .map(([key, value]) => `  ${key}: '${value}',`)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
 
 export const APP_IDENTITY = {
 ${Object.entries(constants.app)
-    .map(([key, value]) => `  ${key}: '${value}',`)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
 
@@ -193,15 +211,7 @@ ${Object.entries(constants.ui)
 
 export const AUDIO = {
 ${Object.entries(constants.audio)
-    .map(([key, value]) => {
-        if (Array.isArray(value)) {
-            return `  ${key}: [${value.map(v => `'${v}'`).join(', ')}],`;
-        } else if (typeof value === 'string') {
-            return `  ${key}: '${value}',`;
-        } else {
-            return `  ${key}: ${value},`;
-        }
-    })
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
 
@@ -318,7 +328,13 @@ export const validateWakeWord = (word: string): boolean => REGEX_PATTERNS.WAKE_W
 
 // Development mode helpers
 export const isDevelopment = (): boolean => {
-  return import.meta.env.MODE === 'development';
+  try {
+    return typeof window !== 'undefined' &&
+           // @ts-ignore - Vite environment variable
+           (window as any).import?.meta?.env?.MODE === 'development';
+  } catch {
+    return false;
+  }
 };
 
 // Default configuration
