@@ -271,8 +271,15 @@ pub async fn invoke_tts(
     // Brief pause to allow existing TTS operations to detect the stop signal
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // Reset stop flag for the new TTS request immediately after the pause
-    // This ensures the new request won't be aborted by the stop flag we just set
+    // Check if user requested stop during the pause - if so, honor it and abort
+    if is_tts_stop_requested() {
+        info!("TTS stop was requested during initialization pause, aborting new TTS request");
+        unregister_tts_escape_key(&app_handle).await;
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    // Reset stop flag for the new TTS request only if no stop was requested during pause
+    // This ensures the new request won't be aborted by the stop flag we just set for cleanup
     reset_tts_stop_flag();
 
     let provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
