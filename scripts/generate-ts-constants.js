@@ -205,7 +205,7 @@ ${Object.entries(constants.app)
 
 export const UI = {
 ${Object.entries(constants.ui)
-    .map(([key, value]) => `  ${key}: ${typeof value === 'string' ? `'${value}'` : value},`)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
 

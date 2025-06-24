@@ -71,9 +71,23 @@ const DesktopCursorOverlay = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Position overlay window at cursor location
-  const positionOverlay = async (x: number, y: number) => {
+  // Position overlay window at cursor location with throttling
+  const lastPositionUpdate = useRef<number>(0);
+  const positionUpdateThrottle = 16; // ~60fps throttling
+
+  const positionOverlay = async (
+    x: number,
+    y: number,
+    force: boolean = false
+  ) => {
     if (!overlayWindowRef.current) return;
+
+    // Throttle position updates unless forced (for initial positioning)
+    const now = Date.now();
+    if (!force && now - lastPositionUpdate.current < positionUpdateThrottle) {
+      return;
+    }
+    lastPositionUpdate.current = now;
 
     try {
       // Position the window slightly offset from cursor to center the visualization
@@ -81,14 +95,14 @@ const DesktopCursorOverlay = () => {
       const offsetY = Math.max(0, y - 100);
 
       await overlayWindowRef.current.setPosition({
-        type: "Physical",
+        type: "Logical",
         x: offsetX,
         y: offsetY,
       });
 
       // Resize window to accommodate visualization (200x200 for circles)
       await overlayWindowRef.current.setSize({
-        type: "Physical",
+        type: "Logical",
         width: 200,
         height: 200,
       });
@@ -108,7 +122,7 @@ const DesktopCursorOverlay = () => {
         async (event) => {
           const [x, y] = event.payload;
           setCursorHighlight({ x, y, active: true, timestamp: Date.now() });
-          await positionOverlay(x, y);
+          await positionOverlay(x, y, true); // Force initial positioning
 
           // Show overlay window
           if (overlayWindowRef.current) {
@@ -125,7 +139,7 @@ const DesktopCursorOverlay = () => {
           setCursorHighlight((prev) =>
             prev ? { ...prev, x, y, timestamp: Date.now() } : null
           );
-          await positionOverlay(x, y);
+          await positionOverlay(x, y); // Allow throttling for smooth movement
         }
       );
 
@@ -158,7 +172,7 @@ const DesktopCursorOverlay = () => {
           };
 
           setClickVisualizations((prev) => [...prev, newClick]);
-          await positionOverlay(x, y);
+          await positionOverlay(x, y, true); // Force positioning for click events
 
           // Show overlay window for click
           if (overlayWindowRef.current) {

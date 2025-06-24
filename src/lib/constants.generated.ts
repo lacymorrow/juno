@@ -266,7 +266,6 @@ export const APP_IDENTITY = {
   APP_NAME: 'Juno',
   BUNDLE_IDENTIFIER: 'com.juno.app',
   PRODUCT_NAME: 'Juno',
-  DEFAULT_WAKE_WORDS: ['hey juno', 'computer'],
   ENTITLEMENTS_FILE: 'juno.entitlements',
   CONFIG_DIR_NAME: '.juno',
   SCREENSHOT_PREFIX: 'juno_screenshot_',
