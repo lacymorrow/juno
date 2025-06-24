@@ -86,62 +86,90 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         error!("[Agent Mode Shortcut] Failed to emit shortcut detection event: {}", e);
     }
 
-    if event.state() == ShortcutState::Pressed {
-        // Check if dictation is currently active by checking the VoiceController directly
-        let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-            voice_controller_state.lock()
-                .map(|controller| controller.is_dictating())
-                .unwrap_or(false)
-        } else {
-            false
-        };
+    // FIXED: Check agent trigger mode to determine behavior
+    let app_state = app.state::<state::AppState>();
+    let trigger_mode = app_state.agent_trigger_mode.lock()
+        .map(|mode| mode.clone())
+        .unwrap_or(state::AgentTriggerMode::Tap);
 
-        if is_dictation_active {
-            info!("[Agent Mode Shortcut] Pressed - stopping active dictation");
-
-            let app_handle = app.clone();
+    match trigger_mode {
+        state::AgentTriggerMode::Tap => {
+            // Tap mode: Only handle key release (press+release = tap)
+            if event.state() == ShortcutState::Released {
+                handle_agent_tap_mode(app);
+            }
+        }
+        state::AgentTriggerMode::Hold => {
+            // Hold mode: Handle both press and release, route to agent_monitor
+            let app_clone = app.clone();
+            let event_state = event.state();
             tauri::async_runtime::spawn(async move {
-                // Stop dictation
-                if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle.clone(),
-                        voice_controller_state
-                    ).await {
-                        Ok(_) => {
-                            info!("[Agent Mode] Stopped dictation successfully");
-                        }
-                        Err(e) => {
-                            error!("[Agent Mode] Failed to stop dictation: {}", e);
-                        }
-                    }
-                }
-            });
-        } else {
-            info!("[Agent Mode Shortcut] Pressed - starting agent mode transcription");
-
-            let app_handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                // Emit agent mode start event
-                if let Err(e) = app_handle.emit("app-dictation-started", ()) {
-                    error!("[Agent Mode] Failed to emit app-dictation-started event: {}", e);
-                }
-
-                // Start voice transcription for agent mode
-                if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                    match tauri_plugin_voice_transcription::commands::start_dictation(
-                        app_handle.clone(),
-                        voice_controller_state
-                    ).await {
-                        Ok(_) => {
-                            info!("[Agent Mode] Started transcription successfully");
-                        }
-                        Err(e) => {
-                            error!("[Agent Mode] Failed to start transcription: {}", e);
-                        }
-                    }
+                if event_state == ShortcutState::Pressed {
+                    crate::agent_monitor::on_agent_input_pressed().await;
+                } else if event_state == ShortcutState::Released {
+                    crate::agent_monitor::on_agent_input_released(&app_clone).await;
                 }
             });
         }
+    }
+}
+
+/// Handle agent tap mode (original behavior)
+fn handle_agent_tap_mode(app: &AppHandle) {
+    // Check if dictation is currently active by checking the VoiceController directly
+    let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+        voice_controller_state.lock()
+            .map(|controller| controller.is_dictating())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if is_dictation_active {
+        info!("[Agent Mode Shortcut] Tap mode - stopping active dictation");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Stop dictation
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Agent Mode] Stopped dictation successfully");
+                    }
+                    Err(e) => {
+                        error!("[Agent Mode] Failed to stop dictation: {}", e);
+                    }
+                }
+            }
+        });
+    } else {
+        info!("[Agent Mode Shortcut] Tap mode - starting agent mode transcription");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Emit agent mode start event
+            if let Err(e) = app_handle.emit("app-dictation-started", ()) {
+                error!("[Agent Mode] Failed to emit app-dictation-started event: {}", e);
+            }
+
+            // Start voice transcription for agent mode
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::start_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Agent Mode] Started transcription successfully");
+                    }
+                    Err(e) => {
+                        error!("[Agent Mode] Failed to start transcription: {}", e);
+                    }
+                }
+            }
+        });
     }
 }
 
