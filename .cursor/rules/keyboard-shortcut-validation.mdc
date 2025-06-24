@@ -1,0 +1,185 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Keyboard Shortcut Validation and Implementation Patterns
+
+## Overview
+This rule documents validation patterns and architectural insights for keyboard shortcut functionality, particularly for voice control features like dictation and agent modes.
+
+## Validation Methodology
+
+### 1. **Complete Infrastructure Analysis**
+When validating keyboard shortcuts, examine the full stack:
+
+**Backend Components:**
+- Shortcut handlers in [src-tauri/src/events/shortcuts.rs](mdc:src-tauri/src/events/shortcuts.rs)
+- Monitor modules for hold behavior ([src-tauri/src/dictation_monitor.rs](mdc:src-tauri/src/dictation_monitor.rs), [src-tauri/src/agent_monitor.rs](mdc:src-tauri/src/agent_monitor.rs))
+- State management in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
+- Commands for settings in [src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs)
+
+**Frontend Integration:**
+- Settings UI in [src/components/settings/sections/GeneralSettings.tsx](mdc:src/components/settings/sections/GeneralSettings.tsx)
+- Help documentation in [src/components/ModalSystem.tsx](mdc:src/components/ModalSystem.tsx)
+- State management hooks in [src/hooks/useSettings.ts](mdc:src/hooks/useSettings.ts)
+
+### 2. **Critical Bug Pattern Recognition**
+Watch for disconnects between settings UI and actual behavior:
+
+```rust
+// ❌ WRONG - Hardcoded behavior ignoring user settings
+if event.state() == ShortcutState::Released {
+    handle_agent_tap_mode(app);
+}
+
+// ✅ CORRECT - Check user preference and route accordingly
+let trigger_mode = app_state.agent_trigger_mode.lock()
+    .map(|mode| mode.clone())
+    .unwrap_or(state::AgentTriggerMode::Tap);
+
+match trigger_mode {
+    state::AgentTriggerMode::Tap => {
+        if event.state() == ShortcutState::Released {
+            handle_agent_tap_mode(app);
+        }
+    }
+    state::AgentTriggerMode::Hold => {
+        // Route to monitor for hold behavior
+        tauri::async_runtime::spawn(async move {
+            if event_state == ShortcutState::Pressed {
+                crate::agent_monitor::on_agent_input_pressed().await;
+            } else if event_state == ShortcutState::Released {
+                crate::agent_monitor::on_agent_input_released(&app_clone).await;
+            }
+        });
+    }
+}
+```
+
+## Architecture Patterns
+
+### 1. **Hold Behavior Implementation**
+Both dictation and agent modes use similar monitor patterns:
+
+**Key Components:**
+- State tracking with thresholds (500ms to commit)
+- Immediate start (0ms) for responsiveness
+- Cooldown periods (150ms) after cancellation
+- Proper cleanup and timeout handling
+
+**Monitor State Pattern:**
+```rust
+pub struct InputMonitorState {
+    pub hold_start_time: Option<Instant>,
+    pub action_started: bool,
+    pub hold_threshold_reached: bool,
+    pub last_cancellation_time: Option<Instant>,
+    // ... other fields
+}
+```
+
+### 2. **Event Flow Architecture**
+```
+Shortcut Pressed → Check Trigger Mode → Route to Handler
+    ↓
+Tap Mode: Wait for Release → Execute Action
+Hold Mode: Monitor Hold → Start Action → Wait for Release → Stop Action
+```
+
+### 3. **Settings Persistence Pattern**
+All keyboard shortcut settings use centralized persistence:
+- Backend: [src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs) - `get_agent_trigger_mode()`, `set_agent_trigger_mode()`
+- Storage: `tauri-plugin-store` with automatic sync to app state
+- Fallback: Always provide sensible defaults
+
+## Validation Checklist
+
+### ✅ **Working Implementation Indicators**
+- [ ] Settings UI changes affect actual behavior
+- [ ] Both press and release events handled correctly
+- [ ] Monitor modules properly route hold behavior
+- [ ] State persistence works across app restarts
+- [ ] Event emissions work for UI feedback
+- [ ] Compilation succeeds with `cargo check`
+
+### ❌ **Bug Warning Signs**
+- [ ] Hardcoded behavior ignoring user settings
+- [ ] Missing routing to monitor modules for hold mode
+- [ ] Only handling press OR release (not both)
+- [ ] Settings UI exists but has no backend effect
+- [ ] Compilation errors in shortcut handlers
+
+## Testing Approach
+
+### 1. **Compilation Validation**
+Always run after significant changes:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short
+```
+
+### 2. **Behavioral Testing**
+- Test both tap and hold modes for agent shortcuts
+- Verify dictation hold behavior works correctly
+- Check settings persistence across app restarts
+- Validate UI feedback and state synchronization
+
+### 3. **Integration Testing**
+- Ensure settings UI reflects actual behavior
+- Test cancellation and cleanup scenarios
+- Verify proper event emission for frontend updates
+
+## Common Pitfalls
+
+### 1. **Settings UI Disconnect**
+The most critical bug type: frontend settings that don't affect backend behavior.
+- Always trace from UI setting to actual execution code
+- Verify routing logic checks app state correctly
+
+### 2. **Incomplete Event Handling**
+Hold behavior requires both press AND release handling:
+```rust
+// Must handle both states for hold mode
+if event_state == ShortcutState::Pressed {
+    monitor::on_input_pressed().await;
+} else if event_state == ShortcutState::Released {
+    monitor::on_input_released(&app_clone).await;
+}
+```
+
+### 3. **State Management Issues**
+- Monitor state must be properly initialized
+- Cleanup on cancellation prevents stuck states
+- Cooldown periods prevent input conflicts
+
+## Integration Points
+
+### Related Systems
+- **Voice Transcription**: [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription)
+- **App State**: [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
+- **Event System**: [src-tauri/src/events/](mdc:src-tauri/src/events)
+- **Settings Management**: [src-tauri/src/settings/](mdc:src-tauri/src/settings)
+
+### Frontend Dependencies
+- Settings hooks for state management
+- Modal system for help documentation
+- Event listeners for real-time feedback
+
+## Maintenance Guidelines
+
+### When Adding New Shortcuts
+1. Create monitor module if hold behavior needed
+2. Add routing logic in shortcut handler
+3. Implement settings commands for persistence
+4. Update frontend settings UI
+5. Add help documentation
+6. Test both modes thoroughly
+
+### When Debugging Shortcuts
+1. Check compilation first
+2. Trace from UI to execution code
+3. Verify state management flow
+4. Test event handling completeness
+5. Validate persistence layer
+
+This rule ensures robust keyboard shortcut implementations that respect user preferences and maintain consistent behavior across the voice control system.

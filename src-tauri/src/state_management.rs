@@ -113,6 +113,11 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         warn!("Failed to load agent trigger mode: {} - using defaults", e);
     }
 
+    // Load dictation trigger mode from persistent storage
+    if let Err(e) = crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &*app_state).await {
+        warn!("Failed to load dictation trigger mode: {} - using defaults", e);
+    }
+
     // Load tool configuration from centralized settings
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager for tool config: {}", e))?;

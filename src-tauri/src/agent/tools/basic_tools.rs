@@ -115,6 +115,45 @@ impl SecurityConfig {
     }
 }
 
+/// Helper function to list directory contents in a standardized format
+///
+/// This function is shared between basic tools and other parts of the system
+/// to avoid code duplication while maintaining consistent directory listing format.
+///
+/// Used by: read_file tool when path is a directory, other directory listing needs
+///
+/// # Arguments
+/// * `path` - PathBuf to the directory to list
+///
+/// # Returns
+/// `Result<String, String>` - Directory contents as formatted string, or error
+fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
+    match fs::read_dir(path) {
+        Ok(entries) => {
+            let mut items = Vec::new();
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let is_dir = entry
+                        .file_type()
+                        .map(|ft| ft.is_dir())
+                        .unwrap_or(false);
+                    items.push(if is_dir {
+                        format!("{}/", name)
+                    } else {
+                        name
+                    });
+                }
+            }
+            items.sort();
+            Ok(items.join("\n"))
+        }
+        Err(e) => {
+            Err(format!("Failed to list directory: {}", e))
+        }
+    }
+}
+
 // Define the implementation module with balanced security
 mod basic_tools_impl {
     use super::*;
@@ -245,13 +284,13 @@ mod basic_tools_impl {
     pub fn read_file_definition() -> ToolDefinition {
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads the entire content of a file at the given path. Minimal security restrictions - blocks only dangerous executables and enforces generous size limits.".to_string(),
+            description: "Reads the entire content of a file at the given path. If the path is a directory, gracefully lists the directory contents instead. Minimal security restrictions - blocks only dangerous executables and enforces generous size limits.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The path to the file (relative or absolute). Minimal restrictions applied."
+                        "description": "The path to the file or directory (relative or absolute). If a directory is specified, its contents will be listed. Minimal restrictions applied."
                     }
                 },
                 "required": ["path"]
@@ -261,10 +300,11 @@ mod basic_tools_impl {
 
     /// Executes the `read_file` tool operation with minimal restrictions.
     ///
-    /// Reads the contents of a file specified by the path.
-    /// Now allows access to almost any readable file.
+    /// Reads the contents of a file specified by the path. If the path is a directory,
+    /// gracefully lists the directory contents instead of failing.
+    /// Now allows access to almost any readable file or directory.
     ///
-    /// Used by: All agent types for accessing file contents during analysis and development
+    /// Used by: All agent types for accessing file contents or directory listings during analysis and development
     ///
     /// # Arguments
     /// * `input` - JSON value containing the file path
@@ -307,8 +347,31 @@ mod basic_tools_impl {
                 }))
             }
             Err(e) => {
-                log::error!("❌ Failed to read file {:?}: {}", validated_path, e);
-                Err(format!("Failed to read file '{}': {}", path_str, e))
+                // Check if path is a directory and gracefully handle by listing contents
+                if validated_path.is_dir() {
+                    log::info!("📁 Path is a directory, listing contents instead: {:?}", validated_path);
+
+                    match list_directory_contents(&validated_path) {
+                        Ok(directory_listing) => {
+                            let item_count = directory_listing.lines().count();
+                            log::info!("📁 Directory listing successful: {} items", item_count);
+
+                            Ok(json!({
+                                "content": directory_listing,
+                                "path": path_str,
+                                "type": "directory",
+                                "item_count": item_count
+                            }))
+                        }
+                        Err(dir_err) => {
+                            log::error!("❌ Failed to list directory {:?}: {}", validated_path, dir_err);
+                            Err(format!("Failed to list directory '{}': {}", path_str, dir_err))
+                        }
+                    }
+                } else {
+                    log::error!("❌ Failed to read file {:?}: {}", validated_path, e);
+                    Err(format!("Failed to read file '{}': {}", path_str, e))
+                }
             }
         }
     }
