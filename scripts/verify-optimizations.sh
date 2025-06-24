@@ -21,7 +21,7 @@ echo -e "\n${BLUE}=== 1. FRONTEND CONVERSATION PRUNING ===${NC}"
 echo "🔍 Checking frontend conversation pruning..."
 if grep -q "pruneConversationIfNeeded" src/App.tsx; then
     echo -e "✅ ${GREEN}Frontend conversation pruning implemented${NC}"
-    
+
     # Check if LIMITS is imported
     if grep -q "LIMITS" src/App.tsx; then
         echo -e "✅ ${GREEN}LIMITS constant imported${NC}"
@@ -29,7 +29,7 @@ if grep -q "pruneConversationIfNeeded" src/App.tsx; then
         echo -e "❌ ${RED}LIMITS constant not imported${NC}"
         ISSUES_FOUND=$((ISSUES_FOUND + 1))
     fi
-    
+
     # Check if setConversationWithPruning is used
     PRUNING_USAGE=$(grep -c "setConversationWithPruning" src/App.tsx)
     if [ $PRUNING_USAGE -gt 5 ]; then
@@ -48,21 +48,21 @@ echo -e "\n${BLUE}=== 2. BACKEND MEMORY MANAGEMENT ===${NC}"
 echo "🔍 Checking backend memory management..."
 if grep -q "AdvancedMemoryManager" src-tauri/src/agent/implementations/memory_manager.rs; then
     echo -e "✅ ${GREEN}AdvancedMemoryManager implemented${NC}"
-    
+
     # Check auto-pruning configuration
     if grep -q "auto_prune: true" src-tauri/src/agent/implementations/memory_manager.rs; then
         echo -e "✅ ${GREEN}Auto-pruning enabled by default${NC}"
     else
         echo -e "⚠️ ${YELLOW}Auto-pruning configuration not found${NC}"
     fi
-    
+
     # Check token limits
     if grep -q "max_tokens: 32000" src-tauri/src/agent/implementations/memory_manager.rs; then
         echo -e "✅ ${GREEN}Token limits configured (32K tokens)${NC}"
     else
         echo -e "⚠️ ${YELLOW}Token limits not found or different${NC}"
     fi
-    
+
     # Check conversation summarization
     if grep -q "enable_summarization: true" src-tauri/src/agent/implementations/memory_manager.rs; then
         echo -e "✅ ${GREEN}Conversation summarization enabled${NC}"
@@ -80,7 +80,7 @@ echo -e "\n${BLUE}=== 3. STATE OBJECT OPTIMIZATION ===${NC}"
 echo "🔍 Checking DevToolsPanel state optimization..."
 if grep -q "useOptimizedLoadingStates" src/components/DevToolsPanel.tsx; then
     echo -e "✅ ${GREEN}DevToolsPanel loading states optimized${NC}"
-    
+
     # Check if Set-based approach is used
     if grep -q "Set<string>" src/components/DevToolsPanel.tsx; then
         echo -e "✅ ${GREEN}Set-based loading state management implemented${NC}"
@@ -147,7 +147,7 @@ echo -e "\n${BLUE}=== 7. PERFORMANCE CONSTANTS ===${NC}"
 
 # Check if performance constants are properly set
 echo "🔍 Checking performance constants..."
-if grep -q "MAX_CHAT_HISTORY_ITEMS: 1000" src/lib/constants.ts; then
+if grep -q "MAX_CHAT_HISTORY_ITEMS: 1000" src/lib/constants.generated.ts; then
     echo -e "✅ ${GREEN}Chat history limit set to 1000 messages${NC}"
 else
     echo -e "⚠️ ${YELLOW}Chat history limit not found or different${NC}"
@@ -157,7 +157,7 @@ echo -e "\n${BLUE}=== 8. COMPILATION CHECK ===${NC}"
 
 # Verify that the code compiles
 echo "🔍 Checking TypeScript compilation..."
-if command -v bun &> /dev/null; then
+if command -v bun &>/dev/null; then
     if bun run typecheck >/dev/null 2>&1; then
         echo -e "✅ ${GREEN}TypeScript compilation successful${NC}"
     else

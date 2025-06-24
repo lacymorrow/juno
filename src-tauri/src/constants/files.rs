@@ -13,6 +13,10 @@ pub mod extensions {
     pub const TMP_EXTENSION: &str = ".tmp";
     pub const CACHE_EXTENSION: &str = ".cache";
     pub const BACKUP_EXTENSION: &str = ".backup";
+
+    // Additional extensions moved from frontend constants.ts
+    pub const TEXT_EXT: &str = ".txt";
+    pub const CSV_EXT: &str = ".csv";
 }
 
 // File prefixes
