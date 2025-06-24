@@ -35,16 +35,21 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("browser_form", ToolCategory::Browser);
 
     // Desktop tools
-    // REMOVED: Redundant tools - Use computer tool with official Anthropic Computer Use API instead
-    // dev_left_click → computer tool with action: "left_click"
-    // dev_right_click → computer tool with action: "right_click"
-    // dev_double_click → computer tool with action: "double_click"
-    // dev_type_text → computer tool with action: "type"
+    // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
+    // dev_left_click, desktop_click, left_click → computer tool with action: "click"
+    // dev_right_click, right_click → computer tool with action: "right_click"
+    // dev_middle_click, middle_click → computer tool with action: "middle_click"
+    // dev_double_click, double_click → computer tool with action: "double_click"
+    // dev_triple_click, triple_click → computer tool with action: "triple_click"
+    // dev_left_click_drag, left_click_drag → computer tool with action: "drag"
+    // dev_left_mouse_down, left_mouse_down → computer tool with action: "drag" (start)
+    // dev_left_mouse_up, left_mouse_up → computer tool with action: "drag" (complete)
+    // mouse_move → computer tool with action: "click" (movement automatic)
+    // REMOVED: 4 redundant keyboard tools - Use computer tool instead
+    // dev_type_text, desktop_type → computer tool with action: "type"
     // dev_global_type_text → computer tool with action: "type"
     // dev_press_key → computer tool with action: "key"
-    // desktop_click → computer tool with action: "left_click"
-    // desktop_type → computer tool with action: "type"
-    // This eliminates redundancy and ensures 100% compliance with the official specification.
+    // This eliminates 15 redundant tools total and ensures 100% compliance with the official specification.
 
     map.insert("open_application", ToolCategory::Desktop);
     map.insert("open_url", ToolCategory::Desktop);

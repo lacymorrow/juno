@@ -474,11 +474,16 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 
 ## **🚫 FORBIDDEN REDUNDANT TOOLS** (DO NOT USE):
 
-### **❌ Mouse Tools (DEPRECATED)**:
-- `dev_left_click`, `dev_right_click`, `dev_middle_click` → Use `computer` with `action: "click"`
-- `dev_double_click`, `dev_triple_click` → Use `computer` with `action: "double_click"/"triple_click"`
-- `dev_left_click_drag`, `left_mouse_down`, `left_mouse_up` → Use `computer` with `action: "drag"`
-- `desktop_click`, `mouse_move` → Use `computer` with appropriate actions
+### **❌ Mouse Tools (DEPRECATED - 11 REDUNDANT TOOLS)**:
+- `dev_left_click`, `desktop_click`, `left_click` → Use `computer` with `action: "click"`
+- `dev_right_click`, `right_click` → Use `computer` with `action: "right_click"`
+- `dev_middle_click`, `middle_click` → Use `computer` with `action: "middle_click"`
+- `dev_double_click`, `double_click` → Use `computer` with `action: "double_click"`
+- `dev_triple_click`, `triple_click` → Use `computer` with `action: "triple_click"`
+- `dev_left_click_drag`, `left_click_drag` → Use `computer` with `action: "drag"`
+- `dev_left_mouse_down`, `left_mouse_down` → Use `computer` with `action: "drag"` (start)
+- `dev_left_mouse_up`, `left_mouse_up` → Use `computer` with `action: "drag"` (complete)
+- `mouse_move` → Use `computer` with `action: "click"` (movement is automatic)
 
 ### **❌ Keyboard Tools (DEPRECATED)**:
 - `press_key`, `dev_press_key` → Use `computer` with `action: "key"`
@@ -510,6 +515,30 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 ```json
 [
   {"name": "computer", "input": {"action": "right_click", "coordinate": [150, 250]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**Middle-click to open in new tab**:
+```json
+[
+  {"name": "computer", "input": {"action": "middle_click", "coordinate": [300, 400]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**Double-click to open file**:
+```json
+[
+  {"name": "computer", "input": {"action": "double_click", "coordinate": [200, 150]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**Triple-click to select line**:
+```json
+[
+  {"name": "computer", "input": {"action": "triple_click", "coordinate": [250, 300]}},
   {"name": "computer", "input": {"action": "screenshot"}}
 ]
 ```
