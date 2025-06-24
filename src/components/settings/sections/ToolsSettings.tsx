@@ -49,7 +49,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleToggleCategory = async (
+    const handleToggleCategory = async (
     categoryName: string,
     enabled: boolean
   ) => {
@@ -68,6 +68,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     settings.setToolConfigurations(updatedConfigs);
 
     try {
+      // Backend now uses enum format consistently, so categoryName is already correct
       await invoke("set_tool_category_enabled", { category: categoryName, enabled });
       // Invalidate cache for future loads but don't reload now
       settings.invalidateToolConfigCache();
