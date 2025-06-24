@@ -47,9 +47,32 @@ pub mod dictation {
     pub const TRANSCRIPTION_STOP: &str = "dictation-transcription-stop";
     pub const COMMITTED: &str = "dictation-committed";
     pub const STOP: &str = "dictation-stop";
-    pub const TRANSCRIPTION_CANCEL: &str = "dictation-transcription-cancel";
+    pub const TRANSCRIPTION_CANCEL: &str = "dictation-cancel";
     pub const TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
     pub const TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
+
+    // Legacy/backward compatibility events
+    pub const STOPPED: &str = "app-dictation-stopped";
+}
+
+/// Voice transcription events (from plugin)
+pub mod voice_transcription {
+    pub const FINAL_RESULT: &str = "voice-transcription:final-result";
+    pub const DICTATION_STOPPED: &str = "voice-transcription:dictation-stopped";
+    pub const ERROR: &str = "voice-transcription:error";
+}
+
+/// Timer events
+pub mod timer {
+    pub const EXPIRED: &str = "timer-expired";
+    pub const QUEUED: &str = "timer-queued";
+    pub const PROCESSED: &str = "timer-processed";
+    pub const STATUS_UPDATE: &str = "timer-status-update";
+}
+
+/// Force stop events
+pub mod force_stop {
+    pub const TRANSCRIPTION: &str = "force-stop-transcription";
 }
 
 /// UI and window events
@@ -94,12 +117,23 @@ pub mod always_listening {
     pub const MODE_CHANGED: &str = "always-listening-mode-changed";
     pub const WAKE_WORD_DETECTED: &str = "always-listening:wake-word-detected";
     pub const TOGGLE_DICTATION_REQUEST: &str = "toggle-dictation-request";
+    pub const STARTED: &str = "always-listening:started";
+    pub const STOPPED: &str = "always-listening:stopped";
+    pub const ACTIVATED: &str = "always-listening:activated";
+    pub const DEACTIVATED: &str = "always-listening:deactivated";
+    pub const STOP_REQUESTED: &str = "always-listening:stop-requested";
+    pub const TRANSCRIPTION: &str = "always-listening:transcription";
+    pub const COMMAND_PROCESSED: &str = "always-listening:command-processed";
+    pub const EVENT: &str = "always-listening-event";
+    pub const STOPPED_BY_COMMAND: &str = "always-listening:stopped-by-command";
+    pub const RETURN_TO_WAKE_WORD: &str = "always-listening:return-to-wake-word";
 }
 
 /// Permission events
 pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
     pub const RESTART_REQUIRED: &str = "permissions-restart-required";
+    pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
 }
 
 /// Development tool events
@@ -110,6 +144,69 @@ pub mod dev {
 /// User message events
 pub mod messages {
     pub const USER_MESSAGE_SUBMITTED: &str = "user-message-submitted";
+}
+
+/// Cloud and connection events
+pub mod cloud {
+    pub const WEBSOCKET_CONNECT: &str = "websocket-connect";
+    pub const WEBSOCKET_SEND: &str = "websocket-send";
+    pub const WEBSOCKET_DISCONNECT: &str = "websocket-disconnect";
+    pub const CONNECTOR_STATE: &str = "cloud-connector-state";
+    pub const CONNECTION_STATE: &str = "cloud-connection-state";
+}
+
+/// System and application events
+pub mod system {
+    pub const ERROR_OCCURRED: &str = "error-occurred";
+    pub const MCP_STATE_UPDATED: &str = "mcp_state_updated";
+    pub const MOUSE_ENTERED_WINDOW: &str = "mouse-entered-window";
+    pub const MOUSE_LEFT_WINDOW: &str = "mouse-left-window";
+}
+
+/// Onboarding events
+pub mod onboarding {
+    pub const COMPLETE: &str = "onboarding-complete";
+    pub const SKIPPED: &str = "onboarding-skipped";
+}
+
+/// Notification events
+pub mod notifications {
+    pub const TOAST: &str = "toast-notification";
+}
+
+/// Bar and UI state events
+pub mod bar {
+    pub const STATE_UPDATE: &str = "bar-state-update";
+    pub const COMPLETE_TRANSITION: &str = "floating-bar-complete-transition";
+    pub const CLEAR_ERROR: &str = "floating-bar-clear-error";
+    pub const CONFIG_CHANGED: &str = "floating-bar-config-changed";
+}
+
+/// Tool and command execution events
+pub mod tools {
+    pub const USAGE: &str = "tool-usage";
+    pub const APPROVAL_REQUEST: &str = "tool-approval-request";
+    pub const COMMAND_EXECUTION_START: &str = "command-execution-start";
+    pub const COMMAND_EXECUTION_END: &str = "command-execution-end";
+}
+
+/// Continuation events
+pub mod continuation {
+    pub const AGENT_REQUEST: &str = "agent-continuation-request";
+    pub const AGENT_RESPONSE: &str = "agent-continuation-response";
+}
+
+/// Dictation state events
+pub mod dictation_state {
+    pub const CHANGED: &str = "dictation-state-changed";
+    pub const FORCE_RESET: &str = "dictation-state-force-reset";
+    pub const INPUT_CHANGED: &str = "dictation-input-state-changed";
+}
+
+/// Shortcut events
+pub mod shortcuts {
+    pub const AGENT_MODE: &str = "shortcut-agent-mode";
+    pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
 }
 
 
