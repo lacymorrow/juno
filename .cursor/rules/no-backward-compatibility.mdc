@@ -1,0 +1,35 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# No Backward Compatibility Rule
+
+## Core Principle
+This is a **NEW APPLICATION BUILD** - never write backward compatibility code, legacy helpers, compatibility layers, deprecation warnings, or dead code for backward compatibility purposes.
+
+### ❌ Never Add These:
+- Backward compatibility layers
+- Legacy method wrappers
+- Deprecation warnings or notices
+- "Old" or "Legacy" event listeners
+- Transition helper functions
+- Compatibility shims
+- Dead code "just in case"
+- Multiple ways to do the same thing for compatibility
+
+1. **Breaking Changes Are OK** - This is a new build, breaking changes are expected and welcomed
+2. **Delete Old Code** - When refactoring, completely remove the old implementation
+3. **Single Pattern** - One way to do each thing, using the most current approach
+4. **Generated Constants** - Always use constants from src-tauri/src/constants/* for rust or [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts) on the frontend to prevent sync issues
+5. **Clean Architecture** - Prefer clean, lean, maintainable code over compatibility
+
+## When Refactoring
+
+1. **Identify** the old pattern
+2. **Implement** the new pattern
+3. **Delete** the old pattern completely
+4. **Test** that the new pattern works
+5. **Never** keep both for "safety"
+
+Remember: **Clean, lean, fresh code** - no backward compatibility whatsoever.
