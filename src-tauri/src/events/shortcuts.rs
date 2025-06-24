@@ -86,62 +86,90 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         error!("[Agent Mode Shortcut] Failed to emit shortcut detection event: {}", e);
     }
 
-    if event.state() == ShortcutState::Pressed {
-        // Check if dictation is currently active by checking the VoiceController directly
-        let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-            voice_controller_state.lock()
-                .map(|controller| controller.is_dictating())
-                .unwrap_or(false)
-        } else {
-            false
-        };
+    // FIXED: Check agent trigger mode to determine behavior
+    let app_state = app.state::<state::AppState>();
+    let trigger_mode = app_state.agent_trigger_mode.lock()
+        .map(|mode| mode.clone())
+        .unwrap_or(state::AgentTriggerMode::Tap);
 
-        if is_dictation_active {
-            info!("[Agent Mode Shortcut] Pressed - stopping active dictation");
-
-            let app_handle = app.clone();
+    match trigger_mode {
+        state::AgentTriggerMode::Tap => {
+            // Tap mode: Only handle key release (press+release = tap)
+            if event.state() == ShortcutState::Released {
+                handle_agent_tap_mode(app);
+            }
+        }
+        state::AgentTriggerMode::Hold => {
+            // Hold mode: Handle both press and release, route to agent_monitor
+            let app_clone = app.clone();
+            let event_state = event.state();
             tauri::async_runtime::spawn(async move {
-                // Stop dictation
-                if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle.clone(),
-                        voice_controller_state
-                    ).await {
-                        Ok(_) => {
-                            info!("[Agent Mode] Stopped dictation successfully");
-                        }
-                        Err(e) => {
-                            error!("[Agent Mode] Failed to stop dictation: {}", e);
-                        }
-                    }
-                }
-            });
-        } else {
-            info!("[Agent Mode Shortcut] Pressed - starting agent mode transcription");
-
-            let app_handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                // Emit agent mode start event
-                if let Err(e) = app_handle.emit("app-dictation-started", ()) {
-                    error!("[Agent Mode] Failed to emit app-dictation-started event: {}", e);
-                }
-
-                // Start voice transcription for agent mode
-                if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                    match tauri_plugin_voice_transcription::commands::start_dictation(
-                        app_handle.clone(),
-                        voice_controller_state
-                    ).await {
-                        Ok(_) => {
-                            info!("[Agent Mode] Started transcription successfully");
-                        }
-                        Err(e) => {
-                            error!("[Agent Mode] Failed to start transcription: {}", e);
-                        }
-                    }
+                if event_state == ShortcutState::Pressed {
+                    crate::agent_monitor::on_agent_input_pressed().await;
+                } else if event_state == ShortcutState::Released {
+                    crate::agent_monitor::on_agent_input_released(&app_clone).await;
                 }
             });
         }
+    }
+}
+
+/// Handle agent tap mode (original behavior)
+fn handle_agent_tap_mode(app: &AppHandle) {
+    // Check if dictation is currently active by checking the VoiceController directly
+    let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+        voice_controller_state.lock()
+            .map(|controller| controller.is_dictating())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if is_dictation_active {
+        info!("[Agent Mode Shortcut] Tap mode - stopping active dictation");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Stop dictation
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Agent Mode] Stopped dictation successfully");
+                    }
+                    Err(e) => {
+                        error!("[Agent Mode] Failed to stop dictation: {}", e);
+                    }
+                }
+            }
+        });
+    } else {
+        info!("[Agent Mode Shortcut] Tap mode - starting agent mode transcription");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Emit agent mode start event
+            if let Err(e) = app_handle.emit("app-dictation-started", ()) {
+                error!("[Agent Mode] Failed to emit app-dictation-started event: {}", e);
+            }
+
+            // Start voice transcription for agent mode
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::start_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Agent Mode] Started transcription successfully");
+                    }
+                    Err(e) => {
+                        error!("[Agent Mode] Failed to start transcription: {}", e);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -163,21 +191,89 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         error!("[Dictation Input Shortcut] Failed to emit shortcut detection event: {}", e);
     }
 
-    tauri::async_runtime::spawn(async move {
-        if event_state == ShortcutState::Pressed {
-            crate::dictation_monitor::on_dictation_input_pressed().await;
-        } else if event_state == ShortcutState::Released {
-            crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-        }
+    // FIXED: Check dictation trigger mode to determine behavior
+    let app_state = app.state::<state::AppState>();
+    let trigger_mode = app_state.dictation_trigger_mode.lock()
+        .map(|mode| mode.clone())
+        .unwrap_or(state::DictationTriggerMode::Hold);
 
-        // Update app state - Note: dictation_pressed field doesn't exist, but this is placeholder code
-        // The real field would need to be added to AppState if needed
-
-        // Emit event for frontend
-        if let Err(e) = app_clone.emit("dictation-input-state-changed", event_state == ShortcutState::Pressed) {
-            error!("Failed to emit dictation-input-state-changed event: {}", e);
+    match trigger_mode {
+        state::DictationTriggerMode::Tap => {
+            // Tap mode: Only handle key release (press+release = tap)
+            if event.state() == ShortcutState::Released {
+                handle_dictation_tap_mode(app);
+            }
         }
-    });
+        state::DictationTriggerMode::Hold => {
+            // Hold mode: Handle both press and release, route to dictation_monitor
+            tauri::async_runtime::spawn(async move {
+                if event_state == ShortcutState::Pressed {
+                    crate::dictation_monitor::on_dictation_input_pressed().await;
+                } else if event_state == ShortcutState::Released {
+                    crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
+                }
+            });
+        }
+    }
+}
+
+/// Handle dictation tap mode (new functionality)
+fn handle_dictation_tap_mode(app: &AppHandle) {
+    // Check if dictation is currently active by checking the VoiceController directly
+    let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+        voice_controller_state.lock()
+            .map(|controller| controller.is_dictating())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if is_dictation_active {
+        info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Stop dictation
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Dictation Tap Mode] Stopped dictation successfully");
+                    }
+                    Err(e) => {
+                        error!("[Dictation Tap Mode] Failed to stop dictation: {}", e);
+                    }
+                }
+            }
+        });
+    } else {
+        info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Emit dictation mode start event
+            if let Err(e) = app_handle.emit("dictation-active", true) {
+                error!("[Dictation Tap Mode] Failed to emit dictation-active event: {}", e);
+            }
+
+            // Start voice transcription for dictation mode
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                match tauri_plugin_voice_transcription::commands::start_dictation(
+                    app_handle.clone(),
+                    voice_controller_state
+                ).await {
+                    Ok(_) => {
+                        info!("[Dictation Tap Mode] Started transcription successfully");
+                    }
+                    Err(e) => {
+                        error!("[Dictation Tap Mode] Failed to start transcription: {}", e);
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// Add a new command to trigger shortcut testing events during onboarding
