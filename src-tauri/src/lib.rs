@@ -628,6 +628,12 @@ pub fn run() {
             get_shortcut_suggestions,
             get_shortcut_best_practices,
             get_escape_key_status,
+            commands::escape_key_coordinator::force_unregister_escape_key,
+            commands::escape_key_coordinator::test_escape_key_flow,
+            // Stop Coordinator Commands
+            commands::stop_coordinator::coordinated_stop_all_operations,
+            commands::stop_coordinator::coordinator_emergency_stop_all_operations,
+            commands::stop_coordinator::get_stop_coordinator_status,
             // Cloud Commands
             get_cloud_config,
             update_cloud_config,

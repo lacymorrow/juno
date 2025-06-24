@@ -291,3 +291,39 @@ pub async fn get_escape_key_coordinator_status() -> Result<serde_json::Value, St
     let coordinator = get_escape_key_coordinator();
     Ok(coordinator.get_status().await)
 }
+
+/// Force unregister escape key for debugging/emergency cleanup
+#[tauri::command]
+pub async fn force_unregister_escape_key(app_handle: AppHandle) -> Result<String, String> {
+    info!("[EscapeKeyCoordinator] Force unregister escape key requested manually");
+
+    let coordinator = get_escape_key_coordinator();
+    coordinator.force_reset(&app_handle).await?;
+
+    Ok("Escape key forcefully unregistered and released to other applications".to_string())
+}
+
+/// Test escape key flow: register -> stop all operations -> verify unregistered
+#[tauri::command]
+pub async fn test_escape_key_flow(app_handle: AppHandle) -> Result<String, String> {
+    info!("[EscapeKeyCoordinator] Testing escape key registration/unregistration flow");
+
+    let coordinator = get_escape_key_coordinator();
+
+    // 1. Register escape key for test user
+    coordinator.register_escape_user(&app_handle, "test_user").await?;
+    let status_after_register = coordinator.get_status().await;
+
+    // 2. Stop all operations (should unregister escape key)
+    let stop_coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+    stop_coordinator.stop_all_operations(&app_handle, "Test escape key flow").await?;
+
+    // 3. Check status after stop
+    let status_after_stop = coordinator.get_status().await;
+
+    Ok(format!(
+        "Escape key flow test completed:\n- After register: {}\n- After stop: {}",
+        serde_json::to_string_pretty(&status_after_register).unwrap_or_else(|_| "failed to serialize".to_string()),
+        serde_json::to_string_pretty(&status_after_stop).unwrap_or_else(|_| "failed to serialize".to_string())
+    ))
+}
