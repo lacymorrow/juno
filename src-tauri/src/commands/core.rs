@@ -402,7 +402,16 @@ pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result
 #[tauri::command]
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let debug_mode = state.is_debug_mode();
-    Ok(debug_mode)
+    let cfg_debug = cfg!(debug_assertions);
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let has_debug_log = rust_log.contains("debug");
+
+    let result = debug_mode || cfg_debug || has_debug_log;
+
+    info!("Debug mode check: state={}, cfg={}, rust_log_debug={}, result={}",
+          debug_mode, cfg_debug, has_debug_log, result);
+
+    Ok(result)
 }
 
 /// Reset all application settings to their default values
