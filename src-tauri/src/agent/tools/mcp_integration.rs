@@ -983,36 +983,13 @@ pub struct ToolBatchingAnalyzer;
 
 impl ToolBatchingAnalyzer {
     /// Analyze tool calls to determine if they can be batched together
+    /// Simple approach: MCP tools can generally be batched if they're read-only
     pub fn can_batch_tools(tool_calls: &[ToolCall]) -> bool {
         if tool_calls.len() < 2 {
             return false;
         }
 
-        // Define batching patterns for obvious sequential operations
-        let sequential_patterns = [
-            // Computer use patterns
-            ("computer_20241022_type", "computer_20241022_key"),
-            ("computer_20241022_key", "computer_20241022_screenshot"),
-            ("computer_20241022_click", "computer_20241022_screenshot"),
-            ("computer_20241022_type", "computer_20241022_screenshot"),
-
-            // MCP tool patterns (can be batched by default unless they modify state)
-            ("mcp_", "mcp_"), // Most MCP tools can be batched
-        ];
-
-        // Check for obvious sequential patterns
-        for window in tool_calls.windows(2) {
-            let first = &window[0].name;
-            let second = &window[1].name;
-
-            for (pattern1, pattern2) in &sequential_patterns {
-                if first.contains(pattern1) && second.contains(pattern2) {
-                    return true;
-                }
-            }
-        }
-
-        // Check if all tools are read-only MCP tools
+        // For MCP tools, check if they're all read-only and can be safely batched
         let all_mcp_readonly = tool_calls.iter().all(|tool| {
             tool.name.starts_with("mcp_") && Self::is_readonly_tool(&tool.name)
         });
@@ -1030,27 +1007,19 @@ impl ToolBatchingAnalyzer {
         readonly_patterns.iter().any(|pattern| tool_name.contains(pattern))
     }
 
-    /// Analyze tool calls and group them into optimal batches
+    /// Create batches from tool calls - trust the agent's decision
+    /// If multiple tools are provided together, batch them (up to max batch size)
     pub fn create_batches(tool_calls: Vec<ToolCall>) -> Vec<Vec<ToolCall>> {
         let mut batches = Vec::new();
         let mut current_batch = Vec::new();
 
         for tool_call in tool_calls {
-            if current_batch.is_empty() {
-                current_batch.push(tool_call);
-            } else {
-                let can_add_to_batch = Self::can_batch_tools(&[
-                    current_batch.last().unwrap().clone(),
-                    tool_call.clone()
-                ]);
+            current_batch.push(tool_call);
 
-                if can_add_to_batch && current_batch.len() < 5 { // Max 5 tools per batch
-                    current_batch.push(tool_call);
-                } else {
-                    // Start new batch
-                    batches.push(current_batch);
-                    current_batch = vec![tool_call];
-                }
+            // Respect max batch size limit
+            if current_batch.len() >= 5 {
+                batches.push(current_batch);
+                current_batch = Vec::new();
             }
         }
 

@@ -140,7 +140,7 @@ where
     }
 
     /// Enhanced tool execution with intelligent batching support
-    /// Detects obvious sequential operations and executes them as batches
+    /// Simply executes whatever tool calls the agent provides
     async fn execute_tools_with_batching(
         &mut self,
         tool_calls: Vec<crate::agent::structs::ToolCall>,
@@ -150,245 +150,21 @@ where
             return Ok(());
         }
 
-        // Analyze tools for batching opportunities
-        let batches = self.analyze_and_create_batches(tool_calls.clone()).await;
+        log::info!("Executing {} tool call(s) as provided by agent", tool_calls.len());
 
-        log::info!(
-            "Tool execution plan: {} tools organized into {} batch(es)",
-            tool_calls.len(),
-            batches.len()
-        );
-
-        // Pre-populate cancelled results for all tool calls to maintain conversation consistency
+        // Initialize result cache for all tools
         let mut tool_results_cache = Vec::new();
         for tool_call in tool_calls.iter() {
-            tool_results_cache.push((tool_call.clone(), None)); // None means not executed yet
+            tool_results_cache.push((tool_call.clone(), None));
         }
 
-        let mut global_tool_index = 0;
-
-        for (batch_index, batch) in batches.iter().enumerate() {
-            // Check for cancellation before each batch
-            if *cancel_rx.borrow() {
-                log::info!("Cancellation detected before batch {} execution", batch_index);
-                self.handle_batch_cancellation(&tool_results_cache, global_tool_index).await?;
-                return Err(AgentError::Terminated);
-            }
-
-            if batch.len() == 1 {
-                // Single tool execution (existing logic)
-                let tool_call = &batch[0];
-                match self.execute_single_tool_with_approval(tool_call, cancel_rx, global_tool_index, &mut tool_results_cache).await? {
-                    true => {}, // Continue
-                    false => return Err(AgentError::Terminated), // Cancelled
-                }
-            } else {
-                // Batch execution for sequential operations
-                log::info!(
-                    "Executing batch {}: {} tools ({} → {} → ...)",
-                    batch_index,
-                    batch.len(),
-                    batch.first().map(|t| t.name.as_str()).unwrap_or("unknown"),
-                    batch.get(1).map(|t| t.name.as_str()).unwrap_or("unknown")
-                );
-
-                match self.execute_tool_batch(batch, cancel_rx, global_tool_index, &mut tool_results_cache).await? {
-                    true => {}, // Continue
-                    false => return Err(AgentError::Terminated), // Cancelled
-                }
-            }
-
-            global_tool_index += batch.len();
+        // Execute the tools as provided - no special logic
+        match self.execute_tool_batch(&tool_calls, cancel_rx, 0, &mut tool_results_cache).await? {
+            true => {}, // Continue
+            false => return Err(AgentError::Terminated), // Cancelled
         }
 
         Ok(())
-    }
-
-    /// Analyze tool calls and create optimal batches for execution
-    async fn analyze_and_create_batches(&self, tool_calls: Vec<crate::agent::structs::ToolCall>) -> Vec<Vec<crate::agent::structs::ToolCall>> {
-        use crate::agent::tools::mcp_integration::ToolBatchingAnalyzer;
-
-        if tool_calls.len() < 2 {
-            return vec![tool_calls];
-        }
-
-        // Check if batching is beneficial
-        let sequential_patterns = self.detect_sequential_patterns(&tool_calls);
-
-        if sequential_patterns.is_empty() {
-            log::debug!("No sequential patterns detected, using individual tool execution");
-            return tool_calls.into_iter().map(|t| vec![t]).collect();
-        }
-
-        log::info!(
-            "Detected {} sequential pattern(s), creating optimized batches",
-            sequential_patterns.len()
-        );
-
-        // Create batches using the MCP analyzer
-        ToolBatchingAnalyzer::create_batches(tool_calls)
-    }
-
-    /// Detect obvious sequential patterns in tool calls
-    fn detect_sequential_patterns(&self, tool_calls: &[crate::agent::structs::ToolCall]) -> Vec<(usize, usize)> {
-        let mut patterns = Vec::new();
-
-        // Define obvious sequential patterns for Computer Use
-        let sequential_patterns = [
-            // Type → Enter → Screenshot (very common)
-            ("computer", "type", "computer", "key", Some("Enter")),
-            ("computer", "key", "computer", "screenshot", None),
-            ("computer", "type", "computer", "screenshot", None),
-
-            // Click → Screenshot (common verification)
-            ("computer", "left_click", "computer", "screenshot", None),
-            ("computer", "click", "computer", "screenshot", None),
-
-            // MCP tool chains (safe for batching)
-            ("mcp_", "", "mcp_", "", None),
-
-            // File operations
-            ("str_replace_based_edit_tool", "create", "str_replace_based_edit_tool", "view", None),
-            ("str_replace_based_edit_tool", "str_replace", "str_replace_based_edit_tool", "view", None),
-        ];
-
-        for window in tool_calls.windows(2) {
-            let first = &window[0];
-            let second = &window[1];
-
-            for (tool1_prefix, action1, tool2_prefix, action2, key_param) in &sequential_patterns {
-                if self.matches_pattern(first, tool1_prefix, action1, key_param) &&
-                   self.matches_pattern(second, tool2_prefix, action2, &None) {
-
-                    let first_index = tool_calls.iter().position(|t| t.id == first.id).unwrap();
-                    let second_index = tool_calls.iter().position(|t| t.id == second.id).unwrap();
-                    patterns.push((first_index, second_index));
-
-                    log::debug!(
-                        "Sequential pattern detected: {} → {} (tools {} → {})",
-                        first.name,
-                        second.name,
-                        first_index,
-                        second_index
-                    );
-                }
-            }
-        }
-
-        patterns
-    }
-
-    /// Check if a tool call matches a specific pattern
-    fn matches_pattern(&self, tool_call: &crate::agent::structs::ToolCall, tool_prefix: &str, action: &str, key_param: &Option<&str>) -> bool {
-        if !tool_call.name.starts_with(tool_prefix) {
-            return false;
-        }
-
-        if action.is_empty() {
-            return true; // Match any action for this tool
-        }
-
-        // Check action parameter for computer tools
-        if tool_call.name == "computer" {
-            if let Some(tool_action) = tool_call.input.get("action").and_then(|v| v.as_str()) {
-                if tool_action == action {
-                    // Check key parameter if specified
-                    if let Some(expected_key) = key_param {
-                        if let Some(key) = tool_call.input.get("key").and_then(|v| v.as_str()) {
-                            return key == *expected_key;
-                        }
-                        return false;
-                    }
-                    return true;
-                }
-            }
-        }
-
-        // Check command parameter for text editor tools
-        if tool_call.name == "str_replace_based_edit_tool" {
-            if let Some(command) = tool_call.input.get("command").and_then(|v| v.as_str()) {
-                return command == action;
-            }
-        }
-
-        false
-    }
-
-    /// Execute a single tool with approval and cancellation handling
-    async fn execute_single_tool_with_approval(
-        &mut self,
-        tool_call: &crate::agent::structs::ToolCall,
-        cancel_rx: &crate::state::CancelReceiver,
-        tool_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
-    ) -> Result<bool, AgentError> {
-        // Check cancellation
-        if *cancel_rx.borrow() {
-            log::info!("Cancellation detected before tool execution: {}", tool_call.name);
-            return Ok(false);
-        }
-
-        // Tool approval check (existing logic)
-        if !self.check_tool_approval(tool_call, cancel_rx).await? {
-            return Ok(true); // Tool denied, but continue with other tools
-        }
-
-        // Execute tool
-        log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
-
-        // Emit tool call request event
-        crate::agent::tool_logger::log_tool_call_request(
-            &self.app_handle,
-            &tool_call.name,
-            tool_call.input.clone(),
-            Some(format!("Executing tool: {}", tool_call.name)),
-        );
-
-        let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
-
-        // FIXED: Emit tool result event to frontend for chat display
-        match &tool_result {
-            Ok(result) => {
-                // Extract screenshot if this is a screenshot tool
-                let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
-                    // For screenshot tools, the result output should contain base64 data
-                    if let Some(screenshot_data) = result.output.get("data") {
-                        screenshot_data.as_str().map(|s| s.to_string())
-                    } else if let Some(screenshot_str) = result.output.as_str() {
-                        Some(screenshot_str.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                crate::agent::tool_logger::log_tool_call_result(
-                    &self.app_handle,
-                    &tool_call.name,
-                    result.output.clone(),
-                    true,
-                    Some(format!("Tool {} executed successfully", tool_call.name)),
-                    screenshot_base64,
-                );
-            }
-            Err(error) => {
-                crate::agent::tool_logger::log_tool_call_result(
-                    &self.app_handle,
-                    &tool_call.name,
-                    serde_json::json!({"error": error.to_string()}),
-                    false,
-                    Some(format!("Tool {} failed: {}", tool_call.name, error)),
-                    None,
-                );
-            }
-        }
-
-        // Cache result and add to memory
-        tool_results_cache[tool_index].1 = Some(tool_result.clone());
-        self.add_tool_result_to_memory(tool_call, tool_result).await?;
-
-        Ok(true)
     }
 
     /// Execute a batch of tools with optimized workflow
@@ -710,27 +486,81 @@ where
         Ok(())
     }
 
-    /// Handle batch cancellation by adding appropriate tool results
-    async fn handle_batch_cancellation(
+    /// Execute a single tool with approval and cancellation handling
+    async fn execute_single_tool_with_approval(
         &mut self,
-        tool_results_cache: &Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
-        start_index: usize,
-    ) -> Result<(), AgentError> {
-        log::info!("Handling batch cancellation from index {}", start_index);
+        tool_call: &crate::agent::structs::ToolCall,
+        cancel_rx: &crate::state::CancelReceiver,
+        tool_index: usize,
+        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+    ) -> Result<bool, AgentError> {
+        // Check cancellation
+        if *cancel_rx.borrow() {
+            log::info!("Cancellation detected before tool execution: {}", tool_call.name);
+            return Ok(false);
+        }
 
-        let mut mem = self.memory.lock().await;
-        for (tool_call, cached_result) in tool_results_cache.iter().skip(start_index) {
-            if cached_result.is_none() {
-                mem.add_message(crate::agent::structs::Message {
-                    role: crate::agent::structs::Role::Tool,
-                    content: "Tool execution was cancelled before completion.".to_string(),
-                    tool_calls: None,
-                    tool_call_id: Some(tool_call.id.clone()),
-                    name: Some(tool_call.name.clone()),
-                }).await?;
+        // Tool approval check (existing logic)
+        if !self.check_tool_approval(tool_call, cancel_rx).await? {
+            return Ok(true); // Tool denied, but continue with other tools
+        }
+
+        // Execute tool
+        log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
+
+        // Emit tool call request event
+        crate::agent::tool_logger::log_tool_call_request(
+            &self.app_handle,
+            &tool_call.name,
+            tool_call.input.clone(),
+            Some(format!("Executing tool: {}", tool_call.name)),
+        );
+
+        let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+
+        // FIXED: Emit tool result event to frontend for chat display
+        match &tool_result {
+            Ok(result) => {
+                // Extract screenshot if this is a screenshot tool
+                let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                    // For screenshot tools, the result output should contain base64 data
+                    if let Some(screenshot_data) = result.output.get("data") {
+                        screenshot_data.as_str().map(|s| s.to_string())
+                    } else if let Some(screenshot_str) = result.output.as_str() {
+                        Some(screenshot_str.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                crate::agent::tool_logger::log_tool_call_result(
+                    &self.app_handle,
+                    &tool_call.name,
+                    result.output.clone(),
+                    true,
+                    Some(format!("Tool {} executed successfully", tool_call.name)),
+                    screenshot_base64,
+                );
+            }
+            Err(error) => {
+                crate::agent::tool_logger::log_tool_call_result(
+                    &self.app_handle,
+                    &tool_call.name,
+                    serde_json::json!({"error": error.to_string()}),
+                    false,
+                    Some(format!("Tool {} failed: {}", tool_call.name, error)),
+                    None,
+                );
             }
         }
-        Ok(())
+
+        // Cache result and add to memory
+        tool_results_cache[tool_index].1 = Some(tool_result.clone());
+        self.add_tool_result_to_memory(tool_call, tool_result).await?;
+
+        Ok(true)
     }
 
     /// Check individual tool approval (used by legacy sequential execution)
@@ -1222,151 +1052,63 @@ mod tests {
 
     #[test]
     fn test_continuation_logic_prevents_infinite_loop() {
-        // This test verifies that even with multiple ExecuteTool actions,
-        // the agent will eventually move to a different state.
-        let max_steps = 5;
-        let current_step = 0;
+        // This test verifies that the continuation counter increments properly
+        // and prevents infinite loops in agent execution.
+        let max_steps = 3;
+        let current_step = 2;
 
-        // Simulate multiple ExecuteTool rounds
-        let should_continue = current_step < max_steps;
-        assert!(should_continue, "Agent should continue when under step limit");
+        // At step 2, we should still be able to continue
+        assert!(current_step < max_steps);
 
-        let current_step = max_steps;
-        let should_continue = current_step < max_steps;
-        assert!(
-            !should_continue,
-            "Agent should stop when reaching step limit"
-        );
+        // At step 3, we should stop
+        let next_step = current_step + 1;
+        assert_eq!(next_step, max_steps);
     }
 
     #[test]
     fn test_continuation_logic_prevents_overflow() {
-        // Test edge case where current_step might approach limits
+        // Test that we don't accidentally overflow the step counter
         let max_steps = u32::MAX - 1;
-        let current_step = u32::MAX - 2;
+        let current_step = max_steps - 1;
 
-        let should_continue = current_step < max_steps;
-        assert!(should_continue, "Should handle large step counts");
+        // Should still be valid
+        assert!(current_step < max_steps);
+
+        // Next step should equal max (stopping condition)
+        let next_step = current_step + 1;
+        assert_eq!(next_step, max_steps);
     }
 
     // MCP Batching Tests
     #[test]
-    fn test_batch_pattern_detection() {
-        // Test that sequential patterns are correctly identified
+    fn test_simple_batching_logic() {
+        // Test the trust-based execution approach:
+        // Execute whatever the agent provides, no special logic
+
         use crate::agent::structs::ToolCall;
         use serde_json::json;
 
-        // Create mock tool calls for a common pattern: type → enter → screenshot
-        let tool_calls = vec![
+        // Any number of tools should just be executed as provided
+        let tools = vec![
             ToolCall {
                 id: "1".to_string(),
-                name: "computer_use_type".to_string(),
-                input: json!({"text": "Hello World"}),
+                name: "computer".to_string(),
+                input: json!({"action": "type", "text": "hello"}),
             },
             ToolCall {
                 id: "2".to_string(),
-                name: "computer_use_key".to_string(),
-                input: json!({"key": "Return"}),
+                name: "computer".to_string(),
+                input: json!({"action": "key", "text": "Return"}),
             },
             ToolCall {
                 id: "3".to_string(),
-                name: "computer_use_screenshot".to_string(),
-                input: json!({}),
+                name: "computer".to_string(),
+                input: json!({"action": "screenshot"}),
             },
         ];
 
-        // Test pattern matching for type → key sequence
-        let type_matches = tool_calls[0].name.starts_with("computer_use_") &&
-                          tool_calls[0].name.contains("type");
-        let key_matches = tool_calls[1].name.starts_with("computer_use_") &&
-                         tool_calls[1].name.contains("key");
-        let screenshot_matches = tool_calls[2].name.starts_with("computer_use_") &&
-                               tool_calls[2].name.contains("screenshot");
-
-        assert!(type_matches, "Should detect type tool");
-        assert!(key_matches, "Should detect key tool");
-        assert!(screenshot_matches, "Should detect screenshot tool");
-
-        // This pattern should be batchable
-        let is_batchable_sequence = type_matches && key_matches && screenshot_matches;
-        assert!(is_batchable_sequence, "type → key → screenshot should be batchable");
-    }
-
-    #[test]
-    fn test_mixed_pattern_detection() {
-        use crate::agent::structs::ToolCall;
-        use serde_json::json;
-
-        // Mix of batchable and non-batchable operations
-        let tool_calls = vec![
-            ToolCall {
-                id: "1".to_string(),
-                name: "computer_use_screenshot".to_string(),
-                input: json!({}),
-            },
-            ToolCall {
-                id: "2".to_string(),
-                name: "analyze_screen".to_string(), // Requires reasoning
-                input: json!({}),
-            },
-            ToolCall {
-                id: "3".to_string(),
-                name: "computer_use_click".to_string(),
-                input: json!({"coordinate": [100, 100]}),
-            },
-            ToolCall {
-                id: "4".to_string(),
-                name: "computer_use_screenshot".to_string(),
-                input: json!({}),
-            },
-        ];
-
-        // Test that analysis tools are correctly identified as non-batchable
-        let analysis_tool = &tool_calls[1];
-        let is_analysis = analysis_tool.name.contains("analyze") ||
-                         analysis_tool.name.contains("think") ||
-                         analysis_tool.name.contains("decide");
-
-        assert!(is_analysis, "Should identify analysis tools");
-
-        // Test that computer_use tools are batchable
-        let click_tool = &tool_calls[2];
-        let screenshot_tool = &tool_calls[3];
-        let is_computer_use_batch = click_tool.name.starts_with("computer_use_") &&
-                                   screenshot_tool.name.starts_with("computer_use_");
-
-        assert!(is_computer_use_batch, "Should identify computer_use tools as batchable");
-    }
-
-    #[test]
-    fn test_no_batching_for_analysis_tools() {
-        use crate::agent::structs::ToolCall;
-        use serde_json::json;
-
-        // Tools that require individual reasoning
-        let analysis_tools = vec![
-            "analyze_content",
-            "decide_next_action",
-            "think_about_strategy",
-            "evaluate_options",
-            "plan_workflow"
-        ];
-
-        for tool_name in analysis_tools {
-            let tool_call = ToolCall {
-                id: "1".to_string(),
-                name: tool_name.to_string(),
-                input: json!({}),
-            };
-
-            // These should not be batchable as they require reasoning
-            let should_not_batch = tool_call.name.contains("analyze") ||
-                                  tool_call.name.contains("decide") ||
-                                  tool_call.name.contains("think") ||
-                                  tool_call.name.contains("evaluate") ||
-                                  tool_call.name.contains("plan");
-
-            assert!(should_not_batch, "Tool '{}' should require individual execution", tool_name);
-        }
+        // The system should just execute these tools without caring about the count
+        // No special logic, no hardcoded numbers - trust the agent
+        assert!(!tools.is_empty());
     }
 }
