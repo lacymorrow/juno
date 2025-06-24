@@ -519,6 +519,9 @@ pub fn run() {
             // Agent Trigger Mode Commands
             get_agent_trigger_mode,
             set_agent_trigger_mode,
+            // Dictation Trigger Mode Commands
+            commands::core::get_dictation_trigger_mode,
+            commands::core::set_dictation_trigger_mode,
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,

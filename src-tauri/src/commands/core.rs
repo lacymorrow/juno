@@ -8,7 +8,7 @@ use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
-use crate::settings::{manager::SettingsManager, AgentSettings};
+use crate::settings::{manager::SettingsManager, AgentSettings, AudioSettings};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -402,7 +402,16 @@ pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result
 #[tauri::command]
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let debug_mode = state.is_debug_mode();
-    Ok(debug_mode)
+    let cfg_debug = cfg!(debug_assertions);
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let has_debug_log = rust_log.contains("debug");
+
+    let result = debug_mode || cfg_debug || has_debug_log;
+
+    info!("Debug mode check: state={}, cfg={}, rust_log_debug={}, result={}",
+          debug_mode, cfg_debug, has_debug_log, result);
+
+    Ok(result)
 }
 
 /// Reset all application settings to their default values
@@ -793,4 +802,109 @@ pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<
             Err(error_msg)
         }
     }
+}
+
+/// Get the current dictation trigger mode (tap or hold)
+#[tauri::command]
+pub async fn get_dictation_trigger_mode(
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<String, String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    match settings_manager.get_audio_settings().await {
+        Ok(audio_settings) => {
+            info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
+
+            // Sync with state for backward compatibility
+            let trigger_mode = match audio_settings.dictation_trigger_mode.as_str() {
+                "tap" => crate::state::DictationTriggerMode::Tap,
+                "hold" => crate::state::DictationTriggerMode::Hold,
+                _ => {
+                    warn!("Invalid dictation trigger mode: {}. Using default (hold)", audio_settings.dictation_trigger_mode);
+                    crate::state::DictationTriggerMode::Hold
+                }
+            };
+
+            {
+                let mut current_mode = state.dictation_trigger_mode.lock()
+                    .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
+                *current_mode = trigger_mode;
+            }
+
+            Ok(audio_settings.dictation_trigger_mode)
+        }
+        Err(e) => {
+            Err(format!("Failed to load dictation trigger mode from centralized settings: {}", e))
+        }
+    }
+}
+
+/// Set the dictation trigger mode (tap or hold)
+#[tauri::command]
+pub async fn set_dictation_trigger_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: String,
+) -> Result<(), String> {
+    // Validate the mode
+    let trigger_mode = match mode.as_str() {
+        "tap" => crate::state::DictationTriggerMode::Tap,
+        "hold" => crate::state::DictationTriggerMode::Hold,
+        _ => return Err(format!("Invalid dictation trigger mode: {}. Must be 'tap' or 'hold'", mode)),
+    };
+
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    // Get current audio settings
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+
+    // Update dictation trigger mode
+    audio_settings.dictation_trigger_mode = mode.clone();
+
+    // Save to centralized settings
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update the state for backward compatibility
+    {
+        let mut current_mode = state.dictation_trigger_mode.lock()
+            .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
+        *current_mode = trigger_mode;
+    }
+
+    info!("Updated dictation trigger mode to: {}", mode);
+    Ok(())
+}
+
+/// Load dictation trigger mode from centralized settings
+pub async fn load_dictation_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    // Get audio settings or use defaults
+    let audio_settings = settings_manager.get_audio_settings().await
+        .unwrap_or_else(|_| AudioSettings::default());
+
+    let trigger_mode = match audio_settings.dictation_trigger_mode.as_str() {
+        "tap" => crate::state::DictationTriggerMode::Tap,
+        "hold" => crate::state::DictationTriggerMode::Hold,
+        _ => {
+            warn!("Invalid dictation trigger mode in centralized settings: {}. Using default (hold)", audio_settings.dictation_trigger_mode);
+            crate::state::DictationTriggerMode::Hold
+        }
+    };
+
+    // Update state
+    {
+        let mut current_mode = state.dictation_trigger_mode.lock()
+            .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
+        *current_mode = trigger_mode;
+    }
+
+    info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
+    Ok(())
 }

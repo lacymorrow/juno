@@ -110,6 +110,7 @@ pub struct AudioSettings {
     pub tts_provider: String,
     pub sound_enabled: bool,
     pub dictation_clipboard_enabled: bool,
+    pub dictation_trigger_mode: String, // "tap" or "hold"
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
     pub always_listening_wake_words: Vec<String>,
@@ -332,6 +333,7 @@ impl Default for AudioSettings {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
+            dictation_trigger_mode: "hold".to_string(),
             always_listening_active: defaults::ALWAYS_LISTENING_ACTIVE,
             always_listening_sensitivity: defaults::ALWAYS_LISTENING_SENSITIVITY,
             always_listening_wake_words: vec!["hey juno".to_string(), "computer".to_string()],
