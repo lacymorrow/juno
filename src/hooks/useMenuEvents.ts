@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/constants.generated";
 
 interface MenuEventsProps {
     // Navigation
@@ -96,7 +97,7 @@ export function useMenuEvents({
             // Chat management
             unlistenCallbacks.push(
                 await listen("menu-new-chat", () => {
-                    console.log("�� Menu: Starting new chat");
+                    console.log("🆕 Menu: Starting new chat");
                     startNewChat();
                     addSystemMessage("🆕 New chat started");
                 })
@@ -164,9 +165,16 @@ export function useMenuEvents({
                 })
             );
 
-            // Developer tools
+            // Developer tools - using generated constants
             unlistenCallbacks.push(
-                await listen("menu-toggle-devtools", () => {
+                await listen(EVENTS.MENU_DEVTOOLS_REQUESTED, () => {
+                    console.log("🔧 Menu: Opening developer tools");
+                    setCurrentView("devtools");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen(EVENTS.MENU_TOGGLE_DEV_PANEL_REQUESTED, () => {
                     console.log("🔧 Menu: Toggling dev tools panel");
                     setIsDevPanelOpen((current: boolean) => !current);
                 })
