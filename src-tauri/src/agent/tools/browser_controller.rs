@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::agent::structs::{AgentError, ToolResult};
-use crate::constants::{chrome_debug_urls, files::shell_commands, timeouts};
+use crate::constants::{browser::{system_url_commands, url_protocols}, chrome_debug_urls, files::shell_commands, timeouts};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -902,6 +902,72 @@ impl BrowserController {
         &self.connection_method
     }
 
+    /// Open URL with system's default handler (cross-platform)
+    async fn open_url_with_system_handler(url: &str) -> ControllerResult<()> {
+        log::info!("Opening URL with system handler: {}", url);
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = tokio::process::Command::new(system_url_commands::OPEN_URL_COMMAND)
+                .arg(url)
+                .output()
+                .await
+                .map_err(|e| {
+                    AgentError::ToolError(format!("Failed to execute open command: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AgentError::ToolError(format!(
+                    "Failed to open URL with system handler: {}",
+                    stderr
+                )));
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let output = tokio::process::Command::new(system_url_commands::OPEN_URL_COMMAND)
+                .args(&system_url_commands::WINDOWS_START_ARGS)
+                .arg(url)
+                .output()
+                .await
+                .map_err(|e| {
+                    AgentError::ToolError(format!("Failed to execute start command: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AgentError::ToolError(format!(
+                    "Failed to open URL with system handler: {}",
+                    stderr
+                )));
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let output = tokio::process::Command::new(system_url_commands::OPEN_URL_COMMAND)
+                .arg(url)
+                .output()
+                .await
+                .map_err(|e| {
+                    AgentError::ToolError(format!("Failed to execute xdg-open command: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AgentError::ToolError(format!(
+                    "Failed to open URL with system handler: {}",
+                    stderr
+                )));
+            }
+        }
+
+        log::info!("Successfully opened URL with system handler");
+        Ok(())
+    }
+
     // Helper to get or create a page, with enhanced error handling and recovery
     async fn ensure_page_exists(&self) -> ControllerResult<()> {
         let mut retry_context = false;
@@ -1008,6 +1074,25 @@ impl BrowserController {
             .unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
 
         log::info!("Navigating to: {}", url);
+
+        // Check if this URL should be handled by the system instead of the browser
+        if url_protocols::should_use_system_handler(url) {
+            log::info!("URL contains custom protocol or is not a web URL, opening with system handler: {}", url);
+
+            // Open with system's default handler
+            Self::open_url_with_system_handler(url).await?;
+
+            let call_id = "nav_system_call".to_string();
+            return Ok(ToolResult {
+                call_id,
+                output: serde_json::json!({
+                    "status": "success",
+                    "url": url,
+                    "opened_with": "system_handler",
+                    "message": "URL opened with system's default application"
+                }),
+            });
+        }
 
         // Ensure a page exists, then get lock
         self.ensure_page_exists().await?;
