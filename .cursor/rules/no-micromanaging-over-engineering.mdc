@@ -1,0 +1,125 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# No Micromanaging or Over-Engineering Rule
+
+## Core Principle: Trust the AI Agent
+
+**CRITICAL**: This is a professional AI application. The AI agent is in charge, not our hardcoded assumptions. Execute what the agent provides without micromanaging.
+
+## ❌ **NEVER DO THESE ANTI-PATTERNS**
+
+### 1. **Hardcoded Pattern Detection**
+```rust
+// ❌ WRONG - Don't hardcode patterns
+let patterns = [
+    ("tool1", "action1", "tool2", "action2"),
+    ("type", "enter", "screenshot"),
+];
+```
+
+### 2. **Special Case Logic Based on Counts**
+```rust
+// ❌ WRONG - Don't treat different counts differently
+if tools.len() == 1 {
+    // Special logic for single tools
+} else if tools.len() > 3 {
+    // Different logic for multiple tools
+}
+```
+
+### 3. **Micromanaging Decisions**
+```rust
+// ❌ WRONG - Don't second-guess the agent
+if tool_name.contains("type") && next_tool.contains("enter") {
+    // Bundle these together
+}
+```
+
+### 4. **Hardcoded String Matching**
+```rust
+// ❌ WRONG - Fragile string-based detection
+if tool.name.starts_with("computer_20241022_") {
+    // Do something special
+}
+```
+
+## ✅ **DO THIS INSTEAD: TRUST-BASED APPROACH**
+
+### 1. **Execute Whatever the Agent Provides**
+```rust
+// ✅ CORRECT - Simple, trust-based execution
+async fn execute_tools(tool_calls: Vec<ToolCall>) -> Result<(), Error> {
+    log::info!("Executing {} tool call(s) as provided by agent", tool_calls.len());
+
+    // Execute the tools as provided - no special logic
+    execute_tool_batch(&tool_calls).await
+}
+```
+
+### 2. **No Hardcoded Assumptions**
+```rust
+// ✅ CORRECT - Let the agent decide
+// If agent provides 1 tool, execute 1
+// If agent provides 10 tools, execute 10
+// No special cases, no micromanaging
+```
+
+### 3. **Clear Communication to Agent**
+```rust
+// ✅ CORRECT - Tell the agent what it CAN do
+pub fn tool_capabilities_guidance() -> &'static str {
+    "You can provide multiple tool calls in a single response.
+     They will be executed efficiently as a batch.
+     Provide ALL the tools you need for a complete workflow."
+}
+```
+
+## 🔧 **IMPLEMENTATION GUIDELINES**
+
+### When Adding New Features:
+1. **Ask**: "Am I trusting the agent or micromanaging it?"
+2. **Check**: "Is this hardcoded logic that could be agent-driven?"
+3. **Verify**: "Would this work for any number of tools without special cases?"
+
+### Code Review Checklist:
+- [ ] No hardcoded pattern arrays
+- [ ] No special logic based on tool counts
+- [ ] No string-based pattern matching
+- [ ] No "if this tool then that tool" logic
+- [ ] Simple, trust-based execution path
+
+### Examples of Proper Trust-Based Design:
+```rust
+// ✅ Configuration-driven, not hardcoded
+let config = load_agent_capabilities();
+
+// ✅ Agent decides, we execute
+let tools = agent.decide_tools(context);
+execute_tools(tools).await?;
+
+// ✅ Simple, uniform handling
+for tool in tools {
+    execute_tool(tool).await?;
+}
+```
+
+## 🚫 **WHEN COMPLEXITY IS JUSTIFIED**
+Only add complexity for:
+- **Security validation** (preventing dangerous operations)
+- **Performance optimization** (caching, connection pooling)
+- **Error recovery** (retry mechanisms, fallbacks)
+- **User safety** (approval systems, confirmation dialogs)
+
+**NOT for**:
+- Second-guessing agent decisions
+- Hardcoded workflow assumptions
+- Pattern detection and matching
+- Tool sequencing logic
+
+## 💡 **REMEMBER**
+> "The agent knows what it wants to do. Our job is to execute it safely and efficiently, not to micromanage its decisions."
+
+This rule prevents the architectural flaw where we test development wrapper functions instead of production code, and eliminates the maintenance nightmare of keeping hardcoded patterns in sync with actual agent behavior.
