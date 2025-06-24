@@ -9,6 +9,7 @@ alwaysApply: true
 This is a **NEW APPLICATION BUILD** - never write backward compatibility code, legacy helpers, compatibility layers, deprecation warnings, or dead code for backward compatibility purposes.
 
 ### ❌ Never Add These:
+- Magic Strings/numbers (events, keys, delays, etc)
 - Backward compatibility layers
 - Legacy method wrappers
 - Deprecation warnings or notices

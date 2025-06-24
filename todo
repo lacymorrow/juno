@@ -12,8 +12,6 @@ If an agent is asked to do multiple things in quick succession, we need to handl
 
 Can we show a canceling state when we have initiated a cancel with esc but the agent has not stopped yet?
 
-2025-06-23T18:20:59.258309Z ERROR [StateManager] Invalid state transition from Idle to Idle
-
 This line logged out always shows the same amount of number of tools and the same amount of batches. Why is that?
 2025-06-23T18:29:38.881449Z  INFO Tool execution plan: 5 tools organized into 5 batch(es)
 
