@@ -94,15 +94,16 @@ impl DictationStateManager {
                 return Ok(());
             }
 
+            // Validate state transition
+            if !self.is_valid_transition(&prev, &new_state) {
+                error!("[StateManager] Invalid state transition from {:?} to {:?}", prev, new_state);
+                return Err(format!("Invalid state transition from {:?} to {:?}", prev, new_state));
+            }
+
+            // Now safe to update state after validation passes
             *current = new_state.clone();
             prev
         };
-
-        // Validate state transition
-        if !self.is_valid_transition(&previous_state, &new_state) {
-            error!("[StateManager] Invalid state transition from {:?} to {:?}", previous_state, new_state);
-            return Err(format!("Invalid state transition from {:?} to {:?}", previous_state, new_state));
-        }
 
         // Create state change event
         let event = StateChangeEvent {
