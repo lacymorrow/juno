@@ -59,11 +59,8 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
       updatedConfigs[categoryName] = {
         ...updatedConfigs[categoryName],
         enabled,
-        // When disabling category, disable all tools; when enabling, keep individual tool states
-        tools: updatedConfigs[categoryName].tools.map(tool => ({
-          ...tool,
-          enabled: enabled ? tool.enabled : false
-        }))
+        // Don't modify individual tool states - the backend only changes category state
+        // Individual tools remain unchanged, but their effective state depends on category
       };
     }
 
@@ -71,7 +68,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     settings.setToolConfigurations(updatedConfigs);
 
     try {
-      await invoke("set_tool_category_enabled", { categoryName, enabled });
+      await invoke("set_tool_category_enabled", { category: categoryName, enabled });
       // Invalidate cache for future loads but don't reload now
       settings.invalidateToolConfigCache();
       toast.success(
