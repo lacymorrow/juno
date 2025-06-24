@@ -55,6 +55,19 @@ impl Default for AgentTriggerMode {
     }
 }
 
+/// Dictation trigger mode configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DictationTriggerMode {
+    Tap,  // Press and release to toggle dictation mode
+    Hold, // Hold to activate dictation mode, release to stop
+}
+
+impl Default for DictationTriggerMode {
+    fn default() -> Self {
+        DictationTriggerMode::Hold // Default to existing hold behavior
+    }
+}
+
 impl Default for KeyboardShortcuts {
     fn default() -> Self {
         Self {
@@ -175,6 +188,8 @@ pub struct AppState {
     pub keyboard_shortcuts: Arc<StdMutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
     // Agent trigger mode configuration
     pub agent_trigger_mode: Arc<StdMutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
+    // Dictation trigger mode configuration
+    pub dictation_trigger_mode: Arc<StdMutex<DictationTriggerMode>>, // Track how dictation is triggered (tap vs hold)
     // MCP manager for external MCP server support
     pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
     // Tool provider registry for refreshing MCP tools - using Weak references to prevent Arc cycles
@@ -255,6 +270,8 @@ impl AppState {
             keyboard_shortcuts: Arc::new(StdMutex::new(KeyboardShortcuts::default())),
             // Initialize agent trigger mode configuration
             agent_trigger_mode: Arc::new(StdMutex::new(AgentTriggerMode::Tap)),
+            // Initialize dictation trigger mode configuration
+            dictation_trigger_mode: Arc::new(StdMutex::new(DictationTriggerMode::Hold)), // Default to existing hold behavior
             // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             // Initialize tool provider registry
