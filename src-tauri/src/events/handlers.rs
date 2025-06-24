@@ -23,7 +23,7 @@ pub fn setup_event_listeners(app: &AppHandle) {
 fn setup_voice_transcription_listeners(app: &AppHandle) {
     // Listen for voice transcription final results
     let app_handle_for_listener = app.clone();
-    app.listen("voice-transcription:final-result", move |event| {
+    app.listen(constants::events::voice_transcription::FINAL_RESULT, move |event| {
         let app_handle = app_handle_for_listener.clone();
         tauri::async_runtime::spawn(async move {
             handle_voice_transcription_final_result(app_handle, event.payload()).await;
@@ -32,7 +32,7 @@ fn setup_voice_transcription_listeners(app: &AppHandle) {
 
     // Listen for dictation stopped events
     let app_handle_for_listener = app.clone();
-    app.listen("voice-transcription:dictation-stopped", move |event| {
+    app.listen(constants::events::voice_transcription::DICTATION_STOPPED, move |event| {
         let app_handle = app_handle_for_listener.clone();
         tauri::async_runtime::spawn(async move {
             handle_voice_transcription_dictation_stopped(app_handle, event.payload().to_string())
@@ -42,7 +42,7 @@ fn setup_voice_transcription_listeners(app: &AppHandle) {
 
     // Listen for voice transcription errors
     let app_handle_for_error_listener = app.clone();
-    app.listen("voice-transcription:error", move |_event| {
+    app.listen(constants::events::voice_transcription::ERROR, move |_event| {
         let app_handle = app_handle_for_error_listener.clone();
         tauri::async_runtime::spawn(async move {
             handle_voice_transcription_error(app_handle).await;
@@ -54,7 +54,7 @@ fn setup_voice_transcription_listeners(app: &AppHandle) {
 fn setup_dictation_listeners(app: &AppHandle) {
     // Listen for dictation-transcription-start events
     let app_handle_for_dictation_start = app.clone();
-    app.listen("dictation-transcription-start", move |_event| {
+    app.listen(constants::events::dictation::TRANSCRIPTION_START, move |_event| {
         let app_handle = app_handle_for_dictation_start.clone();
         tauri::async_runtime::spawn(async move {
             handle_dictation_transcription_start(app_handle).await;
@@ -63,7 +63,7 @@ fn setup_dictation_listeners(app: &AppHandle) {
 
     // Listen for dictation-cancel events
     let app_handle_for_dictation_cancel = app.clone();
-    app.listen("dictation-cancel", move |_event| {
+    app.listen(constants::events::dictation::TRANSCRIPTION_CANCEL, move |_event| {
         let app_handle = app_handle_for_dictation_cancel.clone();
         tauri::async_runtime::spawn(async move {
             handle_dictation_cancel(app_handle).await;
@@ -72,7 +72,7 @@ fn setup_dictation_listeners(app: &AppHandle) {
 
     // Listen for dictation-stop events
     let app_handle_for_dictation_stop = app.clone();
-    app.listen("dictation-stop", move |_event| {
+    app.listen(constants::events::dictation::STOP, move |_event| {
         let app_handle = app_handle_for_dictation_stop.clone();
         tauri::async_runtime::spawn(async move {
             handle_dictation_stop(app_handle).await;
@@ -81,7 +81,7 @@ fn setup_dictation_listeners(app: &AppHandle) {
 
     // Listen for force stop events
     let app_handle_for_force_stop = app.clone();
-    app.listen("force-stop-transcription", move |_event| {
+    app.listen(constants::events::force_stop::TRANSCRIPTION, move |_event| {
         let app_handle = app_handle_for_force_stop.clone();
         tauri::async_runtime::spawn(async move {
             handle_force_stop_transcription(app_handle).await;
@@ -95,7 +95,7 @@ fn setup_timer_event_listeners(app: &AppHandle) {
 
     // Listen for timer-expired events
     let app_handle_for_timer = app.clone();
-    app.listen("timer-expired", move |event| {
+    app.listen(constants::events::timer::EXPIRED, move |event| {
         let app_handle = app_handle_for_timer.clone();
         tauri::async_runtime::spawn(async move {
             handle_timer_expired_event(app_handle, event.payload()).await;
@@ -104,7 +104,7 @@ fn setup_timer_event_listeners(app: &AppHandle) {
 
     // Listen for timer-queued events (for monitoring)
     let app_handle_for_queued = app.clone();
-    app.listen("timer-queued", move |event| {
+    app.listen(constants::events::timer::QUEUED, move |event| {
         let app_handle = app_handle_for_queued.clone();
         tauri::async_runtime::spawn(async move {
             handle_timer_queued_event(app_handle, event.payload()).await;
@@ -288,7 +288,7 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, pay
     }
 
     // Rebroadcast the event as app-dictation-stopped for backward compatibility
-    if let Err(e) = app_handle.emit("app-dictation-stopped", payload) {
+    if let Err(e) = app_handle.emit(constants::events::dictation::STOPPED, payload) {
         error!(
             "[Event] Failed to rebroadcast dictation-stopped event: {}",
             e
@@ -494,7 +494,7 @@ async fn handle_timer_expired_event(app_handle: AppHandle, payload: &str) {
 
             // Emit success event for UI feedback
             if let Err(e) = app_handle.emit(
-                "timer-processed",
+                constants::events::timer::PROCESSED,
                 serde_json::json!({
                     "timer_id": timer_data.id,
                     "status": "success",
@@ -515,7 +515,7 @@ async fn handle_timer_expired_event(app_handle: AppHandle, payload: &str) {
 
             // Emit error event for UI feedback
             if let Err(emit_err) = app_handle.emit(
-                "timer-processed",
+                constants::events::timer::PROCESSED,
                 serde_json::json!({
                     "timer_id": timer_data.id,
                     "status": "error",
@@ -550,7 +550,7 @@ async fn handle_timer_queued_event(app_handle: AppHandle, payload: &str) {
 
     // Emit UI event to show queued timer status
     if let Err(e) = app_handle.emit(
-        "timer-status-update",
+        constants::events::timer::STATUS_UPDATE,
         serde_json::json!({
             "timer_id": timer_data.id,
             "status": "queued",
