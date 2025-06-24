@@ -8,6 +8,9 @@ pub const SOUND_DEBOUNCE_MS: u64 = 300;
 pub const DEFAULT_SENSITIVITY: f32 = 0.5;
 pub const AUDIO_RECV_TIMEOUT_MS: u64 = 100;
 
+// Wake word defaults (moved from frontend constants.ts)
+pub const DEFAULT_WAKE_WORDS: &[&str] = &["hey juno", "computer"];
+
 // Audio processing configuration
 pub mod processing {
     pub const SINC_LENGTH: usize = 256;

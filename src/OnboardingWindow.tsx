@@ -2,7 +2,7 @@ import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
-import { WINDOW_LABELS } from "@/lib/constants";
+import { WINDOW_LABELS } from "@/lib/constants.generated";
 
 export default function OnboardingWindow() {
   console.log("OnboardingWindow: Component rendering/re-rendering");

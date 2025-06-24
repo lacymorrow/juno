@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO } from "@/lib/constants";
+import { AUDIO } from "@/lib/constants.generated";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
 	ProviderInfo,
