@@ -42,7 +42,7 @@ impl BrowserAgent {
     }
 
     /// Convert structs::ToolResult to core::ToolResult
-    fn convert_tool_result(&self, structs_result: crate::agent::structs::ToolResult) -> ToolResult {
+    fn convert_tool_result(&self, structs_result: crate::agent::core::ToolResult) -> ToolResult {
         ToolResult {
             call_id: structs_result.call_id,
             output: structs_result.output,
@@ -50,29 +50,30 @@ impl BrowserAgent {
     }
 
     /// Convert structs::AgentError to core::AgentError
-    fn convert_agent_error(&self, structs_error: crate::agent::structs::AgentError) -> AgentError {
+    fn convert_agent_error(&self, structs_error: crate::agent::core::AgentError) -> AgentError {
         match structs_error {
-            crate::agent::structs::AgentError::LlmError(msg) => AgentError::LlmError(msg),
-            crate::agent::structs::AgentError::ToolError(msg) => AgentError::ToolError(msg),
-            crate::agent::structs::AgentError::MemoryError(msg) => AgentError::MemoryError(msg),
-            crate::agent::structs::AgentError::ConfigurationError(msg) => {
+            crate::agent::core::AgentError::LlmError(msg) => AgentError::LlmError(msg),
+            crate::agent::core::AgentError::ToolError(msg) => AgentError::ToolError(msg),
+            crate::agent::core::AgentError::MemoryError(msg) => AgentError::MemoryError(msg),
+            crate::agent::core::AgentError::ConfigurationError(msg) => {
                 AgentError::ConfigurationError(msg)
             }
-            crate::agent::structs::AgentError::StateError(msg) => AgentError::StateError(msg),
-            crate::agent::structs::AgentError::MaxStepsReached => AgentError::MaxStepsReached,
-            crate::agent::structs::AgentError::LoopError(msg) => AgentError::LoopError(msg),
-            crate::agent::structs::AgentError::InputError(msg) => AgentError::InputError(msg),
-            crate::agent::structs::AgentError::OutputError(msg) => AgentError::OutputError(msg),
-            crate::agent::structs::AgentError::ToolNotFound(msg) => AgentError::ToolNotFound(msg),
-            crate::agent::structs::AgentError::ToolDisabled(msg) => AgentError::ToolDisabled(msg),
-            crate::agent::structs::AgentError::Terminated => AgentError::Terminated,
-            crate::agent::structs::AgentError::PermissionDenied(msg) => {
+            crate::agent::core::AgentError::StateError(msg) => AgentError::StateError(msg),
+            crate::agent::core::AgentError::MaxStepsReached => AgentError::MaxStepsReached,
+            crate::agent::core::AgentError::LoopError(msg) => AgentError::LoopError(msg),
+            crate::agent::core::AgentError::InputError(msg) => AgentError::InputError(msg),
+            crate::agent::core::AgentError::OutputError(msg) => AgentError::OutputError(msg),
+            crate::agent::core::AgentError::ToolNotFound(msg) => AgentError::ToolNotFound(msg),
+            crate::agent::core::AgentError::ToolDisabled(msg) => AgentError::ToolDisabled(msg),
+            crate::agent::core::AgentError::Terminated => AgentError::Terminated,
+            crate::agent::core::AgentError::PermissionDenied(msg) => {
                 AgentError::PermissionDenied(msg)
             }
-            crate::agent::structs::AgentError::Unknown(msg) => AgentError::Unknown(msg),
-            crate::agent::structs::AgentError::InvalidOutput(msg) => AgentError::OutputError(msg),
-            crate::agent::structs::AgentError::InvalidInput(msg) => AgentError::InputError(msg),
-            crate::agent::structs::AgentError::ToolUnavailable(msg) => AgentError::ToolError(msg),
+            crate::agent::core::AgentError::Unknown(msg) => AgentError::Unknown(msg),
+            crate::agent::core::AgentError::InvalidOutput(msg) => AgentError::OutputError(msg),
+            crate::agent::core::AgentError::InvalidInput(msg) => AgentError::InputError(msg),
+            crate::agent::core::AgentError::ToolUnavailable(msg) => AgentError::ToolError(msg),
+            crate::agent::core::AgentError::Other(msg) => AgentError::Unknown(msg),
         }
     }
 

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use super::structs::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
+use super::core::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
 use crate::state::CancelReceiver;
 use tauri::AppHandle;
 

@@ -3,7 +3,7 @@
 //! Used by: Main agent orchestrator for all computer interaction tasks.
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use crate::agent::tools::exploration_reasoning::{
     AppContext, ExplorationConfig, ExplorationEngine, ExplorationResult,
 };
@@ -187,6 +187,109 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
             warn!("Verification: Failed to get focused element: {}", e);
             Ok(false)
         }
+    }
+}
+
+/// Executes a computer tool action for the desktop agent
+/// Handles all computer actions: click, type, scroll, screenshot, etc.
+/// Used by: Desktop agent for delegating to official Anthropic Computer Use API
+pub async fn execute_computer_tool(
+    app_handle: &tauri::AppHandle,
+    tool_call: &crate::agent::core::ToolCall,
+) -> Result<Value, String> {
+    let action = tool_call
+        .input
+        .get("action")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing or invalid 'action' parameter".to_string())?;
+
+    match action {
+        "left_click" | "click" => {
+            let coordinate = tool_call
+                .input
+                .get("coordinate")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+
+            if coordinate.len() != 2 {
+                return Err("Coordinate must be an array of exactly 2 numbers [x, y]".to_string());
+            }
+
+            let x = coordinate[0].as_f64()
+                .ok_or_else(|| "Invalid x coordinate".to_string())?;
+            let y = coordinate[1].as_f64()
+                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+            let state = app_handle.state::<AppState>();
+            match crate::commands::mouse::left_click(app_handle.clone(), state, x, y, None).await {
+                Ok(_) => Ok(json!({"success": true, "action": "left_click", "coordinates": [x, y]})),
+                Err(e) => Err(format!("Left click failed: {}", e)),
+            }
+        }
+        "right_click" => {
+            let coordinate = tool_call
+                .input
+                .get("coordinate")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+
+            if coordinate.len() != 2 {
+                return Err("Coordinate must be an array of exactly 2 numbers [x, y]".to_string());
+            }
+
+            let x = coordinate[0].as_f64()
+                .ok_or_else(|| "Invalid x coordinate".to_string())?;
+            let y = coordinate[1].as_f64()
+                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+            let state = app_handle.state::<AppState>();
+            match crate::commands::mouse::right_click(app_handle.clone(), state, x, y, None).await {
+                Ok(_) => Ok(json!({"success": true, "action": "right_click", "coordinates": [x, y]})),
+                Err(e) => Err(format!("Right click failed: {}", e)),
+            }
+        }
+        "double_click" => {
+            let coordinate = tool_call
+                .input
+                .get("coordinate")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+
+            if coordinate.len() != 2 {
+                return Err("Coordinate must be an array of exactly 2 numbers [x, y]".to_string());
+            }
+
+            let x = coordinate[0].as_f64()
+                .ok_or_else(|| "Invalid x coordinate".to_string())?;
+            let y = coordinate[1].as_f64()
+                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+            let state = app_handle.state::<AppState>();
+            match crate::commands::mouse::double_click(app_handle.clone(), state, x, y, None).await {
+                Ok(_) => Ok(json!({"success": true, "action": "double_click", "coordinates": [x, y]})),
+                Err(e) => Err(format!("Double click failed: {}", e)),
+            }
+        }
+        "type" => {
+            let text = tool_call
+                .input
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
+
+            let state = app_handle.state::<AppState>();
+            match crate::commands::keyboard::type_text(text.to_string(), app_handle.clone(), state).await {
+                Ok(_) => Ok(json!({"success": true, "action": "type", "text": text})),
+                Err(e) => Err(format!("Type failed: {}", e)),
+            }
+        }
+        "screenshot" => {
+            match crate::commands::core::capture_screenshot_command(app_handle.clone()).await {
+                Ok(screenshot_data) => Ok(json!({"success": true, "action": "screenshot", "data": screenshot_data})),
+                Err(e) => Err(format!("Screenshot failed: {}", e)),
+            }
+        }
+        _ => Err(format!("Unsupported computer action: {}", action)),
     }
 }
 

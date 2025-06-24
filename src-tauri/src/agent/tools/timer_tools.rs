@@ -263,7 +263,7 @@ impl TimerManager {
 // Tool implementations
 mod timer_tools_impl {
     use super::*;
-    use crate::agent::structs::ToolDefinition;
+    use crate::agent::core::ToolDefinition;
 
     /// Creates the tool definition for the `set_timer` tool.
     ///

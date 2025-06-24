@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
 use uuid;
 
-use crate::agent::structs::{
+use crate::agent::core::{
     AgentAction,
     AgentError,
     AgentState,
@@ -81,8 +81,8 @@ where
     /// Filter tools based on brain type to prevent access to inappropriate tools
     fn filter_tools_for_brain(
         &self,
-        all_tools: &[crate::agent::structs::ToolDefinition],
-    ) -> Vec<crate::agent::structs::ToolDefinition> {
+        all_tools: &[crate::agent::core::ToolDefinition],
+    ) -> Vec<crate::agent::core::ToolDefinition> {
         // Check if this brain is an orchestrator by checking if it only has delegation tools
         let has_delegation_tools = all_tools
             .iter()
@@ -100,7 +100,7 @@ where
             if delegation_tool_count > 0
                 && (delegation_tool_count as f32 / all_tools.len() as f32) > 0.3
             {
-                let filtered_tools: Vec<crate::agent::structs::ToolDefinition> = all_tools
+                let filtered_tools: Vec<crate::agent::core::ToolDefinition> = all_tools
                     .iter()
                     .filter(|tool| {
                         // Allow delegation tools
@@ -143,7 +143,7 @@ where
     /// Simply executes whatever tool calls the agent provides
     async fn execute_tools_with_batching(
         &mut self,
-        tool_calls: Vec<crate::agent::structs::ToolCall>,
+        tool_calls: Vec<crate::agent::core::ToolCall>,
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<(), AgentError> {
         if tool_calls.is_empty() {
@@ -175,8 +175,8 @@ where
     /// This ensures conversation memory remains consistent even when execution is interrupted
     async fn handle_batch_cancellation(
         &mut self,
-        tool_calls: &[crate::agent::structs::ToolCall],
-        tool_results_cache: &[(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)],
+        tool_calls: &[crate::agent::core::ToolCall],
+        tool_results_cache: &[(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)],
     ) -> Result<(), AgentError> {
         log::info!("Handling batch cancellation for {} tool calls", tool_calls.len());
 
@@ -194,8 +194,8 @@ where
 
             if !was_executed {
                 // Add cancellation message to memory for this unexecuted tool
-                mem.add_message(crate::agent::structs::Message {
-                    role: crate::agent::structs::Role::Tool,
+                mem.add_message(crate::agent::core::Message {
+                    role: crate::agent::core::Role::Tool,
                     content: "Tool execution was cancelled by user".to_string(),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
@@ -223,10 +223,10 @@ where
     /// Execute a batch of tools with optimized workflow
     async fn execute_tool_batch(
         &mut self,
-        batch: &[crate::agent::structs::ToolCall],
+        batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
     ) -> Result<bool, AgentError> {
         log::info!("Executing tool batch: {} tools", batch.len());
 
@@ -240,7 +240,7 @@ where
     }
 
     /// Check if a batch can be executed via MCP batching
-    async fn can_execute_as_mcp_batch(&self, batch: &[crate::agent::structs::ToolCall]) -> bool {
+    async fn can_execute_as_mcp_batch(&self, batch: &[crate::agent::core::ToolCall]) -> bool {
         // Check if all tools in the batch are MCP tools
         for tool_call in batch {
             if !self.is_mcp_tool(&tool_call.name).await {
@@ -259,10 +259,10 @@ where
     /// Execute batch via MCP batching system
     async fn execute_mcp_tool_batch(
         &mut self,
-        batch: &[crate::agent::structs::ToolCall],
+        batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
     ) -> Result<bool, AgentError> {
         // Check cancellation
         if *cancel_rx.borrow() {
@@ -329,10 +329,10 @@ where
     /// Execute batch sequentially but with optimized approval process
     async fn execute_sequential_batch(
         &mut self,
-        batch: &[crate::agent::structs::ToolCall],
+        batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
     ) -> Result<bool, AgentError> {
         // Batch approval for sequential operations
         if !self.check_batch_approval(batch, cancel_rx).await? {
@@ -421,7 +421,7 @@ where
     /// Check approval for a batch of tools
     async fn check_batch_approval(
         &self,
-        batch: &[crate::agent::structs::ToolCall],
+        batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<bool, AgentError> {
         let app_state = self.app_handle.state::<crate::state::AppState>();
@@ -510,8 +510,8 @@ where
             // Add denial message for all tools in batch
             for tool_call in batch {
                 let mut mem = self.memory.lock().await;
-                mem.add_message(crate::agent::structs::Message {
-                    role: crate::agent::structs::Role::Tool,
+                mem.add_message(crate::agent::core::Message {
+                    role: crate::agent::core::Role::Tool,
                     content: format!("Tool execution was denied as part of batch - {}", reason),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
@@ -526,14 +526,14 @@ where
     /// Add tool result to memory with proper error handling
     async fn add_tool_result_to_memory(
         &mut self,
-        tool_call: &crate::agent::structs::ToolCall,
-        tool_result: Result<crate::agent::structs::ToolResult, AgentError>,
+        tool_call: &crate::agent::core::ToolCall,
+        tool_result: Result<crate::agent::core::ToolResult, AgentError>,
     ) -> Result<(), AgentError> {
         let mut mem = self.memory.lock().await;
         match tool_result {
             Ok(result) => {
-                mem.add_message(crate::agent::structs::Message {
-                    role: crate::agent::structs::Role::Tool,
+                mem.add_message(crate::agent::core::Message {
+                    role: crate::agent::core::Role::Tool,
                     content: result.output.to_string(),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
@@ -541,8 +541,8 @@ where
                 }).await?;
             }
             Err(error) => {
-                mem.add_message(crate::agent::structs::Message {
-                    role: crate::agent::structs::Role::Tool,
+                mem.add_message(crate::agent::core::Message {
+                    role: crate::agent::core::Role::Tool,
                     content: format!("Tool execution failed: {}", error),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
@@ -556,10 +556,10 @@ where
     /// Execute a single tool with approval and cancellation handling
     async fn execute_single_tool_with_approval(
         &mut self,
-        tool_call: &crate::agent::structs::ToolCall,
+        tool_call: &crate::agent::core::ToolCall,
         cancel_rx: &crate::state::CancelReceiver,
         tool_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
     ) -> Result<bool, AgentError> {
         // Check cancellation
         if *cancel_rx.borrow() {
@@ -633,7 +633,7 @@ where
     /// Check individual tool approval (used by legacy sequential execution)
     async fn check_tool_approval(
         &self,
-        tool_call: &crate::agent::structs::ToolCall,
+        tool_call: &crate::agent::core::ToolCall,
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<bool, AgentError> {
         let app_state = self.app_handle.state::<crate::state::AppState>();
@@ -701,8 +701,8 @@ where
             log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
 
             let mut mem = self.memory.lock().await;
-            mem.add_message(crate::agent::structs::Message {
-                role: crate::agent::structs::Role::Tool,
+            mem.add_message(crate::agent::core::Message {
+                role: crate::agent::core::Role::Tool,
                 content: format!("Tool execution was denied - {}", reason),
                 tool_calls: None,
                 tool_call_id: Some(tool_call.id.clone()),
@@ -1048,7 +1048,7 @@ where
 mod tests {
     use super::*;
     // Simple mock implementations for testing
-    use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
+    use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
     use async_trait::async_trait;
     use serde_json::Value;
 
@@ -1081,7 +1081,7 @@ mod tests {
     impl AgentBrain for MockBrain {
         async fn decide_next_action(
             &self,
-            _messages: &[crate::agent::structs::Message],
+            _messages: &[crate::agent::core::Message],
             _tools: &[ToolDefinition],
         ) -> Result<AgentAction, AgentError> {
             Ok(AgentAction::Finish("test response".to_string()))
@@ -1093,7 +1093,7 @@ mod tests {
 
         async fn decide_next_action_streaming(
             &self,
-            _messages: &[crate::agent::structs::Message],
+            _messages: &[crate::agent::core::Message],
             _tools: &[ToolDefinition],
             _app_handle: Option<AppHandle>,
             _message_id: Option<String>,
@@ -1108,19 +1108,19 @@ mod tests {
     impl MemoryManager for MockMemoryManagerTest {
         async fn add_message(
             &mut self,
-            _message: crate::agent::structs::Message,
+            _message: crate::agent::core::Message,
         ) -> Result<(), AgentError> {
             Ok(())
         }
 
-        async fn get_messages(&self) -> Result<Vec<crate::agent::structs::Message>, AgentError> {
+        async fn get_messages(&self) -> Result<Vec<crate::agent::core::Message>, AgentError> {
             Ok(vec![])
         }
 
         async fn get_last_n_messages(
             &self,
             _n: usize,
-        ) -> Result<Vec<crate::agent::structs::Message>, AgentError> {
+        ) -> Result<Vec<crate::agent::core::Message>, AgentError> {
             Ok(vec![])
         }
 
@@ -1164,7 +1164,7 @@ mod tests {
         // Test the trust-based execution approach:
         // Execute whatever the agent provides, no special logic
 
-        use crate::agent::structs::ToolCall;
+        use crate::agent::core::ToolCall;
         use serde_json::json;
 
         // Any number of tools should just be executed as provided

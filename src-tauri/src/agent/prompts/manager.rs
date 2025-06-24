@@ -1,6 +1,6 @@
 use super::types::{PromptConfig, PromptContext, PromptTemplate, PromptType};
 use super::templates::DefaultPrompts;
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use std::collections::HashMap;
 
 use tracing::{info, warn};

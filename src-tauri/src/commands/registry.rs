@@ -51,19 +51,18 @@ macro_rules! generate_invoke_handler {
             crate::anthropic::cleanup_browser,
             crate::anthropic::handle_tts_completion,
 
-            // Mouse Commands
-            dev_right_click,
-            dev_middle_click,
-            dev_double_click,
-            dev_triple_click,
-            dev_mouse_move,
-            dev_left_mouse_down,
-            dev_left_mouse_up,
-            dev_left_click,
-            dev_left_click_drag,
-            dev_get_cursor_position,
-            dev_window_relative_click,
-            dev_focused_window_relative_click,
+            // REMOVED: Redundant mouse commands - Use computer tool with official Anthropic Computer Use API instead
+            // dev_right_click → computer tool with action: "right_click"
+            // dev_middle_click → computer tool with action: "middle_click"
+            // dev_double_click → computer tool with action: "double_click"
+            // dev_triple_click → computer tool with action: "triple_click"
+            // dev_mouse_move → computer tool with action: "mouse_move"
+            // dev_left_mouse_down → computer tool with action: "left_mouse_down"
+            // dev_left_mouse_up → computer tool with action: "left_mouse_up"
+            // dev_left_click → computer tool with action: "left_click"
+            // dev_left_click_drag → computer tool with action: "left_click_drag"
+            // dev_get_cursor_position → computer tool with action: "cursor_position"
+            // This eliminates redundancy and ensures 100% compliance with the official specification.
 
             // QA Test Commands
             qa_test_click,
@@ -80,11 +79,13 @@ macro_rules! generate_invoke_handler {
             release_key,
             global_type_text,
 
-            // Dev Keyboard Commands (for devtools)
-            // REMOVED: dev_press_key, dev_hold_key - Use computer tool with official Anthropic API instead
-            dev_type_text,
-            dev_release_key,
-            dev_global_type_text,
+            // REMOVED: Redundant keyboard commands - Use computer tool with official Anthropic Computer Use API instead
+            // dev_type_text → computer tool with action: "type"
+            // dev_release_key → computer tool with action: "release_key" (if needed)
+            // dev_global_type_text → computer tool with action: "type"
+            // dev_press_key → computer tool with action: "key"
+            // dev_hold_key → computer tool with action: "hold_key"
+            // This eliminates redundancy and ensures 100% compliance with the official specification.
 
             // Dev Network Commands
             crate::commands::dev::check_network_connectivity,
