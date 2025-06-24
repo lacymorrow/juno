@@ -248,3 +248,154 @@ pub(crate) async fn dev_bash_command(
         None => Err("Failed to get shell session".to_string())
     }
 }
+
+// ============================================================================
+// PRODUCTION SHELL FUNCTION WITH UNIFIED DEBUG SYSTEM
+// ============================================================================
+
+/// Production function to execute bash commands with optional debug features
+#[tauri::command]
+pub async fn bash_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    command: String,
+    timeout_seconds: Option<u64>,
+    restart: Option<bool>,
+    debug_mode: Option<bool>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
+    use tracing::{info, error};
+
+    let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
+
+    let debug_op = DebugOperation::start("bash_command", debug_config.clone());
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        if let Err(e) = non_empty_text(&command) {
+            let err_msg = format!("Invalid command: {}", e);
+            if debug_config.send_notifications {
+                send_debug_notification(&app, "Bash Command Error", &err_msg)?;
+            }
+            debug_op.complete(Some(&app), false);
+            return Err(err_msg);
+        }
+
+        // Validate timeout if provided
+        if let Some(timeout) = timeout_seconds {
+            if timeout == 0 {
+                let err_msg = "Timeout must be greater than 0 seconds".to_string();
+                if debug_config.send_notifications {
+                    send_debug_notification(&app, "Bash Command Error", &err_msg)?;
+                }
+                debug_op.complete(Some(&app), false);
+                return Err(err_msg);
+            }
+            if timeout > 3600 { // 1 hour max
+                let err_msg = "Timeout cannot exceed 3600 seconds (1 hour)".to_string();
+                if debug_config.send_notifications {
+                    send_debug_notification(&app, "Bash Command Error", &err_msg)?;
+                }
+                debug_op.complete(Some(&app), false);
+                return Err(err_msg);
+            }
+        }
+    }
+
+    let effective_restart = restart.unwrap_or(false);
+    let session_id = "default".to_string();
+
+    if debug_config.log_operations {
+        info!(
+            "[SHELL] Executing bash command: \"{}\" (timeout: {:?}, restart: {})",
+            command,
+            timeout_seconds,
+            effective_restart
+        );
+    }
+
+    // Get shell sessions from state
+    let shell_sessions = state.get::<ShellSessions>()
+        .ok_or_else(|| "Shell session state not initialized".to_string())?;
+    let sessions_arc = shell_sessions.clone();
+    let mut sessions = sessions_arc.lock().map_err(|e| format!("Failed to lock shell sessions: {}", e))?;
+
+    // Handle restart or initialize if needed
+    if effective_restart || !sessions.contains_key(&session_id) {
+        if sessions.contains_key(&session_id) {
+            if debug_config.log_operations {
+                info!("[SHELL] Restarting shell session");
+            }
+            let _ = sessions.remove(&session_id);
+        } else {
+            if debug_config.log_operations {
+                info!("[SHELL] Creating new shell session");
+            }
+        }
+
+        // Create new session
+        let session = ShellSession::new()?;
+        sessions.insert(session_id.clone(), session);
+    }
+
+    // Get the session and run the command
+    match sessions.get_mut(&session_id) {
+        Some(session) => {
+            let (stdout, stderr, exit_code, timed_out) = session.run_command(&command, timeout_seconds)?;
+
+            let success = exit_code.map_or(true, |code| code == 0);
+
+            let result_json = serde_json::json!({
+                "success": success,
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "timed_out": timed_out
+            });
+
+            let result_str = serde_json::to_string(&result_json)
+                .map_err(|e| format!("Failed to serialize bash command result: {}", e))?;
+
+            if debug_config.log_operations {
+                info!(
+                    "[SHELL] Bash command '{}' finished. Success: {}, Timed out: {}",
+                    command,
+                    success,
+                    timed_out
+                );
+            }
+
+            if debug_config.send_notifications {
+                let status = if success { "Success" } else { "Failed" };
+                let preview = if stdout.len() > 100 {
+                    format!("{}... (truncated)", &stdout[..100])
+                } else {
+                    stdout.clone()
+                };
+                send_debug_notification(
+                    &app,
+                    "Bash Command",
+                    &format!("{}: {} - {}", status, command, preview),
+                )?;
+            }
+
+            debug_op.complete(Some(&app), success);
+            Ok(result_str)
+        },
+        None => {
+            let err_msg = "Failed to get shell session".to_string();
+            if debug_config.log_operations {
+                error!("[SHELL] Error: {}", err_msg);
+            }
+            if debug_config.send_notifications {
+                send_debug_notification(&app, "Bash Command Error", &err_msg)?;
+            }
+            debug_op.complete(Some(&app), false);
+            Err(err_msg)
+        }
+    }
+}

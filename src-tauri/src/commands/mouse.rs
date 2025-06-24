@@ -2,6 +2,7 @@
 
 use tauri::{AppHandle, State, Emitter, Manager};
 use crate::state::AppState;
+use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
 use tracing::{info, error};
 use crate::utils::coordinates;
 use crate::constants::{timeouts, events};
@@ -156,16 +157,16 @@ pub(crate) async fn qa_test_click(
     info!("[QA_TOOL] Transformed coordinates: from ({}, {}) to ({}, {})", x, y, original_x, original_y);
     let start_time = std::time::Instant::now();
     let result = match click_type.as_str() {
-        "left" => dev_left_click(app.clone(), state.clone(), original_x, original_y, None).await,
-        "right" => dev_right_click(app.clone(), state.clone(), original_x, original_y, None).await,
-        "middle" => dev_middle_click(app.clone(), state.clone(), original_x, original_y, None).await,
-        "double" => dev_double_click(app.clone(), state.clone(), original_x, original_y, None).await,
-        "triple" => dev_triple_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "left" => left_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "right" => right_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "middle" => middle_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "double" => double_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "triple" => triple_click(app.clone(), state.clone(), original_x, original_y, None).await,
         _ => Err(format!("Unknown click type: {}", click_type)),
     };
     let duration = start_time.elapsed();
     let latency_ms = duration.as_secs_f64() * 1000.0;
-    let cursor_position_result = dev_get_cursor_position(app.clone(), state.clone()).await;
+    let cursor_position_result = get_cursor_position(app.clone(), state.clone()).await;
     let cursor_position = cursor_position_result.ok();
     let qa_result = ClickQAResult {
         success: result.is_ok(),
@@ -238,13 +239,13 @@ pub(crate) async fn qa_test_coordinate_transformation(
     info!("[QA_TOOL] Testing coordinate transformation at scaled ({}, {})", x, y);
     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
     info!("[QA_TOOL] Calculated screen coordinates: ({}, {})", screen_x, screen_y);
-    let move_result = dev_mouse_move(app.clone(), state.clone(), screen_x, screen_y).await;
+            let move_result = mouse_move(app.clone(), state.clone(), screen_x, screen_y).await;
     if let Err(e) = &move_result {
         error!("[QA_TOOL] Failed to move mouse to calculated screen coordinates: {}", e);
     } else {
         tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_ACTION_DELAY_MS)).await;
     }
-    let actual_cursor_pos = dev_get_cursor_position(app.clone(), state.clone()).await;
+    let actual_cursor_pos = get_cursor_position(app.clone(), state.clone()).await;
     let (actual_screen_x, actual_screen_y) = match actual_cursor_pos {
         Ok(pos) => {
             info!("[QA_TOOL] Actual cursor screen coordinates: ({}, {})", pos.0, pos.1);
@@ -778,11 +779,11 @@ pub(crate) async fn dev_window_relative_click(
 
     // Perform the click using existing functionality
     match click_type.as_deref().unwrap_or("left") {
-        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
     }
 }
@@ -870,11 +871,11 @@ pub(crate) async fn dev_focused_window_relative_click(
 
     // Perform the click using existing functionality
     match click_type.as_deref().unwrap_or("left") {
-        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
-        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
     }
 }
@@ -890,4 +891,400 @@ pub(crate) async fn dev_focused_window_relative_click(
     _modifier: Option<String>,
 ) -> Result<(), String> {
     Err("Focused window relative click is only supported on macOS currently.".to_string())
+}
+
+// --- PRODUCTION MOUSE FUNCTIONS WITH DEBUG CAPABILITIES ---
+// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
+
+#[tauri::command]
+pub(crate) async fn left_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("left_click", &format!("Clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
+    info!("Executing left_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
+
+    match state.desktop.left_click(x, y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed left click at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Left Click", &format!("Clicked at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform left click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn right_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("right_click", &format!("Right clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
+    info!("Executing right_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+
+    create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
+
+    match state.desktop.right_click(x, y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed right click at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Right Click", &format!("Right clicked at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform right click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn mouse_move(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("mouse_move", &format!("Moving mouse to ({}, {})", x, y), &debug_config);
+    info!("Executing mouse_move to ({}, {})", x, y);
+
+    match state.desktop.mouse_move(x, y) {
+        Ok(_) => {
+            info!("Successfully moved mouse to ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse to ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to move mouse: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn middle_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("middle_click", &format!("Middle clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
+    info!("Executing middle_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click
+
+    match state.desktop.middle_click(x, y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed middle click at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Middle Click", &format!("Middle clicked at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform middle click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn double_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("double_click", &format!("Double clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
+    info!("Executing double_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
+
+    match state.desktop.double_click(x, y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed double click at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Double Click", &format!("Double clicked at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform double click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn triple_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("triple_click", &format!("Triple clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
+    info!("Executing triple_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
+
+    match state.desktop.triple_click(x, y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed triple click at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Triple Click", &format!("Triple clicked at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform triple click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn left_mouse_down(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {})", x, y), &debug_config);
+    info!("Executing left_mouse_down at ({}, {})", x, y);
+
+    match state.desktop.left_mouse_down(x, y) {
+        Ok(_) => {
+            info!("Successfully performed left mouse down at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform left mouse down: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn left_mouse_up(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(x, y)?;
+    }
+
+    log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {})", x, y), &debug_config);
+    info!("Executing left_mouse_up at ({}, {})", x, y);
+
+    match state.desktop.left_mouse_up(x, y) {
+        Ok(_) => {
+            info!("Successfully performed left mouse up at ({}, {})", x, y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {})", x, y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform left mouse up: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn left_click_drag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(start_x, start_y)?;
+        validators::valid_coordinates(end_x, end_y)?;
+    }
+
+    log_debug_operation("left_click_drag", &format!("Left click drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y), &debug_config);
+    info!("Executing left_click_drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y);
+
+    match state.desktop.left_click_drag(start_x, start_y, end_x, end_y) {
+        Ok(_) => {
+            info!("Successfully performed left click drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Mouse Action", &format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform left click drag: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn get_cursor_position(
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<(f64, f64), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    log_debug_operation("get_cursor_position", "Getting cursor position", &debug_config);
+    info!("Executing get_cursor_position");
+
+    match state.desktop.cursor_position() {
+        Ok(pos) => {
+            info!("Successfully retrieved cursor position: ({}, {})", pos.0, pos.1);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Cursor Info", &format!("Cursor at ({}, {})", pos.0, pos.1));
+            }
+
+            Ok(pos)
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to get cursor position: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
 }
