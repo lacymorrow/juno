@@ -235,14 +235,25 @@ where
 
         // Define obvious sequential patterns for Computer Use
         let sequential_patterns = [
+            // FIXED: Use actual computer tool structure with action parameters
             // Type → Enter → Screenshot (very common)
+            ("computer", "type", "computer", "key", Some("Return")),
             ("computer", "type", "computer", "key", Some("Enter")),
             ("computer", "key", "computer", "screenshot", None),
             ("computer", "type", "computer", "screenshot", None),
 
             // Click → Screenshot (common verification)
             ("computer", "left_click", "computer", "screenshot", None),
-            ("computer", "click", "computer", "screenshot", None),
+            ("computer", "right_click", "computer", "screenshot", None),
+            ("computer", "middle_click", "computer", "screenshot", None),
+            ("computer", "double_click", "computer", "screenshot", None),
+
+            // Mouse movement → Click → Screenshot
+            ("computer", "mouse_move", "computer", "left_click", None),
+            ("computer", "left_click", "computer", "screenshot", None),
+
+            // Type → Key → Screenshot (common form filling pattern)
+            ("computer", "type", "computer", "key", None),
 
             // MCP tool chains (safe for batching)
             ("mcp_", "", "mcp_", "", None),
@@ -250,6 +261,9 @@ where
             // File operations
             ("str_replace_based_edit_tool", "create", "str_replace_based_edit_tool", "view", None),
             ("str_replace_based_edit_tool", "str_replace", "str_replace_based_edit_tool", "view", None),
+
+            // Bash → Screenshot (command verification)
+            ("bash", "", "computer", "screenshot", None),
         ];
 
         for window in tool_calls.windows(2) {
@@ -265,9 +279,11 @@ where
                     patterns.push((first_index, second_index));
 
                     log::debug!(
-                        "Sequential pattern detected: {} → {} (tools {} → {})",
+                        "Sequential pattern detected: {} ({}) → {} ({}) (tools {} → {})",
                         first.name,
+                        action1,
                         second.name,
+                        action2,
                         first_index,
                         second_index
                     );
@@ -295,7 +311,7 @@ where
                     // Check key parameter if specified
                     if let Some(expected_key) = key_param {
                         if let Some(key) = tool_call.input.get("key").and_then(|v| v.as_str()) {
-                            return key == *expected_key;
+                            return key == *expected_key || key == "Return" && *expected_key == "Enter";
                         }
                         return false;
                     }

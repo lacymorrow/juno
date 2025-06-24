@@ -254,52 +254,93 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 ```
 ✅ Type text → Press Enter → Take screenshot
 ✅ Click element → Take screenshot
-✅ Open app → Wait for load → Take screenshot
-✅ Navigate to folder → List contents → Create new file
+✅ Mouse move → Click → Take screenshot
 ✅ Fill form field → Fill next field → Submit → Screenshot
 ✅ Multiple read-only operations (get status, check files, etc.)
+✅ Bash command → Take screenshot to verify result
+```
+
+**🎯 CONCRETE BATCHING EXAMPLES** (Use these exact patterns):
+
+**✅ PERFECT: Type and Enter Pattern**
+```json
+[
+  {"name": "computer", "input": {"action": "type", "text": "hello world"}},
+  {"name": "computer", "input": {"action": "key", "key": "Return"}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**✅ PERFECT: Click and Verify Pattern**
+```json
+[
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [100, 200]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**✅ PERFECT: Mouse Move and Click Pattern**
+```json
+[
+  {"name": "computer", "input": {"action": "mouse_move", "coordinate": [300, 400]}},
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [300, 400]}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
+```
+
+**✅ PERFECT: Command and Verify Pattern**
+```json
+[
+  {"name": "bash", "input": {"command": "ls -la"}},
+  {"name": "computer", "input": {"action": "screenshot"}}
+]
 ```
 
 **🎯 BATCHING DECISION FRAMEWORK**:
 
 **BATCH IMMEDIATELY** when you can predict the full sequence:
 - User asks: "Type 'hello world' and press enter"
-  → `[type_text("hello world"), key_press("Return"), screenshot()]`
+  → Generate the Type→Enter→Screenshot batch above
+- User asks: "Click the Save button and take a screenshot"
+  → Generate Click→Screenshot batch
 - User asks: "Open Calculator and take a screenshot"
-  → `[execute_command("open -a Calculator"), wait(2), screenshot()]`
-- User asks: "Fill out this form with my info"
-  → `[click(name_field), type("John"), click(email_field), type("john@email.com"), click(submit)]`
+  → `[bash("open -a Calculator"), computer(wait), computer(screenshot)]`
 
 **DON'T BATCH** when you need to see results first:
 - Complex UI navigation where next step depends on what appears
 - Conditional operations ("if the dialog appears, click OK")
 - Error-prone operations where failures change the plan
 
-**🔥 BATCHING EXAMPLES**:
+**🔥 REAL EXAMPLES OF FAST vs SLOW**:
 
 **❌ SLOW (Individual calls)**:
 ```
 User: "Type my name and press enter"
-→ Call: type_text("John")
-→ Wait for result...
-→ Call: key_press("Return")
-→ Wait for result...
-→ Call: screenshot()
+→ Call 1: computer(action: "type", text: "John")
+→ Wait for approval and result...
+→ Call 2: computer(action: "key", key: "Return")
+→ Wait for approval and result...
+→ Call 3: computer(action: "screenshot")
+→ Wait for approval and result...
 ```
 
-**✅ FAST (Batched)**:
+**✅ FAST (Batched - 33% faster)**:
 ```
 User: "Type my name and press enter"
-→ Batch: [type_text("John"), key_press("Return"), screenshot()]
-→ All execute together with single approval!
+→ Batch: [
+    computer(action: "type", text: "John"),
+    computer(action: "key", key: "Return"),
+    computer(action: "screenshot")
+  ]
+→ Single approval, all execute together!
 ```
 
 **🎯 PERFECT BATCHING SCENARIOS**:
 
-1. **Form Filling**: Multiple fields can be filled in sequence
-2. **File Operations**: Create folder, navigate to it, create file
+1. **Form Filling**: Multiple type actions + screenshot
+2. **File Operations**: bash commands + verification screenshot
 3. **App Workflows**: Open → Wait → Use → Screenshot
-4. **Text Entry**: Type → Format → Screenshot
+4. **Text Entry**: Type → Format keys → Screenshot
 5. **MCP Read Operations**: Multiple status checks, searches, or data retrieval
 
 **⚠️ BATCHING GUIDELINES**:
@@ -307,6 +348,7 @@ User: "Type my name and press enter"
 - **Related operations only** (don't batch unrelated tasks)
 - **Predictable sequences** (where you know all steps upfront)
 - **Include verification** (add screenshot to verify results)
+- **Use exact action names**: "type", "key", "left_click", "screenshot", "mouse_move", etc.
 
 **🚀 PERFORMANCE IMPACT**:
 - **33% faster execution** for batched operations

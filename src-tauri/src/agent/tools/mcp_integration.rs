@@ -990,23 +990,46 @@ impl ToolBatchingAnalyzer {
 
         // Define batching patterns for obvious sequential operations
         let sequential_patterns = [
-            // Computer use patterns
-            ("computer_20241022_type", "computer_20241022_key"),
-            ("computer_20241022_key", "computer_20241022_screenshot"),
-            ("computer_20241022_click", "computer_20241022_screenshot"),
-            ("computer_20241022_type", "computer_20241022_screenshot"),
+            // FIXED: Use actual computer tool structure with action parameters
+            // Computer use patterns - Type → Key → Screenshot
+            ("computer", "type", "computer", "key"),
+            ("computer", "key", "computer", "screenshot"),
+            ("computer", "type", "computer", "screenshot"),
+            ("computer", "left_click", "computer", "screenshot"),
+            ("computer", "right_click", "computer", "screenshot"),
+            ("computer", "middle_click", "computer", "screenshot"),
+            ("computer", "double_click", "computer", "screenshot"),
+            ("computer", "mouse_move", "computer", "left_click"),
+        ];
 
-            // MCP tool patterns (can be batched by default unless they modify state)
+        // Separate MCP tool patterns (2-element tuples)
+        let mcp_patterns = [
             ("mcp_", "mcp_"), // Most MCP tools can be batched
         ];
 
         // Check for obvious sequential patterns
         for window in tool_calls.windows(2) {
-            let first = &window[0].name;
-            let second = &window[1].name;
+            let first = &window[0];
+            let second = &window[1];
 
-            for (pattern1, pattern2) in &sequential_patterns {
-                if first.contains(pattern1) && second.contains(pattern2) {
+            // Check computer tool patterns (4-element tuples)
+            for (tool1_pattern, action1_pattern, tool2_pattern, action2_pattern) in &sequential_patterns {
+                if first.name.starts_with(tool1_pattern) && second.name.starts_with(tool2_pattern) {
+                    if first.name == "computer" && second.name == "computer" {
+                        // Check action parameters for computer tools
+                        let first_action = first.input.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                        let second_action = second.input.get("action").and_then(|v| v.as_str()).unwrap_or("");
+
+                        if first_action == *action1_pattern && second_action == *action2_pattern {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // Check MCP tool patterns (2-element tuples)
+            for (tool1_pattern, tool2_pattern) in &mcp_patterns {
+                if first.name.contains(tool1_pattern) && second.name.contains(tool2_pattern) {
                     return true;
                 }
             }
