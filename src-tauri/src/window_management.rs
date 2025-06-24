@@ -74,6 +74,22 @@ impl WindowConfig {
             transparent_title_bar: true,
         }
     }
+
+    /// Create configuration for desktop cursor overlay window from Tauri config
+    pub fn desktop_cursor_overlay() -> Self {
+        Self {
+            label: "desktop-cursor-overlay".to_string(),
+            title: "Desktop Cursor Overlay".to_string(),
+            url: "/desktop-cursor-overlay".to_string(),
+            width: 1.0,
+            height: 1.0,
+            min_width: 1.0,
+            min_height: 1.0,
+            resizable: false,
+            center: false,
+            transparent_title_bar: true,
+        }
+    }
 }
 
 /// Window management operations
@@ -271,6 +287,12 @@ pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
     WindowManager::create_or_show_window(&app, WindowConfig::main()).await
+}
+
+/// Open the desktop cursor overlay window
+#[tauri::command]
+pub async fn open_desktop_cursor_overlay(app: AppHandle) -> Result<(), String> {
+    WindowManager::create_or_show_window(&app, WindowConfig::desktop_cursor_overlay()).await
 }
 
 /// Get window states for tray menu and other uses
