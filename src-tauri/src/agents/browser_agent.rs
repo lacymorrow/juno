@@ -41,42 +41,6 @@ impl BrowserAgent {
         })
     }
 
-    /// Convert structs::ToolResult to core::ToolResult
-    fn convert_tool_result(&self, structs_result: crate::agent::core::ToolResult) -> ToolResult {
-        ToolResult {
-            call_id: structs_result.call_id,
-            output: structs_result.output,
-        }
-    }
-
-    /// Convert structs::AgentError to core::AgentError
-    fn convert_agent_error(&self, structs_error: crate::agent::core::AgentError) -> AgentError {
-        match structs_error {
-            crate::agent::core::AgentError::LlmError(msg) => AgentError::LlmError(msg),
-            crate::agent::core::AgentError::ToolError(msg) => AgentError::ToolError(msg),
-            crate::agent::core::AgentError::MemoryError(msg) => AgentError::MemoryError(msg),
-            crate::agent::core::AgentError::ConfigurationError(msg) => {
-                AgentError::ConfigurationError(msg)
-            }
-            crate::agent::core::AgentError::StateError(msg) => AgentError::StateError(msg),
-            crate::agent::core::AgentError::MaxStepsReached => AgentError::MaxStepsReached,
-            crate::agent::core::AgentError::LoopError(msg) => AgentError::LoopError(msg),
-            crate::agent::core::AgentError::InputError(msg) => AgentError::InputError(msg),
-            crate::agent::core::AgentError::OutputError(msg) => AgentError::OutputError(msg),
-            crate::agent::core::AgentError::ToolNotFound(msg) => AgentError::ToolNotFound(msg),
-            crate::agent::core::AgentError::ToolDisabled(msg) => AgentError::ToolDisabled(msg),
-            crate::agent::core::AgentError::Terminated => AgentError::Terminated,
-            crate::agent::core::AgentError::PermissionDenied(msg) => {
-                AgentError::PermissionDenied(msg)
-            }
-            crate::agent::core::AgentError::Unknown(msg) => AgentError::Unknown(msg),
-            crate::agent::core::AgentError::InvalidOutput(msg) => AgentError::OutputError(msg),
-            crate::agent::core::AgentError::InvalidInput(msg) => AgentError::InputError(msg),
-            crate::agent::core::AgentError::ToolUnavailable(msg) => AgentError::ToolError(msg),
-            crate::agent::core::AgentError::Other(msg) => AgentError::Unknown(msg),
-        }
-    }
-
     /// Execute a browser-related tool call
     async fn execute_browser_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let state = self.app_handle.state::<AppState>();
@@ -88,39 +52,19 @@ impl BrowserAgent {
 
         match tool_call.name.as_str() {
             "browser_navigate" => {
-                let result = browser_controller.navigate(&tool_call.input).await;
-                match result {
-                    Ok(tool_result) => Ok(self.convert_tool_result(tool_result)),
-                    Err(e) => Err(self.convert_agent_error(e)),
-                }
+                browser_controller.navigate(&tool_call.input).await
             }
             "browser_click" | "browser_type" | "browser_interact" => {
-                let result = browser_controller.interact(&tool_call.input).await;
-                match result {
-                    Ok(tool_result) => Ok(self.convert_tool_result(tool_result)),
-                    Err(e) => Err(self.convert_agent_error(e)),
-                }
+                browser_controller.interact(&tool_call.input).await
             }
             "browser_screenshot" => {
-                let result = browser_controller.screenshot(&tool_call.input).await;
-                match result {
-                    Ok(tool_result) => Ok(self.convert_tool_result(tool_result)),
-                    Err(e) => Err(self.convert_agent_error(e)),
-                }
+                browser_controller.screenshot(&tool_call.input).await
             }
             "browser_extract_content" => {
-                let result = browser_controller.extract_content(&tool_call.input).await;
-                match result {
-                    Ok(tool_result) => Ok(self.convert_tool_result(tool_result)),
-                    Err(e) => Err(self.convert_agent_error(e)),
-                }
+                browser_controller.extract_content(&tool_call.input).await
             }
             "browser_get_current_url" => {
-                let result = browser_controller.get_current_url(&tool_call.input).await;
-                match result {
-                    Ok(tool_result) => Ok(self.convert_tool_result(tool_result)),
-                    Err(e) => Err(self.convert_agent_error(e)),
-                }
+                browser_controller.get_current_url(&tool_call.input).await
             }
             _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }

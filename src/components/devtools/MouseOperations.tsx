@@ -13,6 +13,18 @@ const MouseOperations: React.FC = () => {
   const [dragEndX, setDragEndX] = useState<string>('');
   const [dragEndY, setDragEndY] = useState<string>('');
 
+  // Show consolidation info
+  const showConsolidationInfo = () => {
+    toast.info(
+      '🔧 Mouse Tools Consolidated! Use the Computer Tool instead:\n' +
+      '• Click: computer tool with action: "click"\n' +
+      '• Right-click: computer tool with action: "right_click"\n' +
+      '• Double-click: computer tool with action: "double_click"\n' +
+      '• Drag: computer tool with action: "drag"',
+      { duration: 8000 }
+    );
+  };
+
   const handleMouseMove = async () => {
     const x = parseInt(mouseX, 10);
     const y = parseInt(mouseY, 10);
@@ -133,6 +145,31 @@ const MouseOperations: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* Consolidation Notice */}
+      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <div className="flex items-center space-x-2 mb-2">
+          <MousePointer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <h3 className="font-semibold text-blue-800 dark:text-blue-200">Mouse Tools Consolidated</h3>
+        </div>
+        <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+          Mouse operations have been consolidated into the official <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">computer</code> tool for 100% Anthropic API compliance.
+        </p>
+        <div className="space-y-1 text-xs text-blue-600 dark:text-blue-400">
+          <div>• <strong>Click:</strong> <code>computer</code> with <code>action: "click"</code></div>
+          <div>• <strong>Right-click:</strong> <code>computer</code> with <code>action: "right_click"</code></div>
+          <div>• <strong>Double-click:</strong> <code>computer</code> with <code>action: "double_click"</code></div>
+          <div>• <strong>Drag:</strong> <code>computer</code> with <code>action: "drag"</code></div>
+        </div>
+        <Button
+          onClick={showConsolidationInfo}
+          variant="outline"
+          size="sm"
+          className="mt-3 text-blue-700 border-blue-300 hover:bg-blue-100 dark:text-blue-300 dark:border-blue-700 dark:hover:bg-blue-900"
+        >
+          Show Examples
+        </Button>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <MousePointer className="h-4 w-4" />
