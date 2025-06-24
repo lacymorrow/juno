@@ -404,7 +404,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing mouse click functionality
-        match crate::commands::mouse::dev_left_click(self.app_handle.clone(), app_state, x, y, None).await {
+        match crate::commands::mouse::left_click(self.app_handle.clone(), app_state, x, y, None).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
