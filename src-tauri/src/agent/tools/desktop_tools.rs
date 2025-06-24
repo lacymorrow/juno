@@ -784,7 +784,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::mouse_move(app.clone(), state_manager, screen_x, screen_y).await
+                    commands::mouse::dev_mouse_move(app.clone(), state_manager, screen_x, screen_y).await
                 })
             });
             inner_result.map_err(|e| format!("Error moving mouse: {}", e))?;

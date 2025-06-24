@@ -306,6 +306,19 @@ where
 
             let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
 
+            // Add delay after mouse movement operations to allow smooth animation to complete
+            if tool_call.name == "computer" {
+                if let Some(action) = tool_call.input.get("action").and_then(|a| a.as_str()) {
+                    if action == "mouse_move" {
+                        // Allow 350ms for smooth movement animation to complete (300ms + buffer)
+                        tokio::time::sleep(tokio::time::Duration::from_millis(350)).await;
+                    }
+                }
+            } else if tool_call.name == "mouse_move" {
+                // For direct mouse_move tool calls
+                tokio::time::sleep(tokio::time::Duration::from_millis(350)).await;
+            }
+
             // FIXED: Emit tool result event to frontend for chat display
             match &tool_result {
                 Ok(result) => {
