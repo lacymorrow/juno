@@ -795,9 +795,6 @@ impl BrainFactory {
         // Register native accessibility tools for element-level interaction
         Self::register_accessibility_tools(provider, app_handle.clone()).await?;
 
-        // Register Safari DOM tools for Safari-specific browser automation
-        Self::register_safari_dom_tools(provider, app_handle.clone()).await?;
-
         // Register self-improvement tools (per-provider instance, development mode only)
         if let Err(e) =
             crate::agent::tools::register_self_improvement_tools_with_provider(provider).await
@@ -872,82 +869,6 @@ impl BrainFactory {
         }
 
         info!("🔧 Native accessibility tools registered successfully");
-        Ok(())
-    }
-
-    /// Register Safari DOM tools for Safari-specific browser automation
-    pub async fn register_safari_dom_tools(
-        provider: &mut LocalToolProvider,
-        app_handle: tauri::AppHandle,
-    ) -> Result<(), String> {
-        info!("🔧 Registering Safari DOM tools...");
-
-        // Get tool definitions from Safari DOM tools
-        let tool_definitions = crate::agent::tools::safari_dom_tools::get_safari_dom_tool_definitions();
-
-        for tool_def in tool_definitions {
-            let tool_name = tool_def.name.clone();
-            let description = tool_def.description.clone();
-            let input_schema = tool_def.input_schema.clone();
-
-            info!("🔧 Registering Safari DOM tool: {}", tool_name);
-
-            // Create tool executor
-            let app_handle_clone = app_handle.clone();
-            let tool_name_clone = tool_name.clone();
-
-            let executor = move |input: serde_json::Value| {
-                let app = app_handle_clone.clone();
-                let name = tool_name_clone.clone();
-
-                async move {
-                    let tools = crate::agent::tools::safari_dom_tools::get_safari_dom_tools();
-
-                    match name.as_str() {
-                        "safari_extract_dom" => tools.extract_safari_dom(),
-                        "safari_click_element" => {
-                            let element_id = input["element_id"]
-                                .as_u64()
-                                .ok_or_else(|| crate::agent::core::AgentError::ToolError(
-                                    "Missing or invalid element_id parameter".to_string()
-                                ))?;
-                            tools.click_element_by_id(element_id as u32)
-                        }
-                        "safari_type_text" => {
-                            let element_id = input["element_id"]
-                                .as_u64()
-                                .ok_or_else(|| crate::agent::core::AgentError::ToolError(
-                                    "Missing or invalid element_id parameter".to_string()
-                                ))?;
-                            let text = input["text"]
-                                .as_str()
-                                .ok_or_else(|| crate::agent::core::AgentError::ToolError(
-                                    "Missing or invalid text parameter".to_string()
-                                ))?;
-                            tools.type_in_element(element_id as u32, text)
-                        }
-                        "safari_get_url" => tools.get_current_url(),
-                        "safari_navigate" => {
-                            let url = input["url"]
-                                .as_str()
-                                .ok_or_else(|| crate::agent::core::AgentError::ToolError(
-                                    "Missing or invalid url parameter".to_string()
-                                ))?;
-                            tools.navigate_to_url(url)
-                        }
-                        "safari_list_clickable_elements" => tools.list_clickable_elements(),
-                        _ => Err(crate::agent::core::AgentError::ToolError(
-                            format!("Unknown Safari DOM tool: {}", name)
-                        )),
-                    }
-                }
-            };
-
-            // Register the tool
-            provider.register_async_tool(tool_def, executor).await;
-        }
-
-        info!("🔧 Safari DOM tools registered successfully");
         Ok(())
     }
 }

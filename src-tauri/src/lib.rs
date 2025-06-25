@@ -217,8 +217,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{
-            accessibility_scan, accessibility_click, test_accessibility_permissions,
-        safari_dom::{safari_extract_dom, safari_click_element, safari_type_text, safari_get_url, safari_navigate, safari_list_clickable_elements, safari_is_active, execute_safari_dom_tool},
+    accessibility_scan, accessibility_click, test_accessibility_permissions,
     get_accessibility_tool_definitions, execute_accessibility_tool,
     always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
@@ -847,16 +846,6 @@ pub fn run() {
             test_accessibility_permissions,
             get_accessibility_tool_definitions,
             execute_accessibility_tool,
-
-            // Safari DOM Tool Commands
-            safari_extract_dom,
-            safari_click_element,
-            safari_type_text,
-            safari_get_url,
-            safari_navigate,
-            safari_list_clickable_elements,
-            safari_is_active,
-            execute_safari_dom_tool,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
