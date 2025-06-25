@@ -6,7 +6,7 @@ use std::env;
 use tracing;
 
 use crate::agent::providers::factory::model_ids;
-use crate::agent::structs::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 
 #[derive(Serialize, Debug)]

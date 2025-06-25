@@ -47,35 +47,17 @@ impl DesktopAgent {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
-            "dev_left_click" | "desktop_click" => {
-                let x = tool_call
-                    .input
-                    .get("x")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
-                    })?;
-                let y = tool_call
-                    .input
-                    .get("y")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
-                    })?;
-                let modifier = tool_call
-                    .input
-                    .get("modifier")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let result =
-                    commands::mouse::left_click(self.app_handle.clone(), state, x, y, modifier)
-                        .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
+            // REMOVED: dev_left_click, desktop_click - Use computer tool with action: "left_click" instead
+            "computer" => {
+                // Delegate to the official Anthropic Computer Use tool implementation
+                // This handles all computer actions: click, type, scroll, screenshot, etc.
+                match crate::agent::tools::anthropic_computer_use::execute_computer_tool(
+                    &self.app_handle,
+                    tool_call,
+                ).await {
+                    Ok(result) => Ok(ToolResult {
                         call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "left_click", "coordinates": [x, y]}),
+                        output: result,
                     }),
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
@@ -101,36 +83,8 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_press_key" => {
-                let key = tool_call
-                    .input
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'key' parameter".to_string())
-                    })?;
-                let modifier = tool_call
-                    .input
-                    .get("modifier")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let result = commands::keyboard::press_key(
-                    key.to_string(),
-                    modifier,
-                    self.app_handle.clone(),
-                    state,
-                )
-                .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "press_key", "key": key}),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
+            // REMOVED: "dev_press_key" - Use computer tool with action: "key" instead
+            // This eliminates redundancy and ensures compliance with official Anthropic Computer Use API
             "open_application" | "dev_open_application" | "desktop_open_app" => {
                 let app_name = tool_call
                     .input
@@ -261,82 +215,15 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_right_click" => {
-                let x = tool_call
-                    .input
-                    .get("x")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
-                    })?;
-                let y = tool_call
-                    .input
-                    .get("y")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
-                    })?;
-                let modifier = tool_call
-                    .input
-                    .get("modifier")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let result = commands::mouse::right_click(
-                    self.app_handle.clone(),
-                    state,
-                    x,
-                    y,
-                    modifier,
-                )
-                .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "right_click", "coordinates": [x, y]}),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
-            "dev_double_click" => {
-                let x = tool_call
-                    .input
-                    .get("x")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
-                    })?;
-                let y = tool_call
-                    .input
-                    .get("y")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
-                    })?;
-                let modifier = tool_call
-                    .input
-                    .get("modifier")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let result = commands::mouse::double_click(
-                    self.app_handle.clone(),
-                    state,
-                    x,
-                    y,
-                    modifier,
-                )
-                .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "double_click", "coordinates": [x, y]}),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
+            // REMOVED: 11 redundant mouse tools - Use computer tool with appropriate actions instead
+            // dev_left_click, desktop_click → computer tool with action: "click"
+            // dev_right_click → computer tool with action: "right_click"
+            // dev_middle_click → computer tool with action: "middle_click"
+            // dev_double_click → computer tool with action: "double_click"
+            // dev_triple_click → computer tool with action: "triple_click"
+            // dev_left_click_drag → computer tool with action: "drag"
+            // dev_left_mouse_down, dev_left_mouse_up → computer tool with action: "drag"
+            // This eliminates 11 redundant tools and ~400 lines of duplicate code for 100% API compliance.
             "dev_get_window_list" => {
                 let result =
                     commands::window::get_window_list(self.app_handle.clone(), state).await;

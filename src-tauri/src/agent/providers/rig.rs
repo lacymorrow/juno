@@ -4,7 +4,7 @@ use serde_json::Value;
 use tracing::{debug, info};
 
 use crate::agent::{
-    structs::{AgentAction, AgentError, Message, Role, ToolDefinition},
+    core::{AgentAction, AgentError, Message, Role, ToolDefinition},
     traits::AgentBrain,
 };
 use crate::agent::providers::factory::model_ids;
@@ -179,7 +179,7 @@ impl AgentBrain for RigBrain {
                     info!("Agent wants to call tool: {}", tool_name);
 
                     // Use the ExecuteTool variant with a vector of ToolCalls
-                    let tool_call = crate::agent::structs::ToolCall {
+                    let tool_call = crate::agent::core::ToolCall {
                         id: tool_call["id"].as_str().unwrap_or("1").to_string(),
                         name: tool_name.to_string(),
                         input: arguments,

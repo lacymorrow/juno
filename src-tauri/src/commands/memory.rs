@@ -81,7 +81,7 @@ pub async fn clean_orphaned_tool_results(state: State<'_, AppState>) -> Result<S
 
 /// Get conversation messages (basic implementation)
 #[tauri::command]
-pub async fn get_conversation_messages(state: State<'_, AppState>) -> Result<Vec<crate::agent::structs::Message>, String> {
+pub async fn get_conversation_messages(state: State<'_, AppState>) -> Result<Vec<crate::agent::core::Message>, String> {
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
@@ -91,7 +91,7 @@ pub async fn get_conversation_messages(state: State<'_, AppState>) -> Result<Vec
 
 /// Get last N messages
 #[tauri::command]
-pub async fn get_last_n_messages(n: usize, state: State<'_, AppState>) -> Result<Vec<crate::agent::structs::Message>, String> {
+pub async fn get_last_n_messages(n: usize, state: State<'_, AppState>) -> Result<Vec<crate::agent::core::Message>, String> {
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 

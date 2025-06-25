@@ -3,9 +3,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{info, warn, debug};
 
-use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
+use crate::agent::core::{ToolCall, ToolResult, ToolDefinition};
 use crate::agent::traits::ToolProvider;
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::state::AppState;
 
 /// Cursor IDE integration using computer use automation

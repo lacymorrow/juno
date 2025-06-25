@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use std::env;
 use tracing::{info, warn};
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::agent::prompts::manager::PromptManager;
 use crate::agent::providers::factory::model_ids;
 

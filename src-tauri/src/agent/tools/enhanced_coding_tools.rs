@@ -10,9 +10,9 @@ use std::fs;
 use tracing::{info, warn};
 use chrono;
 
-use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
+use crate::agent::core::{ToolCall, ToolResult, ToolDefinition};
 use crate::agent::traits::ToolProvider;
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::state::AppState;
 
 /// Enhanced coding tools for sophisticated development workflows.
