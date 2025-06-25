@@ -23,7 +23,6 @@
 //! Each module exports registration functions and relevant types.
 
 pub mod accessibility_tools; // Native macOS accessibility tools for element-level interaction
-pub mod safari_dom_tools; // Safari-specific DOM analysis and interaction tools
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
 pub mod basic_tools; // Ensure basic_tools is declared
 pub mod browser_controller;
