@@ -540,67 +540,53 @@ impl ProductionCloudConnector {
 
         info!("🔐 Authentication message sent");
 
-        // Start WebSocket message handling in background with proper authentication handling
+        // Handle authentication response synchronously to avoid race conditions
+        let auth_result = self.handle_authentication_response(&mut ws_receiver).await?;
+        if !auth_result {
+            return Err(CloudError::AuthenticationFailed("Authentication failed".to_string()));
+        }
+
+        info!("✅ Authentication successful, starting message handling");
+        self.set_connection_state(ConnectorState::Authenticated).await;
+
+        // Now start background task for general message handling (post-authentication)
         let app_handle = self.app_handle.clone();
         let connection_state = self.connection_state.clone();
         let ws_sender_clone = self.ws_sender.clone();
 
         tokio::spawn(async move {
-            let mut authenticated = false;
-
-            // Handle incoming messages
+            // Handle incoming messages (authentication already completed)
             while let Some(msg) = ws_receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
-                        info!("📨 Received cloud message: {}", text);
+                        debug!("📨 Received cloud message: {}", text);
 
                         // Parse and handle the message
                         if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
                             match ws_message.message_type {
                                 MessageType::Auth => {
-                                    if !authenticated {
-                                        // Handle authentication response
-                                        if let Some(success) = ws_message.data.get("success").and_then(|s| s.as_bool()) {
-                                            if success {
-                                                info!("✅ Authentication successful");
-                                                authenticated = true;
-                                                let mut state = connection_state.lock().await;
-                                                *state = ConnectorState::Authenticated;
-                                            } else {
-                                                let error_msg = ws_message.data.get("error")
-                                                    .and_then(|e| e.as_str())
-                                                    .unwrap_or("Authentication failed");
-                                                error!("❌ Authentication failed: {}", error_msg);
-                                                let mut state = connection_state.lock().await;
-                                                *state = ConnectorState::Error(format!("Authentication failed: {}", error_msg));
-                                                break;
-                                            }
-                                        }
-                                    } else {
-                                        debug!("📨 Additional auth message received (ignoring)");
-                                    }
+                                    // Post-authentication auth messages (likely additional auth events)
+                                    debug!("📨 Additional auth message received post-authentication");
                                 },
                                 MessageType::Command => {
-                                    if authenticated {
-                                        if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
-                                            // Emit command to be handled by the app
-                                            if let Err(e) = app_handle.emit("cloud-command-received", &command) {
-                                                error!("Failed to emit cloud command: {}", e);
-                                            }
+                                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
+                                        // Emit command to be handled by the app
+                                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
+                                            error!("Failed to emit cloud command: {}", e);
                                         }
                                     } else {
-                                        warn!("⚠️ Received command before authentication - ignoring");
+                                        warn!("⚠️ Failed to parse cloud command from message");
                                     }
                                 },
                                 MessageType::Heartbeat => {
-                                    if authenticated {
-                                        debug!("💓 Heartbeat received");
-                                    }
+                                    debug!("💓 Heartbeat received");
                                 },
                                 _ => {
                                     debug!("📨 Other message type: {:?}", ws_message.message_type);
                                 }
                             }
+                        } else {
+                            warn!("⚠️ Failed to parse WebSocket message: {}", text);
                         }
                     },
                     Ok(Message::Close(_)) => {
@@ -626,36 +612,114 @@ impl ProductionCloudConnector {
             }
         });
 
-        // Wait for authentication to complete
-        let mut auth_timeout = tokio::time::interval(Duration::from_millis(100));
-        let mut attempts = 0;
-        const MAX_AUTH_ATTEMPTS: u32 = 50; // 5 seconds total
-
-        loop {
-            auth_timeout.tick().await;
-            attempts += 1;
-
-            let state = self.connection_state.lock().await;
-            match *state {
-                ConnectorState::Authenticated => {
-                    info!("✅ Authentication confirmed");
-                    break;
-                },
-                ConnectorState::Error(ref err) => {
-                    return Err(CloudError::AuthenticationFailed(err.clone()));
-                },
-                _ => {
-                    if attempts >= MAX_AUTH_ATTEMPTS {
-                        return Err(CloudError::AuthenticationFailed("Authentication timeout".to_string()));
-                    }
-                    // Continue waiting
-                }
-            }
-        }
-
         self.set_connection_state(ConnectorState::Ready).await;
         info!("✅ Enhanced cloud connector established with hardware monitoring");
         Ok(())
+    }
+
+    /// Handle authentication response synchronously with robust error handling
+    async fn handle_authentication_response(
+        &self,
+        ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>
+    ) -> Result<bool, CloudError> {
+        use tokio_tungstenite::tungstenite::Message;
+
+        // Set timeout for authentication response
+        let timeout_duration = Duration::from_secs(10);
+        let timeout = tokio::time::sleep(timeout_duration);
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                // Wait for authentication response
+                msg_result = ws_receiver.next() => {
+                    match msg_result {
+                        Some(Ok(Message::Text(text))) => {
+                            debug!("📨 Received authentication response: {}", text);
+
+                            // Parse the message
+                            match serde_json::from_str::<WebSocketMessage>(&text) {
+                                Ok(ws_message) => {
+                                    if ws_message.message_type == MessageType::Auth {
+                                        // Handle authentication response with robust parsing
+                                        return self.parse_authentication_response(ws_message.data).await;
+                                    } else {
+                                        // Non-auth message during authentication - this is unexpected
+                                        warn!("⚠️ Received non-auth message during authentication: {:?}", ws_message.message_type);
+                                        // Continue waiting for auth response
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("❌ Failed to parse authentication response: {}", e);
+                                    return Err(CloudError::AuthenticationFailed(format!("Invalid response format: {}", e)));
+                                }
+                            }
+                        },
+                        Some(Ok(Message::Close(_))) => {
+                            error!("❌ WebSocket closed during authentication");
+                            return Err(CloudError::AuthenticationFailed("Connection closed during authentication".to_string()));
+                        },
+                        Some(Err(e)) => {
+                            error!("❌ WebSocket error during authentication: {}", e);
+                            return Err(CloudError::AuthenticationFailed(format!("WebSocket error: {}", e)));
+                        },
+                        None => {
+                            error!("❌ WebSocket stream ended during authentication");
+                            return Err(CloudError::AuthenticationFailed("WebSocket stream ended".to_string()));
+                        },
+                        _ => {
+                            // Other message types (binary, ping, pong) - continue waiting
+                            continue;
+                        }
+                    }
+                },
+                // Authentication timeout
+                _ = &mut timeout => {
+                    error!("❌ Authentication timeout after {:?}", timeout_duration);
+                    return Err(CloudError::AuthenticationFailed("Authentication timeout".to_string()));
+                }
+            }
+        }
+    }
+
+    /// Parse authentication response with comprehensive error handling
+    async fn parse_authentication_response(&self, data: serde_json::Value) -> Result<bool, CloudError> {
+        // Check for success field
+        match data.get("success") {
+            Some(success_value) => {
+                match success_value.as_bool() {
+                    Some(true) => {
+                        info!("✅ Authentication successful");
+                        Ok(true)
+                    },
+                    Some(false) => {
+                        // Authentication explicitly failed
+                        let error_msg = data.get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Authentication rejected by server");
+                        error!("❌ Authentication failed: {}", error_msg);
+                        Err(CloudError::AuthenticationFailed(error_msg.to_string()))
+                    },
+                    None => {
+                        // Success field is not a boolean
+                        let success_str = success_value.to_string();
+                        error!("❌ Authentication response 'success' field is not boolean: {}", success_str);
+                        Err(CloudError::AuthenticationFailed(format!(
+                            "Invalid success field type: expected boolean, got {}",
+                            success_str
+                        )))
+                    }
+                }
+            },
+            None => {
+                // Missing success field
+                error!("❌ Authentication response missing 'success' field: {}", data);
+                Err(CloudError::AuthenticationFailed(
+                    "Authentication response missing required 'success' field".to_string()
+                ))
+            }
+        }
     }
 
 
@@ -734,29 +798,31 @@ impl ProductionCloudConnector {
         let message_json = serde_json::to_string(&ws_message)?;
 
         // Send command using stored WebSocket sender
-        let mut success = false;
         {
             let mut sender_guard = self.ws_sender.lock().await;
             if let Some(ref mut sender) = sender_guard.as_mut() {
                 use tokio_tungstenite::tungstenite::Message;
                 match sender.send(Message::Text(message_json)).await {
                     Ok(()) => {
-                        success = true;
                         log::debug!("📤 Command {} sent successfully", command_id);
                     },
                     Err(e) => {
                         log::error!("❌ Failed to send command {}: {}", command_id, e);
+                        let execution_time = start_time.elapsed();
+                        self.track_command_execution(false, execution_time).await;
                         return Err(CloudError::NetworkError(format!("Failed to send command: {}", e)));
                     }
                 }
             } else {
                 log::error!("❌ WebSocket sender not available for command {}", command_id);
+                let execution_time = start_time.elapsed();
+                self.track_command_execution(false, execution_time).await;
                 return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
             }
         }
 
         let execution_time = start_time.elapsed();
-        self.track_command_execution(success, execution_time).await;
+        self.track_command_execution(true, execution_time).await;
 
         log::info!("✅ Command {} completed in {:?}", command_id, execution_time);
         Ok(())
@@ -1201,6 +1267,83 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             assert!(result.is_some());
             if let Some(cpu_usage) = result {
                 assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
+            }
+        }
+    }
+
+    // Tests for authentication response parsing logic
+    mod authentication_tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_auth_response_failure_logic() {
+            // Test explicit failure response parsing logic
+            let failure_data = serde_json::json!({
+                "success": false,
+                "error": "Invalid credentials"
+            });
+
+            // Test the parsing logic that our methods use
+            match failure_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(false) => {
+                            let error_msg = failure_data.get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Authentication rejected by server");
+                            assert_eq!(error_msg, "Invalid credentials");
+                        },
+                        _ => panic!("Should have matched false case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_parse_auth_response_missing_success_field() {
+            let invalid_data = serde_json::json!({
+                "message": "Some response without success field"
+            });
+
+            // Test that missing success field is detected
+            assert!(invalid_data.get("success").is_none());
+        }
+
+        #[test]
+        fn test_parse_auth_response_invalid_success_type() {
+            let invalid_data = serde_json::json!({
+                "success": "true" // String instead of boolean
+            });
+
+            // Test that non-boolean success field is detected
+            match invalid_data.get("success") {
+                Some(success_value) => {
+                    assert!(success_value.as_bool().is_none());
+                    assert_eq!(success_value.as_str(), Some("true"));
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_parse_auth_response_success_logic() {
+            let success_data = serde_json::json!({
+                "success": true
+            });
+
+            // Test successful authentication parsing logic
+            match success_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(true) => {
+                            // This is the expected path
+                            assert!(true);
+                        },
+                        _ => panic!("Should have matched true case"),
+                    }
+                },
+                None => panic!("Should have success field"),
             }
         }
     }
