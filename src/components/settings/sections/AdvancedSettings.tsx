@@ -31,7 +31,7 @@ export default function AdvancedSettings({
   useEffect(() => {
     const loadDebugMode = async () => {
       try {
-        const enabled = await invoke(COMMANDS.GET_DEBUG_MODE);
+        const enabled = await invoke(COMMANDS.CORE_GET_DEBUG_MODE);
         setDebugMode(enabled as boolean);
       } catch (error) {
         console.error("Failed to get debug mode status:", error);
@@ -62,7 +62,7 @@ export default function AdvancedSettings({
               checked={debugMode}
               onCheckedChange={async (enabled) => {
                 try {
-                  await invoke(COMMANDS.SET_DEBUG_MODE, { enabled });
+                  await invoke(COMMANDS.CORE_SET_DEBUG_MODE, { enabled });
                   setDebugMode(enabled);
                   toast.success(
                     `Debug mode ${enabled ? "enabled" : "disabled"}`
@@ -107,7 +107,7 @@ export default function AdvancedSettings({
                 )
               ) {
                 try {
-                  await invoke(COMMANDS.RESET_SETTINGS);
+                  await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
                   await settings.loadAllSettings();
                   toast.success("All settings have been reset to defaults");
                 } catch (error) {
