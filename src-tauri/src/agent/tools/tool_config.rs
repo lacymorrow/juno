@@ -345,13 +345,6 @@ impl ToolConfigManager {
     /// # Arguments
     /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
-        // CRITICAL FIX: Always enable essential Anthropic Computer Use tools
-        let essential_tools = ["computer", "screenshot", "bash"];
-        if essential_tools.contains(&tool_name) {
-            tracing::debug!("Tool '{}' is essential and always enabled", tool_name);
-            return true;
-        }
-
         if let Some(tool_config) = self.tools.get(tool_name) {
             if tool_config.required {
                 tracing::debug!("Tool '{}' is required and always enabled", tool_name);
@@ -365,9 +358,10 @@ impl ToolConfigManager {
                 tool_name, tool_config.enabled, category_enabled, result);
             result
         } else {
-            // CRITICAL FIX: If essential tools are not in config, still enable them
+            // Essential tools that are missing from config should be enabled as fallback
+            let essential_tools = ["computer", "screenshot", "bash"];
             if essential_tools.contains(&tool_name) {
-                tracing::warn!("Essential tool '{}' not found in config, but enabling anyway", tool_name);
+                tracing::warn!("Essential tool '{}' not found in config, enabling as fallback", tool_name);
                 return true;
             }
             tracing::debug!("Unknown tool '{}' disabled by default", tool_name);
@@ -500,14 +494,21 @@ impl ToolConfigManager {
             ("drag", "Drag from one coordinate to another"),
         ];
 
+        // Essential tools that are required for core functionality
+        let essential_tools = ["computer", "screenshot", "bash"];
+
         for (name, description) in anthropic_tools {
-            let config = ToolConfig::new(
+            let mut config = ToolConfig::new(
                 name.to_string(),
                 ToolCategory::AnthropicComputerUse,
                 true,
             )
-            .with_description(description.to_string())
-            .as_required(); // Computer use tools are required for core functionality
+            .with_description(description.to_string());
+
+            // Only mark essential tools as required
+            if essential_tools.contains(&name) {
+                config = config.as_required();
+            }
 
             tools.insert(name.to_string(), config);
         }
