@@ -813,12 +813,10 @@ pub fn run() {
             validate_visual_analysis_request,
             get_scene_types,
             test_visual_reasoning_engine,
-
             // Agent Continuation Commands
             commands::agent_continuation::respond_to_agent_continuation,
             commands::agent_continuation::get_pending_continuation_requests,
             commands::agent_continuation::has_pending_continuation_requests,
-
             // Self-Improvement Commands (Development Mode Only)
             commands::self_improvement::initialize_self_improvement,
             commands::self_improvement::start_improvement_cycle,
@@ -832,11 +830,21 @@ pub fn run() {
             commands::self_improvement::run_performance_benchmarks,
             commands::self_improvement::get_system_health_metrics,
             commands::self_improvement::get_available_benchmarks,
-
             // Debug Tool Commands
             commands::debug_tools::debug_tool_configuration,
             commands::debug_tools::debug_registered_tools,
             commands::debug_tools::debug_reset_tool_config,
+            // Tool Choice Intelligence Commands
+            commands::tool_choice::get_tool_choice_config,
+            commands::tool_choice::set_tool_choice_config,
+            commands::tool_choice::analyze_tool_choice,
+            commands::tool_choice::get_operational_modes,
+            commands::tool_choice::test_tool_choice_patterns,
+            commands::tool_choice::get_tool_choice_stats,
+            commands::tool_choice::reset_tool_choice_config,
+            commands::tool_choice::set_tool_choice_enabled,
+            commands::tool_choice::get_tool_choice_enabled,
+            commands::tool_choice::validate_tool_choice_config,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
