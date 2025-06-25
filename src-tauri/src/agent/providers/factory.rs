@@ -795,6 +795,9 @@ impl BrainFactory {
         // Register native accessibility tools for element-level interaction
         Self::register_accessibility_tools(provider, app_handle.clone()).await?;
 
+        // Register Safari tools for fast Safari DOM automation
+        Self::register_safari_tools(provider, app_handle.clone()).await?;
+
         // Register self-improvement tools (per-provider instance, development mode only)
         if let Err(e) =
             crate::agent::tools::register_self_improvement_tools_with_provider(provider).await
@@ -869,6 +872,49 @@ impl BrainFactory {
         }
 
         info!("🔧 Native accessibility tools registered successfully");
+        Ok(())
+    }
+
+    /// Register Safari tools for fast Safari DOM automation
+    pub async fn register_safari_tools(
+        provider: &mut LocalToolProvider,
+        app_handle: tauri::AppHandle,
+    ) -> Result<(), String> {
+        info!("🔧 Registering Safari tools for DOM automation...");
+
+        // Get Safari tool definitions
+        use crate::agent::tools::safari_tools::get_safari_tool_definitions;
+        let tool_definitions = get_safari_tool_definitions();
+
+        for tool_def in tool_definitions {
+            let tool_name = tool_def.name.clone();
+            let description = tool_def.description.clone();
+            let input_schema = tool_def.input_schema.clone();
+
+            info!("🔧 Registering Safari tool: {}", tool_name);
+
+            // Create tool executor
+            let app_handle_clone = app_handle.clone();
+            let tool_name_clone = tool_name.clone();
+
+            let executor = move |input: serde_json::Value| {
+                let app = app_handle_clone.clone();
+                let name = tool_name_clone.clone();
+
+                async move {
+                    use crate::commands::safari_tools::execute_safari_tool;
+                    match execute_safari_tool(name, input).await {
+                        Ok(tool_result) => Ok(tool_result.output),
+                        Err(e) => Err(e),
+                    }
+                }
+            };
+
+            // Register the tool
+            provider.register_async_tool(tool_def, executor).await;
+        }
+
+        info!("🔧 Safari tools registered successfully");
         Ok(())
     }
 }

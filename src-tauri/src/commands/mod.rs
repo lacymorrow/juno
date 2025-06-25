@@ -8,6 +8,7 @@ use tracing::{warn, info};
 // Declare the submodules
 pub mod accessibility;
 pub mod registry;
+pub mod safari_tools;
 pub mod app_url;
 pub mod autostart;
 pub mod core;
@@ -57,6 +58,11 @@ pub mod debug_tools; // Debug commands for tool configuration diagnostics
 pub use self::accessibility::{
     accessibility_scan, accessibility_click, test_accessibility_permissions,
     get_accessibility_tool_definitions, execute_accessibility_tool
+};
+pub use self::safari_tools::{
+    safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
+    safari_get_url, safari_navigate, safari_list_clickable_elements,
+    safari_execute_javascript, safari_clear_cache, execute_safari_tool
 };
 pub use self::autostart::*;
 pub use self::core::*;
