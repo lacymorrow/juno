@@ -1562,7 +1562,7 @@ async fn get_voice_audio_state_safe(
 ) -> Option<VoiceAudioState> {
     if let Some(state) = app_state {
         // Get voice controller state if available
-        let is_dictation_active = if let Ok(dictation_guard) = state.dictation_active.lock() {
+        let is_dictation_active = if let Ok(dictation_guard) = state.dictation_active().lock() {
             *dictation_guard
         } else {
             false
@@ -1579,7 +1579,7 @@ async fn get_voice_audio_state_safe(
         };
 
         // Get TTS state if available
-        let is_speaking = if let Ok(_tts_provider) = state.tts_provider.lock() {
+        let is_speaking = if let Ok(_tts_provider) = state.tts_provider().lock() {
             // Check if TTS is currently active (this is a simplified check)
             false // TODO: Implement actual TTS state checking
         } else {

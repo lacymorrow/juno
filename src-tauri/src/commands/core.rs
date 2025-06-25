@@ -463,7 +463,7 @@ pub async fn get_agent_trigger_mode(
             };
 
             {
-                let mut current_mode = state.agent_trigger_mode.lock()
+                let mut current_mode = state.agent_trigger_mode().lock()
                     .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
                 *current_mode = trigger_mode;
             }
@@ -509,7 +509,7 @@ pub async fn set_agent_trigger_mode(
 
     // Update the state for backward compatibility
     {
-        let mut current_mode = state.agent_trigger_mode.lock()
+        let mut current_mode = state.agent_trigger_mode().lock()
             .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }
@@ -538,7 +538,7 @@ pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppStat
 
     // Update state
     {
-        let mut current_mode = state.agent_trigger_mode.lock()
+        let mut current_mode = state.agent_trigger_mode().lock()
             .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }
@@ -760,7 +760,7 @@ pub async fn get_dictation_trigger_mode(
             };
 
             {
-                let mut current_mode = state.dictation_trigger_mode.lock()
+                let mut current_mode = state.dictation_trigger_mode().lock()
                     .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
                 *current_mode = trigger_mode;
             }
@@ -803,7 +803,7 @@ pub async fn set_dictation_trigger_mode(
 
     // Update the state for backward compatibility
     {
-        let mut current_mode = state.dictation_trigger_mode.lock()
+        let mut current_mode = state.dictation_trigger_mode().lock()
             .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }
@@ -832,7 +832,7 @@ pub async fn load_dictation_trigger_mode_from_store(app: &AppHandle, state: &App
 
     // Update state
     {
-        let mut current_mode = state.dictation_trigger_mode.lock()
+        let mut current_mode = state.dictation_trigger_mode().lock()
             .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }

@@ -156,7 +156,7 @@ fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage, Box<dyn std:
 /// Get keyboard shortcuts from app state
 fn get_keyboard_shortcuts(app: &AppHandle) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
     let app_state = app.state::<AppState>();
-    let shortcuts = app_state.keyboard_shortcuts.lock().map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
+    let shortcuts = app_state.keyboard_shortcuts().lock().map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
     Ok(shortcuts.clone())
 }
 
@@ -475,7 +475,7 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     }
 
     // Check always listening state
-    if let Ok(always_listening) = app_state.always_listening_active.lock() {
+    if let Ok(always_listening) = app_state.always_listening_active().lock() {
         if *always_listening {
             return TrayIconState::AlwaysListening;
         }

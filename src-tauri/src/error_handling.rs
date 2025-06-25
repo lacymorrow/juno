@@ -143,7 +143,7 @@ pub mod utils {
 
         // Reset dictation state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = false;
         }
 
@@ -158,7 +158,7 @@ pub mod utils {
 
         // Stop agent execution
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut agent_execution_active) = app_state.agent_execution_active.lock() {
+        if let Ok(mut agent_execution_active) = app_state.agent_execution_active().lock() {
             *agent_execution_active = false;
         }
 

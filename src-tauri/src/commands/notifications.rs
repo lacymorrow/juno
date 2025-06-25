@@ -39,8 +39,8 @@ pub async fn get_notification_settings(
     let sound_enabled = *state.notification_sound_enabled.lock().map_err(|e| format!("Failed to get sound enabled: {}", e))?;
     let duration = *state.notification_duration.lock().map_err(|e| format!("Failed to get duration: {}", e))?;
     let position = state.notification_position.lock().map_err(|e| format!("Failed to get position: {}", e))?.clone();
-    let show_icons = *state.notification_show_icons.lock().map_err(|e| format!("Failed to get show icons: {}", e))?;
-    let persist_important = *state.notification_persist_important.lock().map_err(|e| format!("Failed to get persist important: {}", e))?;
+    let show_icons = *state.notification_show_icons().lock().map_err(|e| format!("Failed to get show icons: {}", e))?;
+    let persist_important = *state.notification_persist_important().lock().map_err(|e| format!("Failed to get persist important: {}", e))?;
 
     Ok(NotificationSettings {
         notification_type,
@@ -102,7 +102,7 @@ pub async fn set_notification_show_icons(
     state: tauri::State<'_, AppState>,
     show_icons: bool,
 ) -> Result<(), String> {
-    let mut icons_guard = state.notification_show_icons.lock().map_err(|e| format!("Failed to lock show icons: {}", e))?;
+    let mut icons_guard = state.notification_show_icons().lock().map_err(|e| format!("Failed to lock show icons: {}", e))?;
     *icons_guard = show_icons;
     Ok(())
 }
@@ -113,7 +113,7 @@ pub async fn set_notification_persist_important(
     state: tauri::State<'_, AppState>,
     persist_important: bool,
 ) -> Result<(), String> {
-    let mut persist_guard = state.notification_persist_important.lock().map_err(|e| format!("Failed to lock persist important: {}", e))?;
+    let mut persist_guard = state.notification_persist_important().lock().map_err(|e| format!("Failed to lock persist important: {}", e))?;
     *persist_guard = persist_important;
     Ok(())
 }

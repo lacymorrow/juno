@@ -206,7 +206,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
 
     // Reset Dictation Mode state after processing
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = false;
     }
 
@@ -309,7 +309,7 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
 async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     // Mark this as Dictation Mode in AppState BEFORE starting transcription
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = true;
     }
 
@@ -364,7 +364,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
 
                 // Reset the dictation active flag
-                if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
                     *dictation_active = false;
                 }
 
@@ -391,7 +391,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
         error!("[Dictation Mode] Voice controller not found, cannot start dictation");
 
         // Reset the dictation active flag
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = false;
         }
 
@@ -420,7 +420,7 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     // Reset state
     {
         let app_state = app_handle.state::<state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = false;
         };
     }
@@ -441,7 +441,7 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // Reset state
     {
         let app_state = app_handle.state::<state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = false;
         };
     }

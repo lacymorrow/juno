@@ -45,6 +45,15 @@ pub enum AgentError {
     Unknown(String),
     #[error("General error: {0}")]
     Other(String),
+    // New variants for simplified error recovery
+    #[error("Timeout: {0}")]
+    Timeout(String),
+    #[error("Network error: {0}")]
+    NetworkError(String),
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+    #[error("Resource busy: {0}")]
+    ResourceBusy(String),
 }
 
 impl From<&str> for AgentError {

@@ -825,7 +825,7 @@ where
                             );
 
                             // Update AppState with new max steps
-                            if let Ok(mut max_steps_guard) = app_state.agent_max_steps.lock() {
+                            if let Ok(mut max_steps_guard) = app_state.agent_max_steps().lock() {
                                 *max_steps_guard = Some(self.max_steps);
                             }
 

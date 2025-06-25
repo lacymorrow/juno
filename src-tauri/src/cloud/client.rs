@@ -486,7 +486,7 @@ impl CloudClient {
         }
 
         let voice_enabled = {
-            match app_state.always_listening_active.lock() {
+            match app_state.always_listening_active().lock() {
                 Ok(always_listening) => *always_listening,
                 Err(e) => {
                     warn!("Failed to acquire always_listening_active lock: {}", e);

@@ -850,7 +850,7 @@ async fn execute_agent_internal(
                     .map(|p| p.clone())
                     .unwrap_or_default();
                 // Switch to system TTS for network errors
-                if let Ok(mut tts_provider) = state.tts_provider.lock() {
+                if let Ok(mut tts_provider) = state.tts_provider().lock() {
                     *tts_provider = "system".to_string();
                     info!("Temporarily switched to system TTS for offline/network error message");
                 }

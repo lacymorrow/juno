@@ -271,7 +271,7 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
 pub async fn should_handle_agent_key(app_handle: &AppHandle, key_state: &str) -> bool {
     let app_state = app_handle.state::<AppState>();
 
-    let trigger_mode = app_state.agent_trigger_mode.lock()
+    let trigger_mode = app_state.agent_trigger_mode().lock()
         .map(|mode| mode.clone())
         .unwrap_or(AgentTriggerMode::Tap);
 

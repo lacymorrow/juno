@@ -148,165 +148,312 @@ impl ToolApprovalRequest {
     }
 }
 
-// Application state structure
+// Consolidated state structures to reduce Arc<Mutex<T>> count
+
+/// Audio-related settings grouped together
+#[derive(Clone, Debug)]
+pub struct AudioSettings {
+    pub tts_provider: String,
+    pub dictation_active: bool,
+    pub dictation_clipboard_enabled: bool,
+    pub sound_enabled: bool,
+    pub always_listening_active: bool,
+    pub always_listening_sensitivity: f32,
+    pub always_listening_wake_words: Vec<String>,
+    pub notification_sound_enabled: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            tts_provider: {
+                #[cfg(debug_assertions)]
+                { "system".to_string() }
+                #[cfg(not(debug_assertions))]
+                { "elevenlabs".to_string() }
+            },
+            dictation_active: false,
+            dictation_clipboard_enabled: true,
+            sound_enabled: true,
+            always_listening_active: false,
+            always_listening_sensitivity: 0.5,
+            always_listening_wake_words: audio::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
+            notification_sound_enabled: true,
+        }
+    }
+}
+
+/// Agent execution state grouped together
+#[derive(Clone, Debug)]
+pub struct AgentExecutionState {
+    pub execution_active: bool,
+    pub execution_id: Option<String>,
+    pub current_step: Option<u32>,
+    pub max_steps: Option<u32>,
+    pub tool_approval_required: bool,
+}
+
+impl Default for AgentExecutionState {
+    fn default() -> Self {
+        Self {
+            execution_active: false,
+            execution_id: None,
+            current_step: None,
+            max_steps: None,
+            tool_approval_required: false,
+        }
+    }
+}
+
+/// UI and display settings grouped together
+#[derive(Clone, Debug)]
+pub struct UISettings {
+    pub bar_ui_state: String,
+    pub performance_monitoring_enabled: bool,
+    pub debug_mode: bool,
+    pub notification_type: String,
+    pub notification_duration: u32,
+    pub notification_position: String,
+    pub notification_show_icons: bool,
+    pub notification_persist_important: bool,
+}
+
+impl Default for UISettings {
+    fn default() -> Self {
+        Self {
+            bar_ui_state: "default".to_string(),
+            performance_monitoring_enabled: true,
+            debug_mode: false,
+            notification_type: "system".to_string(),
+            notification_duration: 5000,
+            notification_position: "bottom-right".to_string(),
+            notification_show_icons: true,
+            notification_persist_important: true,
+        }
+    }
+}
+
+/// Input configuration grouped together
+#[derive(Clone, Debug)]
+pub struct InputSettings {
+    pub keyboard_shortcuts: KeyboardShortcuts,
+    pub agent_trigger_mode: AgentTriggerMode,
+    pub dictation_trigger_mode: DictationTriggerMode,
+}
+
+impl Default for InputSettings {
+    fn default() -> Self {
+        Self {
+            keyboard_shortcuts: KeyboardShortcuts::default(),
+            agent_trigger_mode: AgentTriggerMode::default(),
+            dictation_trigger_mode: DictationTriggerMode::default(),
+        }
+    }
+}
+
+/// Application state structure - Simplified with grouped settings
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
     pub desktop: DesktopWrapper,
     pub shell_sessions: ShellSessions,
     cancel_tx: Arc<CancelSender>,  // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
-    // State for text_editor_undo_edit - Wrapped in Arc
+
+    // Grouped settings structures (major simplification)
+    pub audio_settings: Arc<StdMutex<AudioSettings>>,
+    pub agent_execution: Arc<StdMutex<AgentExecutionState>>,
+    pub ui_settings: Arc<StdMutex<UISettings>>,
+    pub input_settings: Arc<StdMutex<InputSettings>>,
+
+    // Essential state that needs separate control
     pub last_edited_file: Arc<StdMutex<Option<PathBuf>>>,
     pub previous_content: Arc<StdMutex<Option<Option<String>>>>,
-    // Persistent Playwright driver instance, using TokioMutex
-    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
-    // Persistent browser controller instance
-    pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
-    // Persistent memory manager for conversation history
-    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
-    // Dynamic storage for other state components - Wrapped in Arc
-    state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
-    pub tts_provider: Arc<StdMutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
-    pub bar_ui_state: Arc<StdMutex<String>>, // Added to store the current UI state of the floating bar
-    pub dictation_active: Arc<StdMutex<bool>>, // Track if Dictation Mode is active
-    pub dictation_clipboard_enabled: Arc<StdMutex<bool>>, // Track if Dictation Mode should save to clipboard
-    pub sound_enabled: Arc<StdMutex<bool>>,               // Track if sound effects are enabled
-    pub performance_monitoring_enabled: Arc<StdMutex<bool>>, // Track if performance monitoring is enabled
-    pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,  // Track timestamps for log grouping
-    // Permissions state tracking
-    pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
-    pub permissions_checked: Arc<StdMutex<bool>>, // Track if permissions have been checked
-    // Tool configuration manager
-    pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
-    // Cloud connectivity
-    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
-    pub cloud_config: Arc<TokioMutex<CloudConfig>>,         // Cloud configuration
-    pub cloud_enabled: Arc<StdMutex<bool>>,                 // Track if cloud is enabled
-    // Production cloud connector
-    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
-    // Keyboard shortcuts configuration
-    pub keyboard_shortcuts: Arc<StdMutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
-    // Agent trigger mode configuration
-    pub agent_trigger_mode: Arc<StdMutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
-    // Dictation trigger mode configuration
-    pub dictation_trigger_mode: Arc<StdMutex<DictationTriggerMode>>, // Track how dictation is triggered (tap vs hold)
-    // MCP manager for external MCP server support
-    pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
-    // Tool provider registry for refreshing MCP tools - using Weak references to prevent Arc cycles
-    pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>, // Track active tool providers
-    // Always listening mode state
-    pub always_listening_active: Arc<StdMutex<bool>>, // Track if Always Listening Mode is active
-    pub always_listening_sensitivity: Arc<StdMutex<f32>>, // Sensitivity threshold for activation
-    pub always_listening_wake_words: Arc<StdMutex<Vec<String>>>, // Configurable wake words
-    // Notification settings
-    pub notification_type: Arc<StdMutex<String>>, // "system", "toast", "both", or "disabled"
-    pub notification_sound_enabled: Arc<StdMutex<bool>>, // Sound for notifications
-    pub notification_duration: Arc<StdMutex<u32>>, // Duration in milliseconds for toast notifications
-    pub notification_position: Arc<StdMutex<String>>, // Position for toast notifications
-    pub notification_show_icons: Arc<StdMutex<bool>>, // Show icons in notifications
-    pub notification_persist_important: Arc<StdMutex<bool>>, // Keep important notifications until dismissed
-    // Agent execution status tracking
-    pub agent_execution_active: Arc<StdMutex<bool>>, // Track if an agent is currently executing
-    pub agent_execution_id: Arc<StdMutex<Option<String>>>, // Track the current agent execution ID
-    // Agent iteration tracking
-    pub agent_current_step: Arc<StdMutex<Option<u32>>>, // Track the current iteration/step number
-    pub agent_max_steps: Arc<StdMutex<Option<u32>>>, // Track the maximum iterations/steps allowed
+    pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,
 
-    // TTS content is now handled via XML tags during streaming, no separate storage needed
-    // Debug mode tracking
-    pub debug_mode: Arc<StdMutex<bool>>, // Track if debug mode is enabled
-    // Tool approval setting
-    pub tool_approval_required: Arc<StdMutex<bool>>, // Track if tool approval is required before execution
-    // Pending tool approvals
-    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>, // Track pending approval requests
+    // Async state that needs TokioMutex
+    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
+    pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
+    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
+    pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
+    pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
+    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
+    pub cloud_config: Arc<TokioMutex<CloudConfig>>,
+    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>,
+    pub mcp_manager: Arc<TokioMutex<MCPManager>>,
+    pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
+    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
+
+    // Simple state fields
+    pub permissions_checked: Arc<StdMutex<bool>>,
+    pub cloud_enabled: Arc<StdMutex<bool>>,
+
+    // Dynamic storage for other state components
+    state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
 impl AppState {
     pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false); // Initial state: not cancelled
+        info!("Initializing AppState with simplified grouped structure");
         Self {
             desktop: DesktopWrapper::new(desktop),
             shell_sessions: ShellSessions::default(),
             cancel_tx: Arc::new(cancel_tx),
             cancel_rx,
+
+            // Initialize grouped settings
+            audio_settings: Arc::new(StdMutex::new(AudioSettings::default())),
+            agent_execution: Arc::new(StdMutex::new(AgentExecutionState::default())),
+            ui_settings: Arc::new(StdMutex::new(UISettings::default())),
+            input_settings: Arc::new(StdMutex::new(InputSettings::default())),
+
+            // Initialize essential state
             last_edited_file: Arc::new(StdMutex::new(None)),
             previous_content: Arc::new(StdMutex::new(None)),
+            timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())),
+
+            // Initialize async state
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
-            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
-            state_components: Arc::new(StdMutex::new(HashMap::new())),
-            tts_provider: Arc::new(StdMutex::new({
-                #[cfg(debug_assertions)]
-                {
-                    // In development, default to 'system' TTS
-                    info!("Initializing TTS provider to 'system' (development mode)");
-                    "system".to_string()
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    // In production, default to 'elevenlabs' TTS
-                    info!("Initializing TTS provider to 'elevenlabs' (production mode)");
-                    "elevenlabs".to_string()
-                }
-            })),
-            bar_ui_state: Arc::new(StdMutex::new("default".to_string())), // Initialize bar UI state
-            dictation_active: Arc::new(StdMutex::new(false)), // Initialize Dictation Mode as inactive
-            dictation_clipboard_enabled: Arc::new(StdMutex::new(true)), // Initialize clipboard saving as enabled by default
-            sound_enabled: Arc::new(StdMutex::new(true)), // Initialize sound effects as enabled by default
-            performance_monitoring_enabled: Arc::new(StdMutex::new(true)), // Initialize performance monitoring as enabled by default
-            timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())), // Initialize timestamp tracker
-            // Initialize permissions state
+            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())),
             permissions_state: Arc::new(TokioMutex::new(None)),
-            permissions_checked: Arc::new(StdMutex::new(false)),
-            // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
-            // Initialize cloud connectivity
             cloud_client: Arc::new(TokioMutex::new(None)),
             cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
-            cloud_enabled: Arc::new(StdMutex::new(false)),
-            // Initialize production cloud connector
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
-            // Initialize keyboard shortcuts configuration
-            keyboard_shortcuts: Arc::new(StdMutex::new(KeyboardShortcuts::default())),
-            // Initialize agent trigger mode configuration
-            agent_trigger_mode: Arc::new(StdMutex::new(AgentTriggerMode::Tap)),
-            // Initialize dictation trigger mode configuration
-            dictation_trigger_mode: Arc::new(StdMutex::new(DictationTriggerMode::Hold)), // Default to existing hold behavior
-            // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
-            // Initialize tool provider registry
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
-            // Initialize Always Listening mode state
-            always_listening_active: Arc::new(StdMutex::new(false)),
-            always_listening_sensitivity: Arc::new(StdMutex::new(0.5)),
-            always_listening_wake_words: Arc::new(StdMutex::new(
-                audio::DEFAULT_WAKE_WORDS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            )),
-            // Initialize notification settings
-            notification_type: Arc::new(StdMutex::new("system".to_string())),
-            notification_sound_enabled: Arc::new(StdMutex::new(true)),
-            notification_duration: Arc::new(StdMutex::new(5000)),
-            notification_position: Arc::new(StdMutex::new("bottom-right".to_string())),
-            notification_show_icons: Arc::new(StdMutex::new(true)),
-            notification_persist_important: Arc::new(StdMutex::new(true)),
-            // Initialize agent execution status tracking
-            agent_execution_active: Arc::new(StdMutex::new(false)),
-            agent_execution_id: Arc::new(StdMutex::new(None)),
-            // Initialize agent iteration tracking
-            agent_current_step: Arc::new(StdMutex::new(None)),
-            agent_max_steps: Arc::new(StdMutex::new(None)),
-
-            // TTS content now handled via XML tags during streaming
-            // Initialize debug mode tracking
-            debug_mode: Arc::new(StdMutex::new(false)),
-            // Initialize tool approval setting as disabled by default
-            tool_approval_required: Arc::new(StdMutex::new(false)),
-            // Initialize pending tool approvals
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+
+            // Initialize simple state
+            permissions_checked: Arc::new(StdMutex::new(false)),
+            cloud_enabled: Arc::new(StdMutex::new(false)),
+
+            // Initialize dynamic storage
+            state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
+    }
+
+    // Helper methods for backward compatibility with old field access patterns
+    // These provide access to the grouped fields directly
+    pub fn tts_provider(&self) -> Arc<StdMutex<String>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.tts_provider.clone()))
+    }
+
+    pub fn dictation_active(&self) -> Arc<StdMutex<bool>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.dictation_active))
+    }
+
+    pub fn dictation_clipboard_enabled(&self) -> Arc<StdMutex<bool>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.dictation_clipboard_enabled))
+    }
+
+    pub fn sound_enabled(&self) -> Arc<StdMutex<bool>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.sound_enabled))
+    }
+
+    pub fn always_listening_active(&self) -> Arc<StdMutex<bool>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.always_listening_active))
+    }
+
+    pub fn always_listening_sensitivity(&self) -> Arc<StdMutex<f32>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.always_listening_sensitivity))
+    }
+
+    pub fn always_listening_wake_words(&self) -> Arc<StdMutex<Vec<String>>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.always_listening_wake_words.clone()))
+    }
+
+    pub fn notification_sound_enabled(&self) -> Arc<StdMutex<bool>> {
+        let audio_settings = self.audio_settings.lock().unwrap();
+        Arc::new(StdMutex::new(audio_settings.notification_sound_enabled))
+    }
+
+    pub fn agent_execution_active(&self) -> Arc<StdMutex<bool>> {
+        let agent_execution = self.agent_execution.lock().unwrap();
+        Arc::new(StdMutex::new(agent_execution.execution_active))
+    }
+
+    pub fn agent_execution_id(&self) -> Arc<StdMutex<Option<String>>> {
+        let agent_execution = self.agent_execution.lock().unwrap();
+        Arc::new(StdMutex::new(agent_execution.execution_id.clone()))
+    }
+
+    pub fn agent_current_step(&self) -> Arc<StdMutex<Option<u32>>> {
+        let agent_execution = self.agent_execution.lock().unwrap();
+        Arc::new(StdMutex::new(agent_execution.current_step))
+    }
+
+    pub fn agent_max_steps(&self) -> Arc<StdMutex<Option<u32>>> {
+        let agent_execution = self.agent_execution.lock().unwrap();
+        Arc::new(StdMutex::new(agent_execution.max_steps))
+    }
+
+    pub fn tool_approval_required(&self) -> Arc<StdMutex<bool>> {
+        let agent_execution = self.agent_execution.lock().unwrap();
+        Arc::new(StdMutex::new(agent_execution.tool_approval_required))
+    }
+
+    pub fn bar_ui_state(&self) -> Arc<StdMutex<String>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.bar_ui_state.clone()))
+    }
+
+    pub fn performance_monitoring_enabled(&self) -> Arc<StdMutex<bool>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.performance_monitoring_enabled))
+    }
+
+    pub fn debug_mode(&self) -> Arc<StdMutex<bool>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.debug_mode))
+    }
+
+    pub fn notification_type(&self) -> Arc<StdMutex<String>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.notification_type.clone()))
+    }
+
+    pub fn notification_duration(&self) -> Arc<StdMutex<u32>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.notification_duration))
+    }
+
+    pub fn notification_position(&self) -> Arc<StdMutex<String>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.notification_position.clone()))
+    }
+
+    pub fn notification_show_icons(&self) -> Arc<StdMutex<bool>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.notification_show_icons))
+    }
+
+    pub fn notification_persist_important(&self) -> Arc<StdMutex<bool>> {
+        let ui_settings = self.ui_settings.lock().unwrap();
+        Arc::new(StdMutex::new(ui_settings.notification_persist_important))
+    }
+
+    pub fn keyboard_shortcuts(&self) -> Arc<StdMutex<KeyboardShortcuts>> {
+        let input_settings = self.input_settings.lock().unwrap();
+        Arc::new(StdMutex::new(input_settings.keyboard_shortcuts.clone()))
+    }
+
+    pub fn agent_trigger_mode(&self) -> Arc<StdMutex<AgentTriggerMode>> {
+        let input_settings = self.input_settings.lock().unwrap();
+        Arc::new(StdMutex::new(input_settings.agent_trigger_mode.clone()))
+    }
+
+    pub fn dictation_trigger_mode(&self) -> Arc<StdMutex<DictationTriggerMode>> {
+        let input_settings = self.input_settings.lock().unwrap();
+        Arc::new(StdMutex::new(input_settings.dictation_trigger_mode.clone()))
     }
 
     // Method to trigger cancellation
@@ -840,7 +987,7 @@ impl AppState {
 
     /// Set performance monitoring enabled state
     pub fn set_performance_monitoring_enabled(&self, enabled: bool) -> Result<(), String> {
-        let mut monitoring_guard = self.performance_monitoring_enabled.lock().map_err(|e| {
+        let mut monitoring_guard = self.performance_monitoring_enabled().lock().map_err(|e| {
             format!(
                 "Failed to acquire performance_monitoring_enabled lock: {}",
                 e
@@ -1460,12 +1607,12 @@ mod tests {
 
         // Test Arc-wrapped values - using unwrap in tests is acceptable
         {
-            let tts_provider = state.tts_provider.lock().unwrap();
+            let tts_provider = state.tts_provider().lock().unwrap();
             assert_eq!(*tts_provider, "system");
         }
 
         {
-            let dictation_active = state.dictation_active.lock().unwrap();
+            let dictation_active = state.dictation_active().lock().unwrap();
             assert!(!*dictation_active);
         }
 
@@ -1475,7 +1622,7 @@ mod tests {
         }
 
         {
-            let always_listening = state.always_listening_active.lock().unwrap();
+            let always_listening = state.always_listening_active().lock().unwrap();
             assert!(!*always_listening);
         }
     }
@@ -1676,19 +1823,19 @@ mod tests {
 
         // Check initial value
         {
-            let tts_provider = state.tts_provider.lock().unwrap();
+            let tts_provider = state.tts_provider().lock().unwrap();
             assert_eq!(*tts_provider, "system");
         }
 
         // Update TTS provider
         {
-            let mut tts_provider = state.tts_provider.lock().unwrap();
+            let mut tts_provider = state.tts_provider().lock().unwrap();
             *tts_provider = "openai".to_string();
         }
 
         // Verify update
         {
-            let tts_provider = state.tts_provider.lock().unwrap();
+            let tts_provider = state.tts_provider().lock().unwrap();
             assert_eq!(*tts_provider, "openai");
         }
     }
@@ -1699,34 +1846,34 @@ mod tests {
 
         // Check initial state
         {
-            let dictation_active = state.dictation_active.lock().unwrap();
+            let dictation_active = state.dictation_active().lock().unwrap();
             assert!(!*dictation_active);
         }
 
         {
-            let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
+            let clipboard_enabled = state.dictation_clipboard_enabled().lock().unwrap();
             assert!(*clipboard_enabled);
         }
 
         // Update dictation state
         {
-            let mut dictation_active = state.dictation_active.lock().unwrap();
+            let mut dictation_active = state.dictation_active().lock().unwrap();
             *dictation_active = true;
         }
 
         {
-            let mut clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
+            let mut clipboard_enabled = state.dictation_clipboard_enabled().lock().unwrap();
             *clipboard_enabled = false;
         }
 
         // Verify updates
         {
-            let dictation_active = state.dictation_active.lock().unwrap();
+            let dictation_active = state.dictation_active().lock().unwrap();
             assert!(*dictation_active);
         }
 
         {
-            let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
+            let clipboard_enabled = state.dictation_clipboard_enabled().lock().unwrap();
             assert!(!*clipboard_enabled);
         }
     }
@@ -1737,17 +1884,17 @@ mod tests {
 
         // Check initial values
         {
-            let active = state.always_listening_active.lock().unwrap();
+            let active = state.always_listening_active().lock().unwrap();
             assert!(!*active);
         }
 
         {
-            let sensitivity = state.always_listening_sensitivity.lock().unwrap();
+            let sensitivity = state.always_listening_sensitivity().lock().unwrap();
             assert_eq!(*sensitivity, 0.5);
         }
 
         {
-            let wake_words = state.always_listening_wake_words.lock().unwrap();
+            let wake_words = state.always_listening_wake_words().lock().unwrap();
             assert_eq!(wake_words.len(), 2);
             assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[0].to_string()));
             assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[1].to_string()));
@@ -1755,33 +1902,33 @@ mod tests {
 
         // Update configuration
         {
-            let mut active = state.always_listening_active.lock().unwrap();
+            let mut active = state.always_listening_active().lock().unwrap();
             *active = true;
         }
 
         {
-            let mut sensitivity = state.always_listening_sensitivity.lock().unwrap();
+            let mut sensitivity = state.always_listening_sensitivity().lock().unwrap();
             *sensitivity = 0.8;
         }
 
         {
-            let mut wake_words = state.always_listening_wake_words.lock().unwrap();
+            let mut wake_words = state.always_listening_wake_words().lock().unwrap();
             wake_words.push("assistant".to_string());
         }
 
         // Verify updates
         {
-            let active = state.always_listening_active.lock().unwrap();
+            let active = state.always_listening_active().lock().unwrap();
             assert!(*active);
         }
 
         {
-            let sensitivity = state.always_listening_sensitivity.lock().unwrap();
+            let sensitivity = state.always_listening_sensitivity().lock().unwrap();
             assert_eq!(*sensitivity, 0.8);
         }
 
         {
-            let wake_words = state.always_listening_wake_words.lock().unwrap();
+            let wake_words = state.always_listening_wake_words().lock().unwrap();
             assert_eq!(wake_words.len(), 3);
             assert!(wake_words.contains(&"assistant".to_string()));
         }

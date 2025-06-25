@@ -154,7 +154,7 @@ pub async fn load_audio_settings_from_centralized_settings(
     // This prevents empty/uninitialized centralized settings from overriding correct AppState defaults
     // Note: "off" is a valid user preference for disabling TTS and should be honored
     let should_update_centralized_settings = {
-        let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
+        let mut tts_provider = state.tts_provider().lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
         if !audio_settings.tts_provider.is_empty() {
             tracing::info!("Loading TTS provider from centralized settings: {}", audio_settings.tts_provider);
             *tts_provider = audio_settings.tts_provider.clone();
@@ -180,15 +180,15 @@ pub async fn load_audio_settings_from_centralized_settings(
         }
     }
 
-    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+    if let Ok(mut always_listening_active) = state.always_listening_active().lock() {
         *always_listening_active = audio_settings.always_listening_active;
     }
 
-    if let Ok(mut always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
+    if let Ok(mut always_listening_sensitivity) = state.always_listening_sensitivity().lock() {
         *always_listening_sensitivity = audio_settings.always_listening_sensitivity;
     }
 
-    if let Ok(mut always_listening_wake_words) = state.always_listening_wake_words.lock() {
+    if let Ok(mut always_listening_wake_words) = state.always_listening_wake_words().lock() {
         *always_listening_wake_words = audio_settings.always_listening_wake_words;
     }
 
@@ -212,19 +212,19 @@ pub async fn save_audio_settings_to_centralized_settings(
 
     // Update centralized settings with current AppState values
     // Extract values from AppState locks before any await points
-    if let Ok(tts_provider) = state.tts_provider.lock() {
+    if let Ok(tts_provider) = state.tts_provider().lock() {
         audio_settings.tts_provider = tts_provider.clone();
     }
 
-    if let Ok(always_listening_active) = state.always_listening_active.lock() {
+    if let Ok(always_listening_active) = state.always_listening_active().lock() {
         audio_settings.always_listening_active = *always_listening_active;
     }
 
-    if let Ok(always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
+    if let Ok(always_listening_sensitivity) = state.always_listening_sensitivity().lock() {
         audio_settings.always_listening_sensitivity = *always_listening_sensitivity;
     }
 
-    if let Ok(always_listening_wake_words) = state.always_listening_wake_words.lock() {
+    if let Ok(always_listening_wake_words) = state.always_listening_wake_words().lock() {
         audio_settings.always_listening_wake_words = always_listening_wake_words.clone();
     }
 

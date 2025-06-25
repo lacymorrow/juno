@@ -16,7 +16,7 @@ pub static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::A
 pub async fn get_keyboard_shortcuts(
     state: State<'_, AppState>,
 ) -> Result<KeyboardShortcuts, String> {
-    let shortcuts = state.keyboard_shortcuts.lock()
+    let shortcuts = state.keyboard_shortcuts().lock()
         .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?
         .clone();
 
@@ -36,7 +36,7 @@ pub async fn set_keyboard_shortcut(
 
     // Get current shortcuts for conflict checking
     let current_shortcuts = {
-        let shortcuts = state.keyboard_shortcuts.lock()
+        let shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
         shortcuts.clone()
     };
@@ -46,7 +46,7 @@ pub async fn set_keyboard_shortcut(
 
     // Update the shortcut in state
     {
-        let mut shortcuts = state.keyboard_shortcuts.lock()
+        let mut shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
 
         match shortcut_name.as_str() {
@@ -103,7 +103,7 @@ pub async fn set_keyboard_shortcuts(
 
     // Update state
     {
-        let mut current_shortcuts = state.keyboard_shortcuts.lock()
+        let mut current_shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
         *current_shortcuts = shortcuts.clone();
     }
@@ -128,7 +128,7 @@ pub async fn reset_keyboard_shortcuts(
 
     // Update state
     {
-        let mut shortcuts = state.keyboard_shortcuts.lock()
+        let mut shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
         *shortcuts = default_shortcuts.clone();
     }
@@ -152,7 +152,7 @@ pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &A
         Ok(settings_shortcuts) => {
             // Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
             let state_shortcuts = convert_settings_to_state_shortcuts(&settings_shortcuts);
-            let mut current_shortcuts = state.keyboard_shortcuts.lock()
+            let mut current_shortcuts = state.keyboard_shortcuts().lock()
                 .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
             *current_shortcuts = state_shortcuts;
             info!("Loaded keyboard shortcuts from centralized settings");
@@ -160,7 +160,7 @@ pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &A
         Err(e) => {
             warn!("Failed to load shortcuts from centralized settings: {}, using defaults", e);
             let default_shortcuts = crate::state::KeyboardShortcuts::default();
-            let mut current_shortcuts = state.keyboard_shortcuts.lock()
+            let mut current_shortcuts = state.keyboard_shortcuts().lock()
                 .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
             *current_shortcuts = default_shortcuts;
         }
@@ -174,7 +174,7 @@ async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppStat
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let state_shortcuts = state.keyboard_shortcuts.lock()
+    let state_shortcuts = state.keyboard_shortcuts().lock()
         .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?
         .clone();
 
@@ -431,7 +431,7 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         warn!("Failed to unregister existing shortcuts (this is often normal): {}", e);
     }
 
-    let shortcuts = state.keyboard_shortcuts.lock()
+    let shortcuts = state.keyboard_shortcuts().lock()
         .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?
         .clone();
 
@@ -510,7 +510,7 @@ pub async fn validate_keyboard_shortcut(
 
     // Get current shortcuts for conflict checking
     let current_shortcuts = {
-        let shortcuts = state.keyboard_shortcuts.lock()
+        let shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
         shortcuts.clone()
     };
@@ -533,7 +533,7 @@ pub async fn get_shortcut_suggestions(
 
     // Get current shortcuts to avoid suggesting conflicts
     let current_shortcuts = {
-        let shortcuts = state.keyboard_shortcuts.lock()
+        let shortcuts = state.keyboard_shortcuts().lock()
             .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
         shortcuts.clone()
     };
