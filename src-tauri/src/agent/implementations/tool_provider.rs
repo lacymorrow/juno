@@ -1220,55 +1220,30 @@ impl LocalToolProvider {
         Ok(())
     }
 
-    /// Get circuit breaker status for all tools
-    ///
-    /// Research Citations:
-    /// - Circuit breaker monitoring enables proactive failure prevention (Computer Use Agent reliability, 2025)
-    /// - Real-time tool health status improves system observability (Microsoft Azure AI Foundry, 2025)
-    /// - Failure pattern tracking reduces recovery time by 45% (Anthropic multi-agent research, 2025)
+    /// Get simple recovery status for monitoring
     pub async fn get_circuit_breaker_status(&self) -> Value {
-        let circuit_breakers = self.circuit_breakers.lock().await;
-        let mut status = serde_json::Map::new();
-
-        for (tool_name, breaker) in circuit_breakers.iter() {
-            let tool_status = serde_json::json!({
-                "state": format!("{:?}", breaker.get_state()),
-                "is_healthy": breaker.is_healthy(),
-                "failure_count": breaker.failure_count,
-                "success_count": breaker.success_count,
-                "last_failure": breaker.last_failure_time.map(|t| t.elapsed().as_secs())
-            });
-            status.insert(tool_name.clone(), tool_status);
-        }
-
-        serde_json::Value::Object(status)
+        let stats = self.recovery_stats.lock().await;
+        serde_json::json!({
+            "tool_provider_health": "operational",
+            "total_attempts": stats.total_attempts,
+            "success_rate": stats.success_rate(),
+            "recovery_info": "Using simplified recovery tracking"
+        })
     }
 
-    /// Get list of unhealthy tools (circuit breaker open)
+    /// Get list of tools that have experienced failures (simplified version)
     pub async fn get_unhealthy_tools(&self) -> Vec<String> {
-        let circuit_breakers = self.circuit_breakers.lock().await;
-        circuit_breakers
-            .iter()
-            .filter_map(|(tool_name, breaker)| {
-                if !breaker.is_healthy() {
-                    Some(tool_name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect()
+        // Since we don't have per-tool circuit breakers, return empty list
+        // This method is kept for API compatibility
+        Vec::new()
     }
 
-    /// Reset circuit breaker for a specific tool (emergency recovery)
-    pub async fn reset_circuit_breaker(&self, tool_name: &str) -> bool {
-        let mut circuit_breakers = self.circuit_breakers.lock().await;
-        if let Some(breaker) = circuit_breakers.get_mut(tool_name) {
-            *breaker = ToolCircuitBreaker::new(3, Duration::from_secs(30));
-            info!("Reset circuit breaker for tool '{}'", tool_name);
-            true
-        } else {
-            false
-        }
+    /// Reset recovery stats (simplified version)
+    pub async fn reset_circuit_breaker(&self, _tool_name: &str) -> bool {
+        let mut stats = self.recovery_stats.lock().await;
+        *stats = SimpleRecoveryStats::default();
+        info!("Reset recovery stats");
+        true
     }
 }
 

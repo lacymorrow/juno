@@ -156,8 +156,7 @@ fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage, Box<dyn std:
 /// Get keyboard shortcuts from app state
 fn get_keyboard_shortcuts(app: &AppHandle) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
     let app_state = app.state::<AppState>();
-    let shortcuts = app_state.keyboard_shortcuts().lock().map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
-    Ok(shortcuts.clone())
+    app_state.get_keyboard_shortcuts().map_err(|e| format!("Failed to get keyboard shortcuts: {}", e).into())
 }
 
 /// Create a state-aware tray menu with keyboard shortcuts
