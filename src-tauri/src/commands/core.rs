@@ -462,11 +462,8 @@ pub async fn get_agent_trigger_mode(
                 }
             };
 
-            {
-                let mut current_mode = state.agent_trigger_mode().lock()
-                    .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
-                *current_mode = trigger_mode;
-            }
+            state.set_agent_trigger_mode(trigger_mode)
+                .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
             Ok(agent_settings.trigger_mode)
         }
@@ -508,11 +505,8 @@ pub async fn set_agent_trigger_mode(
         .map_err(|e| format!("Failed to save agent settings: {}", e))?;
 
     // Update the state for backward compatibility
-    {
-        let mut current_mode = state.agent_trigger_mode().lock()
-            .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
-        *current_mode = trigger_mode;
-    }
+    state.set_agent_trigger_mode(trigger_mode)
+        .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
     info!("Updated agent trigger mode to: {}", mode);
     Ok(())
@@ -537,11 +531,8 @@ pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppStat
     };
 
     // Update state
-    {
-        let mut current_mode = state.agent_trigger_mode().lock()
-            .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
-        *current_mode = trigger_mode;
-    }
+    state.set_agent_trigger_mode(trigger_mode)
+        .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
     info!("Loaded agent trigger mode from centralized settings: {}", agent_settings.trigger_mode);
     Ok(())
@@ -759,11 +750,8 @@ pub async fn get_dictation_trigger_mode(
                 }
             };
 
-            {
-                let mut current_mode = state.dictation_trigger_mode().lock()
-                    .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
-                *current_mode = trigger_mode;
-            }
+            state.set_dictation_trigger_mode(trigger_mode)
+                .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
             Ok(audio_settings.dictation_trigger_mode)
         }
@@ -802,11 +790,8 @@ pub async fn set_dictation_trigger_mode(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update the state for backward compatibility
-    {
-        let mut current_mode = state.dictation_trigger_mode().lock()
-            .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
-        *current_mode = trigger_mode;
-    }
+    state.set_dictation_trigger_mode(trigger_mode)
+        .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
     info!("Updated dictation trigger mode to: {}", mode);
     Ok(())
@@ -831,11 +816,8 @@ pub async fn load_dictation_trigger_mode_from_store(app: &AppHandle, state: &App
     };
 
     // Update state
-    {
-        let mut current_mode = state.dictation_trigger_mode().lock()
-            .map_err(|e| format!("Failed to lock dictation trigger mode: {}", e))?;
-        *current_mode = trigger_mode;
-    }
+    state.set_dictation_trigger_mode(trigger_mode)
+        .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
     info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
     Ok(())

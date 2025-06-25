@@ -125,9 +125,7 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
     // Check if Dictation Mode is active to determine processing mode
     let app_state = app_handle.state::<state::AppState>();
     let is_dictation_active = app_state
-        .dictation_active
-        .lock()
-        .map(|active| *active)
+        .get_dictation_active()
         .unwrap_or(false);
 
     // Extract text from payload
@@ -157,9 +155,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
 
             // Store to clipboard if enabled
             let clipboard_enabled = app_state
-                .dictation_clipboard_enabled
-                .lock()
-                .map(|enabled| *enabled)
+                .get_dictation_clipboard_enabled()
                 .unwrap_or(true);
 
             if clipboard_enabled {

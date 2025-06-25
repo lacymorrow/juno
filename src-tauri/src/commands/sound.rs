@@ -95,9 +95,8 @@ pub async fn play_sound_by_type(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
     // Check if sound is enabled
-    let sound_enabled = state.sound_enabled.lock()
-        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
-        .clone();
+    let sound_enabled = state.get_sound_enabled()
+        .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
 
     if !sound_enabled {
         info!("Sound is disabled, skipping playback of {:?}", sound_type);
@@ -129,9 +128,8 @@ pub async fn play_sound_file(
     info!("Attempting to play sound file: {}", file_path);
 
     // Check if sound is enabled
-    let sound_enabled = state.sound_enabled.lock()
-        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
-        .clone();
+    let sound_enabled = state.get_sound_enabled()
+        .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
 
     if !sound_enabled {
         info!("Sound is disabled, skipping playback of {}", file_path);
@@ -334,11 +332,8 @@ pub async fn set_sound_enabled(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update state for backward compatibility
-    {
-        let mut sound_enabled = state.sound_enabled.lock()
-            .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
-        *sound_enabled = enabled;
-    }
+    state.set_sound_enabled(enabled)
+        .map_err(|e| format!("Failed to set sound_enabled: {}", e))?;
 
     info!("Sound effects set to: {}", enabled);
     Ok(())
@@ -357,11 +352,8 @@ pub async fn get_sound_enabled(
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Sync with state for backward compatibility
-    {
-        let mut sound_enabled = state.sound_enabled.lock()
-            .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
-        *sound_enabled = audio_settings.sound_enabled;
-    }
+    state.set_sound_enabled(audio_settings.sound_enabled)
+        .map_err(|e| format!("Failed to set sound_enabled: {}", e))?;
 
     info!("Current sound enabled setting: {}", audio_settings.sound_enabled);
     Ok(audio_settings.sound_enabled)
