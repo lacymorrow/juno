@@ -7,386 +7,950 @@ use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
 use serde_json::{json, Value};
-use std::sync::Arc;
 use tauri::Manager;
-use tracing::info;
+use tracing::{info, warn, error};
+use std::fs;
+use std::path::{Path, PathBuf};
 
-/// Main computer tool execution function
+// --- Security and Validation Helpers ---
+
+/// Security configuration for text editor operations
+struct SecurityConfig {
+    max_file_size: usize,
+    allowed_extensions: Vec<&'static str>,
+    allow_absolute_paths: bool,
+}
+
+impl SecurityConfig {
+    fn default() -> Self {
+        Self {
+            max_file_size: 10 * 1024 * 1024, // 10MB in production
+            allowed_extensions: vec![
+                "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
+                "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
+                "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala"
+            ],
+            allow_absolute_paths: false,
+        }
+    }
+
+    fn development_mode() -> Self {
+        Self {
+            max_file_size: 50 * 1024 * 1024, // 50MB in development
+            allowed_extensions: vec![
+                "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
+                "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
+                "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala",
+                "log", "out", "err", "tmp"
+            ],
+            allow_absolute_paths: true,
+        }
+    }
+}
+
+/// Validates file path for security concerns
+fn validate_file_path(path: &str, config: &SecurityConfig) -> Result<PathBuf, String> {
+    // Check for path traversal attempts
+    if path.contains("../") || path.contains("..\\") {
+        return Err("Path traversal not allowed".to_string());
+    }
+
+    // Check for home directory access (unless allowed)
+    if path.starts_with("~/") && !config.allow_absolute_paths {
+        return Err("Home directory access not allowed".to_string());
+    }
+
+    let path_buf = PathBuf::from(path);
+
+    // Validate file extension if it's a file
+    if let Some(extension) = path_buf.extension() {
+        let ext_str = extension.to_string_lossy().to_lowercase();
+        if !config.allowed_extensions.contains(&ext_str.as_str()) {
+            return Err(format!("File extension '{}' not allowed", ext_str));
+        }
+    }
+
+    Ok(path_buf)
+}
+
+/// Validates file size against security limits
+fn validate_file_size(path: &Path, config: &SecurityConfig) -> Result<(), String> {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            let size = metadata.len() as usize;
+            if size > config.max_file_size {
+                return Err(format!("File size {} bytes exceeds limit of {} bytes",
+                    size, config.max_file_size));
+            }
+            Ok(())
+        }
+        Err(_) => Ok(()), // File doesn't exist yet, that's fine
+    }
+}
+
+/// Adds line numbers to file content for display
+fn add_line_numbers(content: &str) -> String {
+    content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", i + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Extracts specific line range from content
+fn extract_line_range(content: &str, start_line: usize, end_line: Option<usize>) -> Result<String, String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    if start_line == 0 {
+        return Err("Line numbers are 1-indexed, start_line cannot be 0".to_string());
+    }
+
+    let start_idx = start_line - 1; // Convert to 0-indexed
+    if start_idx >= total_lines {
+        return Err(format!("Start line {} exceeds file length of {} lines", start_line, total_lines));
+    }
+
+    let end_idx = match end_line {
+        Some(end) if end == 0 => return Err("Line numbers are 1-indexed, end_line cannot be 0".to_string()),
+        Some(end) => {
+            let end_idx = end;
+            if end_idx > total_lines {
+                return Err(format!("End line {} exceeds file length of {} lines", end_idx, total_lines));
+            }
+            end_idx
+        }
+        None => total_lines, // None means end of file
+    };
+
+    if start_idx >= end_idx {
+        return Err("Start line must be less than end line".to_string());
+    }
+
+    let selected_lines = &lines[start_idx..end_idx];
+    let numbered_content = selected_lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {}", start_idx + i + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(numbered_content)
+}
+
+/// Preserves original line ending style when writing files
+fn detect_line_ending(content: &str) -> &'static str {
+    if content.contains("\r\n") {
+        "\r\n"
+    } else if content.contains('\n') {
+        "\n"
+    } else {
+        "\n" // Default to LF for new files
+    }
+}
+
+// --- Main computer tool execution function ---
+
+/// Execute computer tool
 pub async fn execute_computer_tool(
     app_handle: &tauri::AppHandle,
-    tool_call: &crate::agent::core::ToolCall,
+    input: Value,
 ) -> Result<Value, String> {
-    let state_manager = app_handle.state::<AppState>();
-    let input = &tool_call.input;
-
     let action = input["action"].as_str()
         .ok_or_else(|| "Missing 'action' parameter".to_string())?;
 
-    // Permission validation
-    match action {
-        "screenshot" => validate_permission(app_handle, RequiredPermission::ScreenRecording, "computer/screenshot").await.map_err(|e| e.to_string())?,
-        "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" | "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" | "scroll" | "cursor_position" => {
-            validate_permission(app_handle, RequiredPermission::Accessibility, &format!("computer/{}", action)).await.map_err(|e| e.to_string())?;
-        }
-        "wait" => {}
-        _ => return Err(format!("Unknown action: {}", action)),
-    }
+    let state_manager = app_handle.state::<AppState>();
 
-    // Execute action
+    // Add permission validation for sensitive operations
     match action {
         "screenshot" => {
-            crate::commands::core::capture_screenshot_command(app_handle.clone()).await
-                .map(|base64| json!(base64))
-        },
-        "cursor_position" => {
-            match state_manager.desktop.cursor_position() {
-                Ok((x, y)) => Ok(json!([x, y])),
-                Err(e) => Err(format!("Cursor position failed: {}", e)),
+            // Validate screen recording permission
+            validate_permission(
+                app_handle,
+                RequiredPermission::ScreenRecording,
+                "computer (screenshot)"
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+
+            let screenshot_path = crate::commands::core::capture_screenshot_command(
+                app_handle.clone(),
+            ).await.map_err(|e| format!("Screenshot failed: {}", e))?;
+
+            Ok(json!({
+                "base64_image": screenshot_path
+            }))
+        }
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
+            // Validate accessibility permission for mouse operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                &format!("computer ({})", action)
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+
+            match action {
+                "left_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::left_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Left click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "right_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::right_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Right click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "middle_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::middle_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Middle click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "double_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::double_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Double click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "triple_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::triple_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Triple click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_click_drag" => {
+                    // Support both old and new parameter formats for backward compatibility
+                    let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
+                        // Old format: start_coordinate + coordinate (end)
+                        let coordinate = input["coordinate"].as_array()
+                            .ok_or_else(|| "Missing 'coordinate' (end) parameter for drag operation".to_string())?;
+
+                        let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                        let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                        let end_x = coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                        let end_y = coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
+
+                        (start_x, start_y, end_x, end_y)
+                    } else if let Some(coordinate) = input["coordinate"].as_array() {
+                        // New format: coordinate (start) + end_coordinate
+                        let end_coordinate = input["end_coordinate"].as_array()
+                            .ok_or_else(|| "Missing 'end_coordinate' parameter for drag operation".to_string())?;
+
+                        let start_x = coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                        let start_y = coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                        let end_x = end_coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                        let end_y = end_coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
+
+                        (start_x, start_y, end_x, end_y)
+                    } else {
+                        return Err("Missing coordinate parameters for drag operation. Use either 'start_coordinate' + 'coordinate' or 'coordinate' + 'end_coordinate'".to_string());
+                    };
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
+                    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
+                    crate::commands::mouse::left_click_drag(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_start_x,
+                        screen_start_y,
+                        screen_end_x,
+                        screen_end_y,
+                    ).await.map_err(|e| format!("Left click drag failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "mouse_move" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::mouse_move(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Mouse move failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_mouse_down" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::left_mouse_down(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Left mouse down failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_mouse_up" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::left_mouse_up(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Left mouse up failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                _ => unreachable!("Mouse action already matched in outer pattern")
             }
         }
-        "mouse_move" => {
-            let coord = input["coordinate"].as_array().ok_or("Missing coordinate")?;
-            let screenshot_x = coord[0].as_f64().ok_or("Invalid x")?;
-            let screenshot_y = coord[1].as_f64().ok_or("Invalid y")?;
+        "key" | "hold_key" | "type" => {
+            // Validate accessibility permission for keyboard operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                &format!("computer ({})", action)
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            // Transform screenshot coordinates to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+            match action {
+                "key" => {
+                    // Support both 'key' and 'text' parameters for backward compatibility
+                    let key = input["key"].as_str()
+                        .or_else(|| input["text"].as_str()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
 
-            crate::commands::mouse::mouse_move(app_handle.clone(), app_handle.state(), screen_x, screen_y).await
-                .map(|_| json!({"success": true, "action": "mouse_move", "coordinate": [screenshot_x, screenshot_y], "screen_coordinate": [screen_x, screen_y]}))
-                .map_err(|e| format!("Mouse move failed: {}", e))
-        }
-        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
-            let coord = input["coordinate"].as_array().ok_or("Missing coordinate")?;
-            let screenshot_x = coord[0].as_f64().ok_or("Invalid x")?;
-            let screenshot_y = coord[1].as_f64().ok_or("Invalid y")?;
+                    crate::commands::keyboard::press_key(
+                        key.to_string(),
+                        None, // modifier
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Key press failed: {}", e))?;
 
-            // Transform screenshot coordinates to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "hold_key" => {
+                    // Support both 'key' and 'text' parameters for backward compatibility
+                    let key = input["key"].as_str()
+                        .or_else(|| input["text"].as_str()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
 
-            let result = match action {
-                "left_click" => crate::commands::mouse::left_click(app_handle.clone(), app_handle.state(), screen_x, screen_y, None).await,
-                "right_click" => crate::commands::mouse::right_click(app_handle.clone(), app_handle.state(), screen_x, screen_y, None).await,
-                "middle_click" => crate::commands::mouse::middle_click(app_handle.clone(), app_handle.state(), screen_x, screen_y, None).await,
-                "double_click" => crate::commands::mouse::double_click(app_handle.clone(), app_handle.state(), screen_x, screen_y, None).await,
-                "triple_click" => crate::commands::mouse::triple_click(app_handle.clone(), app_handle.state(), screen_x, screen_y, None).await,
-                _ => return Err(format!("Unsupported click action: {}", action)),
-            };
+                    // Support both 'duration_ms' and 'duration' parameters for backward compatibility
+                    let duration_ms = input["duration_ms"].as_u64()
+                        .or_else(|| input["duration"].as_u64()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'duration_ms' or 'duration' parameter".to_string())?;
 
-            result.map(|_| json!({"success": true, "action": action, "coordinate": [screenshot_x, screenshot_y], "screen_coordinate": [screen_x, screen_y]}))
-                  .map_err(|e| format!("{} failed: {}", action, e))
-        }
-        "left_click_drag" => {
-            let start = input["start_coordinate"].as_array().ok_or("Missing start_coordinate")?;
-            let end = input["coordinate"].as_array().ok_or("Missing coordinate")?;
-            let start_screenshot_x = start[0].as_f64().ok_or("Invalid start x")?;
-            let start_screenshot_y = start[1].as_f64().ok_or("Invalid start y")?;
-            let end_screenshot_x = end[0].as_f64().ok_or("Invalid end x")?;
-            let end_screenshot_y = end[1].as_f64().ok_or("Invalid end y")?;
+                    crate::commands::keyboard::hold_key(
+                        key.to_string(),
+                        Some(duration_ms),
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Hold key failed: {}", e))?;
 
-            // Transform screenshot coordinates to screen coordinates
-            let (start_screen_x, start_screen_y) = coordinates::transform_to_screen_coordinates(start_screenshot_x, start_screenshot_y);
-            let (end_screen_x, end_screen_y) = coordinates::transform_to_screen_coordinates(end_screenshot_x, end_screenshot_y);
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "type" => {
+                    let text = input["text"].as_str()
+                        .ok_or_else(|| "Missing 'text' parameter".to_string())?;
 
-            crate::commands::mouse::left_click_drag(app_handle.clone(), app_handle.state(), start_screen_x, start_screen_y, end_screen_x, end_screen_y).await
-                .map(|_| json!({"success": true, "action": "left_click_drag", "start_coordinate": [start_screenshot_x, start_screenshot_y], "end_coordinate": [end_screenshot_x, end_screenshot_y], "start_screen_coordinate": [start_screen_x, start_screen_y], "end_screen_coordinate": [end_screen_x, end_screen_y]}))
-                .map_err(|e| format!("Drag failed: {}", e))
-        }
-        "left_mouse_down" | "left_mouse_up" => {
-            let coord = input["coordinate"].as_array().ok_or("Missing coordinate")?;
-            let screenshot_x = coord[0].as_f64().ok_or("Invalid x")?;
-            let screenshot_y = coord[1].as_f64().ok_or("Invalid y")?;
+                    crate::commands::keyboard::type_text(
+                        text.to_string(),
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Type text failed: {}", e))?;
 
-            // Transform screenshot coordinates to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
-
-            let result = match action {
-                "left_mouse_down" => crate::commands::mouse::left_mouse_down(app_handle.clone(), app_handle.state(), screen_x, screen_y).await,
-                "left_mouse_up" => crate::commands::mouse::left_mouse_up(app_handle.clone(), app_handle.state(), screen_x, screen_y).await,
-                _ => return Err(format!("Unsupported mouse action: {}", action)),
-            };
-
-            result.map(|_| json!({"success": true, "action": action, "coordinate": [screenshot_x, screenshot_y], "screen_coordinate": [screen_x, screen_y]}))
-                  .map_err(|e| format!("{} failed: {}", action, e))
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                _ => unreachable!("Keyboard action already matched in outer pattern")
+            }
         }
         "scroll" => {
-            let coord = input["coordinate"].as_array().ok_or("Missing coordinate")?;
-            let direction = input["scroll_direction"].as_str().ok_or("Missing scroll_direction")?;
-            let amount = input["scroll_amount"].as_i64().unwrap_or(3) as f64;
-            let screenshot_x = coord[0].as_f64().ok_or("Invalid x")?;
-            let screenshot_y = coord[1].as_f64().ok_or("Invalid y")?;
+            // Validate accessibility permission for scroll operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                "computer (scroll)"
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            // Transform screenshot coordinates to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+            let coordinate = input["coordinate"].as_array()
+                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+            let x = coordinate.get(0).and_then(|v| v.as_f64())
+                .ok_or_else(|| "Invalid x coordinate".to_string())?;
+            let y = coordinate.get(1).and_then(|v| v.as_f64())
+                .ok_or_else(|| "Invalid y coordinate".to_string())?;
 
-            // Use the correct function signature: scroll_window(direction, amount, x, y, app_handle, state)
-            crate::commands::window::scroll_window(direction.to_string(), amount, Some(screen_x), Some(screen_y), app_handle.clone(), app_handle.state()).await
-                .map(|_| json!({"success": true, "action": "scroll", "coordinate": [screenshot_x, screenshot_y], "screen_coordinate": [screen_x, screen_y], "direction": direction, "amount": amount}))
-                .map_err(|e| format!("Scroll failed: {}", e))
+            let scroll_direction = input["scroll_direction"].as_str()
+                .ok_or_else(|| "Missing 'scroll_direction' parameter".to_string())?;
+            let scroll_clicks = input["scroll_clicks"].as_u64().unwrap_or(3);
+
+            // Transform coordinates from scaled screenshot to screen coordinates
+            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+            crate::commands::window::scroll_window(
+                scroll_direction.to_string(),
+                scroll_clicks as f64,
+                Some(screen_x),
+                Some(screen_y),
+                app_handle.clone(),
+                state_manager,
+            ).await.map_err(|e| format!("Scroll failed: {}", e))?;
+
+            Ok(json!({
+                "success": true
+            }))
         }
-        "type" => {
-            let text = input["text"].as_str().ok_or("Missing text")?;
-            crate::commands::keyboard::global_type_text(text.to_string(), app_handle.clone(), app_handle.state()).await
-                .map(|_| json!({"success": true, "action": "type", "text": text}))
-                .map_err(|e| format!("Type failed: {}", e))
-        }
-        "key" => {
-            let key = input["text"].as_str().ok_or("Missing text for key")?;
-            crate::commands::keyboard::press_key(key.to_string(), None, app_handle.clone(), app_handle.state()).await
-                .map(|_| json!({"success": true, "action": "key", "key": key}))
-                .map_err(|e| format!("Key failed: {}", e))
-        }
-        "hold_key" => {
-            let key = input["text"].as_str().ok_or("Missing text for hold_key")?;
-            let duration = input["duration"].as_u64().unwrap_or(1000); // Default to 1000ms
-            crate::commands::keyboard::hold_key(key.to_string(), Some(duration), app_handle.clone(), app_handle.state()).await
-                .map(|_| json!({"success": true, "action": "hold_key", "key": key, "duration": duration}))
-                .map_err(|e| format!("Hold key failed: {}", e))
+        "cursor_position" => {
+            // No permission validation needed for cursor position query
+            let (x, y) = crate::commands::mouse::get_cursor_position(
+                app_handle.clone(),
+                state_manager,
+            ).await.map_err(|e| format!("Get cursor position failed: {}", e))?;
+
+            Ok(json!({
+                "coordinate": [x, y]
+            }))
         }
         "wait" => {
-            let duration = input["duration"].as_u64().unwrap_or(1);
-            tokio::time::sleep(std::time::Duration::from_secs(duration)).await;
-            Ok(json!({"success": true, "action": "wait", "duration": duration}))
+            // No permission validation needed for wait operation
+            // Support both 'seconds' and 'duration' parameters for backward compatibility
+            let seconds = input["seconds"].as_f64()
+                .or_else(|| input["duration"].as_f64()) // Backward compatibility
+                .ok_or_else(|| "Missing 'seconds' or 'duration' parameter".to_string())?;
+
+            crate::commands::core::wait(
+                seconds,
+                app_handle.clone(),
+                state_manager,
+            ).await.map_err(|e| format!("Wait failed: {}", e))?;
+
+            Ok(json!({
+                "success": true
+            }))
         }
         _ => Err(format!("Unknown action: {}", action)),
     }
 }
 
-/// Execute bash command tool
+/// Execute bash tool
 pub async fn execute_bash_tool(
     app_handle: &tauri::AppHandle,
-    tool_call: &crate::agent::core::ToolCall,
+    input: Value,
 ) -> Result<Value, String> {
-    let input = &tool_call.input;
     let command = input["command"].as_str()
         .ok_or_else(|| "Missing 'command' parameter".to_string())?;
 
-    let timeout = input["timeout"].as_u64();
-    let working_dir = input["working_dir"].as_str().map(|s| s.to_string());
+    let state_manager = app_handle.state::<AppState>();
 
-    // Execute bash command using existing implementation
-    crate::commands::shell::bash_command(
+    // Use the bash command execution
+    let result = crate::commands::shell::bash_command(
         app_handle.clone(),
-        app_handle.state(),
+        state_manager,
         command.to_string(),
-        timeout,
+        None, // timeout_seconds
         None, // restart
-        Some(false), // debug_mode
-    )
-    .await
-    .map(|output| json!({"success": true, "output": output}))
-    .map_err(|e| format!("Bash command failed: {}", e))
+        None, // debug_mode
+    ).await.map_err(|e| format!("Bash command failed: {}", e))?;
+
+    // Log the raw result for debugging
+    info!("Raw bash_command result: {}", result);
+
+    // The bash_command function returns a JSON string containing stdout, stderr, exit_code, etc.
+    // We need to parse this JSON to extract the specific fields we want to return
+    let result_json: Value = serde_json::from_str(&result)
+        .map_err(|e| {
+            // If JSON parsing fails, provide detailed error information
+            error!("Failed to parse bash_command result as JSON. Error: {}, Raw result: '{}'", e, result);
+            format!("Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'", e, result)
+        })?;
+
+    // Extract stdout and exit_code from the parsed JSON with better error handling
+    let stdout = result_json.get("stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            warn!("Missing or invalid 'stdout' field in bash command result: {}", result_json);
+            ""
+        });
+
+    let exit_code = result_json.get("exit_code")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| {
+            warn!("Missing or invalid 'exit_code' field in bash command result: {}", result_json);
+            -1
+        });
+
+    // Also extract stderr for completeness (even though we don't return it in the final result)
+    let stderr = result_json.get("stderr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let success = result_json.get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(exit_code == 0);
+
+    info!("Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}",
+          stdout, stderr, exit_code, success);
+
+    // Return the result in the format expected by the Anthropic Computer Use API
+    Ok(json!({
+        "output": stdout,
+        "exit_code": exit_code
+    }))
 }
 
 /// Execute str_replace_based_edit_tool
 pub async fn execute_str_replace_tool(
-    app_handle: &tauri::AppHandle,
-    tool_call: &crate::agent::core::ToolCall,
+    _app_handle: &tauri::AppHandle,
+    input: Value,
 ) -> Result<Value, String> {
-    let input = &tool_call.input;
     let command = input["command"].as_str()
         .ok_or_else(|| "Missing 'command' parameter".to_string())?;
 
+    let path = input["path"].as_str()
+        .ok_or_else(|| "Missing 'path' parameter".to_string())?;
+
+    // Get security config based on debug mode
+    let config = if cfg!(debug_assertions) {
+        SecurityConfig::development_mode()
+    } else {
+        SecurityConfig::default()
+    };
+
     match command {
         "view" => {
-            let path = input["path"].as_str()
-                .ok_or_else(|| "Missing 'path' parameter for view command".to_string())?;
+            // Validate file path
+            let file_path = validate_file_path(path, &config)?;
+            validate_file_size(&file_path, &config)?;
 
-            crate::commands::text_editor::text_editor_view(path.to_string())
-                .await
-                .map(|content| json!({"success": true, "content": content}))
-                .map_err(|e| format!("View failed: {}", e))
-        }
-        "create" => {
-            let path = input["path"].as_str()
-                .ok_or_else(|| "Missing 'path' parameter for create command".to_string())?;
-            let file_text = input["file_text"].as_str()
-                .ok_or_else(|| "Missing 'file_text' parameter for create command".to_string())?;
+            // Handle view_range if provided
+            if let (Some(start), end) = (
+                input["view_range"].as_array().and_then(|arr| arr.get(0)).and_then(|v| v.as_u64()),
+                input["view_range"].as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_u64())
+            ) {
+                let start_line = start as usize;
+                let end_line = end.map(|e| e as usize);
 
-            crate::commands::text_editor::text_editor_create(path.to_string(), file_text.to_string(), app_handle.state(), app_handle.clone())
-                .await
-                .map(|_| json!({"success": true, "message": "File created successfully"}))
-                .map_err(|e| format!("Create failed: {}", e))
+                // Read file content
+                let content = fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+
+                let range_content = extract_line_range(&content, start_line, end_line)?;
+
+                Ok(json!({
+                    "content": range_content,
+                    "view_range": [start_line, end_line.unwrap_or(content.lines().count())]
+                }))
+            } else {
+                // Read entire file
+                let content = fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+
+                let numbered_content = add_line_numbers(&content);
+
+                Ok(json!({
+                    "content": numbered_content
+                }))
+            }
         }
         "str_replace" => {
-            let path = input["path"].as_str()
-                .ok_or_else(|| "Missing 'path' parameter for str_replace command".to_string())?;
             let old_str = input["old_str"].as_str()
-                .ok_or_else(|| "Missing 'old_str' parameter for str_replace command".to_string())?;
-            let new_str = input["new_str"].as_str().unwrap_or("");
+                .ok_or_else(|| "Missing 'old_str' parameter".to_string())?;
+            let new_str = input["new_str"].as_str()
+                .ok_or_else(|| "Missing 'new_str' parameter".to_string())?;
 
-            crate::commands::text_editor::text_editor_str_replace(path.to_string(), old_str.to_string(), new_str.to_string(), app_handle.state(), app_handle.clone())
-                .await
-                .map(|_| json!({"success": true, "message": "String replacement completed"}))
-                .map_err(|e| format!("String replace failed: {}", e))
+            // Validate file path
+            let file_path = validate_file_path(path, &config)?;
+            validate_file_size(&file_path, &config)?;
+
+            // Read file content
+            let content = fs::read_to_string(&file_path)
+                .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+
+            // Check if old_str exists in file
+            if !content.contains(old_str) {
+                return Err(format!("String '{}' not found in file '{}'", old_str, path));
+            }
+
+            // Detect original line ending style
+            let original_line_ending = detect_line_ending(&content);
+
+            // Normalize the replacement text to match the original file's line ending style
+            let normalized_new_str = if original_line_ending == "\r\n" {
+                // If original uses CRLF, normalize replacement text to use CRLF
+                new_str.replace("\r\n", "\n").replace('\n', "\r\n")
+            } else {
+                // If original uses LF, normalize replacement text to use LF
+                new_str.replace("\r\n", "\n")
+            };
+
+            // Perform replacement with normalized replacement text
+            let new_content = content.replace(old_str, &normalized_new_str);
+
+            // Write back to file
+            fs::write(&file_path, &new_content)
+                .map_err(|e| format!("Failed to write file '{}': {}", path, e))?;
+
+            Ok(json!({
+                "success": true,
+                "message": format!("Successfully replaced text in '{}'", path)
+            }))
+        }
+        "create" => {
+            let file_content = input["file_text"].as_str()
+                .ok_or_else(|| "Missing 'file_text' parameter".to_string())?;
+
+            // Validate file path
+            let file_path = validate_file_path(path, &config)?;
+
+            // Check if file already exists
+            if file_path.exists() {
+                return Err(format!("File '{}' already exists", path));
+            }
+
+            // Create parent directories if they don't exist
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directories for '{}': {}", path, e))?;
+            }
+
+            // Write file
+            fs::write(&file_path, file_content)
+                .map_err(|e| format!("Failed to create file '{}': {}", path, e))?;
+
+            Ok(json!({
+                "success": true,
+                "message": format!("Successfully created file '{}'", path)
+            }))
         }
         _ => Err(format!("Unknown str_replace_based_edit_tool command: {}", command)),
     }
 }
 
-/// Register all official Anthropic Computer Use tools with the tool provider
+/// Register all Anthropic Computer Use tools with the provider
 pub async fn register_anthropic_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    // === COMPUTER TOOL ===
-    let computer_tool_def = ToolDefinition {
+    info!("Registering official Anthropic Computer Use tools...");
+
+    // Computer tool - main screen interaction tool
+    let computer_tool = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use a computer like a human to interact with applications, take screenshots, click, type, and navigate. This is the official Anthropic Computer Use tool.".to_string(),
+        description: "Use a computer to complete tasks. This tool gives you access to interact with any desktop application using the mouse and keyboard, take screenshots, and perform various system operations.
+
+The computer tool accepts these actions:
+- screenshot: Take a screenshot of the current screen
+- left_click: Click at coordinates with left mouse button
+- right_click: Click at coordinates with right mouse button
+- middle_click: Click at coordinates with middle mouse button
+- double_click: Double-click at coordinates
+- triple_click: Triple-click at coordinates
+- left_click_drag: Drag from start coordinates to end coordinates
+- mouse_move: Move mouse to coordinates
+- left_mouse_down: Press and hold left mouse button at coordinates
+- left_mouse_up: Release left mouse button at coordinates
+- key: Press a key (supports modifiers like 'cmd+c', 'ctrl+v', etc.)
+- hold_key: Hold a key for specified duration in milliseconds
+- type: Type text at current cursor position
+- scroll: Scroll at coordinates in specified direction
+- cursor_position: Get current mouse cursor position
+- wait: Wait for specified number of seconds
+
+Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "type", "key", "hold_key", "scroll", "wait", "cursor_position"],
-                    "description": "The action to perform."
+                    "description": "The action to perform",
+                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
                 },
                 "coordinate": {
                     "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Array of [x, y] coordinates for click, mouse actions, and end position of drag actions."
+                    "description": "The [x, y] coordinate for mouse actions. For drag operations, this can be either start coordinate (with end_coordinate) or end coordinate (with start_coordinate)",
+                    "items": {"type": "number"}
                 },
                 "start_coordinate": {
                     "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Array of [x, y] start coordinates for drag actions."
+                    "description": "The start [x, y] coordinate for drag actions (backward compatibility)",
+                    "items": {"type": "number"}
+                },
+                "end_coordinate": {
+                    "type": "array",
+                    "description": "The end [x, y] coordinate for drag actions",
+                    "items": {"type": "number"}
+                },
+                "key": {
+                    "type": "string",
+                    "description": "The key to press (supports modifiers like 'cmd+c'). Preferred parameter name."
                 },
                 "text": {
                     "type": "string",
-                    "description": "Text to type or key combination to press."
+                    "description": "Text to type, or key to press (backward compatibility for key action)"
                 },
-                "scroll_direction": {
-                    "type": "string",
-                    "enum": ["up", "down", "left", "right"],
-                    "description": "Direction to scroll."
-                },
-                "scroll_amount": {
+                "duration_ms": {
                     "type": "number",
-                    "description": "Amount to scroll (default: 3)."
+                    "description": "Duration in milliseconds for hold_key action. Preferred parameter name."
                 },
                 "duration": {
                     "type": "number",
-                    "description": "Duration in milliseconds for wait or hold_key actions."
+                    "description": "Duration in milliseconds for hold_key action, or seconds for wait action (backward compatibility)"
+                },
+                "scroll_direction": {
+                    "type": "string",
+                    "description": "Direction to scroll: 'up', 'down', 'left', 'right'"
+                },
+                "scroll_clicks": {
+                    "type": "number",
+                    "description": "Number of scroll clicks (default: 3)"
+                },
+                "seconds": {
+                    "type": "number",
+                    "description": "Number of seconds to wait. Preferred parameter name."
                 }
             },
             "required": ["action"]
         }),
     };
 
-    let app_handle_clone = Arc::new(app_handle.clone());
-    let computer_tool_exec = {
-        let app_handle_clone = app_handle_clone.clone();
-        move |input: Value| {
-            let app = (*app_handle_clone).clone();
-            async move {
-                let tool_call = crate::agent::core::ToolCall {
-                    id: "computer_tool".to_string(),
-                    name: "computer".to_string(),
-                    input,
-                };
-                // FIX: Call the execution function directly instead of recursively calling execute_computer_tool
-                // This eliminates the infinite recursion bug
-                execute_computer_tool(&app, &tool_call).await
-            }
-        }
-    };
-
-    provider.register_async_tool(computer_tool_def, computer_tool_exec).await;
-
-    // === BASH TOOL ===
-    let bash_tool_def = ToolDefinition {
+    // Bash tool - command execution
+    let bash_tool = ToolDefinition {
         name: "bash".to_string(),
-        description: "Execute bash commands in the terminal. Use this for system operations, file management, and running scripts.".to_string(),
+        description: "Execute bash commands on the system. Use this tool to run shell commands, scripts, and interact with the command line.
+
+The tool accepts a 'command' parameter with the bash command to execute.
+Returns the command output and exit code.
+
+Example usage:
+- List files: {\"command\": \"ls -la\"}
+- Check system info: {\"command\": \"uname -a\"}
+- Run scripts: {\"command\": \"./script.sh\"}".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The bash command to execute."
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Optional timeout in seconds (default: 30)."
-                },
-                "working_dir": {
-                    "type": "string",
-                    "description": "Optional working directory for the command."
+                    "description": "The bash command to execute"
                 }
             },
             "required": ["command"]
         }),
     };
 
-    let app_handle_clone = Arc::new(app_handle.clone());
-    let bash_tool_exec = {
-        let app_handle_clone = app_handle_clone.clone();
-        move |input: Value| {
-            let app = (*app_handle_clone).clone();
-            async move {
-                let tool_call = crate::agent::core::ToolCall {
-                    id: "bash_tool".to_string(),
-                    name: "bash".to_string(),
-                    input,
-                };
-                execute_bash_tool(&app, &tool_call).await
-            }
-        }
-    };
-
-    provider.register_async_tool(bash_tool_def, bash_tool_exec).await;
-
-    // === STR_REPLACE_BASED_EDIT_TOOL ===
-    let str_replace_tool_def = ToolDefinition {
+    // String replacement based edit tool
+    let str_replace_tool = ToolDefinition {
         name: "str_replace_based_edit_tool".to_string(),
-        description: "A tool for viewing, creating and editing files based on string replacement. Use this for precise text editing operations.".to_string(),
+        description: "Edit files using string replacement operations. This tool provides safe file editing capabilities with security validation.
+
+Supports these commands:
+- view: Read file content with optional line range
+- str_replace: Replace exact string matches in files
+- create: Create new files with specified content
+
+The tool includes security features:
+- Path traversal protection
+- File extension validation
+- File size limits
+- Safe file operations
+
+Example usage:
+- View file: {\"command\": \"view\", \"path\": \"file.txt\"}
+- View range: {\"command\": \"view\", \"path\": \"file.txt\", \"view_range\": [1, 10]}
+- Replace text: {\"command\": \"str_replace\", \"path\": \"file.txt\", \"old_str\": \"old text\", \"new_str\": \"new text\"}
+- Create file: {\"command\": \"create\", \"path\": \"new_file.txt\", \"file_text\": \"content\"}".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "enum": ["view", "create", "str_replace"],
-                    "description": "The command to execute: view (read file), create (create new file), str_replace (replace string in file)."
+                    "description": "The operation to perform",
+                    "enum": ["view", "str_replace", "create"]
                 },
                 "path": {
                     "type": "string",
-                    "description": "The file path for the operation."
+                    "description": "Path to the file"
                 },
-                "file_text": {
-                    "type": "string",
-                    "description": "The complete text content for create command."
+                "view_range": {
+                    "type": "array",
+                    "description": "Optional [start_line, end_line] for view command",
+                    "items": {"type": "number"}
                 },
                 "old_str": {
                     "type": "string",
-                    "description": "The string to find and replace (for str_replace command)."
+                    "description": "String to replace (for str_replace command)"
                 },
                 "new_str": {
                     "type": "string",
-                    "description": "The replacement string (for str_replace command)."
+                    "description": "Replacement string (for str_replace command)"
+                },
+                "file_text": {
+                    "type": "string",
+                    "description": "Content for new file (for create command)"
                 }
             },
             "required": ["command", "path"]
         }),
     };
 
-    let app_handle_clone = Arc::new(app_handle.clone());
-    let str_replace_tool_exec = {
-        let app_handle_clone = app_handle_clone.clone();
+    // Register all tools with the provider using the correct method
+    provider.register_async_tool(computer_tool, {
+        let handle = app_handle.clone();
         move |input: Value| {
-            let app = (*app_handle_clone).clone();
+            let handle = handle.clone();
             async move {
-                let tool_call = crate::agent::core::ToolCall {
-                    id: "str_replace_tool".to_string(),
-                    name: "str_replace_based_edit_tool".to_string(),
-                    input,
-                };
-                execute_str_replace_tool(&app, &tool_call).await
+                execute_computer_tool(&handle, input).await
             }
         }
-    };
+    }).await;
 
-    provider.register_async_tool(str_replace_tool_def, str_replace_tool_exec).await;
+    provider.register_async_tool(bash_tool, {
+        let handle = app_handle.clone();
+        move |input: Value| {
+            let handle = handle.clone();
+            async move {
+                execute_bash_tool(&handle, input).await
+            }
+        }
+    }).await;
 
-    info!("Successfully registered complete Anthropic Computer Use tools: computer, bash, str_replace_based_edit_tool");
+    provider.register_async_tool(str_replace_tool, {
+        let handle = app_handle.clone();
+        move |input: Value| {
+            let handle = handle.clone();
+            async move {
+                execute_str_replace_tool(&handle, input).await
+            }
+        }
+    }).await;
+
+    info!("Successfully registered 3 official Anthropic Computer Use tools");
     Ok(())
 }
 
