@@ -154,17 +154,19 @@ pub async fn load_audio_settings_from_centralized_settings(
     // This prevents empty/uninitialized centralized settings from overriding correct AppState defaults
     // Note: "off" is a valid user preference for disabling TTS and should be honored
     let should_update_centralized_settings = {
-        let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
+        let current_tts_provider = state.get_tts_provider()
+            .map_err(|e| format!("Failed to get TTS provider: {}", e))?;
         if !audio_settings.tts_provider.is_empty() {
             tracing::info!("Loading TTS provider from centralized settings: {}", audio_settings.tts_provider);
-            *tts_provider = audio_settings.tts_provider.clone();
+            state.set_tts_provider(audio_settings.tts_provider.clone())
+                .map_err(|e| format!("Failed to set TTS provider: {}", e))?;
             None // No need to update centralized settings
         } else {
             tracing::warn!("Centralized settings TTS provider is empty ('{}'), keeping AppState default: {}",
-                audio_settings.tts_provider, &*tts_provider);
+                audio_settings.tts_provider, current_tts_provider);
 
             // Return the current valid AppState value for updating centralized settings
-            Some(tts_provider.clone())
+            Some(current_tts_provider)
         }
     };
 
@@ -180,17 +182,9 @@ pub async fn load_audio_settings_from_centralized_settings(
         }
     }
 
-    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
-        *always_listening_active = audio_settings.always_listening_active;
-    }
-
-    if let Ok(mut always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
-        *always_listening_sensitivity = audio_settings.always_listening_sensitivity;
-    }
-
-    if let Ok(mut always_listening_wake_words) = state.always_listening_wake_words.lock() {
-        *always_listening_wake_words = audio_settings.always_listening_wake_words;
-    }
+    let _ = state.set_always_listening_active(audio_settings.always_listening_active);
+    let _ = state.set_always_listening_sensitivity(audio_settings.always_listening_sensitivity);
+    let _ = state.set_always_listening_wake_words(audio_settings.always_listening_wake_words);
 
     tracing::info!("Loaded audio settings from centralized settings into AppState");
     Ok(())
@@ -211,21 +205,20 @@ pub async fn save_audio_settings_to_centralized_settings(
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Update centralized settings with current AppState values
-    // Extract values from AppState locks before any await points
-    if let Ok(tts_provider) = state.tts_provider.lock() {
-        audio_settings.tts_provider = tts_provider.clone();
+    if let Ok(tts_provider) = state.get_tts_provider() {
+        audio_settings.tts_provider = tts_provider;
     }
 
-    if let Ok(always_listening_active) = state.always_listening_active.lock() {
-        audio_settings.always_listening_active = *always_listening_active;
+    if let Ok(always_listening_active) = state.get_always_listening_active() {
+        audio_settings.always_listening_active = always_listening_active;
     }
 
-    if let Ok(always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
-        audio_settings.always_listening_sensitivity = *always_listening_sensitivity;
+    if let Ok(always_listening_sensitivity) = state.get_always_listening_sensitivity() {
+        audio_settings.always_listening_sensitivity = always_listening_sensitivity;
     }
 
-    if let Ok(always_listening_wake_words) = state.always_listening_wake_words.lock() {
-        audio_settings.always_listening_wake_words = always_listening_wake_words.clone();
+    if let Ok(always_listening_wake_words) = state.get_always_listening_wake_words() {
+        audio_settings.always_listening_wake_words = always_listening_wake_words;
     }
 
     // All mutex guards are automatically dropped here before the await
