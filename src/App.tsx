@@ -155,7 +155,6 @@ function App() {
     setActiveModal: appState.setActiveModal,
     setFeedbackData: appState.setFeedbackData,
     startNewChat: conversation.startNewChat,
-    clearConversation: conversation.clearConversation,
     addSystemMessage: conversation.addSystemMessage,
     handleUpdateCheck,
   });
@@ -335,7 +334,6 @@ function App() {
                       onSubmit={handleSubmit}
                       onStop={handleStop}
                       onNewChat={conversation.startNewChat}
-                      onClearConversation={conversation.clearConversation}
                     />
                   </div>
                 )}
