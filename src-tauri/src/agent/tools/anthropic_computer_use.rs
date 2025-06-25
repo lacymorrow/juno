@@ -299,7 +299,7 @@ pub async fn execute_computer_tool(
             tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::commands::mouse::dev_mouse_move(
+                    crate::commands::mouse::mouse_move(
                         app_handle.clone(),
                         app_handle.clone().state(),
                         screen_x,
@@ -332,7 +332,7 @@ pub async fn execute_computer_tool(
             tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::commands::mouse::dev_left_mouse_down(
+                    crate::commands::mouse::left_mouse_down(
                         app_handle.clone(),
                         app_handle.clone().state(),
                         screen_x,
@@ -365,7 +365,7 @@ pub async fn execute_computer_tool(
             tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::commands::mouse::dev_left_mouse_up(
+                    crate::commands::mouse::left_mouse_up(
                         app_handle.clone(),
                         app_handle.clone().state(),
                         screen_x,
@@ -436,7 +436,7 @@ pub async fn execute_computer_tool(
                 tokio::task::block_in_place(|| {
                     let rt = tokio::runtime::Handle::current();
                     rt.block_on(async {
-                        crate::commands::mouse::dev_left_click(
+                        crate::commands::mouse::left_click(
                             app_handle.clone(),
                             app_handle.clone().state(),
                             screen_x,
@@ -527,7 +527,7 @@ pub async fn execute_computer_tool(
                 tokio::task::block_in_place(|| {
                     let rt = tokio::runtime::Handle::current();
                     rt.block_on(async {
-                        crate::commands::mouse::dev_right_click(
+                        crate::commands::mouse::right_click(
                             app_handle.clone(),
                             app_handle.clone().state(),
                             screen_x,
@@ -599,7 +599,7 @@ pub async fn execute_computer_tool(
                 tokio::task::block_in_place(|| {
                     let rt = tokio::runtime::Handle::current();
                     rt.block_on(async {
-                        crate::commands::mouse::dev_middle_click(
+                        crate::commands::mouse::middle_click(
                             app_handle.clone(),
                             app_handle.clone().state(),
                             screen_x,
@@ -671,7 +671,7 @@ pub async fn execute_computer_tool(
                 tokio::task::block_in_place(|| {
                     let rt = tokio::runtime::Handle::current();
                     rt.block_on(async {
-                        crate::commands::mouse::dev_double_click(
+                        crate::commands::mouse::double_click(
                             app_handle.clone(),
                             app_handle.clone().state(),
                             screen_x,
@@ -762,7 +762,7 @@ pub async fn execute_computer_tool(
                 tokio::task::block_in_place(|| {
                     let rt = tokio::runtime::Handle::current();
                     rt.block_on(async {
-                        crate::commands::mouse::dev_triple_click(
+                        crate::commands::mouse::triple_click(
                             app_handle.clone(),
                             app_handle.clone().state(),
                             screen_x,
@@ -837,7 +837,7 @@ pub async fn execute_computer_tool(
             tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::commands::mouse::dev_left_click_drag(
+                    crate::commands::mouse::left_click_drag(
                         app_handle.clone(),
                         app_handle.clone().state(),
                         screen_start_x,
@@ -993,7 +993,7 @@ pub async fn execute_computer_tool(
             tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::commands::mouse::dev_left_click_drag(
+                    crate::commands::mouse::left_click_drag(
                         app_handle.clone(),
                         app_handle.clone().state(),
                         screen_start_x,
@@ -1644,7 +1644,7 @@ pub async fn register_anthropic_computer_use_tools(
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
-                                crate::commands::mouse::dev_mouse_move(
+                                crate::commands::mouse::mouse_move(
                                     app.clone(),
                                     app.clone().state(),
                                     screen_x,
@@ -1677,7 +1677,7 @@ pub async fn register_anthropic_computer_use_tools(
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
-                                crate::commands::mouse::dev_left_mouse_down(
+                                crate::commands::mouse::left_mouse_down(
                                     app.clone(),
                                     app.clone().state(),
                                     screen_x,
@@ -1710,7 +1710,7 @@ pub async fn register_anthropic_computer_use_tools(
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
-                                crate::commands::mouse::dev_left_mouse_up(
+                                crate::commands::mouse::left_mouse_up(
                                     app.clone(),
                                     app.clone().state(),
                                     screen_x,
@@ -1781,7 +1781,7 @@ pub async fn register_anthropic_computer_use_tools(
                             tokio::task::block_in_place(|| {
                                 let rt = tokio::runtime::Handle::current();
                                 rt.block_on(async {
-                                    crate::commands::mouse::dev_left_click(
+                                    crate::commands::mouse::left_click(
                                         app.clone(),
                                         app.clone().state(),
                                         screen_x,
@@ -1872,7 +1872,7 @@ pub async fn register_anthropic_computer_use_tools(
                             tokio::task::block_in_place(|| {
                                 let rt = tokio::runtime::Handle::current();
                                 rt.block_on(async {
-                                    crate::commands::mouse::dev_right_click(
+                                    crate::commands::mouse::right_click(
                                         app.clone(),
                                         app.clone().state(),
                                         screen_x,
@@ -1944,7 +1944,7 @@ pub async fn register_anthropic_computer_use_tools(
                             tokio::task::block_in_place(|| {
                                 let rt = tokio::runtime::Handle::current();
                                 rt.block_on(async {
-                                    crate::commands::mouse::dev_middle_click(
+                                    crate::commands::mouse::middle_click(
                                         app.clone(),
                                         app.clone().state(),
                                         screen_x,
@@ -2016,7 +2016,7 @@ pub async fn register_anthropic_computer_use_tools(
                             tokio::task::block_in_place(|| {
                                 let rt = tokio::runtime::Handle::current();
                                 rt.block_on(async {
-                                    crate::commands::mouse::dev_double_click(
+                                    crate::commands::mouse::double_click(
                                         app.clone(),
                                         app.clone().state(),
                                         screen_x,
@@ -2107,7 +2107,7 @@ pub async fn register_anthropic_computer_use_tools(
                             tokio::task::block_in_place(|| {
                                 let rt = tokio::runtime::Handle::current();
                                 rt.block_on(async {
-                                    crate::commands::mouse::dev_triple_click(
+                                    crate::commands::mouse::triple_click(
                                         app.clone(),
                                         app.clone().state(),
                                         screen_x,
@@ -2182,7 +2182,7 @@ pub async fn register_anthropic_computer_use_tools(
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
-                                crate::commands::mouse::dev_left_click_drag(
+                                crate::commands::mouse::left_click_drag(
                                     app.clone(),
                                     app.clone().state(),
                                     screen_start_x,
@@ -2338,7 +2338,7 @@ pub async fn register_anthropic_computer_use_tools(
                         tokio::task::block_in_place(|| {
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
-                                crate::commands::mouse::dev_left_click_drag(
+                                crate::commands::mouse::left_click_drag(
                                     app.clone(),
                                     app.clone().state(),
                                     screen_start_x,
