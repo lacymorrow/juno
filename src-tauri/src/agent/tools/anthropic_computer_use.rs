@@ -104,14 +104,14 @@ async fn verify_input_focus_after_click(
                     // Verify the element is actually focused
                     match focused_element.is_focused() {
                         Ok(true) => {
-                            info!("Verification: Input element is properly focused after click at ({}, {})", x, y);
+                            info!("Input element is properly focused after click at ({}, {})", x, y);
                             return Ok(true);
                         }
                         Ok(false) => {
-                            warn!("Verification: Input element at ({}, {}) is not focused (attempt {}/{})", x, y, attempt + 1, max_attempts);
+                            warn!("Input element at ({}, {}) is not focused (attempt {}/{})", x, y, attempt + 1, max_attempts);
                         }
                         Err(e) => {
-                            warn!("Verification: Failed to check focus state: {}", e);
+                            warn!("Failed to check focus state: {}", e);
                         }
                     }
                 } else {
@@ -120,7 +120,7 @@ async fn verify_input_focus_after_click(
                 }
             }
             Err(e) => {
-                warn!("Verification: Failed to get focused element: {}", e);
+                warn!("Failed to get focused element: {}", e);
             }
         }
 
@@ -148,7 +148,7 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
 
             if !is_text_input {
                 warn!(
-                    "Verification: Currently focused element is not a text input (role: {})",
+                    "Currently focused element is not a text input (role: {})",
                     attrs.role
                 );
                 return Ok(false);
@@ -160,31 +160,31 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
                     // Check if the element is enabled
                     match focused_element.is_enabled() {
                         Ok(true) => {
-                            info!("Verification: Text input element is focused and enabled for typing");
+                            info!("Text input element is focused and enabled for typing");
                             Ok(true)
                         }
                         Ok(false) => {
-                            warn!("Verification: Text input element is focused but disabled");
+                            warn!("Text input element is focused but disabled");
                             Ok(false)
                         }
                         Err(e) => {
-                            warn!("Verification: Failed to check if element is enabled: {}", e);
+                            warn!("Failed to check if element is enabled: {}", e);
                             Ok(false)
                         }
                     }
                 }
                 Ok(false) => {
-                    warn!("Verification: Text input element is not focused");
+                    warn!("Text input element is not focused");
                     Ok(false)
                 }
                 Err(e) => {
-                    warn!("Verification: Failed to check focus state: {}", e);
+                    warn!("Failed to check focus state: {}", e);
                     Ok(false)
                 }
             }
         }
         Err(e) => {
-            warn!("Verification: Failed to get focused element: {}", e);
+            warn!("Failed to get focused element: {}", e);
             Ok(false)
         }
     }
@@ -450,19 +450,19 @@ pub async fn execute_computer_tool(
 
             click_result.map_err(|e| format!("Left click failed: {}", e))?;
 
-            // Verification: Check if clicking an input resulted in proper focus
+            // Check if clicking an input resulted in proper focus
             match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                 .await
             {
                 Ok(true) => {
-                    info!("Action verification: Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
+                    info!("Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
                 }
                 Ok(false) => {
-                    warn!("Action verification: Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                    warn!("Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                 }
                 Err(e) => {
                     warn!(
-                        "Action verification: Failed to verify click at screen coordinates ({}, {}): {}",
+                        "Failed to verify click at screen coordinates ({}, {}): {}",
                         screen_x, screen_y, e
                     );
                 }
@@ -685,21 +685,21 @@ pub async fn execute_computer_tool(
 
             click_result.map_err(|e| format!("Double click failed: {}", e))?;
 
-            // Verification: Check if double-clicking an input resulted in proper focus
+            // Check if double-clicking an input resulted in proper focus
             match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                 .await
             {
                 Ok(true) => {
                     info!(
-                        "Action verification: Double-click at screen coordinates ({}, {}) successful",
+                        "Double-click at screen coordinates ({}, {}) successful",
                         screen_x, screen_y
                     );
                 }
                 Ok(false) => {
-                    warn!("Action verification: Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                    warn!("Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                 }
                 Err(e) => {
-                    warn!("Action verification: Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                    warn!("Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
                 }
             }
 
@@ -776,21 +776,21 @@ pub async fn execute_computer_tool(
 
             click_result.map_err(|e| format!("Triple click failed: {}", e))?;
 
-            // Verification: Check if triple-clicking an input resulted in proper focus
+            // Check if triple-clicking an input resulted in proper focus
             match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                 .await
             {
                 Ok(true) => {
                     info!(
-                        "Action verification: Triple-click at screen coordinates ({}, {}) successful",
+                        "Triple-click at screen coordinates ({}, {}) successful",
                         screen_x, screen_y
                     );
                 }
                 Ok(false) => {
-                    warn!("Action verification: Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                    warn!("Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                 }
                 Err(e) => {
-                    warn!("Action verification: Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                    warn!("Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
                 }
             }
 
@@ -888,17 +888,17 @@ pub async fn execute_computer_tool(
                 .as_str()
                 .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
 
-            // Verification: Ensure we have a focused, enabled text input before typing
+            // Ensure we have a focused, enabled text input before typing
             match verify_ready_for_text_input(&state_manager) {
                 Ok(true) => {
-                    info!("Action verification: Ready to type text: '{}'", text);
+                    info!("Ready to type text: '{}'", text);
                 }
                 Ok(false) => {
-                    warn!("Action verification: No properly focused text input for typing. Attempting anyway...");
+                    warn!("No properly focused text input for typing. Attempting anyway...");
                 }
                 Err(e) => {
                     warn!(
-                        "Action verification: Failed to verify text input readiness: {}",
+                        "Failed to verify text input readiness: {}",
                         e
                     );
                 }
@@ -1512,7 +1512,7 @@ pub async fn register_anthropic_computer_use_tools(
                     "type": "string",
                     "description": "Optional window ID to target specific window for screenshots and clicks. When provided, coordinates are relative to the window's top-left corner."
                 },
-                                "use_focused_window": {
+                "use_focused_window": {
                     "type": "boolean",
                     "description": "When true, targets the currently focused window for screenshots and clicks. Coordinates are relative to the window's top-left corner.",
                     "default": false
@@ -1795,21 +1795,21 @@ pub async fn register_anthropic_computer_use_tools(
 
                         click_result.map_err(|e| format!("Left click failed: {}", e))?;
 
-                        // Verification: Check if clicking an input resulted in proper focus
+                        // Check if clicking an input resulted in proper focus
                         match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                             .await
                         {
                             Ok(true) => {
-                                info!("Action verification: Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
+                                info!("Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
                             }
                             Ok(false) => {
-                                warn!("Action verification: Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                                warn!("Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                             }
                             Err(e) => {
-                                warn!(
-                                    "Action verification: Failed to verify click at screen coordinates ({}, {}): {}",
-                                    screen_x, screen_y, e
-                                );
+                                                warn!(
+                    "Failed to verify click at screen coordinates ({}, {}): {}",
+                    screen_x, screen_y, e
+                );
                             }
                         }
 
@@ -2030,21 +2030,21 @@ pub async fn register_anthropic_computer_use_tools(
 
                         click_result.map_err(|e| format!("Double click failed: {}", e))?;
 
-                        // Verification: Check if double-clicking an input resulted in proper focus
+                        // Check if double-clicking an input resulted in proper focus
                         match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                             .await
                         {
                             Ok(true) => {
-                                info!(
-                                    "Action verification: Double-click at screen coordinates ({}, {}) successful",
-                                    screen_x, screen_y
-                                );
+                                            info!(
+                "Double-click at screen coordinates ({}, {}) successful",
+                screen_x, screen_y
+            );
                             }
                             Ok(false) => {
-                                warn!("Action verification: Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                                warn!("Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                             }
                             Err(e) => {
-                                warn!("Action verification: Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                                warn!("Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
                             }
                         }
 
@@ -2121,21 +2121,21 @@ pub async fn register_anthropic_computer_use_tools(
 
                         click_result.map_err(|e| format!("Triple click failed: {}", e))?;
 
-                        // Verification: Check if triple-clicking an input resulted in proper focus
+                        // Check if triple-clicking an input resulted in proper focus
                         match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                             .await
                         {
                             Ok(true) => {
-                                info!(
-                                    "Action verification: Triple-click at screen coordinates ({}, {}) successful",
-                                    screen_x, screen_y
-                                );
+                                            info!(
+                "Triple-click at screen coordinates ({}, {}) successful",
+                screen_x, screen_y
+            );
                             }
                             Ok(false) => {
-                                warn!("Action verification: Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                                warn!("Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
                             }
                             Err(e) => {
-                                warn!("Action verification: Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                                warn!("Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
                             }
                         }
 
@@ -2233,17 +2233,17 @@ pub async fn register_anthropic_computer_use_tools(
                             .as_str()
                             .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
 
-                        // Verification: Ensure we have a focused, enabled text input before typing
+                        // Ensure we have a focused, enabled text input before typing
                         match verify_ready_for_text_input(&state_manager) {
                             Ok(true) => {
-                                info!("Action verification: Ready to type text: '{}'", text);
+                                info!("Ready to type text: '{}'", text);
                             }
                             Ok(false) => {
-                                warn!("Action verification: No properly focused text input for typing. Attempting anyway...");
+                                warn!("No properly focused text input for typing. Attempting anyway...");
                             }
                             Err(e) => {
                                 warn!(
-                                    "Action verification: Failed to verify text input readiness: {}",
+                                    "Failed to verify text input readiness: {}",
                                     e
                                 );
                             }
@@ -2393,11 +2393,11 @@ pub async fn register_anthropic_computer_use_tools(
     provider
         .register_async_tool(computer_tool_def, computer_tool_exec)
         .await;
-    info!("✅ Registered tool: computer (Anthropic Computer Use)");
+    info!("Registered tool: computer (Anthropic Computer Use)");
 
-    // DEBUG: Verify registration immediately after
-    debug!("🔧 VERIFICATION: Just registered 'computer' tool");
-    debug!("🔧 Provider executor count after computer tool registration should be at least 1");
+    // Verify registration immediately after
+    debug!("Just registered 'computer' tool");
+    debug!("Provider executor count after computer tool registration should be at least 1");
 
     // Text Editor Tool (text_editor_20250429) - Claude 4 version without undo_edit
     let text_editor_tool_def = ToolDefinition {
