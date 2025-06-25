@@ -181,7 +181,7 @@ impl DictationStateManager {
 
         // 3. Reset app state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = false;
         }
 
@@ -226,7 +226,7 @@ impl DictationStateManager {
 
         // Get real-time component states
         let app_state = app_handle.state::<crate::state::AppState>();
-        let real_app_state = app_state.dictation_active.lock()
+        let real_app_state = app_state.dictation_active().lock()
             .map(|active| *active)
             .unwrap_or(false);
 
@@ -300,7 +300,7 @@ impl DictationStateManager {
 
         // Sync app state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
             *dictation_active = is_active;
         }
 
@@ -520,7 +520,7 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
 
     // Reset app state
     let app_state = app_handle.state::<crate::state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = false;
     }
 

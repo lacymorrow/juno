@@ -23,7 +23,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let app_state = app.state::<state::AppState>();
 
     // Get current keyboard shortcuts from state
-    let current_shortcuts = match app_state.keyboard_shortcuts.lock() {
+    let current_shortcuts = match app_state.keyboard_shortcuts().lock() {
         Ok(shortcuts) => shortcuts.clone(),
         Err(e) => {
             error!("Failed to get keyboard shortcuts: {}", e);
@@ -88,7 +88,7 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 
     // FIXED: Check agent trigger mode to determine behavior
     let app_state = app.state::<state::AppState>();
-    let trigger_mode = app_state.agent_trigger_mode.lock()
+    let trigger_mode = app_state.agent_trigger_mode().lock()
         .map(|mode| mode.clone())
         .unwrap_or(state::AgentTriggerMode::Tap);
 
@@ -193,7 +193,7 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 
     // FIXED: Check dictation trigger mode to determine behavior
     let app_state = app.state::<state::AppState>();
-    let trigger_mode = app_state.dictation_trigger_mode.lock()
+    let trigger_mode = app_state.dictation_trigger_mode().lock()
         .map(|mode| mode.clone())
         .unwrap_or(state::DictationTriggerMode::Hold);
 

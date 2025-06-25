@@ -1091,7 +1091,7 @@ impl ProductionCloudConnector {
         // Check if any agent is currently active
         if app_state.is_agent_executing() {
             Some("Agent interaction in progress".to_string())
-        } else if app_state.dictation_active.lock()
+        } else if app_state.dictation_active().lock()
             .map(|guard| *guard)
             .unwrap_or(false) {
             Some("Voice dictation active".to_string())
@@ -1110,7 +1110,7 @@ impl ProductionCloudConnector {
             permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
-        let voice_enabled = app_state.always_listening_active.lock()
+        let voice_enabled = app_state.always_listening_active().lock()
             .map(|guard| *guard)
             .unwrap_or(false);
 

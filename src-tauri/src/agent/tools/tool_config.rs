@@ -358,14 +358,10 @@ impl ToolConfigManager {
                 tool_name, tool_config.enabled, category_enabled, result);
             result
         } else {
-            // Essential tools that are missing from config should be enabled as fallback
-            let essential_tools = ["computer", "screenshot", "bash"];
-            if essential_tools.contains(&tool_name) {
-                tracing::warn!("Essential tool '{}' not found in config, enabling as fallback", tool_name);
-                return true;
-            }
+            // Unknown tools are disabled by default
+            // Note: Essential tools should be properly configured as required during initialization
             tracing::debug!("Unknown tool '{}' disabled by default", tool_name);
-            false // Unknown tools are disabled by default
+            false
         }
     }
 
