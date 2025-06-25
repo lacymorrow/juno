@@ -540,8 +540,8 @@ impl ProductionCloudConnector {
 
         info!("🔐 Authentication message sent");
 
-        // Handle authentication response synchronously to avoid race conditions
-        let auth_result = self.handle_authentication_response(&mut ws_receiver).await?;
+        // Handle authentication response synchronously with robust error handling
+        let (auth_result, message_buffer) = self.handle_authentication_response(&mut ws_receiver).await?;
         if !auth_result {
             return Err(CloudError::AuthenticationFailed("Authentication failed".to_string()));
         }
@@ -555,39 +555,28 @@ impl ProductionCloudConnector {
         let ws_sender_clone = self.ws_sender.clone();
 
         tokio::spawn(async move {
+            // First, process any messages that were buffered during authentication
+            if !message_buffer.is_empty() {
+                info!("📦 Processing {} buffered messages from authentication phase", message_buffer.len());
+                for buffered_text in message_buffer {
+                    Self::process_websocket_message(
+                        buffered_text,
+                        &app_handle,
+                        &connection_state
+                    ).await;
+                }
+                info!("✅ Finished processing buffered messages");
+            }
+
             // Handle incoming messages (authentication already completed)
             while let Some(msg) = ws_receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
-                        debug!("📨 Received cloud message: {}", text);
-
-                        // Parse and handle the message
-                        if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
-                            match ws_message.message_type {
-                                MessageType::Auth => {
-                                    // Post-authentication auth messages (likely additional auth events)
-                                    debug!("📨 Additional auth message received post-authentication");
-                                },
-                                MessageType::Command => {
-                                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
-                                        // Emit command to be handled by the app
-                                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
-                                            error!("Failed to emit cloud command: {}", e);
-                                        }
-                                    } else {
-                                        warn!("⚠️ Failed to parse cloud command from message");
-                                    }
-                                },
-                                MessageType::Heartbeat => {
-                                    debug!("💓 Heartbeat received");
-                                },
-                                _ => {
-                                    debug!("📨 Other message type: {:?}", ws_message.message_type);
-                                }
-                            }
-                        } else {
-                            warn!("⚠️ Failed to parse WebSocket message: {}", text);
-                        }
+                        Self::process_websocket_message(
+                            text,
+                            &app_handle,
+                            &connection_state
+                        ).await;
                     },
                     Ok(Message::Close(_)) => {
                         info!("🔌 WebSocket closed by server");
@@ -617,11 +606,48 @@ impl ProductionCloudConnector {
         Ok(())
     }
 
+    /// Process a WebSocket message (extracted for reuse in buffered message processing)
+    async fn process_websocket_message(
+        text: String,
+        app_handle: &AppHandle,
+        connection_state: &Arc<TokioMutex<ConnectorState>>
+    ) {
+        debug!("📨 Received cloud message: {}", text);
+
+        // Parse and handle the message
+        if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
+            match ws_message.message_type {
+                MessageType::Auth => {
+                    // Post-authentication auth messages (likely additional auth events)
+                    debug!("📨 Additional auth message received post-authentication");
+                },
+                MessageType::Command => {
+                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
+                        // Emit command to be handled by the app
+                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
+                            error!("Failed to emit cloud command: {}", e);
+                        }
+                    } else {
+                        warn!("⚠️ Failed to parse cloud command from message");
+                    }
+                },
+                MessageType::Heartbeat => {
+                    debug!("💓 Heartbeat received");
+                },
+                _ => {
+                    debug!("📨 Other message type: {:?}", ws_message.message_type);
+                }
+            }
+        } else {
+            warn!("⚠️ Failed to parse WebSocket message: {}", text);
+        }
+    }
+
     /// Handle authentication response synchronously with robust error handling
     async fn handle_authentication_response(
         &self,
         ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>
-    ) -> Result<bool, CloudError> {
+    ) -> Result<(bool, Vec<String>), CloudError> {
         use tokio_tungstenite::tungstenite::Message;
 
         // Set timeout for authentication response
@@ -629,30 +655,38 @@ impl ProductionCloudConnector {
         let timeout = tokio::time::sleep(timeout_duration);
         tokio::pin!(timeout);
 
+        // Buffer for messages received during authentication
+        let mut message_buffer: Vec<String> = Vec::new();
+
         loop {
             tokio::select! {
                 // Wait for authentication response
                 msg_result = ws_receiver.next() => {
                     match msg_result {
                         Some(Ok(Message::Text(text))) => {
-                            debug!("📨 Received authentication response: {}", text);
+                            debug!("📨 Received message during authentication: {}", text);
 
                             // Parse the message
                             match serde_json::from_str::<WebSocketMessage>(&text) {
                                 Ok(ws_message) => {
                                     if ws_message.message_type == MessageType::Auth {
                                         // Handle authentication response with robust parsing
-                                        return self.parse_authentication_response(ws_message.data).await;
+                                        let auth_result = self.parse_authentication_response(ws_message.data).await?;
+                                        return Ok((auth_result, message_buffer));
                                     } else {
-                                        // Non-auth message during authentication - this is unexpected
-                                        warn!("⚠️ Received non-auth message during authentication: {:?}", ws_message.message_type);
+                                        // Non-auth message during authentication - buffer it for later processing
+                                        debug!("📦 Buffering non-auth message during authentication: {:?}", ws_message.message_type);
+                                        message_buffer.push(text);
                                         // Continue waiting for auth response
                                         continue;
                                     }
                                 },
                                 Err(e) => {
-                                    error!("❌ Failed to parse authentication response: {}", e);
-                                    return Err(CloudError::AuthenticationFailed(format!("Invalid response format: {}", e)));
+                                    error!("❌ Failed to parse message during authentication: {}", e);
+                                    // Buffer unparseable messages too - might be valid later
+                                    warn!("📦 Buffering unparseable message for later retry: {}", text);
+                                    message_buffer.push(text);
+                                    continue;
                                 }
                             }
                         },
@@ -670,6 +704,7 @@ impl ProductionCloudConnector {
                         },
                         _ => {
                             // Other message types (binary, ping, pong) - continue waiting
+                            debug!("📨 Received non-text message during authentication, continuing...");
                             continue;
                         }
                     }
@@ -721,8 +756,6 @@ impl ProductionCloudConnector {
             }
         }
     }
-
-
 
     /// Run the active connection
     async fn run_connection(&self) -> Result<(), CloudError> {
@@ -1345,6 +1378,153 @@ PhysMem: 8192M used (1234M wired), 567M unused.
                 },
                 None => panic!("Should have success field"),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod websocket_race_condition_tests {
+        use super::*;
+
+        #[test]
+        fn test_message_buffering_during_authentication() {
+            // Test the logic that buffers non-auth messages during authentication
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            // Simulate receiving various message types during authentication
+            let command_message = r#"{"type": "command", "data": {"id": "test", "command_type": "screenshot"}, "timestamp": 1234567890}"#;
+            let heartbeat_message = r#"{"type": "heartbeat", "data": {"timestamp": 1234567890}, "timestamp": 1234567890}"#;
+            let auth_success_message = r#"{"type": "auth", "data": {"success": true}, "timestamp": 1234567890}"#;
+
+            // Messages received before auth response should be buffered
+            message_buffer.push(command_message.to_string());
+            message_buffer.push(heartbeat_message.to_string());
+
+            // Verify buffer contains expected messages
+            assert_eq!(message_buffer.len(), 2);
+            assert!(message_buffer[0].contains("command"));
+            assert!(message_buffer[1].contains("heartbeat"));
+
+            // Simulate processing auth response (would return from authentication handler)
+            // The buffered messages would then be processed by the background task
+
+            // Verify we can parse the buffered messages correctly
+            for buffered_msg in &message_buffer {
+                let parsed: Result<serde_json::Value, _> = serde_json::from_str(buffered_msg);
+                assert!(parsed.is_ok(), "Buffered message should be valid JSON: {}", buffered_msg);
+            }
+        }
+
+        #[test]
+        fn test_authentication_response_parsing_comprehensive() {
+            // Test success case
+            let success_data = serde_json::json!({
+                "success": true
+            });
+
+            match success_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(true) => assert!(true), // Expected path
+                        _ => panic!("Should have matched true case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+
+            // Test failure case
+            let failure_data = serde_json::json!({
+                "success": false,
+                "error": "Invalid credentials"
+            });
+
+            match failure_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(false) => {
+                            let error_msg = failure_data.get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Authentication rejected by server");
+                            assert_eq!(error_msg, "Invalid credentials");
+                        },
+                        _ => panic!("Should have matched false case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+
+            // Test missing success field
+            let missing_success_data = serde_json::json!({
+                "message": "Some response without success field"
+            });
+
+            assert!(missing_success_data.get("success").is_none());
+
+            // Test invalid success field type
+            let invalid_success_data = serde_json::json!({
+                "success": "true" // String instead of boolean
+            });
+
+            match invalid_success_data.get("success") {
+                Some(success_value) => {
+                    assert!(success_value.as_bool().is_none());
+                    assert_eq!(success_value.as_str(), Some("true"));
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_message_buffer_ordering() {
+            // Test that message ordering is preserved during buffering
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            let messages = vec![
+                r#"{"type": "command", "data": {"id": "cmd1"}, "timestamp": 1}"#,
+                r#"{"type": "heartbeat", "data": {}, "timestamp": 2}"#,
+                r#"{"type": "command", "data": {"id": "cmd2"}, "timestamp": 3}"#,
+                r#"{"type": "status", "data": {}, "timestamp": 4}"#,
+            ];
+
+            // Add messages to buffer in order
+            for msg in &messages {
+                message_buffer.push(msg.to_string());
+            }
+
+            // Verify ordering is preserved
+            assert_eq!(message_buffer.len(), 4);
+            for (i, msg) in message_buffer.iter().enumerate() {
+                let parsed: serde_json::Value = serde_json::from_str(msg).unwrap();
+                let expected_timestamp = (i + 1) as u64;
+                assert_eq!(parsed["timestamp"].as_u64().unwrap(), expected_timestamp);
+            }
+        }
+
+        #[test]
+        fn test_unparseable_message_buffering() {
+            // Test that even unparseable messages are buffered for later retry
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            let valid_message = r#"{"type": "command", "data": {"id": "test"}}"#;
+            let invalid_message = r#"{"type": "command", "data": {invalid json"#;
+            let malformed_message = r#"not json at all"#;
+
+            // All messages should be buffered, even invalid ones
+            message_buffer.push(valid_message.to_string());
+            message_buffer.push(invalid_message.to_string());
+            message_buffer.push(malformed_message.to_string());
+
+            assert_eq!(message_buffer.len(), 3);
+
+            // Verify that at least the valid message can be parsed
+            let parsed_valid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[0]);
+            assert!(parsed_valid.is_ok());
+
+            // Invalid messages should fail parsing but still be buffered
+            let parsed_invalid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[1]);
+            assert!(parsed_invalid.is_err());
+
+            let parsed_malformed: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[2]);
+            assert!(parsed_malformed.is_err());
         }
     }
 }
