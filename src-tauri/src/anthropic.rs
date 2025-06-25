@@ -612,18 +612,34 @@ async fn execute_agent_internal(
             };
             info!("Single agent brain initialized.");
 
-            // Create single agent runner with all tools
+            // CRITICAL FIX: Register full Computer Use tools for single agent mode
+            // The agent_tool_provider was missing the core Anthropic Computer Use tools
+            // that provide mouse, keyboard, and screenshot capabilities
+            let mut single_agent_tool_provider = agent_tool_provider.clone();
+
+            // Register the complete Anthropic Computer Use tools (computer, str_replace_based_edit_tool, bash)
+            if let Err(e) = BrainFactory::register_computer_use_tools(
+                &mut single_agent_tool_provider,
+                app_handle.clone(),
+            ).await {
+                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+            info!("Registered full Computer Use tools for single agent mode.");
+
+            // Create single agent runner with all tools (including computer use tools)
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
                 {
                     let memory_guard = memory_manager_arc.lock().await;
                     memory_guard.clone()
                 },
-                agent_tool_provider,
+                single_agent_tool_provider,
                 brain,
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
-            info!("Single agent runner created with all tools.");
+            info!("Single agent runner created with all tools including Computer Use capabilities.");
 
             info!("Starting single agent run...");
 
