@@ -592,8 +592,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                     	node -e "const WebSocket = require('ws'); \
                     const ws = new WebSocket('wss://juno-cloud-backend.fly.dev/ws'); \
                     ws.on('open', () => { \
-                    &nbsp;&nbsp;ws.send(JSON.stringify({type:'auth',api_key:'YOUR_API_KEY'})); \
-                    &nbsp;&nbsp;setTimeout(() => ws.send(JSON.stringify({type:'command',command:'take_screenshot'})), 1000); \
+                      ws.send(JSON.stringify({type:'auth',api_key:'YOUR_API_KEY'})); \
+                      setTimeout(() => ws.send(JSON.stringify({type:'command',command:'take_screenshot'})), 1000); \
                     });"
                   `}
                 </code>
