@@ -540,8 +540,27 @@ impl ProductionCloudConnector {
 
         info!("🔐 Authentication message sent");
 
-        // Handle authentication response synchronously with robust error handling
-        let (auth_result, message_buffer) = self.handle_authentication_response(&mut ws_receiver).await?;
+                // Handle authentication response synchronously with robust error handling
+        let (auth_result, message_buffer) = match self.handle_authentication_response(&mut ws_receiver).await {
+            Ok((result, buffer)) => (result, buffer),
+            Err((auth_error, recovered_buffer)) => {
+                // Authentication failed - but we recovered the buffered messages to prevent message loss
+                error!("🔥 Authentication failed but recovered {} buffered messages: {}", recovered_buffer.len(), auth_error);
+
+                // If we have buffered messages, log them for debugging
+                if !recovered_buffer.is_empty() {
+                    warn!("📦 Buffered messages from failed authentication will be lost:");
+                    for (i, msg) in recovered_buffer.iter().enumerate() {
+                        debug!("  [{}]: {}", i, msg);
+                    }
+                }
+
+                // For now, return the error as authentication is required
+                // In the future, we could consider processing buffered messages before failing
+                return Err(auth_error);
+            }
+        };
+
         if !auth_result {
             return Err(CloudError::AuthenticationFailed("Authentication failed".to_string()));
         }
@@ -644,10 +663,11 @@ impl ProductionCloudConnector {
     }
 
     /// Handle authentication response synchronously with robust error handling
+    /// Returns (auth_success, buffered_messages) - buffered messages are preserved even on auth failure
     async fn handle_authentication_response(
         &self,
         ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>
-    ) -> Result<(bool, Vec<String>), CloudError> {
+    ) -> Result<(bool, Vec<String>), (CloudError, Vec<String>)> {
         use tokio_tungstenite::tungstenite::Message;
 
         // Set timeout for authentication response
@@ -671,8 +691,18 @@ impl ProductionCloudConnector {
                                 Ok(ws_message) => {
                                     if ws_message.message_type == MessageType::Auth {
                                         // Handle authentication response with robust parsing
-                                        let auth_result = self.parse_authentication_response(ws_message.data).await?;
-                                        return Ok((auth_result, message_buffer));
+                                        // CRITICAL: Do not use ? operator here as it would lose buffered messages on error
+                                        match self.parse_authentication_response(ws_message.data).await {
+                                            Ok(auth_result) => {
+                                                return Ok((auth_result, message_buffer));
+                                            },
+                                                                                         Err(auth_error) => {
+                                                 // Authentication failed, but we must preserve buffered messages
+                                                 error!("❌ Authentication failed: {}", auth_error);
+                                                 // Return the error while preserving message buffer to prevent message loss
+                                                 return Err((auth_error, message_buffer));
+                                             }
+                                        }
                                     } else {
                                         // Non-auth message during authentication - buffer it for later processing
                                         debug!("📦 Buffering non-auth message during authentication: {:?}", ws_message.message_type);
@@ -692,15 +722,15 @@ impl ProductionCloudConnector {
                         },
                         Some(Ok(Message::Close(_))) => {
                             error!("❌ WebSocket closed during authentication");
-                            return Err(CloudError::AuthenticationFailed("Connection closed during authentication".to_string()));
+                            return Err((CloudError::AuthenticationFailed("Connection closed during authentication".to_string()), message_buffer));
                         },
                         Some(Err(e)) => {
                             error!("❌ WebSocket error during authentication: {}", e);
-                            return Err(CloudError::AuthenticationFailed(format!("WebSocket error: {}", e)));
+                            return Err((CloudError::AuthenticationFailed(format!("WebSocket error: {}", e)), message_buffer));
                         },
                         None => {
                             error!("❌ WebSocket stream ended during authentication");
-                            return Err(CloudError::AuthenticationFailed("WebSocket stream ended".to_string()));
+                            return Err((CloudError::AuthenticationFailed("WebSocket stream ended".to_string()), message_buffer));
                         },
                         _ => {
                             // Other message types (binary, ping, pong) - continue waiting
@@ -712,7 +742,7 @@ impl ProductionCloudConnector {
                 // Authentication timeout
                 _ = &mut timeout => {
                     error!("❌ Authentication timeout after {:?}", timeout_duration);
-                    return Err(CloudError::AuthenticationFailed("Authentication timeout".to_string()));
+                    return Err((CloudError::AuthenticationFailed("Authentication timeout".to_string()), message_buffer));
                 }
             }
         }
