@@ -68,7 +68,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         safe_spawn_async_task(move || async move {
             // Check if Dictation Mode is active
             let app_state = app_handle_clone.state::<state::AppState>();
-            let is_dictation_mode = app_state.dictation_active.lock()
+            let is_dictation_mode = app_state.dictation_active().lock()
                 .map(|active| *active)
                 .unwrap_or_else(|e| {
                     warn!("[Voice] Failed to read dictation state: {}", e);
@@ -245,7 +245,7 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
 
     // Force clean up state
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = false;
     }
 
@@ -267,7 +267,7 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
 
     // Force clean up app state
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = false;
     }
 
@@ -328,7 +328,7 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
     let app_state = app_handle.state::<state::AppState>();
 
     // Check if Dictation Mode is active - skip if so
-    let is_dictation_active = app_state.dictation_active.lock()
+    let is_dictation_active = app_state.dictation_active().lock()
         .map(|active| *active)
         .unwrap_or_else(|e| {
             warn!("[AlwaysListening] Failed to read dictation state: {}", e);

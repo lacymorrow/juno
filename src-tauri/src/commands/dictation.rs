@@ -23,7 +23,7 @@ pub async fn set_dictation_clipboard_enabled(
 
     // Update state for backward compatibility
     {
-        let mut clipboard_enabled = state.dictation_clipboard_enabled.lock()
+        let mut clipboard_enabled = state.dictation_clipboard_enabled().lock()
             .map_err(|e| format!("Failed to lock dictation_clipboard_enabled: {}", e))?;
         *clipboard_enabled = enabled;
     }
@@ -46,7 +46,7 @@ pub async fn get_dictation_clipboard_enabled(
 
     // Sync with state for backward compatibility
     {
-        let mut clipboard_enabled = state.dictation_clipboard_enabled.lock()
+        let mut clipboard_enabled = state.dictation_clipboard_enabled().lock()
             .map_err(|e| format!("Failed to lock dictation_clipboard_enabled: {}", e))?;
         *clipboard_enabled = audio_settings.dictation_clipboard_enabled;
     }

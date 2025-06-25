@@ -233,7 +233,7 @@ pub async fn set_tts_provider_command(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    let mut current_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
+    let mut current_provider = state.tts_provider().lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
     *current_provider = provider.clone();
 
     info!("TTS provider set to: {} (saved to centralized settings)", provider);
@@ -282,7 +282,7 @@ pub async fn invoke_tts(
     // This ensures the new request won't be aborted by the stop flag we just set for cleanup
     reset_tts_stop_flag();
 
-    let provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
+    let provider = state.tts_provider().lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
