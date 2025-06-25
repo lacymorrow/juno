@@ -2485,29 +2485,41 @@ pub async fn register_anthropic_computer_use_tools(
 
                 let start_i64 = view_range[0].as_i64()
                     .ok_or_else(|| "Error: view_range start must be an integer".to_string())?;
-                let end = view_range[1].as_i64()
+                let end_i64 = view_range[1].as_i64()
                     .ok_or_else(|| "Error: view_range end must be an integer".to_string())?;
 
-                // Validate line numbers are positive (1-indexed as per spec)
+                // Validate start line number (1-indexed as per spec, must be strictly positive)
                 if start_i64 < 1 {
-                    return Err("Error: view_range start must be positive (1-indexed)".to_string());
+                    return Err("Error: view_range start must be positive (1-indexed, minimum value is 1)".to_string());
                 }
 
+                // Validate end line number (must be positive or -1 for end of file)
+                if end_i64 < 1 && end_i64 != -1 {
+                    return Err("Error: view_range end must be positive or -1 for end of file".to_string());
+                }
+
+                // Safe conversion to usize after validation (start is guaranteed to be >= 1)
                 let start = start_i64 as usize;
                 let lines: Vec<&str> = content.lines().collect();
 
                 // Handle 1-indexed line numbers as per official spec
                 let start_idx = start - 1;
-                let end_idx = if end == -1 {
+                let end_idx = if end_i64 == -1 {
                     lines.len()
-                } else if end < 1 {
-                    return Err("Error: view_range end must be positive or -1 for end of file".to_string());
                 } else {
-                    std::cmp::min(end as usize, lines.len())
+                    // Safe conversion for end since we validated it's positive
+                    let end = end_i64 as usize;
+                    std::cmp::min(end, lines.len())
                 };
 
+                // Validate that start_idx is within bounds
                 if start_idx >= lines.len() {
-                    return Ok(format!("Lines {}-{}: (empty - beyond file length)", start, if end == -1 { "EOF".to_string() } else { end.to_string() }));
+                    return Ok(format!("Lines {}-{}: (empty - beyond file length)", start, if end_i64 == -1 { "EOF".to_string() } else { end_i64.to_string() }));
+                }
+
+                // Ensure end_idx is not less than start_idx
+                if end_idx < start_idx {
+                    return Err("Error: view_range end must be greater than or equal to start".to_string());
                 }
 
                 let selected_lines = &lines[start_idx..end_idx];
