@@ -401,14 +401,15 @@ where
         }
     }
 
-    fn get(&self) -> T {
-        let state_guard = self.shared_state.lock().unwrap();
-        (self.getter)(&*state_guard)
+    fn get(&self) -> Result<T, std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        let state_guard = self.shared_state.lock()?;
+        Ok((self.getter)(&*state_guard))
     }
 
-    fn set(&self, value: T) {
-        let mut state_guard = self.shared_state.lock().unwrap();
+    fn set(&self, value: T) -> Result<(), std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        let mut state_guard = self.shared_state.lock()?;
         (self.setter)(&mut *state_guard, value);
+        Ok(())
     }
 }
 
