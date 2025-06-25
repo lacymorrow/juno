@@ -136,33 +136,79 @@ function parseSimpleConstants(rustCode) {
 function parseModuleConstants(rustCode) {
     const allConstants = {};
 
-    // Parse nested modules first
-    const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
-    let moduleMatch;
-    const moduleMatches = [];
+    // Parse nested modules with proper brace matching
+    const moduleMatches = parseModulesWithBraceMatching(rustCode);
 
-    while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
-        const [fullMatch, moduleName, moduleContent] = moduleMatch;
-        moduleMatches.push(fullMatch);
-
+    moduleMatches.forEach(({ fullMatch, moduleName, moduleContent }) => {
         const moduleConstants = parseSimpleConstants(moduleContent);
 
         // Prefix module constants with module name
         Object.entries(moduleConstants).forEach(([key, value]) => {
             allConstants[`${moduleName.toUpperCase()}_${key}`] = value;
         });
-    }
+    });
 
     // Parse top-level constants by removing module content first to avoid duplicates
     let codeWithoutModules = rustCode;
-    moduleMatches.forEach(moduleMatch => {
-        codeWithoutModules = codeWithoutModules.replace(moduleMatch, '');
+    moduleMatches.forEach(({ fullMatch }) => {
+        codeWithoutModules = codeWithoutModules.replace(fullMatch, '');
     });
 
     const topLevelConstants = parseSimpleConstants(codeWithoutModules);
     Object.assign(allConstants, topLevelConstants);
 
     return allConstants;
+}
+
+/**
+ * Parse Rust modules with proper brace matching to handle nested braces correctly
+ */
+function parseModulesWithBraceMatching(rustCode) {
+    const modules = [];
+    const moduleStartRegex = /pub mod (\w+) \{/g;
+    let match;
+
+    while ((match = moduleStartRegex.exec(rustCode)) !== null) {
+        const moduleName = match[1];
+        const moduleStartIndex = match.index;
+        const contentStartIndex = match.index + match[0].length;
+
+        // Find the matching closing brace by counting braces
+        let braceCount = 1;
+        let currentIndex = contentStartIndex;
+
+        while (currentIndex < rustCode.length && braceCount > 0) {
+            const char = rustCode[currentIndex];
+            if (char === '{') {
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+            }
+            currentIndex++;
+        }
+
+        if (braceCount === 0) {
+            // Found the matching closing brace
+            const moduleEndIndex = currentIndex;
+            const fullMatch = rustCode.substring(moduleStartIndex, moduleEndIndex);
+            const moduleContent = rustCode.substring(contentStartIndex, currentIndex - 1);
+
+            modules.push({
+                fullMatch,
+                moduleName,
+                moduleContent
+            });
+
+            // Update the regex lastIndex to continue searching after this module
+            moduleStartRegex.lastIndex = moduleEndIndex;
+        } else {
+            // Unmatched braces - log warning and continue
+            console.warn(`Warning: Unmatched braces in module ${moduleName}`);
+            break;
+        }
+    }
+
+    return modules;
 }
 
 /**
