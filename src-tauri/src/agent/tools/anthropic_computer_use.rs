@@ -664,11 +664,20 @@ pub async fn execute_str_replace_tool(
                 return Err(format!("String '{}' not found in file '{}'", old_str, path));
             }
 
-            // Perform replacement
-            let new_content = content.replace(old_str, new_str);
+            // Detect original line ending style
+            let original_line_ending = detect_line_ending(&content);
 
-            // Preserve line endings
-            let _line_ending = detect_line_ending(&content);
+            // Perform replacement
+            let mut new_content = content.replace(old_str, new_str);
+
+            // Normalize the new content to preserve original line ending style
+            if original_line_ending == "\r\n" {
+                // If original was CRLF, ensure replacement maintains CRLF
+                new_content = new_content.replace("\r\n", "\n").replace('\n', "\r\n");
+            } else {
+                // If original was LF, ensure replacement maintains LF
+                new_content = new_content.replace("\r\n", "\n");
+            }
 
             // Write back to file
             fs::write(&file_path, &new_content)
