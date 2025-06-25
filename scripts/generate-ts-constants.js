@@ -27,6 +27,7 @@ function parseRustConstants() {
         files: {},
         permissions: {},
         errors: {},
+        commands: {},
     };
 
     // Parse each constants module
@@ -70,6 +71,10 @@ function parseRustConstants() {
         // Parse errors module
         const errorsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'errors.rs'), 'utf8');
         constants.errors = parseModuleConstants(errorsFile);
+
+        // Parse commands module
+        const commandsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'commands.rs'), 'utf8');
+        constants.commands = parseModuleConstants(commandsFile);
 
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
@@ -215,6 +220,12 @@ ${Object.entries(constants.audio)
     .join('\n')}
 } as const;
 
+export const COMMANDS = {
+${Object.entries(constants.commands)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
 export const FILE_EXTENSIONS = {
 ${Object.entries(constants.files)
     .filter(([key]) => key.includes('EXT'))
@@ -339,6 +350,7 @@ export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
 export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS];
 export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
 export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
+export type CommandName = typeof COMMANDS[keyof typeof COMMANDS];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
 `;
 }

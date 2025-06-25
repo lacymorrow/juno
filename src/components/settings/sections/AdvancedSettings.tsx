@@ -12,6 +12,7 @@ import { RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionProps } from "../types";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
@@ -30,7 +31,7 @@ export default function AdvancedSettings({
   useEffect(() => {
     const loadDebugMode = async () => {
       try {
-        const enabled = await invoke("get_debug_mode");
+        const enabled = await invoke(COMMANDS.GET_DEBUG_MODE);
         setDebugMode(enabled as boolean);
       } catch (error) {
         console.error("Failed to get debug mode status:", error);
@@ -61,7 +62,7 @@ export default function AdvancedSettings({
               checked={debugMode}
               onCheckedChange={async (enabled) => {
                 try {
-                  await invoke("set_debug_mode", { enabled });
+                  await invoke(COMMANDS.SET_DEBUG_MODE, { enabled });
                   setDebugMode(enabled);
                   toast.success(
                     `Debug mode ${enabled ? "enabled" : "disabled"}`
@@ -106,7 +107,7 @@ export default function AdvancedSettings({
                 )
               ) {
                 try {
-                  await invoke("reset_all_settings");
+                  await invoke(COMMANDS.RESET_SETTINGS);
                   await settings.loadAllSettings();
                   toast.success("All settings have been reset to defaults");
                 } catch (error) {
