@@ -734,7 +734,7 @@ pub async fn execute_computer_tool(
         result_content,
         screenshot_base64,
         Some(execution_time_ms),
-        Some(&*state_manager),
+        Some(&*app_handle.state::<AppState>()),
     ).await;
 
     result
