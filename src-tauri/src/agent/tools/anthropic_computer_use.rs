@@ -164,8 +164,16 @@ pub async fn execute_computer_tool(
 
     let state_manager = app_handle.state::<AppState>();
 
+    // Add permission validation for sensitive operations
     match action {
         "screenshot" => {
+            // Validate screen recording permission
+            validate_permission(
+                app_handle,
+                RequiredPermission::ScreenRecording,
+                "computer (screenshot)"
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+
             let screenshot_path = crate::commands::core::capture_screenshot_command(
                 app_handle.clone(),
             ).await.map_err(|e| format!("Screenshot failed: {}", e))?;
@@ -174,266 +182,326 @@ pub async fn execute_computer_tool(
                 "base64_image": screenshot_path
             }))
         }
-        "left_click" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
+            // Validate accessibility permission for mouse operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                &format!("computer ({})", action)
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            match action {
+                "left_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
 
-            crate::commands::mouse::left_click(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-                None, // modifier
-            ).await.map_err(|e| format!("Left click failed: {}", e))?;
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-            Ok(json!({
-                "success": true
-            }))
+                    crate::commands::mouse::left_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Left click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "right_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::right_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Right click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "middle_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::middle_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Middle click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "double_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::double_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Double click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "triple_click" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::triple_click(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                        None, // modifier
+                    ).await.map_err(|e| format!("Triple click failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_click_drag" => {
+                    // Support both old and new parameter formats for backward compatibility
+                    let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
+                        // Old format: start_coordinate + coordinate (end)
+                        let coordinate = input["coordinate"].as_array()
+                            .ok_or_else(|| "Missing 'coordinate' (end) parameter for drag operation".to_string())?;
+
+                        let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                        let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                        let end_x = coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                        let end_y = coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
+
+                        (start_x, start_y, end_x, end_y)
+                    } else if let Some(coordinate) = input["coordinate"].as_array() {
+                        // New format: coordinate (start) + end_coordinate
+                        let end_coordinate = input["end_coordinate"].as_array()
+                            .ok_or_else(|| "Missing 'end_coordinate' parameter for drag operation".to_string())?;
+
+                        let start_x = coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                        let start_y = coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                        let end_x = end_coordinate.get(0).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                        let end_y = end_coordinate.get(1).and_then(|v| v.as_f64())
+                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
+
+                        (start_x, start_y, end_x, end_y)
+                    } else {
+                        return Err("Missing coordinate parameters for drag operation. Use either 'start_coordinate' + 'coordinate' or 'coordinate' + 'end_coordinate'".to_string());
+                    };
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
+                    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
+                    crate::commands::mouse::left_click_drag(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_start_x,
+                        screen_start_y,
+                        screen_end_x,
+                        screen_end_y,
+                    ).await.map_err(|e| format!("Left click drag failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "mouse_move" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::mouse_move(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Mouse move failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_mouse_down" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::left_mouse_down(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Left mouse down failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_mouse_up" => {
+                    let coordinate = input["coordinate"].as_array()
+                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
+                    let x = coordinate.get(0).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
+                    let y = coordinate.get(1).and_then(|v| v.as_f64())
+                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    crate::commands::mouse::left_mouse_up(
+                        app_handle.clone(),
+                        state_manager,
+                        screen_x,
+                        screen_y,
+                    ).await.map_err(|e| format!("Left mouse up failed: {}", e))?;
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                _ => unreachable!("Mouse action already matched in outer pattern")
+            }
         }
-        "right_click" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+        "key" | "hold_key" | "type" => {
+            // Validate accessibility permission for keyboard operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                &format!("computer ({})", action)
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            match action {
+                "key" => {
+                    // Support both 'key' and 'text' parameters for backward compatibility
+                    let key = input["key"].as_str()
+                        .or_else(|| input["text"].as_str()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
 
-            crate::commands::mouse::right_click(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-                None, // modifier
-            ).await.map_err(|e| format!("Right click failed: {}", e))?;
+                    crate::commands::keyboard::press_key(
+                        key.to_string(),
+                        None, // modifier
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Key press failed: {}", e))?;
 
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "middle_click" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "hold_key" => {
+                    // Support both 'key' and 'text' parameters for backward compatibility
+                    let key = input["key"].as_str()
+                        .or_else(|| input["text"].as_str()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
 
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    // Support both 'duration_ms' and 'duration' parameters for backward compatibility
+                    let duration_ms = input["duration_ms"].as_u64()
+                        .or_else(|| input["duration"].as_u64()) // Backward compatibility
+                        .ok_or_else(|| "Missing 'duration_ms' or 'duration' parameter".to_string())?;
 
-            crate::commands::mouse::middle_click(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-                None, // modifier
-            ).await.map_err(|e| format!("Middle click failed: {}", e))?;
+                    crate::commands::keyboard::hold_key(
+                        key.to_string(),
+                        Some(duration_ms),
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Hold key failed: {}", e))?;
 
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "double_click" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "type" => {
+                    let text = input["text"].as_str()
+                        .ok_or_else(|| "Missing 'text' parameter".to_string())?;
 
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    crate::commands::keyboard::type_text(
+                        text.to_string(),
+                        app_handle.clone(),
+                        state_manager,
+                    ).await.map_err(|e| format!("Type text failed: {}", e))?;
 
-            crate::commands::mouse::double_click(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-                None, // modifier
-            ).await.map_err(|e| format!("Double click failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "triple_click" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
-
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-            crate::commands::mouse::triple_click(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-                None, // modifier
-            ).await.map_err(|e| format!("Triple click failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "left_click_drag" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let end_coordinate = input["end_coordinate"].as_array()
-                .ok_or_else(|| "Missing 'end_coordinate' parameter".to_string())?;
-
-            let start_x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid start x coordinate".to_string())?;
-            let start_y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid start y coordinate".to_string())?;
-            let end_x = end_coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid end x coordinate".to_string())?;
-            let end_y = end_coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid end y coordinate".to_string())?;
-
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
-            let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
-
-            crate::commands::mouse::left_click_drag(
-                app_handle.clone(),
-                state_manager,
-                screen_start_x,
-                screen_start_y,
-                screen_end_x,
-                screen_end_y,
-            ).await.map_err(|e| format!("Left click drag failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "mouse_move" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
-
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-            crate::commands::mouse::mouse_move(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-            ).await.map_err(|e| format!("Mouse move failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "left_mouse_down" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
-
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-            crate::commands::mouse::left_mouse_down(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-            ).await.map_err(|e| format!("Left mouse down failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "left_mouse_up" => {
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
-
-            // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-            crate::commands::mouse::left_mouse_up(
-                app_handle.clone(),
-                state_manager,
-                screen_x,
-                screen_y,
-            ).await.map_err(|e| format!("Left mouse up failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "key" => {
-            let key = input["key"].as_str()
-                .ok_or_else(|| "Missing 'key' parameter".to_string())?;
-
-            crate::commands::keyboard::press_key(
-                key.to_string(),
-                None, // modifier
-                app_handle.clone(),
-                state_manager,
-            ).await.map_err(|e| format!("Key press failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "hold_key" => {
-            let key = input["key"].as_str()
-                .ok_or_else(|| "Missing 'key' parameter".to_string())?;
-            let duration_ms = input["duration_ms"].as_u64()
-                .ok_or_else(|| "Missing 'duration_ms' parameter".to_string())?;
-
-            crate::commands::keyboard::hold_key(
-                key.to_string(),
-                Some(duration_ms),
-                app_handle.clone(),
-                state_manager,
-            ).await.map_err(|e| format!("Hold key failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
-        }
-        "type" => {
-            let text = input["text"].as_str()
-                .ok_or_else(|| "Missing 'text' parameter".to_string())?;
-
-            crate::commands::keyboard::type_text(
-                text.to_string(),
-                app_handle.clone(),
-                state_manager,
-            ).await.map_err(|e| format!("Type text failed: {}", e))?;
-
-            Ok(json!({
-                "success": true
-            }))
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                _ => unreachable!("Keyboard action already matched in outer pattern")
+            }
         }
         "scroll" => {
+            // Validate accessibility permission for scroll operations
+            validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                "computer (scroll)"
+            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+
             let coordinate = input["coordinate"].as_array()
                 .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
             let x = coordinate.get(0).and_then(|v| v.as_f64())
@@ -462,6 +530,7 @@ pub async fn execute_computer_tool(
             }))
         }
         "cursor_position" => {
+            // No permission validation needed for cursor position query
             let (x, y) = crate::commands::mouse::get_cursor_position(
                 app_handle.clone(),
                 state_manager,
@@ -472,8 +541,11 @@ pub async fn execute_computer_tool(
             }))
         }
         "wait" => {
+            // No permission validation needed for wait operation
+            // Support both 'seconds' and 'duration' parameters for backward compatibility
             let seconds = input["seconds"].as_f64()
-                .ok_or_else(|| "Missing 'seconds' parameter".to_string())?;
+                .or_else(|| input["duration"].as_f64()) // Backward compatibility
+                .ok_or_else(|| "Missing 'seconds' or 'duration' parameter".to_string())?;
 
             crate::commands::core::wait(
                 seconds,
@@ -679,7 +751,12 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "coordinate": {
                     "type": "array",
-                    "description": "The [x, y] coordinate for mouse actions",
+                    "description": "The [x, y] coordinate for mouse actions. For drag operations, this can be either start coordinate (with end_coordinate) or end coordinate (with start_coordinate)",
+                    "items": {"type": "number"}
+                },
+                "start_coordinate": {
+                    "type": "array",
+                    "description": "The start [x, y] coordinate for drag actions (backward compatibility)",
                     "items": {"type": "number"}
                 },
                 "end_coordinate": {
@@ -689,15 +766,19 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "key": {
                     "type": "string",
-                    "description": "The key to press (supports modifiers like 'cmd+c')"
-                },
-                "duration_ms": {
-                    "type": "number",
-                    "description": "Duration in milliseconds for hold_key action"
+                    "description": "The key to press (supports modifiers like 'cmd+c'). Preferred parameter name."
                 },
                 "text": {
                     "type": "string",
-                    "description": "Text to type"
+                    "description": "Text to type, or key to press (backward compatibility for key action)"
+                },
+                "duration_ms": {
+                    "type": "number",
+                    "description": "Duration in milliseconds for hold_key action. Preferred parameter name."
+                },
+                "duration": {
+                    "type": "number",
+                    "description": "Duration in milliseconds for hold_key action, or seconds for wait action (backward compatibility)"
                 },
                 "scroll_direction": {
                     "type": "string",
@@ -709,7 +790,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "seconds": {
                     "type": "number",
-                    "description": "Number of seconds to wait"
+                    "description": "Number of seconds to wait. Preferred parameter name."
                 }
             },
             "required": ["action"]
