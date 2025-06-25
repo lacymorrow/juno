@@ -18,9 +18,8 @@ pub use tray_menu::*;
 pub fn setup_all_menus(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     info!("🍎 Setting up all application menus...");
 
-    // Setup application menu
-    let app_menu = app_menu::setup_app_menu(app_handle)?;
-    app_handle.set_menu(app_menu)?;
+    // Setup application menu for all relevant windows
+    app_menu::setup_menu_for_all_windows(app_handle)?;
 
     // Setup tray menu
     let _ = tray_menu::setup_tray_icon(app_handle);
@@ -46,8 +45,8 @@ fn setup_menu_event_listeners(app_handle: &AppHandle) {
 
 /// Central menu event handler for all menu types
 fn handle_menu_event(app_handle: AppHandle, event_id: &str) {
-    // Check if it's an app menu event
-    if is_app_menu_event(event_id) {
+    // Check if it's an app menu event (including Edit menu items)
+    if is_app_menu_event(event_id) || is_edit_menu_event(event_id) {
         app_menu::handle_app_menu_events(app_handle, event_id);
     }
     // Check if it's a tray menu event
@@ -94,6 +93,18 @@ fn is_app_menu_event(event_id: &str) -> bool {
         constants::app_menu_ids::SEND_FEEDBACK |
         constants::app_menu_ids::REPORT_ISSUE |
         constants::app_menu_ids::VISIT_WEBSITE
+    )
+}
+
+/// Check if an event ID belongs to the Edit menu
+fn is_edit_menu_event(event_id: &str) -> bool {
+    matches!(event_id,
+        "edit-undo" |
+        "edit-redo" |
+        "edit-cut" |
+        "edit-copy" |
+        "edit-paste" |
+        "edit-select-all"
     )
 }
 
