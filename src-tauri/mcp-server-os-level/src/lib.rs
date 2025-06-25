@@ -1373,9 +1373,21 @@ impl Desktop {
                             Ok(c) => c,
                             Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.path, e))),
                         };
+
+                        // Count matches before replacement to provide feedback
+                        let match_count = content.matches(&old_str).count();
+
+                        if match_count == 0 {
+                            return Err(AutomationError::Internal(format!("No matches found for '{}' in file '{}'", old_str, parsed_args.path)));
+                        }
+
                         let new_content = content.replace(&old_str, &new_str);
                         match fs::write(&parsed_args.path, new_content) {
-                            Ok(_) => Ok(json!({ "status": format!("File '{}' updated successfully with replacements.", parsed_args.path) })),
+                            Ok(_) => Ok(json!({
+                                "status": format!("File '{}' updated successfully. {} occurrence(s) of '{}' replaced with '{}'.",
+                                    parsed_args.path, match_count, old_str, new_str),
+                                "matches_replaced": match_count
+                            })),
                             Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
                         }
                     }
