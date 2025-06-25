@@ -431,7 +431,7 @@ impl Desktop {
                         );
                         props
                     },
-                    required: vec![],
+                    required: vec!["command".to_string()],
                 },
             },
 
