@@ -50,11 +50,10 @@ use tauri::{AppHandle, Manager, Emitter};
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{debug, error, warn, info};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 
 use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
-use crate::agent::tool_logger;
 use crate::agent::tools::mcp_integration::MCPManager;
 use crate::agent::tools::ToolCategory;
 use crate::agent::traits::ToolProvider;
