@@ -148,165 +148,918 @@ impl ToolApprovalRequest {
     }
 }
 
-// Application state structure
+// Consolidated state structures to reduce Arc<Mutex<T>> count
+
+/// Audio-related settings grouped together
+#[derive(Clone, Debug)]
+pub struct AudioSettings {
+    pub tts_provider: String,
+    pub dictation_active: bool,
+    pub dictation_clipboard_enabled: bool,
+    pub sound_enabled: bool,
+    pub always_listening_active: bool,
+    pub always_listening_sensitivity: f32,
+    pub always_listening_wake_words: Vec<String>,
+    pub notification_sound_enabled: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            tts_provider: {
+                #[cfg(debug_assertions)]
+                { "system".to_string() }
+                #[cfg(not(debug_assertions))]
+                { "elevenlabs".to_string() }
+            },
+            dictation_active: false,
+            dictation_clipboard_enabled: true,
+            sound_enabled: true,
+            always_listening_active: false,
+            always_listening_sensitivity: 0.5,
+            always_listening_wake_words: audio::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
+            notification_sound_enabled: true,
+        }
+    }
+}
+
+/// Agent execution state grouped together
+#[derive(Clone, Debug)]
+pub struct AgentExecutionState {
+    pub execution_active: bool,
+    pub execution_id: Option<String>,
+    pub current_step: Option<u32>,
+    pub max_steps: Option<u32>,
+    pub tool_approval_required: bool,
+}
+
+impl Default for AgentExecutionState {
+    fn default() -> Self {
+        Self {
+            execution_active: false,
+            execution_id: None,
+            current_step: None,
+            max_steps: None,
+            tool_approval_required: false,
+        }
+    }
+}
+
+/// UI and display settings grouped together
+#[derive(Clone, Debug)]
+pub struct UISettings {
+    pub bar_ui_state: String,
+    pub performance_monitoring_enabled: bool,
+    pub debug_mode: bool,
+    pub notification_type: String,
+    pub notification_duration: u32,
+    pub notification_position: String,
+    pub notification_show_icons: bool,
+    pub notification_persist_important: bool,
+}
+
+impl Default for UISettings {
+    fn default() -> Self {
+        Self {
+            bar_ui_state: "default".to_string(),
+            performance_monitoring_enabled: true,
+            debug_mode: false,
+            notification_type: "system".to_string(),
+            notification_duration: 5000,
+            notification_position: "bottom-right".to_string(),
+            notification_show_icons: true,
+            notification_persist_important: true,
+        }
+    }
+}
+
+/// Input configuration grouped together
+#[derive(Clone, Debug)]
+pub struct InputSettings {
+    pub keyboard_shortcuts: KeyboardShortcuts,
+    pub agent_trigger_mode: AgentTriggerMode,
+    pub dictation_trigger_mode: DictationTriggerMode,
+}
+
+impl Default for InputSettings {
+    fn default() -> Self {
+        Self {
+            keyboard_shortcuts: KeyboardShortcuts::default(),
+            agent_trigger_mode: AgentTriggerMode::default(),
+            dictation_trigger_mode: DictationTriggerMode::default(),
+        }
+    }
+}
+
+/// Synchronized wrapper for backward compatibility
+/// This provides Deref/DerefMut to the actual value while keeping state synchronized
+struct SyncWrapper<T, S> {
+    shared_state: Arc<StdMutex<S>>,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, S> SyncWrapper<T, S>
+where
+    T: Clone,
+{
+    fn new(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> T,
+        setter: fn(&mut S, T) -> (),
+    ) -> Self {
+        Self {
+            shared_state,
+            getter,
+            setter,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    // Specialized constructors for common types
+    fn new_bool(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> bool,
+        setter: fn(&mut S, bool) -> (),
+    ) -> SyncWrapper<bool, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> String,
+        setter: fn(&mut S, String) -> (),
+    ) -> SyncWrapper<String, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_f32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> f32,
+        setter: fn(&mut S, f32) -> (),
+    ) -> SyncWrapper<f32, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_u32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> u32,
+        setter: fn(&mut S, u32) -> (),
+    ) -> SyncWrapper<u32, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_vec_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Vec<String>,
+        setter: fn(&mut S, Vec<String>) -> (),
+    ) -> SyncWrapper<Vec<String>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_option_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Option<String>,
+        setter: fn(&mut S, Option<String>) -> (),
+    ) -> SyncWrapper<Option<String>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_option_u32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Option<u32>,
+        setter: fn(&mut S, Option<u32>) -> (),
+    ) -> SyncWrapper<Option<u32>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_keyboard_shortcuts(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> KeyboardShortcuts,
+        setter: fn(&mut S, KeyboardShortcuts) -> (),
+    ) -> SyncWrapper<KeyboardShortcuts, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_agent_trigger_mode(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> AgentTriggerMode,
+        setter: fn(&mut S, AgentTriggerMode) -> (),
+    ) -> SyncWrapper<AgentTriggerMode, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_dictation_trigger_mode(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> DictationTriggerMode,
+        setter: fn(&mut S, DictationTriggerMode) -> (),
+    ) -> SyncWrapper<DictationTriggerMode, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+}
+
+impl<T, S> std::ops::Deref for SyncWrapper<T, S>
+where
+    T: Clone,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // We can't return a reference to the actual value since it's behind a lock
+        // Instead we need to use a different approach - we'll need to rethink this
+        // For now, we'll implement a custom value holder
+        unimplemented!("Direct deref not possible with synchronized wrapper - use explicit get/set methods")
+    }
+}
+
+// Instead of implementing Deref/DerefMut, we'll implement the actual value semantics
+// that the old Arc<StdMutex<T>> interface expected
+
+/// Backward compatibility value holder that synchronizes with grouped state
+pub struct CompatValue<T, S> {
+    shared_state: Arc<StdMutex<S>>,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, S> CompatValue<T, S>
+where
+    T: Clone,
+{
+    fn new(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> T,
+        setter: fn(&mut S, T) -> (),
+    ) -> Self {
+        Self {
+            shared_state,
+            getter,
+            setter,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    fn get(&self) -> Result<T, std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        let state_guard = self.shared_state.lock()?;
+        Ok((self.getter)(&*state_guard))
+    }
+
+    fn set(&self, value: T) -> Result<(), std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        let mut state_guard = self.shared_state.lock()?;
+        (self.setter)(&mut *state_guard, value);
+        Ok(())
+    }
+}
+
+// We need to implement a custom wrapper that behaves like the old interface
+// but synchronizes with the actual shared state
+impl<T, S> CompatValue<T, S>
+where
+    T: Clone,
+{
+    /// Get current value - public method for backward compatibility
+    pub fn lock(&self) -> Result<AtomicCompatGuard<T, S>, std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        // Hold the actual mutex lock for the entire duration to prevent race conditions
+        let state_guard = self.shared_state.lock()?;
+        let current_value = (self.getter)(&*state_guard);
+        Ok(AtomicCompatGuard {
+            state_guard,
+            current_value,
+            getter: self.getter,
+            setter: self.setter,
+            value_changed: false,
+        })
+    }
+}
+
+/// Guard that provides the expected interface for backward compatibility
+/// FIXED: Now holds the actual mutex lock to prevent race conditions
+pub struct AtomicCompatGuard<'a, T: Clone, S> {
+    state_guard: std::sync::MutexGuard<'a, S>,
+    current_value: T,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    value_changed: bool,
+}
+
+impl<'a, T: Clone, S> std::ops::Deref for AtomicCompatGuard<'a, T, S> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.current_value
+    }
+}
+
+impl<'a, T: Clone, S> std::ops::DerefMut for AtomicCompatGuard<'a, T, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.value_changed = true;
+        &mut self.current_value
+    }
+}
+
+impl<'a, T: Clone, S> Drop for AtomicCompatGuard<'a, T, S> {
+    fn drop(&mut self) {
+        if self.value_changed {
+            // Only write back if the value was actually changed through DerefMut
+            (self.setter)(&mut *self.state_guard, self.current_value.clone());
+        }
+        // The MutexGuard will be dropped here, releasing the lock
+    }
+}
+
+impl<'a, T: Clone, S> AtomicCompatGuard<'a, T, S> {
+    /// Get the current value through the held lock
+    pub fn get(&self) -> T {
+        self.current_value.clone()
+    }
+
+    /// Set the value through the held lock
+    pub fn set(&mut self, value: T) {
+        self.current_value = value.clone();
+        (self.setter)(&mut *self.state_guard, value);
+        self.value_changed = false; // Reset since we already wrote to state
+    }
+
+    /// Replace the current value and return the old value
+    pub fn replace(&mut self, value: T) -> T {
+        let old_value = self.current_value.clone();
+        self.current_value = value.clone();
+        (self.setter)(&mut *self.state_guard, value);
+        self.value_changed = false; // Reset since we already wrote to state
+        old_value
+    }
+}
+
+/// Application state structure - Simplified with grouped settings
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
     pub desktop: DesktopWrapper,
     pub shell_sessions: ShellSessions,
     cancel_tx: Arc<CancelSender>,  // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
-    // State for text_editor_undo_edit - Wrapped in Arc
+
+    // Grouped settings structures (major simplification)
+    pub audio_settings: Arc<StdMutex<AudioSettings>>,
+    pub agent_execution: Arc<StdMutex<AgentExecutionState>>,
+    pub ui_settings: Arc<StdMutex<UISettings>>,
+    pub input_settings: Arc<StdMutex<InputSettings>>,
+
+    // Essential state that needs separate control
     pub last_edited_file: Arc<StdMutex<Option<PathBuf>>>,
     pub previous_content: Arc<StdMutex<Option<Option<String>>>>,
-    // Persistent Playwright driver instance, using TokioMutex
-    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
-    // Persistent browser controller instance
-    pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
-    // Persistent memory manager for conversation history
-    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
-    // Dynamic storage for other state components - Wrapped in Arc
-    state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
-    pub tts_provider: Arc<StdMutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
-    pub bar_ui_state: Arc<StdMutex<String>>, // Added to store the current UI state of the floating bar
-    pub dictation_active: Arc<StdMutex<bool>>, // Track if Dictation Mode is active
-    pub dictation_clipboard_enabled: Arc<StdMutex<bool>>, // Track if Dictation Mode should save to clipboard
-    pub sound_enabled: Arc<StdMutex<bool>>,               // Track if sound effects are enabled
-    pub performance_monitoring_enabled: Arc<StdMutex<bool>>, // Track if performance monitoring is enabled
-    pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,  // Track timestamps for log grouping
-    // Permissions state tracking
-    pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
-    pub permissions_checked: Arc<StdMutex<bool>>, // Track if permissions have been checked
-    // Tool configuration manager
-    pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
-    // Cloud connectivity
-    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
-    pub cloud_config: Arc<TokioMutex<CloudConfig>>,         // Cloud configuration
-    pub cloud_enabled: Arc<StdMutex<bool>>,                 // Track if cloud is enabled
-    // Production cloud connector
-    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
-    // Keyboard shortcuts configuration
-    pub keyboard_shortcuts: Arc<StdMutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
-    // Agent trigger mode configuration
-    pub agent_trigger_mode: Arc<StdMutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
-    // Dictation trigger mode configuration
-    pub dictation_trigger_mode: Arc<StdMutex<DictationTriggerMode>>, // Track how dictation is triggered (tap vs hold)
-    // MCP manager for external MCP server support
-    pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
-    // Tool provider registry for refreshing MCP tools - using Weak references to prevent Arc cycles
-    pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>, // Track active tool providers
-    // Always listening mode state
-    pub always_listening_active: Arc<StdMutex<bool>>, // Track if Always Listening Mode is active
-    pub always_listening_sensitivity: Arc<StdMutex<f32>>, // Sensitivity threshold for activation
-    pub always_listening_wake_words: Arc<StdMutex<Vec<String>>>, // Configurable wake words
-    // Notification settings
-    pub notification_type: Arc<StdMutex<String>>, // "system", "toast", "both", or "disabled"
-    pub notification_sound_enabled: Arc<StdMutex<bool>>, // Sound for notifications
-    pub notification_duration: Arc<StdMutex<u32>>, // Duration in milliseconds for toast notifications
-    pub notification_position: Arc<StdMutex<String>>, // Position for toast notifications
-    pub notification_show_icons: Arc<StdMutex<bool>>, // Show icons in notifications
-    pub notification_persist_important: Arc<StdMutex<bool>>, // Keep important notifications until dismissed
-    // Agent execution status tracking
-    pub agent_execution_active: Arc<StdMutex<bool>>, // Track if an agent is currently executing
-    pub agent_execution_id: Arc<StdMutex<Option<String>>>, // Track the current agent execution ID
-    // Agent iteration tracking
-    pub agent_current_step: Arc<StdMutex<Option<u32>>>, // Track the current iteration/step number
-    pub agent_max_steps: Arc<StdMutex<Option<u32>>>, // Track the maximum iterations/steps allowed
+    pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,
 
-    // TTS content is now handled via XML tags during streaming, no separate storage needed
-    // Debug mode tracking
-    pub debug_mode: Arc<StdMutex<bool>>, // Track if debug mode is enabled
-    // Tool approval setting
-    pub tool_approval_required: Arc<StdMutex<bool>>, // Track if tool approval is required before execution
-    // Pending tool approvals
-    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>, // Track pending approval requests
+    // Async state that needs TokioMutex
+    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
+    pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
+    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
+    pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
+    pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
+    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
+    pub cloud_config: Arc<TokioMutex<CloudConfig>>,
+    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>,
+    pub mcp_manager: Arc<TokioMutex<MCPManager>>,
+    pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
+    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
+
+    // Simple state fields
+    pub permissions_checked: Arc<StdMutex<bool>>,
+    pub cloud_enabled: Arc<StdMutex<bool>>,
+
+    // Dynamic storage for other state components
+    state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
 impl AppState {
     pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false); // Initial state: not cancelled
+        info!("Initializing AppState with simplified grouped structure");
         Self {
             desktop: DesktopWrapper::new(desktop),
             shell_sessions: ShellSessions::default(),
             cancel_tx: Arc::new(cancel_tx),
             cancel_rx,
+
+            // Initialize grouped settings
+            audio_settings: Arc::new(StdMutex::new(AudioSettings::default())),
+            agent_execution: Arc::new(StdMutex::new(AgentExecutionState::default())),
+            ui_settings: Arc::new(StdMutex::new(UISettings::default())),
+            input_settings: Arc::new(StdMutex::new(InputSettings::default())),
+
+            // Initialize essential state
             last_edited_file: Arc::new(StdMutex::new(None)),
             previous_content: Arc::new(StdMutex::new(None)),
+            timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())),
+
+            // Initialize async state
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
-            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
-            state_components: Arc::new(StdMutex::new(HashMap::new())),
-            tts_provider: Arc::new(StdMutex::new({
-                #[cfg(debug_assertions)]
-                {
-                    // In development, default to 'system' TTS
-                    info!("Initializing TTS provider to 'system' (development mode)");
-                    "system".to_string()
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    // In production, default to 'elevenlabs' TTS
-                    info!("Initializing TTS provider to 'elevenlabs' (production mode)");
-                    "elevenlabs".to_string()
-                }
-            })),
-            bar_ui_state: Arc::new(StdMutex::new("default".to_string())), // Initialize bar UI state
-            dictation_active: Arc::new(StdMutex::new(false)), // Initialize Dictation Mode as inactive
-            dictation_clipboard_enabled: Arc::new(StdMutex::new(true)), // Initialize clipboard saving as enabled by default
-            sound_enabled: Arc::new(StdMutex::new(true)), // Initialize sound effects as enabled by default
-            performance_monitoring_enabled: Arc::new(StdMutex::new(true)), // Initialize performance monitoring as enabled by default
-            timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())), // Initialize timestamp tracker
-            // Initialize permissions state
+            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())),
             permissions_state: Arc::new(TokioMutex::new(None)),
-            permissions_checked: Arc::new(StdMutex::new(false)),
-            // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
-            // Initialize cloud connectivity
             cloud_client: Arc::new(TokioMutex::new(None)),
             cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
-            cloud_enabled: Arc::new(StdMutex::new(false)),
-            // Initialize production cloud connector
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
-            // Initialize keyboard shortcuts configuration
-            keyboard_shortcuts: Arc::new(StdMutex::new(KeyboardShortcuts::default())),
-            // Initialize agent trigger mode configuration
-            agent_trigger_mode: Arc::new(StdMutex::new(AgentTriggerMode::Tap)),
-            // Initialize dictation trigger mode configuration
-            dictation_trigger_mode: Arc::new(StdMutex::new(DictationTriggerMode::Hold)), // Default to existing hold behavior
-            // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
-            // Initialize tool provider registry
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
-            // Initialize Always Listening mode state
-            always_listening_active: Arc::new(StdMutex::new(false)),
-            always_listening_sensitivity: Arc::new(StdMutex::new(0.5)),
-            always_listening_wake_words: Arc::new(StdMutex::new(
-                audio::DEFAULT_WAKE_WORDS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            )),
-            // Initialize notification settings
-            notification_type: Arc::new(StdMutex::new("system".to_string())),
-            notification_sound_enabled: Arc::new(StdMutex::new(true)),
-            notification_duration: Arc::new(StdMutex::new(5000)),
-            notification_position: Arc::new(StdMutex::new("bottom-right".to_string())),
-            notification_show_icons: Arc::new(StdMutex::new(true)),
-            notification_persist_important: Arc::new(StdMutex::new(true)),
-            // Initialize agent execution status tracking
-            agent_execution_active: Arc::new(StdMutex::new(false)),
-            agent_execution_id: Arc::new(StdMutex::new(None)),
-            // Initialize agent iteration tracking
-            agent_current_step: Arc::new(StdMutex::new(None)),
-            agent_max_steps: Arc::new(StdMutex::new(None)),
-
-            // TTS content now handled via XML tags during streaming
-            // Initialize debug mode tracking
-            debug_mode: Arc::new(StdMutex::new(false)),
-            // Initialize tool approval setting as disabled by default
-            tool_approval_required: Arc::new(StdMutex::new(false)),
-            // Initialize pending tool approvals
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+
+            // Initialize simple state
+            permissions_checked: Arc::new(StdMutex::new(false)),
+            cloud_enabled: Arc::new(StdMutex::new(false)),
+
+            // Initialize dynamic storage
+            state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
+    }
+
+    // Audio Settings - Getter/Setter methods that operate on actual shared state
+    pub fn get_tts_provider(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.tts_provider.clone())
+            .map_err(|e| format!("Failed to get TTS provider: {}", e))
+    }
+
+    pub fn set_tts_provider(&self, provider: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.tts_provider = provider)
+            .map_err(|e| format!("Failed to set TTS provider: {}", e))
+    }
+
+    pub fn get_dictation_active(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.dictation_active)
+            .map_err(|e| format!("Failed to get dictation active: {}", e))
+    }
+
+    pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.dictation_active = active)
+            .map_err(|e| format!("Failed to set dictation active: {}", e))
+    }
+
+    pub fn get_dictation_clipboard_enabled(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.dictation_clipboard_enabled)
+            .map_err(|e| format!("Failed to get dictation clipboard enabled: {}", e))
+    }
+
+    pub fn set_dictation_clipboard_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.dictation_clipboard_enabled = enabled)
+            .map_err(|e| format!("Failed to set dictation clipboard enabled: {}", e))
+    }
+
+    pub fn get_sound_enabled(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.sound_enabled)
+            .map_err(|e| format!("Failed to get sound enabled: {}", e))
+    }
+
+    pub fn set_sound_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.sound_enabled = enabled)
+            .map_err(|e| format!("Failed to set sound enabled: {}", e))
+    }
+
+    pub fn get_always_listening_active(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.always_listening_active)
+            .map_err(|e| format!("Failed to get always listening active: {}", e))
+    }
+
+    pub fn set_always_listening_active(&self, active: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.always_listening_active = active)
+            .map_err(|e| format!("Failed to set always listening active: {}", e))
+    }
+
+    pub fn get_always_listening_sensitivity(&self) -> Result<f32, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.always_listening_sensitivity)
+            .map_err(|e| format!("Failed to get always listening sensitivity: {}", e))
+    }
+
+    pub fn set_always_listening_sensitivity(&self, sensitivity: f32) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.always_listening_sensitivity = sensitivity)
+            .map_err(|e| format!("Failed to set always listening sensitivity: {}", e))
+    }
+
+    pub fn get_always_listening_wake_words(&self) -> Result<Vec<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.always_listening_wake_words.clone())
+            .map_err(|e| format!("Failed to get always listening wake words: {}", e))
+    }
+
+    pub fn set_always_listening_wake_words(&self, wake_words: Vec<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.always_listening_wake_words = wake_words)
+            .map_err(|e| format!("Failed to set always listening wake words: {}", e))
+    }
+
+    pub fn get_notification_sound_enabled(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.notification_sound_enabled)
+            .map_err(|e| format!("Failed to get notification sound enabled: {}", e))
+    }
+
+    pub fn set_notification_sound_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.notification_sound_enabled = enabled)
+            .map_err(|e| format!("Failed to set notification sound enabled: {}", e))
+    }
+
+    // UI Settings - Getter/Setter methods
+    pub fn get_bar_ui_state(&self) -> Result<String, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.bar_ui_state.clone())
+            .map_err(|e| format!("Failed to get bar UI state: {}", e))
+    }
+
+    pub fn set_bar_ui_state(&self, state: String) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.bar_ui_state = state)
+            .map_err(|e| format!("Failed to set bar UI state: {}", e))
+    }
+
+    pub fn get_performance_monitoring_enabled(&self) -> Result<bool, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.performance_monitoring_enabled)
+            .map_err(|e| format!("Failed to get performance monitoring enabled: {}", e))
+    }
+
+    pub fn set_performance_monitoring_enabled_internal(&self, enabled: bool) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.performance_monitoring_enabled = enabled)
+            .map_err(|e| format!("Failed to set performance monitoring enabled: {}", e))
+    }
+
+    pub fn get_debug_mode(&self) -> Result<bool, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.debug_mode)
+            .map_err(|e| format!("Failed to get debug mode: {}", e))
+    }
+
+    pub fn set_debug_mode_internal(&self, enabled: bool) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.debug_mode = enabled)
+            .map_err(|e| format!("Failed to set debug mode: {}", e))
+    }
+
+    pub fn get_notification_type(&self) -> Result<String, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.notification_type.clone())
+            .map_err(|e| format!("Failed to get notification type: {}", e))
+    }
+
+    pub fn set_notification_type(&self, notification_type: String) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.notification_type = notification_type)
+            .map_err(|e| format!("Failed to set notification type: {}", e))
+    }
+
+    pub fn get_notification_duration(&self) -> Result<u32, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.notification_duration)
+            .map_err(|e| format!("Failed to get notification duration: {}", e))
+    }
+
+    pub fn set_notification_duration(&self, duration: u32) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.notification_duration = duration)
+            .map_err(|e| format!("Failed to set notification duration: {}", e))
+    }
+
+    pub fn get_notification_position(&self) -> Result<String, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.notification_position.clone())
+            .map_err(|e| format!("Failed to get notification position: {}", e))
+    }
+
+    pub fn set_notification_position(&self, position: String) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.notification_position = position)
+            .map_err(|e| format!("Failed to set notification position: {}", e))
+    }
+
+    pub fn get_notification_show_icons(&self) -> Result<bool, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.notification_show_icons)
+            .map_err(|e| format!("Failed to get notification show icons: {}", e))
+    }
+
+    pub fn set_notification_show_icons(&self, show_icons: bool) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.notification_show_icons = show_icons)
+            .map_err(|e| format!("Failed to set notification show icons: {}", e))
+    }
+
+    pub fn get_notification_persist_important(&self) -> Result<bool, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.notification_persist_important)
+            .map_err(|e| format!("Failed to get notification persist important: {}", e))
+    }
+
+    pub fn set_notification_persist_important(&self, persist: bool) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.notification_persist_important = persist)
+            .map_err(|e| format!("Failed to set notification persist important: {}", e))
+    }
+
+    // Input Settings - Getter/Setter methods
+    pub fn get_keyboard_shortcuts(&self) -> Result<KeyboardShortcuts, String> {
+        self.input_settings
+            .lock()
+            .map(|settings| settings.keyboard_shortcuts.clone())
+            .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))
+    }
+
+    pub fn set_keyboard_shortcuts(&self, shortcuts: KeyboardShortcuts) -> Result<(), String> {
+        self.input_settings
+            .lock()
+            .map(|mut settings| settings.keyboard_shortcuts = shortcuts)
+            .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))
+    }
+
+    pub fn get_agent_trigger_mode(&self) -> Result<AgentTriggerMode, String> {
+        self.input_settings
+            .lock()
+            .map(|settings| settings.agent_trigger_mode.clone())
+            .map_err(|e| format!("Failed to get agent trigger mode: {}", e))
+    }
+
+    pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) -> Result<(), String> {
+        self.input_settings
+            .lock()
+            .map(|mut settings| settings.agent_trigger_mode = mode)
+            .map_err(|e| format!("Failed to set agent trigger mode: {}", e))
+    }
+
+    pub fn get_dictation_trigger_mode(&self) -> Result<DictationTriggerMode, String> {
+        self.input_settings
+            .lock()
+            .map(|settings| settings.dictation_trigger_mode.clone())
+            .map_err(|e| format!("Failed to get dictation trigger mode: {}", e))
+    }
+
+    pub fn set_dictation_trigger_mode(&self, mode: DictationTriggerMode) -> Result<(), String> {
+        self.input_settings
+            .lock()
+            .map(|mut settings| settings.dictation_trigger_mode = mode)
+            .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))
+    }
+
+    // FIXED: Backward compatibility methods now return synchronized wrappers
+    // that delegate to the actual shared state instead of disconnected copies
+    pub fn tts_provider(&self) -> Arc<CompatValue<String, AudioSettings>> {
+        warn!("DEPRECATED: tts_provider() method. Use get_tts_provider()/set_tts_provider() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.tts_provider.clone(),
+            |settings, value| settings.tts_provider = value,
+        ))
+    }
+
+    pub fn dictation_active(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: dictation_active() method. Use get_dictation_active()/set_dictation_active() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.dictation_active,
+            |settings, value| settings.dictation_active = value,
+        ))
+    }
+
+    pub fn dictation_clipboard_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: dictation_clipboard_enabled() method. Use get_dictation_clipboard_enabled()/set_dictation_clipboard_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.dictation_clipboard_enabled,
+            |settings, value| settings.dictation_clipboard_enabled = value,
+        ))
+    }
+
+    pub fn sound_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: sound_enabled() method. Use get_sound_enabled()/set_sound_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.sound_enabled,
+            |settings, value| settings.sound_enabled = value,
+        ))
+    }
+
+    pub fn always_listening_active(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_active() method. Use get_always_listening_active()/set_always_listening_active() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_active,
+            |settings, value| settings.always_listening_active = value,
+        ))
+    }
+
+    pub fn always_listening_sensitivity(&self) -> Arc<CompatValue<f32, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_sensitivity() method. Use get_always_listening_sensitivity()/set_always_listening_sensitivity() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_sensitivity,
+            |settings, value| settings.always_listening_sensitivity = value,
+        ))
+    }
+
+    pub fn always_listening_wake_words(&self) -> Arc<CompatValue<Vec<String>, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_wake_words() method. Use get_always_listening_wake_words()/set_always_listening_wake_words() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_wake_words.clone(),
+            |settings, value| settings.always_listening_wake_words = value,
+        ))
+    }
+
+    pub fn notification_sound_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: notification_sound_enabled() method. Use get_notification_sound_enabled()/set_notification_sound_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.notification_sound_enabled,
+            |settings, value| settings.notification_sound_enabled = value,
+        ))
+    }
+
+    pub fn agent_execution_active(&self) -> Arc<CompatValue<bool, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_execution_active() method. Use is_agent_executing() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.execution_active,
+            |execution, value| execution.execution_active = value,
+        ))
+    }
+
+    pub fn agent_execution_id(&self) -> Arc<CompatValue<Option<String>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_execution_id() method. Use get_current_agent_execution_id() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.execution_id.clone(),
+            |execution, value| execution.execution_id = value,
+        ))
+    }
+
+    pub fn agent_current_step(&self) -> Arc<CompatValue<Option<u32>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_current_step() method. Use get_agent_current_step() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.current_step,
+            |execution, value| execution.current_step = value,
+        ))
+    }
+
+    pub fn agent_max_steps(&self) -> Arc<CompatValue<Option<u32>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_max_steps() method. Use get_agent_max_steps() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.max_steps,
+            |execution, value| execution.max_steps = value,
+        ))
+    }
+
+    pub fn tool_approval_required(&self) -> Arc<CompatValue<bool, AgentExecutionState>> {
+        warn!("DEPRECATED: tool_approval_required() method. Use is_tool_approval_required()/set_tool_approval_required() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.tool_approval_required,
+            |execution, value| execution.tool_approval_required = value,
+        ))
+    }
+
+    pub fn bar_ui_state(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: bar_ui_state() method. Use get_bar_ui_state()/set_bar_ui_state() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.bar_ui_state.clone(),
+            |settings, value| settings.bar_ui_state = value,
+        ))
+    }
+
+    pub fn performance_monitoring_enabled(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: performance_monitoring_enabled() method. Use get_performance_monitoring_enabled()/set_performance_monitoring_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.performance_monitoring_enabled,
+            |settings, value| settings.performance_monitoring_enabled = value,
+        ))
+    }
+
+    pub fn debug_mode(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: debug_mode() method. Use get_debug_mode()/set_debug_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.debug_mode,
+            |settings, value| settings.debug_mode = value,
+        ))
+    }
+
+    pub fn notification_type(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: notification_type() method. Use get_notification_type()/set_notification_type() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_type.clone(),
+            |settings, value| settings.notification_type = value,
+        ))
+    }
+
+    pub fn notification_duration(&self) -> Arc<CompatValue<u32, UISettings>> {
+        warn!("DEPRECATED: notification_duration() method. Use get_notification_duration()/set_notification_duration() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_duration,
+            |settings, value| settings.notification_duration = value,
+        ))
+    }
+
+    pub fn notification_position(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: notification_position() method. Use get_notification_position()/set_notification_position() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_position.clone(),
+            |settings, value| settings.notification_position = value,
+        ))
+    }
+
+    pub fn notification_show_icons(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: notification_show_icons() method. Use get_notification_show_icons()/set_notification_show_icons() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_show_icons,
+            |settings, value| settings.notification_show_icons = value,
+        ))
+    }
+
+    pub fn notification_persist_important(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: notification_persist_important() method. Use get_notification_persist_important()/set_notification_persist_important() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_persist_important,
+            |settings, value| settings.notification_persist_important = value,
+        ))
+    }
+
+    pub fn keyboard_shortcuts(&self) -> Arc<CompatValue<KeyboardShortcuts, InputSettings>> {
+        warn!("DEPRECATED: keyboard_shortcuts() method. Use get_keyboard_shortcuts()/set_keyboard_shortcuts() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.keyboard_shortcuts.clone(),
+            |settings, value| settings.keyboard_shortcuts = value,
+        ))
+    }
+
+    pub fn agent_trigger_mode(&self) -> Arc<CompatValue<AgentTriggerMode, InputSettings>> {
+        warn!("DEPRECATED: agent_trigger_mode() method. Use get_agent_trigger_mode()/set_agent_trigger_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.agent_trigger_mode.clone(),
+            |settings, value| settings.agent_trigger_mode = value,
+        ))
+    }
+
+    pub fn dictation_trigger_mode(&self) -> Arc<CompatValue<DictationTriggerMode, InputSettings>> {
+        warn!("DEPRECATED: dictation_trigger_mode() method. Use get_dictation_trigger_mode()/set_dictation_trigger_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.dictation_trigger_mode.clone(),
+            |settings, value| settings.dictation_trigger_mode = value,
+        ))
     }
 
     // Method to trigger cancellation
@@ -338,20 +1091,10 @@ impl AppState {
 
     // Method to mark agent execution started
     pub fn mark_agent_execution_started(&self, execution_id: String) -> Result<(), String> {
-        {
-            let mut active_guard = self
-                .agent_execution_active
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
-            *active_guard = true;
-        }
-        {
-            let mut id_guard = self
-                .agent_execution_id
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
-            *id_guard = Some(execution_id.clone());
-        }
+        let mut execution_state = self.agent_execution.lock()
+            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+        execution_state.execution_active = true;
+        execution_state.execution_id = Some(execution_id.clone());
         info!(
             "[AppState] Agent execution started with ID: {}",
             execution_id
@@ -365,34 +1108,12 @@ impl AppState {
         execution_id: String,
         max_steps: u32,
     ) -> Result<(), String> {
-        {
-            let mut active_guard = self
-                .agent_execution_active
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
-            *active_guard = true;
-        }
-        {
-            let mut id_guard = self
-                .agent_execution_id
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
-            *id_guard = Some(execution_id.clone());
-        }
-        {
-            let mut max_steps_guard = self
-                .agent_max_steps
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
-            *max_steps_guard = Some(max_steps);
-        }
-        {
-            let mut current_step_guard = self
-                .agent_current_step
-                .lock()
-                .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
-            *current_step_guard = Some(0); // Start at step 0
-        }
+        let mut execution_state = self.agent_execution.lock()
+            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+        execution_state.execution_active = true;
+        execution_state.execution_id = Some(execution_id.clone());
+        execution_state.max_steps = Some(max_steps);
+        execution_state.current_step = Some(0); // Start at step 0
         info!(
             "[AppState] Agent execution started with ID: {} (max steps: {})",
             execution_id, max_steps
@@ -403,38 +1124,16 @@ impl AppState {
     // Method to mark agent execution as finished
     pub fn mark_agent_execution_finished(&self) {
         let result = (|| -> Result<(), String> {
-            {
-                let mut active_guard = self
-                    .agent_execution_active
-                    .lock()
-                    .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
-                *active_guard = false;
-            }
-            {
-                let mut id_guard = self
-                    .agent_execution_id
-                    .lock()
-                    .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
-                let execution_id = id_guard.take();
-                info!(
-                    "[AppState] Agent execution finished for ID: {:?}",
-                    execution_id
-                );
-            }
-            {
-                let mut current_step_guard = self
-                    .agent_current_step
-                    .lock()
-                    .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
-                *current_step_guard = None;
-            }
-            {
-                let mut max_steps_guard = self
-                    .agent_max_steps
-                    .lock()
-                    .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
-                *max_steps_guard = None;
-            }
+            let mut execution_state = self.agent_execution.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+            let execution_id = execution_state.execution_id.take();
+            execution_state.execution_active = false;
+            execution_state.current_step = None;
+            execution_state.max_steps = None;
+            info!(
+                "[AppState] Agent execution finished for ID: {:?}",
+                execution_id
+            );
             Ok(())
         })();
 
@@ -445,9 +1144,9 @@ impl AppState {
 
     // Method to check if an agent is currently executing
     pub fn is_agent_executing(&self) -> bool {
-        self.agent_execution_active
+        self.agent_execution
             .lock()
-            .map(|guard| *guard)
+            .map(|guard| guard.execution_active)
             .unwrap_or_else(|e| {
                 error!("Failed to check agent execution status: {}", e);
                 false // Safe fallback
@@ -456,9 +1155,9 @@ impl AppState {
 
     // Method to get the current agent execution ID
     pub fn get_current_agent_execution_id(&self) -> Option<String> {
-        self.agent_execution_id
+        self.agent_execution
             .lock()
-            .map(|guard| guard.clone())
+            .map(|guard| guard.execution_id.clone())
             .unwrap_or_else(|e| {
                 error!("Failed to get current agent execution ID: {}", e);
                 None // Safe fallback
@@ -467,20 +1166,19 @@ impl AppState {
 
     // Method to update the current agent step
     pub fn update_agent_current_step(&self, step: u32) -> Result<(), String> {
-        let mut current_step_guard = self
-            .agent_current_step
+        let mut execution_state = self.agent_execution
             .lock()
-            .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
-        *current_step_guard = Some(step);
+            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+        execution_state.current_step = Some(step);
         debug!("[AppState] Agent current step updated to: {}", step);
         Ok(())
     }
 
     // Method to get the current agent step
     pub fn get_agent_current_step(&self) -> Option<u32> {
-        self.agent_current_step
+        self.agent_execution
             .lock()
-            .map(|guard| *guard)
+            .map(|guard| guard.current_step)
             .unwrap_or_else(|e| {
                 error!("Failed to get current agent step: {}", e);
                 None // Safe fallback
@@ -489,9 +1187,9 @@ impl AppState {
 
     // Method to get the agent max steps
     pub fn get_agent_max_steps(&self) -> Option<u32> {
-        self.agent_max_steps
+        self.agent_execution
             .lock()
-            .map(|guard| *guard)
+            .map(|guard| guard.max_steps)
             .unwrap_or_else(|e| {
                 error!("Failed to get agent max steps: {}", e);
                 None // Safe fallback
@@ -507,9 +1205,9 @@ impl AppState {
 
     /// Check if agent mode is currently active
     pub fn is_agent_mode_active(&self) -> bool {
-        self.agent_execution_active
+        self.agent_execution
             .lock()
-            .map(|guard| *guard)
+            .map(|guard| guard.execution_active)
             .unwrap_or_else(|e| {
                 error!("Failed to check agent mode status: {}", e);
                 false // Safe fallback
@@ -518,9 +1216,9 @@ impl AppState {
 
     /// Check if dictation mode is currently active
     pub fn is_dictation_active(&self) -> bool {
-        self.dictation_active
+        self.audio_settings
             .lock()
-            .map(|guard| *guard)
+            .map(|settings| settings.dictation_active)
             .unwrap_or_else(|e| {
                 error!("Failed to check dictation status: {}", e);
                 false // Safe fallback
@@ -829,9 +1527,9 @@ impl AppState {
 
     /// Check if performance monitoring is enabled
     pub fn is_performance_monitoring_enabled(&self) -> bool {
-        self.performance_monitoring_enabled
+        self.ui_settings
             .lock()
-            .map(|enabled| *enabled)
+            .map(|settings| settings.performance_monitoring_enabled)
             .unwrap_or_else(|e| {
                 error!("Failed to check performance monitoring status: {}", e);
                 false // Safe fallback
@@ -840,18 +1538,16 @@ impl AppState {
 
     /// Set performance monitoring enabled state
     pub fn set_performance_monitoring_enabled(&self, enabled: bool) -> Result<(), String> {
-        let mut monitoring_guard = self.performance_monitoring_enabled.lock().map_err(|e| {
-            format!(
-                "Failed to acquire performance_monitoring_enabled lock: {}",
-                e
-            )
-        })?;
-        *monitoring_guard = enabled;
-        info!(
-            "Performance monitoring {}",
-            if enabled { "enabled" } else { "disabled" }
-        );
-        Ok(())
+        self.ui_settings
+            .lock()
+            .map(|mut settings| {
+                settings.performance_monitoring_enabled = enabled;
+                info!(
+                    "Performance monitoring {}",
+                    if enabled { "enabled" } else { "disabled" }
+                );
+            })
+            .map_err(|e| format!("Failed to set performance monitoring enabled: {}", e))
     }
 
     // Production cloud connector methods
@@ -1265,18 +1961,16 @@ impl AppState {
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) -> Result<(), String> {
-        let mut debug_guard = self
-            .debug_mode
+        self.ui_settings
             .lock()
-            .map_err(|e| format!("Failed to acquire debug_mode lock: {}", e))?;
-        *debug_guard = enabled;
-        Ok(())
+            .map(|mut settings| settings.debug_mode = enabled)
+            .map_err(|e| format!("Failed to set debug mode: {}", e))
     }
 
     pub fn is_debug_mode(&self) -> bool {
-        self.debug_mode
+        self.ui_settings
             .lock()
-            .map(|guard| *guard)
+            .map(|settings| settings.debug_mode)
             .unwrap_or_else(|e| {
                 error!("Failed to check debug mode status: {}", e);
                 false // Safe fallback
@@ -1285,18 +1979,16 @@ impl AppState {
 
     // Methods for tool approval setting
     pub fn set_tool_approval_required(&self, required: bool) -> Result<(), String> {
-        let mut approval_guard = self
-            .tool_approval_required
+        self.agent_execution
             .lock()
-            .map_err(|e| format!("Failed to acquire tool_approval_required lock: {}", e))?;
-        *approval_guard = required;
-        Ok(())
+            .map(|mut execution| execution.tool_approval_required = required)
+            .map_err(|e| format!("Failed to set tool approval required: {}", e))
     }
 
     pub fn is_tool_approval_required(&self) -> bool {
-        self.tool_approval_required
+        self.agent_execution
             .lock()
-            .map(|guard| *guard)
+            .map(|execution| execution.tool_approval_required)
             .unwrap_or_else(|e| {
                 error!("Failed to check tool approval requirement: {}", e);
                 false // Safe fallback
@@ -1458,26 +2150,11 @@ mod tests {
         assert!(!state.are_permissions_checked());
         assert!(!state.is_cloud_enabled());
 
-        // Test Arc-wrapped values - using unwrap in tests is acceptable
-        {
-            let tts_provider = state.tts_provider.lock().unwrap();
-            assert_eq!(*tts_provider, "system");
-        }
-
-        {
-            let dictation_active = state.dictation_active.lock().unwrap();
-            assert!(!*dictation_active);
-        }
-
-        {
-            let sound_enabled = state.sound_enabled.lock().unwrap();
-            assert!(*sound_enabled);
-        }
-
-        {
-            let always_listening = state.always_listening_active.lock().unwrap();
-            assert!(!*always_listening);
-        }
+        // Test getter methods - using unwrap in tests is acceptable
+        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert!(!state.get_dictation_active().unwrap());
+        assert!(state.get_sound_enabled().unwrap());
+        assert!(!state.get_always_listening_active().unwrap());
     }
 
     #[tokio::test]
@@ -1675,22 +2352,13 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial value
-        {
-            let tts_provider = state.tts_provider.lock().unwrap();
-            assert_eq!(*tts_provider, "system");
-        }
+        assert_eq!(state.get_tts_provider().unwrap(), "system");
 
-        // Update TTS provider
-        {
-            let mut tts_provider = state.tts_provider.lock().unwrap();
-            *tts_provider = "openai".to_string();
-        }
+        // Update TTS provider using new setter method
+        state.set_tts_provider("openai".to_string()).unwrap();
 
-        // Verify update
-        {
-            let tts_provider = state.tts_provider.lock().unwrap();
-            assert_eq!(*tts_provider, "openai");
-        }
+        // Verify update persists
+        assert_eq!(state.get_tts_provider().unwrap(), "openai");
     }
 
     #[test]
@@ -1698,37 +2366,16 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial state
-        {
-            let dictation_active = state.dictation_active.lock().unwrap();
-            assert!(!*dictation_active);
-        }
+        assert!(!state.get_dictation_active().unwrap());
+        assert!(state.get_dictation_clipboard_enabled().unwrap());
 
-        {
-            let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
-            assert!(*clipboard_enabled);
-        }
+        // Update dictation state using new setter methods
+        state.set_dictation_active(true).unwrap();
+        state.set_dictation_clipboard_enabled(false).unwrap();
 
-        // Update dictation state
-        {
-            let mut dictation_active = state.dictation_active.lock().unwrap();
-            *dictation_active = true;
-        }
-
-        {
-            let mut clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
-            *clipboard_enabled = false;
-        }
-
-        // Verify updates
-        {
-            let dictation_active = state.dictation_active.lock().unwrap();
-            assert!(*dictation_active);
-        }
-
-        {
-            let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
-            assert!(!*clipboard_enabled);
-        }
+        // Verify updates persist
+        assert!(state.get_dictation_active().unwrap());
+        assert!(!state.get_dictation_clipboard_enabled().unwrap());
     }
 
     #[test]
@@ -1736,55 +2383,29 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial values
-        {
-            let active = state.always_listening_active.lock().unwrap();
-            assert!(!*active);
-        }
+        assert!(!state.get_always_listening_active().unwrap());
+        assert_eq!(state.get_always_listening_sensitivity().unwrap(), 0.5);
 
-        {
-            let sensitivity = state.always_listening_sensitivity.lock().unwrap();
-            assert_eq!(*sensitivity, 0.5);
-        }
+        let wake_words = state.get_always_listening_wake_words().unwrap();
+        assert_eq!(wake_words.len(), 2);
+        assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[0].to_string()));
+        assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[1].to_string()));
 
-        {
-            let wake_words = state.always_listening_wake_words.lock().unwrap();
-            assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[0].to_string()));
-            assert!(wake_words.contains(&audio::DEFAULT_WAKE_WORDS[1].to_string()));
-        }
+        // Update configuration using new setter methods
+        state.set_always_listening_active(true).unwrap();
+        state.set_always_listening_sensitivity(0.8).unwrap();
 
-        // Update configuration
-        {
-            let mut active = state.always_listening_active.lock().unwrap();
-            *active = true;
-        }
+        let mut new_wake_words = wake_words;
+        new_wake_words.push("assistant".to_string());
+        state.set_always_listening_wake_words(new_wake_words).unwrap();
 
-        {
-            let mut sensitivity = state.always_listening_sensitivity.lock().unwrap();
-            *sensitivity = 0.8;
-        }
+        // Verify updates persist
+        assert!(state.get_always_listening_active().unwrap());
+        assert_eq!(state.get_always_listening_sensitivity().unwrap(), 0.8);
 
-        {
-            let mut wake_words = state.always_listening_wake_words.lock().unwrap();
-            wake_words.push("assistant".to_string());
-        }
-
-        // Verify updates
-        {
-            let active = state.always_listening_active.lock().unwrap();
-            assert!(*active);
-        }
-
-        {
-            let sensitivity = state.always_listening_sensitivity.lock().unwrap();
-            assert_eq!(*sensitivity, 0.8);
-        }
-
-        {
-            let wake_words = state.always_listening_wake_words.lock().unwrap();
-            assert_eq!(wake_words.len(), 3);
-            assert!(wake_words.contains(&"assistant".to_string()));
-        }
+        let updated_wake_words = state.get_always_listening_wake_words().unwrap();
+        assert_eq!(updated_wake_words.len(), 3);
+        assert!(updated_wake_words.contains(&"assistant".to_string()));
     }
 
     #[test]
@@ -1835,3 +2456,4 @@ mod tests {
         assert!(!config.enabled);
     }
 }
+

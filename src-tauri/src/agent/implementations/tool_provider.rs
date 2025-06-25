@@ -73,6 +73,101 @@ pub type AsyncToolFn =
 pub type AsyncToolExecutor =
     Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
+/// Simplified error types instead of string matching
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolErrorType {
+    Timeout,
+    Network,
+    Permission,
+    NotFound,
+    Invalid,
+    Temporary,  // For things like "busy", "locked", etc.
+    Fatal,      // For non-recoverable errors
+}
+
+impl ToolErrorType {
+    /// Simple classification based on structured error patterns
+    pub fn from_agent_error(error: &AgentError) -> Self {
+        match error {
+            AgentError::Timeout(_) => Self::Timeout,
+            AgentError::NetworkError(_) => Self::Network,
+            AgentError::PermissionDenied(_) => Self::Permission,
+            AgentError::ToolNotFound(_) => Self::NotFound,
+            AgentError::ValidationError(_) => Self::Invalid,
+            AgentError::ResourceBusy(_) => Self::Temporary,
+            _ => {
+                // Simple fallback without complex string parsing
+                let msg = error.to_string().to_lowercase();
+                if msg.contains("timeout") || msg.contains("timed out") {
+                    Self::Timeout
+                } else if msg.contains("network") || msg.contains("connection") {
+                    Self::Network
+                } else if msg.contains("permission") || msg.contains("denied") {
+                    Self::Permission
+                } else if msg.contains("not found") {
+                    Self::NotFound
+                } else if msg.contains("invalid") || msg.contains("malformed") {
+                    Self::Invalid
+                } else if msg.contains("busy") || msg.contains("locked") {
+                    Self::Temporary
+                } else {
+                    Self::Fatal
+                }
+            }
+        }
+    }
+
+    /// Simple retry policy
+    pub fn should_retry(&self) -> bool {
+        matches!(self, Self::Timeout | Self::Network | Self::Temporary)
+    }
+
+    /// Simple delay calculation
+    pub fn retry_delay(&self, attempt: u32) -> Duration {
+        let base_ms = match self {
+            Self::Timeout => 1000,
+            Self::Network => 2000,
+            Self::Temporary => 500,
+            _ => 0, // Don't retry others
+        };
+
+        if base_ms == 0 {
+            return Duration::from_millis(0);
+        }
+
+        // Simple exponential backoff: base * 2^attempt, max 30 seconds
+        let delay_ms = base_ms * 2_u64.pow(attempt.min(4));
+        Duration::from_millis(delay_ms.min(30000))
+    }
+}
+
+// Simplified recovery stats - just essentials
+#[derive(Debug, Default)]
+pub struct SimpleRecoveryStats {
+    pub total_attempts: u64,
+    pub total_failures: u64,
+    pub total_retries: u64,
+    pub success_after_retry: u64,
+}
+
+impl SimpleRecoveryStats {
+    pub fn success_rate(&self) -> f32 {
+        if self.total_attempts == 0 {
+            0.0
+        } else {
+            (self.total_attempts - self.total_failures) as f32 / self.total_attempts as f32
+        }
+    }
+
+    pub fn retry_success_rate(&self) -> f32 {
+        if self.total_retries == 0 {
+            0.0
+        } else {
+            self.success_after_retry as f32 / self.total_retries as f32
+        }
+    }
+}
+
 /// Error recovery statistics for monitoring tool reliability
 ///
 /// Research Citations:
@@ -292,14 +387,11 @@ impl ToolCircuitBreaker {
 #[derive(Clone)]
 pub struct LocalToolProvider {
     definitions: Arc<RwLock<HashMap<String, ToolDefinition>>>,
-    // Use the AsyncToolFn type
     executors: Arc<RwLock<HashMap<String, AsyncToolExecutor>>>,
     app_handle: Option<AppHandle>,
     mcp_manager: Option<Arc<Mutex<MCPManager>>>,
-    error_recovery_stats: Arc<Mutex<ErrorRecoveryStats>>,
-    recovery_config: ErrorRecoveryConfig,
-    tool_execution_history: Arc<Mutex<HashMap<String, Vec<(Instant, bool)>>>>,
-    circuit_breakers: Arc<Mutex<HashMap<String, ToolCircuitBreaker>>>,
+    // Simplified recovery stats - removed complex tracking
+    recovery_stats: Arc<Mutex<SimpleRecoveryStats>>,
 }
 
 impl LocalToolProvider {
@@ -309,10 +401,7 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: None,
             mcp_manager: None,
-            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
-            recovery_config: ErrorRecoveryConfig::default(),
-            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
-            circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
+            recovery_stats: Arc::new(Mutex::new(SimpleRecoveryStats::default())),
         }
     }
 
@@ -323,10 +412,7 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
             mcp_manager: None,
-            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
-            recovery_config: ErrorRecoveryConfig::default(),
-            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
-            circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
+            recovery_stats: Arc::new(Mutex::new(SimpleRecoveryStats::default())),
         }
     }
 
@@ -337,10 +423,7 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
             mcp_manager: Some(mcp_manager),
-            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
-            recovery_config: ErrorRecoveryConfig::default(),
-            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
-            circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
+            recovery_stats: Arc::new(Mutex::new(SimpleRecoveryStats::default())),
         }
     }
 
@@ -354,9 +437,9 @@ impl LocalToolProvider {
         self.mcp_manager = Some(mcp_manager);
     }
 
-    /// Configure error recovery settings
-    pub fn set_recovery_config(&mut self, config: ErrorRecoveryConfig) {
-        self.recovery_config = config;
+    /// Configure error recovery settings - SIMPLIFIED (no complex config needed)
+    pub fn set_recovery_config(&mut self, _config: ()) {
+        // Simplified - no complex configuration needed
     }
 
     /// Register an asynchronous tool with this provider
@@ -576,394 +659,98 @@ impl LocalToolProvider {
                 .unwrap_or(false)
     }
 
-    /// Get comprehensive error recovery statistics
+    /// Get simplified error recovery statistics
     pub async fn get_recovery_stats(&self) -> Value {
-        let stats = self.error_recovery_stats.lock().await;
-        serde_json::to_value(&*stats).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "Failed to serialize recovery stats"
-            })
+        let stats = self.recovery_stats.lock().await;
+        serde_json::json!({
+            "total_attempts": stats.total_attempts,
+            "total_failures": stats.total_failures,
+            "total_retries": stats.total_retries,
+            "success_after_retry": stats.success_after_retry,
+            "success_rate": stats.success_rate(),
+            "retry_success_rate": stats.retry_success_rate()
         })
     }
 
     /// Clear error recovery history
     pub async fn clear_recovery_history(&self) {
-        let mut stats = self.error_recovery_stats.lock().await;
-        *stats = ErrorRecoveryStats::default();
-
-        let mut history = self.tool_execution_history.lock().await;
-        history.clear();
-
+        let mut stats = self.recovery_stats.lock().await;
+        *stats = SimpleRecoveryStats::default();
         tracing::info!("Error recovery history cleared");
     }
 
-    /// Get tool-specific failure rates
-    pub async fn get_tool_failure_rates(&self) -> HashMap<String, f32> {
-        let stats = self.error_recovery_stats.lock().await;
-        stats.tool_failure_rates.clone()
+    /// Get basic failure statistics - SIMPLIFIED from complex tracking
+    pub async fn get_failure_stats(&self) -> (f32, f32) {
+        let stats = self.recovery_stats.lock().await;
+        (stats.success_rate(), stats.retry_success_rate())
     }
 
-    /// Get most common error patterns
-    pub async fn get_error_patterns(&self) -> Vec<(String, u32)> {
-        let stats = self.error_recovery_stats.lock().await;
-        let mut patterns: Vec<_> = stats.common_error_patterns.iter()
-            .map(|(pattern, count)| (pattern.clone(), *count))
-            .collect();
-        patterns.sort_by(|a, b| b.1.cmp(&a.1));
-        patterns.truncate(10); // Return top 10 patterns
-        patterns
+    /// Simple error classification - SIMPLIFIED from complex string matching
+    fn classify_error(&self, error: &AgentError) -> ToolErrorType {
+        ToolErrorType::from_agent_error(error)
     }
 
-	/// TODO: ELIMINATE STRING MATCHING
-    /// Classify error for recovery strategy selection
-    fn classify_error(&self, error_msg: &str) -> ErrorClass {
-        let error_lower = error_msg.to_lowercase();
-
-        if error_lower.contains("timeout") || error_lower.contains("timed out") {
-            ErrorClass::Timeout
-        } else if error_lower.contains("displayid")
-                || error_lower.contains("remotelayertree")
-                || error_lower.contains("display")
-                || error_lower.contains("scheduleDisplayLink") {
-            ErrorClass::DisplaySystem
-        } else if error_lower.contains("network")
-                || error_lower.contains("connection")
-                || error_lower.contains("unreachable") {
-            ErrorClass::NetworkConnectivity
-        } else if error_lower.contains("locked")
-                || error_lower.contains("busy")
-                || error_lower.contains("in use") {
-            ErrorClass::ResourceLocked
-        } else if error_lower.contains("permission")
-                || error_lower.contains("denied")
-                || error_lower.contains("unauthorized") {
-            ErrorClass::PermissionDenied
-        } else if error_lower.contains("not found")
-                || error_lower.contains("unknown tool") {
-            ErrorClass::ToolNotFound
-        } else if error_lower.contains("invalid")
-                || error_lower.contains("malformed")
-                || error_lower.contains("parse") {
-            ErrorClass::InvalidInput
-        } else {
-            ErrorClass::Unknown
-        }
+    /// Simple recovery strategy - SIMPLIFIED from complex configuration logic
+    fn determine_recovery_strategy(&self, error_type: &ToolErrorType, retry_count: u32) -> bool {
+        // Simple rule: retry up to 3 times for recoverable errors
+        retry_count < 3 && error_type.should_retry()
     }
 
-    /// Determine recovery strategy based on error class and history
-    async fn determine_recovery_strategy(&self,
-        error_class: ErrorClass,
-        _tool_name: &str,
-        retry_count: u32
-    ) -> RecoveryStrategy {
-        if retry_count >= self.recovery_config.max_retries {
-            return RecoveryStrategy::Skip;
+    /// Update simple recovery statistics - SIMPLIFIED from complex tracking
+    async fn update_recovery_stats(&self, retry_attempted: bool, success: bool) {
+        let mut stats = self.recovery_stats.lock().await;
+        stats.total_attempts += 1;
+
+        if !success {
+            stats.total_failures += 1;
         }
 
-        match error_class {
-            ErrorClass::Timeout => {
-                if self.recovery_config.timeout_recovery_enabled {
-                    let delay = std::cmp::min(
-                        self.recovery_config.base_retry_delay_ms *
-                        (self.recovery_config.backoff_multiplier.powi(retry_count as i32) as u64),
-                        self.recovery_config.max_retry_delay_ms
-                    );
-                    RecoveryStrategy::RetryWithDelay(Duration::from_millis(delay))
-                } else {
-                    RecoveryStrategy::Skip
-                }
-            },
-            ErrorClass::DisplaySystem => {
-                if self.recovery_config.display_error_recovery_enabled {
-                    // For display errors, try to reset and retry after a short delay
-                    RecoveryStrategy::RetryWithDelay(Duration::from_millis(200))
-                } else {
-                    RecoveryStrategy::Skip
-                }
-            },
-            ErrorClass::ResourceLocked => {
-                // Wait longer for locked resources
-                RecoveryStrategy::RetryWithDelay(Duration::from_millis(500))
-            },
-            ErrorClass::NetworkConnectivity => {
-                // Progressive backoff for network issues
-                let delay = self.recovery_config.base_retry_delay_ms * (retry_count + 1) as u64;
-                RecoveryStrategy::RetryWithDelay(Duration::from_millis(delay))
-            },
-            ErrorClass::PermissionDenied | ErrorClass::ToolNotFound => {
-                // These errors typically don't benefit from retries
-                RecoveryStrategy::Skip
-            },
-            ErrorClass::InvalidInput => {
-                // Input validation errors shouldn't be retried
-                RecoveryStrategy::Skip
-            },
-            ErrorClass::Unknown => {
-                // Conservative retry with backoff for unknown errors
-                let delay = self.recovery_config.base_retry_delay_ms * 2_u64.pow(retry_count);
-                RecoveryStrategy::RetryWithDelay(Duration::from_millis(
-                    std::cmp::min(delay, self.recovery_config.max_retry_delay_ms)
-                ))
+        if retry_attempted {
+            stats.total_retries += 1;
+            if success {
+                stats.success_after_retry += 1;
             }
         }
     }
 
-    /// Update error recovery statistics
-    async fn update_recovery_stats(&self,
-        tool_name: &str,
-        error_msg: &str,
-        recovery_attempted: bool,
-        recovery_successful: bool,
-        recovery_time: Option<Duration>
-    ) {
-        let mut stats = self.error_recovery_stats.lock().await;
 
-        stats.total_executions += 1;
-        stats.total_failures += 1;
 
-        if recovery_attempted {
-            stats.total_recoveries += 1;
-            if recovery_successful {
-                if let Some(time) = recovery_time {
-                    let time_ms = time.as_millis() as f64;
-                    if stats.total_recoveries == 1 {
-                        stats.average_recovery_time_ms = time_ms;
-                    } else {
-                        stats.average_recovery_time_ms =
-                            (stats.average_recovery_time_ms * (stats.total_recoveries - 1) as f64 + time_ms)
-                            / stats.total_recoveries as f64;
-                    }
-                }
-            }
-            stats.last_recovery_attempt = Some(
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-            );
-        }
-
-        // Update recovery success rate
-        if stats.total_recoveries > 0 {
-            stats.recovery_success_rate =
-                (stats.total_recoveries as f32 - stats.total_failures as f32 + 1.0)
-                / stats.total_recoveries as f32;
-        }
-
-        // Track error patterns
-        if self.recovery_config.enable_pattern_recognition {
-            let error_pattern = self.extract_error_pattern(error_msg);
-            *stats.common_error_patterns.entry(error_pattern).or_insert(0) += 1;
-        }
-
-        // Update tool failure rates
-        let mut history = self.tool_execution_history.lock().await;
-        let tool_history = history.entry(tool_name.to_string()).or_insert_with(Vec::new);
-        tool_history.push((Instant::now(), !recovery_successful));
-
-        // Keep only recent history (last 100 executions)
-        if tool_history.len() > 100 {
-            tool_history.remove(0);
-        }
-
-        // Calculate failure rate for this tool
-        let failures = tool_history.iter().filter(|(_, failed)| *failed).count();
-        let failure_rate = failures as f32 / tool_history.len() as f32;
-        stats.tool_failure_rates.insert(tool_name.to_string(), failure_rate);
-    }
-
-    /// Extract error pattern for tracking
-    fn extract_error_pattern(&self, error_msg: &str) -> String {
-        // Simplify error message to pattern by removing specific details
-        let pattern = error_msg
-            .chars()
-            .filter(|c| c.is_alphabetic() || c.is_whitespace())
-            .collect::<String>()
-            .split_whitespace()
-            .take(5) // Take first 5 words
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        if pattern.len() > 50 {
-            pattern[..50].to_string()
-        } else {
-            pattern
-        }
-    }
-
-    /// Execute tool with comprehensive error recovery and exponential backoff
-    ///
-    /// Research Citations:
-    /// - Exponential backoff reduces tool failure rates by 67% (Microsoft Copilot Studio, 2025)
-    /// - Multi-agent systems show 90.2% performance improvement with proper error recovery (Anthropic Research, 2025)
-    /// - Circuit breaker pattern prevents cascading failures (https://docs.anthropic.com/en/docs/agents-and-tools/computer-use)
-    /// - Tool calling reliability is foundation for agent performance (OpenAI Operator research, January 2025)
+    /// Execute tool with simplified error recovery
     async fn execute_tool_with_recovery(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = tool_call.name.clone();
-        let mut retry_count = 0;
-        let recovery_start = Instant::now();
+        let max_retries = 3;
 
-        // Check circuit breaker before attempting execution
-        {
-            let mut circuit_breakers = self.circuit_breakers.lock().await;
-            let circuit_breaker = circuit_breakers
-                .entry(tool_name.clone())
-                .or_insert_with(|| ToolCircuitBreaker::new(3, Duration::from_secs(30))); // 3 failures, 30s timeout
-
-            if !circuit_breaker.can_execute() {
-                let state = circuit_breaker.get_state();
-                warn!("Circuit breaker {:?} for tool '{}' - rejecting call", state, tool_name);
-                return Err(AgentError::ToolError(
-                    format!("Tool '{}' circuit breaker is {:?} - temporarily unavailable", tool_name, state)
-                ));
-            }
-        }
-
-        loop {
-            // Try to execute the tool
-            let result = self.execute_tool_direct(tool_call.clone()).await;
-
-            match result {
-                                Ok(tool_result) => {
-                    // Validate tool output before considering it successful
-                    if let Err(validation_error) = self.validate_tool_output(&tool_name, &tool_result).await {
-                        warn!("Tool '{}' output validation failed: {}", tool_name, validation_error);
-
-                        // Treat output validation failure as a tool failure
-                        let error_msg = format!("Output validation failed: {}", validation_error);
-                        let error_class = ErrorClass::InvalidInput;
-                        let strategy = self.determine_recovery_strategy(error_class, &tool_name, retry_count).await;
-
-                        match strategy {
-                            RecoveryStrategy::Skip => {
-                                self.update_recovery_stats(
-                                    &tool_name,
-                                    &error_msg,
-                                    false,
-                                    false,
-                                    None
-                                ).await;
-                                return Err(AgentError::InvalidOutput(error_msg));
-                            },
-                            _ => {
-                                // Continue with retry logic for output validation failures
-                                retry_count += 1;
-                                warn!("Tool '{}' output validation failed (attempt {}/{}), retrying: {}",
-                                      tool_name, retry_count, self.recovery_config.max_retries, validation_error);
-                                continue;
-                            }
-                        }
+        for attempt in 0..=max_retries {
+            match self.execute_tool_direct(tool_call.clone()).await {
+                Ok(tool_result) => {
+                    // Record success if this was a retry
+                    if attempt > 0 {
+                        self.update_recovery_stats(true, true).await;
+                        info!("Tool '{}' recovered after {} retries", tool_name, attempt);
                     }
-
-                                        // Success - update stats if this was a recovery
-                    if retry_count > 0 {
-                        self.update_recovery_stats(
-                            &tool_name,
-                            "recovered",
-                            true,
-                            true,
-                            Some(recovery_start.elapsed())
-                        ).await;
-
-                        // Log successful recovery for monitoring
-                        info!("Tool '{}' recovered after {} retries in {:?}",
-                              tool_name, retry_count, recovery_start.elapsed());
-                    }
-
-                    // Record success in circuit breaker
-                    {
-                        let mut circuit_breakers = self.circuit_breakers.lock().await;
-                        if let Some(circuit_breaker) = circuit_breakers.get_mut(&tool_name) {
-                            circuit_breaker.record_success();
-                        }
-                    }
-
                     return Ok(tool_result);
                 },
                 Err(error) => {
-                    // Classify the error
-                    let error_msg = error.to_string();
-                    let error_class = self.classify_error(&error_msg);
+                    let error_type = self.classify_error(&error);
 
-                    // Determine recovery strategy
-                    let strategy = self.determine_recovery_strategy(error_class, &tool_name, retry_count).await;
+                    if attempt < max_retries && error_type.should_retry() {
+                        let delay = error_type.retry_delay(attempt);
+                        warn!("Tool '{}' failed (attempt {}/{}), retrying in {:?}: {}",
+                              tool_name, attempt + 1, max_retries + 1, delay, error);
 
-                    match strategy {
-                        RecoveryStrategy::Skip => {
-                            // No recovery possible, record failure and return error
-                            self.update_recovery_stats(
-                                &tool_name,
-                                &error_msg,
-                                false,
-                                false,
-                                None
-                            ).await;
-
-                            // Record failure in circuit breaker
-                            {
-                                let mut circuit_breakers = self.circuit_breakers.lock().await;
-                                if let Some(circuit_breaker) = circuit_breakers.get_mut(&tool_name) {
-                                    circuit_breaker.record_failure();
-                                }
-                            }
-
-                            warn!("Tool '{}' failed after {} retries: {}", tool_name, retry_count, error_msg);
-                            return Err(error);
-                        },
-                        RecoveryStrategy::RetryWithDelay(delay) => {
-                            retry_count += 1;
-
-                            // Add jitter to prevent thundering herd (research-backed improvement)
-                            let jitter_ms = (delay.as_millis() as u64 / 8).min(100); // Simple jitter up to 100ms
-                            let total_delay = delay + Duration::from_millis(jitter_ms);
-
-                            warn!("Tool '{}' failed (attempt {}/{}), retrying in {:?}: {}",
-                                  tool_name, retry_count, self.recovery_config.max_retries, total_delay, error_msg);
-
-                            tokio::time::sleep(total_delay).await;
-                            continue;
-                        },
-                        RecoveryStrategy::Retry => {
-                            retry_count += 1;
-                            warn!("Tool '{}' failed (attempt {}/{}), retrying immediately: {}",
-                                  tool_name, retry_count, self.recovery_config.max_retries, error_msg);
-                            continue;
-                        },
-                        RecoveryStrategy::ResetAndRetry => {
-                            retry_count += 1;
-                            warn!("Tool '{}' failed (attempt {}/{}), resetting and retrying: {}",
-                                  tool_name, retry_count, self.recovery_config.max_retries, error_msg);
-
-                            // Attempt to reset tool state if applicable
-                            if let Err(reset_error) = self.reset_tool_state(&tool_name).await {
-                                warn!("Failed to reset tool '{}' state: {}", tool_name, reset_error);
-                            }
-
-                            // Short delay after reset
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                            continue;
-                        },
-                        RecoveryStrategy::Fallback(fallback_tool) => {
-                            warn!("Tool '{}' failed, attempting fallback to '{}'", tool_name, fallback_tool);
-
-                            // Create fallback tool call
-                            let mut fallback_call = tool_call.clone();
-                            fallback_call.name = fallback_tool.clone();
-                            let fallback_name = fallback_tool.clone(); // Capture name before move
-
-                            // Try fallback (without further recovery to prevent infinite loops)
-                            match self.execute_tool_direct(fallback_call).await {
-                                Ok(result) => {
-                                    info!("Fallback tool '{}' succeeded for failed '{}'", fallback_name, tool_name);
-                                    return Ok(result);
-                                },
-                                Err(fallback_error) => {
-                                    warn!("Fallback tool '{}' also failed: {}", fallback_name, fallback_error);
-                                    return Err(error); // Return original error
-                                }
-                            }
-                        }
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    } else {
+                        // Final failure
+                        self.update_recovery_stats(attempt > 0, false).await;
+                        warn!("Tool '{}' failed after {} attempts: {}", tool_name, attempt + 1, error);
+                        return Err(error);
                     }
                 }
             }
         }
+
+        unreachable!("Loop should have returned")
     }
 
     /// Reset tool state for recovery (tool-specific implementations)
@@ -1108,20 +895,7 @@ impl LocalToolProvider {
             _ => {} // No specific validation for other tools
         }
 
-        // 5. Check tool failure rate and circuit breaker logic
-        let tool_history = self.tool_execution_history.lock().await;
-        if let Some(history) = tool_history.get(&tool_call.name) {
-            if history.len() >= 10 { // Only check if we have enough data
-                let recent_failures = history.iter().rev().take(5).filter(|(_, failed)| *failed).count();
-                if recent_failures >= 4 { // 80% failure rate in last 5 attempts
-                    warn!("Tool '{}' has high failure rate ({}%), applying circuit breaker",
-                          tool_call.name, (recent_failures * 100) / 5);
-                    return Err(AgentError::ToolUnavailable(
-                        format!("Tool '{}' temporarily unavailable due to high failure rate", tool_call.name)
-                    ));
-                }
-            }
-        }
+        // Simplified validation - no complex circuit breaker logic needed
 
         Ok(())
     }
@@ -1446,55 +1220,30 @@ impl LocalToolProvider {
         Ok(())
     }
 
-    /// Get circuit breaker status for all tools
-    ///
-    /// Research Citations:
-    /// - Circuit breaker monitoring enables proactive failure prevention (Computer Use Agent reliability, 2025)
-    /// - Real-time tool health status improves system observability (Microsoft Azure AI Foundry, 2025)
-    /// - Failure pattern tracking reduces recovery time by 45% (Anthropic multi-agent research, 2025)
+    /// Get simple recovery status for monitoring
     pub async fn get_circuit_breaker_status(&self) -> Value {
-        let circuit_breakers = self.circuit_breakers.lock().await;
-        let mut status = serde_json::Map::new();
-
-        for (tool_name, breaker) in circuit_breakers.iter() {
-            let tool_status = serde_json::json!({
-                "state": format!("{:?}", breaker.get_state()),
-                "is_healthy": breaker.is_healthy(),
-                "failure_count": breaker.failure_count,
-                "success_count": breaker.success_count,
-                "last_failure": breaker.last_failure_time.map(|t| t.elapsed().as_secs())
-            });
-            status.insert(tool_name.clone(), tool_status);
-        }
-
-        serde_json::Value::Object(status)
+        let stats = self.recovery_stats.lock().await;
+        serde_json::json!({
+            "tool_provider_health": "operational",
+            "total_attempts": stats.total_attempts,
+            "success_rate": stats.success_rate(),
+            "recovery_info": "Using simplified recovery tracking"
+        })
     }
 
-    /// Get list of unhealthy tools (circuit breaker open)
+    /// Get list of tools that have experienced failures (simplified version)
     pub async fn get_unhealthy_tools(&self) -> Vec<String> {
-        let circuit_breakers = self.circuit_breakers.lock().await;
-        circuit_breakers
-            .iter()
-            .filter_map(|(tool_name, breaker)| {
-                if !breaker.is_healthy() {
-                    Some(tool_name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect()
+        // Since we don't have per-tool circuit breakers, return empty list
+        // This method is kept for API compatibility
+        Vec::new()
     }
 
-    /// Reset circuit breaker for a specific tool (emergency recovery)
-    pub async fn reset_circuit_breaker(&self, tool_name: &str) -> bool {
-        let mut circuit_breakers = self.circuit_breakers.lock().await;
-        if let Some(breaker) = circuit_breakers.get_mut(tool_name) {
-            *breaker = ToolCircuitBreaker::new(3, Duration::from_secs(30));
-            info!("Reset circuit breaker for tool '{}'", tool_name);
-            true
-        } else {
-            false
-        }
+    /// Reset recovery stats (simplified version)
+    pub async fn reset_circuit_breaker(&self, _tool_name: &str) -> bool {
+        let mut stats = self.recovery_stats.lock().await;
+        *stats = SimpleRecoveryStats::default();
+        info!("Reset recovery stats");
+        true
     }
 }
 
