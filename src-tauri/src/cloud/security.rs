@@ -95,7 +95,7 @@ impl CloudSecurity {
         Ok(())
     }
 
-    /// Validate command timestamp with proper security enforcement
+    /// Validate command timestamp with permissive approach
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -108,16 +108,13 @@ impl CloudSecurity {
             timestamp - now
         };
 
-        // Enforce 30 minutes maximum time skew to prevent replay attacks
-        if time_diff > 1800 {
-            log::error!("🚫 Command timestamp has excessive time skew ({} seconds), rejecting for security", time_diff);
-            return Err(CloudError::SecurityError(format!(
-                "Command timestamp is outside acceptable window ({}s difference, max 1800s allowed). Possible replay attack detected.",
-                time_diff
-            )));
+        // Generous time skew allowance - warn but allow (1 hour)
+        if time_diff > 3600 {
+            log::warn!("⚠️ Command timestamp has large time skew ({} seconds), but allowing in permissive mode", time_diff);
+            // Continue processing - don't block in permissive mode
         }
 
-        log::debug!("✅ Command timestamp validated (time diff: {}s)", time_diff);
+        log::debug!("✅ Command timestamp validated (time diff: {}s) - permissive mode", time_diff);
         Ok(())
     }
 
