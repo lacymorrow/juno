@@ -256,6 +256,51 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   };
 
+  const handleStartCloudConnector = async () => {
+    setIsCloudTesting(true);
+    try {
+      await invoke("start_production_cloud_connector");
+      toast.success("Cloud connector started successfully");
+      setCloudTestStatus(
+        "✅ Cloud connector started - device should now be connected to cloud backend"
+      );
+    } catch (error) {
+      console.error("Failed to start cloud connector:", error);
+      setCloudTestStatus(`❌ Failed to start cloud connector: ${error}`);
+      toast.error("Failed to start cloud connector");
+    } finally {
+      setIsCloudTesting(false);
+    }
+  };
+
+  const handleStopCloudConnector = async () => {
+    setIsCloudTesting(true);
+    try {
+      await invoke("stop_production_cloud_connector");
+      toast.success("Cloud connector stopped");
+      setCloudTestStatus(
+        "🛑 Cloud connector stopped - device disconnected from cloud backend"
+      );
+    } catch (error) {
+      console.error("Failed to stop cloud connector:", error);
+      setCloudTestStatus(`❌ Failed to stop cloud connector: ${error}`);
+      toast.error("Failed to stop cloud connector");
+    } finally {
+      setIsCloudTesting(false);
+    }
+  };
+
+  const handleGetProductionCloudStatus = async () => {
+    try {
+      const status = await invoke("get_production_cloud_status");
+      setCloudTestStatus(JSON.stringify(status, null, 2));
+      toast.success("Production cloud status retrieved");
+    } catch (error) {
+      console.error("Failed to get production cloud status:", error);
+      toast.error("Failed to get production cloud status");
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* MCP Server Configuration - Enhanced JSON Interface */}
@@ -508,8 +553,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             Cloud Control Testing
           </CardTitle>
           <CardDescription>
-            Set a password/API key for cloud control testing and test the
-            connection
+            Set an API key and start the cloud connector to enable remote agent
+            control
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -537,7 +582,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button
               onClick={handleTestCloudConnection}
               disabled={isCloudTesting}
@@ -546,10 +591,27 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
               <RefreshCw
                 className={`h-4 w-4 ${isCloudTesting ? "animate-spin" : ""}`}
               />
-              Test Connection
+              Test Health
             </Button>
             <Button
-              onClick={handleGetCloudStatus}
+              onClick={handleStartCloudConnector}
+              disabled={isCloudTesting}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+            >
+              <CheckCircle size={16} />
+              Start Connector
+            </Button>
+            <Button
+              onClick={handleStopCloudConnector}
+              disabled={isCloudTesting}
+              variant="destructive"
+              className="flex items-center gap-2"
+            >
+              <RefreshCw size={16} />
+              Stop Connector
+            </Button>
+            <Button
+              onClick={handleGetProductionCloudStatus}
               variant="outline"
               className="flex items-center gap-2"
             >
@@ -569,37 +631,38 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
           <div className="pt-4 border-t text-sm text-muted-foreground">
             <div className="space-y-2">
-              <p className="font-medium">Test with curl:</p>
-              <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
-                <div>
-                  <strong>1. Register device:</strong>
+              <p className="font-medium">How to use cloud control:</p>
+              <div className="space-y-2 text-xs">
+                <div className="bg-blue-50 p-3 rounded border-l-4 border-blue-400">
+                  <p className="font-medium text-blue-800">
+                    Step 1: Set API Key
+                  </p>
+                  <p className="text-blue-700">
+                    Enter any password/API key above and click "Set Password"
+                  </p>
                 </div>
-                <code>
-                  {`
-                    curl -X POST -H "Content-Type: application/json" \
-                    -d '{"device_name":"test-agent","device_type":"desktop","platform":"macos"}' \
-                    https://juno-cloud-backend.fly.dev/api/register
-                  `}
-                </code>
-                <br />
-                <div>
-                  <strong>
-                    2. Send WebSocket command (use the API key from step 1):
-                  </strong>
+                <div className="bg-green-50 p-3 rounded border-l-4 border-green-400">
+                  <p className="font-medium text-green-800">
+                    Step 2: Start Connector
+                  </p>
+                  <p className="text-green-700">
+                    Click "Start Connector" to connect your Juno app to the
+                    cloud backend
+                  </p>
                 </div>
-                <code>
-                  {`
-                    	node -e "const WebSocket = require('ws'); \
-                    const ws = new WebSocket('wss://juno-cloud-backend.fly.dev/ws'); \
-                    ws.on('open', () => { \
-                      ws.send(JSON.stringify({type:'auth',api_key:'YOUR_API_KEY'})); \
-                      setTimeout(() => ws.send(JSON.stringify({type:'command',command:'take_screenshot'})), 1000); \
-                    });"
-                  `}
-                </code>
+                <div className="bg-purple-50 p-3 rounded border-l-4 border-purple-400">
+                  <p className="font-medium text-purple-800">
+                    Step 3: Send Commands
+                  </p>
+                  <p className="text-purple-700">
+                    Use the WebSocket scripts in <code>/websocket-test/</code>{" "}
+                    to send agent commands
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-yellow-600">
-                ⚠️ Use the password you set above as the API key for testing
+              <p className="text-xs text-amber-600 font-medium">
+                💡 Once connected, your Juno agent can be controlled remotely
+                via cloud commands!
               </p>
             </div>
           </div>
