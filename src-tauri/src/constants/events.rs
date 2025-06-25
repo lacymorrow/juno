@@ -94,7 +94,6 @@ pub mod menu {
     pub const FEEDBACK_REQUESTED: &str = "feedback-requested";
     pub const HELP_REQUESTED: &str = "help-requested";
     pub const NEW_CHAT_REQUESTED: &str = "new-chat-requested";
-    pub const CLEAR_HISTORY_REQUESTED: &str = "clear-history-requested";
     pub const IMPORT_CHAT_REQUESTED: &str = "import-chat-requested";
     pub const EXPORT_CHAT_REQUESTED: &str = "export-chat-requested";
     pub const TOGGLE_FLOATING_BAR_REQUESTED: &str = "toggle-floating-bar-requested";

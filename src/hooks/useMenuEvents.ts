@@ -13,7 +13,6 @@ interface MenuEventsProps {
 
 	// Chat actions
 	startNewChat: () => void;
-	clearConversation: () => void;
 
 	// System message
 	addSystemMessage: (message: string) => void;
@@ -28,7 +27,6 @@ export function useMenuEvents({
 	setActiveModal,
 	setFeedbackData,
 	startNewChat,
-	clearConversation,
 	addSystemMessage,
 	handleUpdateCheck,
 }: MenuEventsProps) {
@@ -105,8 +103,8 @@ export function useMenuEvents({
 
 			unlistenCallbacks.push(
 				await listen("menu-clear-chat", () => {
-					console.log("🗑️ Menu: Clearing chat");
-					clearConversation();
+					console.log("🗑️ Menu: Clearing chat (using new chat)");
+					startNewChat();
 					addSystemMessage("🗑️ Chat history cleared");
 				})
 			);
@@ -284,7 +282,6 @@ export function useMenuEvents({
 		setActiveModal,
 		setFeedbackData,
 		startNewChat,
-		clearConversation,
 		addSystemMessage,
 		handleUpdateCheck,
 	]);
