@@ -1367,9 +1367,8 @@ impl Desktop {
                         let old_str = parsed_args.old_str.ok_or_else(|| {
                             AutomationError::InvalidArgument("old_str required for str_replace command".to_string())
                         })?;
-                        let new_str = parsed_args.new_str.ok_or_else(|| {
-                            AutomationError::InvalidArgument("new_str required for str_replace command".to_string())
-                        })?;
+                        // new_str defaults to empty string if not provided (enables deletion)
+                        let new_str = parsed_args.new_str.unwrap_or_default();
                         let content = match fs::read_to_string(&parsed_args.path) {
                             Ok(c) => c,
                             Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.path, e))),
