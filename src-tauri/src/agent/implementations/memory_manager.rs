@@ -36,12 +36,12 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 50,       // Reduced from 100 to be more aggressive
-            max_tokens: 150000,     // Reduced from 32000 to stay well under 200K API limit
-            min_messages_to_keep: 5, // Reduced from 10 for emergency pruning
+            max_messages: 20,       // Further reduced from 50 to be more aggressive
+            max_tokens: 100000,     // Reduced from 150000 to stay well under 200K API limit
+            min_messages_to_keep: 3, // Reduced from 5 for emergency pruning
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 15, // Increased to summarize more aggressively
+            summarization_batch_size: 20, // Increased to summarize more aggressively
             enable_metrics: true,
             enable_summary_cache: true,
         }
@@ -126,9 +126,14 @@ impl AdvancedMemoryManager {
         if content.contains("data:image/") || content.contains("base64,") ||
            (content.len() > 1000 && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
             // This looks like base64 image data - use more accurate estimation
-            // Base64 images typically use ~1 token per 20-25 characters (not 4)
-            total_tokens += content.len() / 20; // More conservative estimate for images
-            log::debug!("Detected base64 image content: {} chars = ~{} tokens", content.len(), content.len() / 20);
+            // Base64 images typically use ~1 token per 15-20 characters (more aggressive estimate)
+            total_tokens += content.len() / 15; // More aggressive estimate for images that contribute heavily to token count
+            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / 15);
+
+            // If this single message has excessive tokens, mark it for immediate attention
+            if content.len() / 15 > 50000 {
+                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / 15);
+            }
         } else {
             // Regular text content - use standard 4 chars per token
             total_tokens += content.len() / 4;
@@ -216,18 +221,31 @@ impl AdvancedMemoryManager {
 
         let estimated_tokens = self.estimate_total_tokens().await;
 
-        // Check if pruning is needed
-        if messages_count <= config.max_messages && estimated_tokens <= config.max_tokens {
+        // Emergency pruning if we're close to API limits
+        let emergency_threshold = 180000; // Leave buffer before 200K limit
+        let normal_threshold = config.max_tokens;
+
+        let needs_emergency_pruning = estimated_tokens >= emergency_threshold;
+        let needs_normal_pruning = messages_count >= config.max_messages ||
+                                 estimated_tokens >= normal_threshold;
+
+        if needs_emergency_pruning {
+            log::error!("EMERGENCY: Token count ({}) approaching API limit (200K)! Aggressive pruning required.", estimated_tokens);
+            // Keep only the most recent messages
+            let emergency_keep = std::cmp::max(config.min_messages_to_keep, 2);
+            drop(config);
+            self.prune_memory(Some(emergency_keep)).await?;
+            return Ok(true);
+        } else if needs_normal_pruning {
+            log::info!("Memory pruning triggered: {} messages, ~{} tokens",
+                      messages_count, estimated_tokens);
+            drop(config);
+            self.prune_memory(None).await?;
+            return Ok(true);
+        } else {
+            drop(config);
             return Ok(false);
         }
-
-        drop(config); // Release config lock before calling prune_memory
-
-        log::info!("Memory pruning triggered: {} messages, ~{} tokens",
-                   messages_count, estimated_tokens);
-
-        self.prune_memory(None).await?;
-        Ok(true)
     }
 
     /// Create a summary of conversation segments
