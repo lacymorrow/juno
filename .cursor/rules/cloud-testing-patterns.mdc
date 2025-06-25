@@ -1,0 +1,324 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Cloud Testing & Verification Patterns
+
+## Overview
+
+This guide documents the comprehensive testing approach for Juno AI's cloud connectivity system, including test scripts, verification methods, and debugging patterns.
+
+## Test Script Architecture
+
+### Test Scripts Location
+All cloud testing scripts are located in [websocket-test/](mdc:websocket-test) directory.
+
+### Testing Hierarchy
+
+1. **Basic Connection**: [test-juno-cloud-connection.js](mdc:websocket-test/test-juno-cloud-connection.js)
+   - Tests WebSocket connection to cloud server
+   - Verifies server availability
+   - Basic handshake validation
+
+2. **Device Registration**: [register-device.js](mdc:websocket-test/register-device.js)
+   - Registers device with cloud backend
+   - Generates API key and HMAC secret
+   - Tests authentication flow
+
+3. **Authenticated Connection**: [test-with-real-auth.js](mdc:websocket-test/test-with-real-auth.js)
+   - Tests connection with real credentials
+   - Validates HMAC signature generation
+   - Tests command sending/receiving
+
+4. **Complete Flow**: [test-final-fix.js](mdc:websocket-test/test-final-fix.js)
+   - End-to-end testing
+   - Full authentication and command processing
+   - Validates entire cloud integration
+
+5. **Agent Calling**: [call-agent.js](mdc:websocket-test/call-agent.js)
+   - Tests actual agent invocation through cloud
+   - Validates command routing to Juno AI
+   - Tests real agent responses
+
+## Verification Patterns
+
+### 1. Connection Verification
+```javascript
+// Pattern for testing WebSocket connection
+const WebSocket = require('ws');
+
+async function testConnection(url) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+
+    ws.on('open', () => {
+      console.log('✅ Connection successful');
+      ws.close();
+      resolve(true);
+    });
+
+    ws.on('error', (error) => {
+      console.log('❌ Connection failed:', error.message);
+      reject(error);
+    });
+  });
+}
+```
+
+### 2. Authentication Verification
+```javascript
+// Pattern for HMAC signature validation
+const crypto = require('crypto');
+
+function generateHMACSignature(message, secret) {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(message)
+    .digest('hex');
+}
+
+function validateAuth(apiKey, hmacSecret) {
+  const message = JSON.stringify({
+    type: 'authenticate',
+    api_key: apiKey,
+    timestamp: Date.now()
+  });
+
+  const signature = generateHMACSignature(message, hmacSecret);
+  return { message, signature };
+}
+```
+
+### 3. Command Flow Verification
+```javascript
+// Pattern for testing command processing
+async function testCommandFlow(ws, command) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Command timeout'));
+    }, 30000);
+
+    ws.on('message', (data) => {
+      clearTimeout(timeout);
+      const response = JSON.parse(data);
+      if (response.type === 'command_result') {
+        resolve(response);
+      }
+    });
+
+    ws.send(JSON.stringify(command));
+  });
+}
+```
+
+## Debugging Patterns
+
+### 1. Connection State Debugging
+```bash
+# Check stored configuration
+cat ~/Library/Application\ Support/com.juno.app/cloud-config.toml
+
+# Expected output:
+# api_key = "eea05e0e52e3b07be0647b862ff71680168858d68cbb0c3e83dcb9c77dc87af0"
+# hmac_secret = "7fd8a36b1fec73e50ca6be13e47992beb5c48e2a9a0af41328626378b8418244"
+# server_url = "wss://juno-cloud-backend.fly.dev/ws"
+```
+
+### 2. Compilation Verification
+```bash
+# Full compilation check
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
+
+# Expected: Exit code 0 (success)
+# Warnings are acceptable, errors are not
+```
+
+### 3. Cache Clearing Pattern
+```bash
+# Complete cache clear for troubleshooting
+rm -rf node_modules/.vite node_modules/.cache .next
+pkill -f "tauri|vite" 2>/dev/null || true
+```
+
+### 4. Live Status Monitoring
+```typescript
+// Pattern for monitoring connection status
+class CloudStatusMonitor {
+  private statusInterval?: NodeJS.Timeout;
+
+  startMonitoring(connector: ProductionCloudConnector) {
+    this.statusInterval = setInterval(async () => {
+      try {
+        const status = await connector.getStatus();
+        console.log(`[Monitor] Status: ${status.state}, Connected: ${status.connected}`);
+
+        if (status.stats) {
+          const successRate = status.stats.total_commands > 0
+            ? (status.stats.successful_commands / status.stats.total_commands * 100).toFixed(1)
+            : 'N/A';
+          console.log(`[Monitor] Success Rate: ${successRate}%, Reconnections: ${status.stats.reconnection_count}`);
+        }
+      } catch (error) {
+        console.error('[Monitor] Status check failed:', error);
+      }
+    }, 5000);
+  }
+
+  stopMonitoring() {
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+    }
+  }
+}
+```
+
+## Test Execution Patterns
+
+### 1. Sequential Testing
+```bash
+# Run tests in order
+node websocket-test/test-juno-cloud-connection.js
+node websocket-test/register-device.js  # Only if needed
+node websocket-test/test-with-real-auth.js
+node websocket-test/test-final-fix.js
+node websocket-test/call-agent.js
+```
+
+### 2. Quick Health Check
+```bash
+# Single command health check
+node websocket-test/test-final-fix.js
+```
+
+### 3. Full Integration Test
+```bash
+# Complete end-to-end test
+node websocket-test/call-agent.js
+```
+
+## Expected Test Results
+
+### ✅ Success Patterns
+
+**Connection Test**:
+```
+✅ Connected to wss://juno-cloud-backend.fly.dev/ws
+✅ WebSocket connection successful
+✅ Server is responsive
+```
+
+**Authentication Test**:
+```
+✅ Authentication successful
+✅ HMAC signature validated
+✅ Device registered with cloud
+```
+
+**Command Test**:
+```
+✅ Command sent successfully
+✅ Response received from agent
+✅ Command processing completed
+```
+
+### ❌ Failure Patterns
+
+**Connection Failures**:
+```
+❌ ECONNREFUSED: Connection refused
+❌ ENOTFOUND: DNS resolution failed
+❌ Timeout: Server not responding
+```
+
+**Authentication Failures**:
+```
+❌ Invalid API key
+❌ HMAC signature mismatch
+❌ Authentication timeout
+```
+
+**Command Failures**:
+```
+❌ Command timeout (no response)
+❌ Invalid command format
+❌ Agent execution error
+```
+
+## Performance Benchmarks
+
+### Connection Metrics
+- **Connection Time**: < 2 seconds
+- **Authentication Time**: < 1 second
+- **Command Response Time**: < 30 seconds
+- **Reconnection Time**: < 5 seconds
+
+### Success Rate Targets
+- **Connection Success**: > 95%
+- **Authentication Success**: > 99%
+- **Command Success**: > 90%
+- **Reconnection Success**: > 85%
+
+## Integration Testing Checklist
+
+Before deploying cloud functionality:
+
+- [ ] ✅ **Basic Connection**: WebSocket connects to cloud server
+- [ ] ✅ **Authentication**: API key and HMAC validation work
+- [ ] ✅ **Command Sending**: Commands reach cloud backend
+- [ ] ✅ **Command Processing**: Commands reach Juno AI agent
+- [ ] ✅ **Response Handling**: Agent responses return to client
+- [ ] ✅ **Error Handling**: Failures are handled gracefully
+- [ ] ✅ **Reconnection**: Auto-reconnection works after failures
+- [ ] ✅ **Performance**: Response times meet targets
+- [ ] ✅ **Stability**: No memory leaks or crashes
+- [ ] ✅ **Compilation**: All code compiles without errors
+
+## Troubleshooting Decision Tree
+
+```
+Cloud Connection Issue
+│
+├── Compilation Error?
+│   ├── Yes → Check imports in [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts)
+│   └── No → Continue
+│
+├── Connection Refused?
+│   ├── Yes → Check server URL in config files
+│   └── No → Continue
+│
+├── Authentication Failed?
+│   ├── Yes → Verify API key and HMAC secret
+│   └── No → Continue
+│
+├── Commands Not Working?
+│   ├── Yes → Test with [call-agent.js](mdc:websocket-test/call-agent.js)
+│   └── No → Continue
+│
+└── Status Shows "Reconnecting"?
+    ├── Yes → Check network connectivity and server status
+    └── No → Check application logs
+```
+
+## Monitoring & Alerting
+
+### Key Metrics to Monitor
+```typescript
+interface CloudHealthMetrics {
+  connectionUptime: number;        // Percentage uptime
+  averageResponseTime: number;     // Milliseconds
+  commandSuccessRate: number;      // Percentage
+  reconnectionFrequency: number;   // Per hour
+  errorRate: number;              // Errors per minute
+}
+```
+
+### Alert Thresholds
+- **Connection Uptime** < 95%: Warning
+- **Response Time** > 30s: Warning
+- **Success Rate** < 90%: Critical
+- **Error Rate** > 5/min: Critical
+
+---
+
+**Remember**: Always test the complete flow from connection → authentication → command → response to ensure end-to-end functionality.

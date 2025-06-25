@@ -1,0 +1,233 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# WebSocket Troubleshooting & Debugging Guide
+
+## Overview
+
+This guide covers WebSocket-related issues in the Juno AI Computer Use Agent, focusing on the cloud connection system and common debugging patterns.
+
+## Architecture Pattern
+
+### ✅ Correct: Native Rust WebSocket
+```rust
+// src-tauri/src/cloud/connector.rs
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+
+async fn establish_connection(&mut self) -> Result<(), CloudError> {
+    let (ws_stream, _) = connect_async(&self.settings.server_url).await?;
+    // Direct native connection
+}
+```
+
+### ❌ Avoid: JavaScript Bridge Pattern
+```typescript
+// DON'T DO THIS - causes import errors
+const { WebSocket } = await import("@tauri-apps/plugin-websocket");
+```
+
+## Common Issues & Solutions
+
+### 1. Import Resolution Errors
+
+**Error**: `Failed to resolve import "@tauri-apps/plugin-websocket"`
+
+**Cause**: Trying to import Tauri WebSocket plugin in frontend code
+
+**Solution**: Use native Rust WebSocket in backend, emit events to frontend
+```typescript
+// ✅ Frontend: Listen for events from Rust
+await listen('cloud-command-received', (event) => {
+  const command = event.payload;
+  // Handle command
+});
+```
+
+```rust
+// ✅ Backend: Emit events to frontend
+app_handle.emit_all("cloud-command-received", &command)?;
+```
+
+### 2. Connection URL Issues
+
+**Error**: `Connection refused (os error 61)`
+
+**Debug Steps**:
+1. Check stored configuration:
+   ```bash
+   cat ~/Library/Application\ Support/com.juno.app/cloud-config.toml
+   ```
+
+2. Verify default settings in [src-tauri/src/settings/mod.rs](mdc:src-tauri/src/settings/mod.rs):
+   ```rust
+   server_url: crate::constants::api::CLOUD_SERVER_URL.to_string(),
+   // NOT: "wss://localhost:8080"
+   ```
+
+3. Test connection directly:
+   ```bash
+   node websocket-test/test-juno-cloud-connection.js
+   ```
+
+### 3. Authentication Failures
+
+**Error**: WebSocket connects but commands fail
+
+**Debug**: Check HMAC signature generation
+```rust
+// Verify HMAC calculation
+let signature = generate_hmac_signature(&message, &self.settings.hmac_secret)?;
+```
+
+**Test**: Use verification script
+```bash
+node websocket-test/test-with-real-auth.js
+```
+
+### 4. Event Listener Issues
+
+**Problem**: Events not reaching frontend
+
+**Check**: Event names match between Rust and TypeScript
+```rust
+// Rust backend
+app_handle.emit_all("cloud-command-received", &payload)?;
+```
+
+```typescript
+// Frontend
+await listen('cloud-command-received', (event) => { /* ... */ });
+```
+
+## Debugging Tools
+
+### 1. WebSocket Test Scripts
+
+Located in [websocket-test/](mdc:websocket-test) directory:
+
+- **Basic Connection**: `test-juno-cloud-connection.js`
+- **Authentication Test**: `test-with-real-auth.js`
+- **Complete Flow**: `test-final-fix.js`
+- **Device Registration**: `register-device.js`
+
+### 2. Compilation Check
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
+```
+
+### 3. Clear All Caches
+```bash
+rm -rf node_modules/.vite node_modules/.cache .next
+pkill -f "tauri|vite" 2>/dev/null || true
+```
+
+### 4. Live Connection Monitoring
+```typescript
+// Add to cloud connector for debugging
+setInterval(async () => {
+  const stats = await this.getConnectionStats();
+  console.log('Connection health:', stats);
+}, 10000);
+```
+
+## Connection States
+
+### Status Meanings
+- **"Disconnected"**: No connection attempt
+- **"Connecting"**: Initial connection in progress
+- **"Reconnecting(N)"**: Failed N times, retrying
+- **"Ready"**: Connected and authenticated
+- **"Error"**: Permanent failure
+
+### State Transitions
+```
+Disconnected → Connecting → Ready
+     ↓              ↓         ↓
+   Error ← Reconnecting(N) ←  Error
+```
+
+## Performance Monitoring
+
+### Key Metrics
+```typescript
+interface ConnectionStats {
+  connected_at?: number;
+  total_commands: number;
+  successful_commands: number;
+  failed_commands: number;
+  reconnection_count: number;
+  last_heartbeat?: number;
+  latency_ms?: number;
+}
+```
+
+### Health Check Pattern
+```typescript
+async checkHealth(): Promise<boolean> {
+  try {
+    const stats = await this.getConnectionStats();
+    return stats?.total_commands > 0 &&
+           (stats.successful_commands / stats.total_commands) > 0.8;
+  } catch {
+    return false;
+  }
+}
+```
+
+## Error Recovery Patterns
+
+### 1. Automatic Reconnection
+```rust
+async fn handle_connection_error(&mut self, error: &CloudError) {
+  self.reconnection_count += 1;
+  if self.reconnection_count < MAX_RECONNECTION_ATTEMPTS {
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    self.establish_connection().await?;
+  }
+}
+```
+
+### 2. Circuit Breaker Pattern
+```rust
+if self.consecutive_failures > CIRCUIT_BREAKER_THRESHOLD {
+  return Err(CloudError::CircuitBreakerOpen);
+}
+```
+
+### 3. Graceful Degradation
+```typescript
+if (!await cloudConnector.isConnected()) {
+  // Fall back to local-only mode
+  console.warn('Cloud unavailable, using local agent only');
+}
+```
+
+## Testing Checklist
+
+Before deploying WebSocket changes:
+
+- [ ] ✅ Compilation: `cargo check` passes
+- [ ] ✅ Connection: Test script connects successfully
+- [ ] ✅ Authentication: HMAC validation works
+- [ ] ✅ Commands: Messages flow both directions
+- [ ] ✅ Events: Frontend receives Rust events
+- [ ] ✅ Errors: Graceful error handling
+- [ ] ✅ Reconnection: Automatic recovery works
+- [ ] ✅ Performance: No memory leaks or hangs
+
+## File References
+
+Key files for WebSocket functionality:
+
+1. **Backend Core**: [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs)
+2. **Types**: [src-tauri/src/cloud/types.rs](mdc:src-tauri/src/cloud/types.rs)
+3. **Frontend**: [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts)
+4. **Settings**: [src-tauri/src/settings/mod.rs](mdc:src-tauri/src/settings/mod.rs)
+5. **Constants**: [src-tauri/src/constants/api.rs](mdc:src-tauri/src/constants/api.rs)
+6. **Test Scripts**: [websocket-test/](mdc:websocket-test)
+
+---
+
+**Remember**: Always use native Rust WebSocket for backend connections, never try to import WebSocket plugins in frontend TypeScript code.

@@ -27,6 +27,7 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
+import { cloudConnector } from "@/lib/cloud-connector";
 
 function App() {
   // Initialize custom hooks
@@ -175,6 +176,10 @@ function App() {
           open_settings: string;
         };
         appState.setKeyboardShortcuts(shortcuts);
+
+        // Initialize cloud connector event listeners (but don't start connection yet)
+        // The connection will be started when user clicks "Start Connector" in settings
+        console.log("🌐 Cloud connector event listeners initialized");
 
         console.log(`🚀 Juno AI v${version} initialized`);
       } catch (error) {
