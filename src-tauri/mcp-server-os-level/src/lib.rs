@@ -300,7 +300,7 @@ impl Desktop {
                             "coordinate".to_string(),
                             ToolParameter {
                                 type_: "array".to_string(),
-                                description: "Array of [x, y] coordinates for click, drag, and mouse actions. Required for mouse actions.".to_string(),
+                                description: "Array of [x, y] coordinates for click, mouse actions, and end position of drag actions. Required for mouse actions.".to_string(),
                             },
                         );
                         props.insert(
@@ -314,7 +314,7 @@ impl Desktop {
                             "end_coordinate".to_string(),
                             ToolParameter {
                                 type_: "array".to_string(),
-                                description: "Array of [x, y] end coordinates for drag actions.".to_string(),
+                                description: "Array of [x, y] end coordinates for drag actions. DEPRECATED: Use 'coordinate' for end position instead.".to_string(),
                             },
                         );
                         props.insert(
@@ -400,7 +400,7 @@ impl Desktop {
                             "insert_line".to_string(),
                             ToolParameter {
                                 type_: "integer".to_string(),
-                                description: "Line number for insert command".to_string(),
+                                description: "Line number for insert command. Use 0 to insert at beginning, 1 to insert after line 1, 2 to insert after line 2, etc.".to_string(),
                             },
                         );
                         props
@@ -1228,11 +1228,11 @@ impl Desktop {
                         let start_coords = parsed_args.start_coordinate.ok_or_else(|| {
                             AutomationError::InvalidArgument("start_coordinate required for left_click_drag action".to_string())
                         })?;
-                        let end_coords = parsed_args.end_coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("end_coordinate required for left_click_drag action".to_string())
+                        let end_coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for left_click_drag action".to_string())
                         })?;
                         if start_coords.len() != 2 || end_coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("start_coordinate and end_coordinate must be [x, y] arrays".to_string()));
+                            return Err(AutomationError::InvalidArgument("start_coordinate and coordinate must be [x, y] arrays".to_string()));
                         }
                         self.left_click_drag(start_coords[0], start_coords[1], end_coords[0], end_coords[1])?;
                         Ok(json!({"status": "success"}))
@@ -1404,7 +1404,16 @@ impl Desktop {
                         };
 
                         let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-                        let insertion_point = insert_line.saturating_sub(1).min(lines.len());
+
+                        // Fix: insert_line should mean "insert after line N" for consistency with text editor expectations
+                        // insert_line=1 means insert after line 1 (at index 1)
+                        // insert_line=0 means insert at beginning (at index 0)
+                        let insertion_point = if insert_line == 0 {
+                            0
+                        } else {
+                            insert_line.min(lines.len())
+                        };
+
                         lines.insert(insertion_point, new_str);
 
                         let new_content = lines.join("\n");
@@ -1415,7 +1424,7 @@ impl Desktop {
                         };
 
                         match fs::write(&parsed_args.path, final_content) {
-                            Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' at line {}.", parsed_args.path, insert_line) })),
+                            Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' after line {}.", parsed_args.path, if insert_line == 0 { "beginning".to_string() } else { insert_line.to_string() }) })),
                             Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
                         }
                     }
