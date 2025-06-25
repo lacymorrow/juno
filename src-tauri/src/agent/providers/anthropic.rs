@@ -9,56 +9,11 @@ use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
-use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::providers::factory::model_ids;
+use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
-
-#[derive(Serialize, Debug, Clone)]
-pub struct WebSearchConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_uses: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_domains: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked_domains: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_location: Option<String>,
-}
-
-impl Default for WebSearchConfig {
-    fn default() -> Self {
-        WebSearchConfig {
-            max_uses: Some(3), // Default to 3 searches per request
-            allowed_domains: None,
-            blocked_domains: None,
-            user_location: None,
-        }
-    }
-}
-
-#[derive(Serialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum ToolChoice {
-    #[serde(rename = "auto")]
-    Auto,
-    #[serde(rename = "any")]
-    Any,
-    #[serde(rename = "none")]
-    None,
-    Tool {
-        #[serde(rename = "type")]
-        choice_type: String, // "tool"
-        name: String,
-    },
-}
-
-impl Default for ToolChoice {
-    fn default() -> Self {
-        ToolChoice::Auto
-    }
-}
 
 #[derive(Serialize, Debug)]
 struct AnthropicRequest {
@@ -70,8 +25,6 @@ struct AnthropicRequest {
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>, // Add streaming support
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<ToolChoice>, // Add tool choice support
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -216,10 +169,9 @@ pub struct AnthropicBrain {
     api_key: String,
     model: String,
     max_tokens: u32,
-    system_prompt: Option<String>,           // Optional system prompt
-    streaming_enabled: bool,                 // New field for streaming support
-    beta_features: BetaFeatures,             // Beta feature configuration
-    default_tool_choice: Option<ToolChoice>, // Default tool choice behavior
+    system_prompt: Option<String>, // Optional system prompt
+    streaming_enabled: bool,       // New field for streaming support
+    beta_features: BetaFeatures,   // Beta feature configuration
 }
 
 #[derive(Clone)]
@@ -227,7 +179,6 @@ pub struct BetaFeatures {
     pub token_efficient_tools: bool,
     pub fine_grained_streaming: bool,
     pub code_execution: bool,
-    pub web_search: bool,
 }
 
 impl Default for BetaFeatures {
@@ -236,7 +187,6 @@ impl Default for BetaFeatures {
             token_efficient_tools: true,  // Enable by default for token savings
             fine_grained_streaming: true, // Enable by default for better streaming
             code_execution: false,        // Disabled by default, requires explicit enablement
-            web_search: false,            // Disabled by default, requires explicit enablement
         }
     }
 }
@@ -260,7 +210,6 @@ impl AnthropicBrain {
             system_prompt,
             streaming_enabled: true, // Default to streaming for real-time user experience
             beta_features: BetaFeatures::default(), // Enable token-efficient features by default
-            default_tool_choice: None, // Default to Claude's auto behavior
         })
     }
 
@@ -283,33 +232,6 @@ impl AnthropicBrain {
             system_prompt,
             streaming_enabled: true,
             beta_features,
-            default_tool_choice: None,
-        })
-    }
-
-    /// Creates a new AnthropicBrain with web search enabled and custom configuration.
-    pub fn with_web_search(
-        api_key: String,
-        model: Option<String>,
-        max_tokens: Option<u32>,
-        system_prompt: Option<String>,
-        web_search_config: WebSearchConfig,
-    ) -> Result<Self, AgentError> {
-        let model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
-
-        let mut beta_features = BetaFeatures::default();
-        beta_features.web_search = true; // Enable web search
-
-        Ok(AnthropicBrain {
-            client: Client::new(),
-            api_key,
-            model,
-            max_tokens,
-            system_prompt,
-            streaming_enabled: true,
-            beta_features,
-            web_search_config: Some(web_search_config),
         })
     }
 
@@ -822,23 +744,6 @@ impl AgentBrain for AnthropicBrain {
         true // AnthropicBrain supports streaming
     }
 
-    async fn decide_next_action_with_tool_choice(
-        &self,
-        messages: &[Message],
-        available_tools: &[ToolDefinition],
-        tool_choice: Option<ToolChoice>,
-    ) -> Result<AgentAction, AgentError> {
-        // Delegate to streaming version with tool choice
-        self.decide_next_action_streaming_with_tool_choice(
-            messages,
-            available_tools,
-            None,
-            None,
-            tool_choice,
-        )
-        .await
-    }
-
     async fn decide_next_action_streaming(
         &self,
         messages: &[Message],
@@ -846,32 +751,12 @@ impl AgentBrain for AnthropicBrain {
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
     ) -> Result<AgentAction, AgentError> {
-        // Delegate to streaming version with default tool choice
-        self.decide_next_action_streaming_with_tool_choice(
-            messages,
-            available_tools,
-            app_handle,
-            message_id,
-            None,
-        )
-        .await
-    }
-
-    async fn decide_next_action_streaming_with_tool_choice(
-        &self,
-        messages: &[Message],
-        available_tools: &[ToolDefinition],
-        app_handle: Option<tauri::AppHandle>,
-        message_id: Option<String>,
-        tool_choice: Option<ToolChoice>,
-    ) -> Result<AgentAction, AgentError> {
         // --- 1. Prepare API Request ---
         let mut api_messages = Vec::new();
 
         // Track tool calls that need results to validate message ordering
         let mut pending_tool_calls: Vec<String> = Vec::new();
-        let mut resolved_tool_calls: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut resolved_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // First pass: collect all tool call IDs and tool result IDs
         for message in messages {
@@ -1048,10 +933,7 @@ impl AgentBrain for AnthropicBrain {
             )));
         }
 
-        log::info!(
-            "Conversation validation passed: {} messages prepared for Anthropic API",
-            api_messages.len()
-        );
+        log::info!("Conversation validation passed: {} messages prepared for Anthropic API", api_messages.len());
 
         let api_tools = if available_tools.is_empty() {
             None
@@ -1075,7 +957,6 @@ impl AgentBrain for AnthropicBrain {
             system: self.system_prompt.clone(),
             max_tokens: self.max_tokens,
             stream: None, // Will be set based on streaming mode
-            tool_choice: tool_choice.or_else(|| self.default_tool_choice.clone()),
         };
 
         // Enable streaming if configured and we have an app handle
@@ -1100,12 +981,10 @@ impl AgentBrain for AnthropicBrain {
         // Build beta features header
         let mut beta_features_vec = Vec::new();
         if self.beta_features.token_efficient_tools {
-            beta_features_vec
-                .push(crate::constants::api::anthropic_beta_headers::TOKEN_EFFICIENT_TOOLS);
+            beta_features_vec.push(crate::constants::api::anthropic_beta_headers::TOKEN_EFFICIENT_TOOLS);
         }
         if self.beta_features.fine_grained_streaming {
-            beta_features_vec
-                .push(crate::constants::api::anthropic_beta_headers::FINE_GRAINED_STREAMING);
+            beta_features_vec.push(crate::constants::api::anthropic_beta_headers::FINE_GRAINED_STREAMING);
         }
         if self.beta_features.code_execution {
             beta_features_vec.push(crate::constants::api::anthropic_beta_headers::CODE_EXECUTION);
@@ -1114,24 +993,15 @@ impl AgentBrain for AnthropicBrain {
         let mut request_builder = self
             .client
             .post(ANTHROPIC_API_URL)
-            .header(
-                crate::constants::api::http_headers::X_API_KEY,
-                &self.api_key,
-            )
-            .header(
-                crate::constants::api::http_headers::ANTHROPIC_VERSION,
-                "2023-06-01",
-            ) // Required header
-            .header(
-                crate::constants::api::http_headers::CONTENT_TYPE,
-                crate::constants::api::http_headers::APPLICATION_JSON,
-            );
+            .header(crate::constants::api::http_headers::X_API_KEY, &self.api_key)
+            .header(crate::constants::api::http_headers::ANTHROPIC_VERSION, "2023-06-01") // Required header
+            .header(crate::constants::api::http_headers::CONTENT_TYPE, crate::constants::api::http_headers::APPLICATION_JSON);
 
         // Add beta features header if any features are enabled
         if !beta_features_vec.is_empty() {
             request_builder = request_builder.header(
                 crate::constants::api::http_headers::ANTHROPIC_BETA,
-                beta_features_vec.join(","),
+                beta_features_vec.join(",")
             );
         }
 

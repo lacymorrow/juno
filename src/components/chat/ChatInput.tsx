@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, Send, Square } from "lucide-react";
+import { Plus, Send, Square, Trash2 } from "lucide-react";
 import {
   AIInput,
   AIInputButton,
@@ -17,6 +17,7 @@ interface ChatInputProps {
   onSubmit: (e: React.FormEvent) => void;
   onStop: (e: React.FormEvent) => void;
   onNewChat: () => void;
+  onClearConversation: () => void;
 }
 
 export const ChatInput = React.memo(function ChatInput({
@@ -27,6 +28,7 @@ export const ChatInput = React.memo(function ChatInput({
   onSubmit,
   onStop,
   onNewChat,
+  onClearConversation,
 }: ChatInputProps) {
   return (
     <AIInput onSubmit={isProcessing ? onStop : onSubmit}>
@@ -48,10 +50,18 @@ export const ChatInput = React.memo(function ChatInput({
           <AIInputButton
             onClick={onNewChat}
             disabled={isProcessing}
-            title="Start new chat (clears conversation and input)"
+            title="Start new agent chat"
           >
             <Plus size={18} />
             New Chat
+          </AIInputButton>
+          <AIInputButton
+            onClick={onClearConversation}
+            disabled={isProcessing}
+            title="Clear conversation history"
+          >
+            <Trash2 size={18} />
+            Clear
           </AIInputButton>
         </AIInputTools>
         <AIInputSubmit

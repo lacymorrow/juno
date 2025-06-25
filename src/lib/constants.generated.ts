@@ -58,6 +58,7 @@ export const EVENTS = {
   MENU_FEEDBACK_REQUESTED: 'feedback-requested',
   MENU_HELP_REQUESTED: 'help-requested',
   MENU_NEW_CHAT_REQUESTED: 'new-chat-requested',
+  MENU_CLEAR_HISTORY_REQUESTED: 'clear-history-requested',
   MENU_IMPORT_CHAT_REQUESTED: 'import-chat-requested',
   MENU_EXPORT_CHAT_REQUESTED: 'export-chat-requested',
   MENU_TOGGLE_FLOATING_BAR_REQUESTED: 'toggle-floating-bar-requested',

@@ -50,191 +50,73 @@ All documentation has been successfully organized into logical categories under 
 
 # Cursor Rules for Juno AI Computer Use Agent
 
-This directory contains comprehensive Cursor Rules that guide AI development and maintenance of the Juno AI Computer Use Agent. These rules establish patterns, best practices, and architectural guidelines to ensure consistent, high-quality development.
+This directory contains Cursor-specific rules and documentation to help AI assistants understand and work with the Juno codebase effectively.
 
-## Core Architecture Rules
+## Rule Categories
 
-### [no-backward-compatibility.mdc](mdc:no-backward-compatibility.mdc)
+### Core Architecture
 
-**NEW APPLICATION BUILD** - No backward compatibility, legacy code, or deprecated patterns. Clean, modern implementation only.
+- **[Tauri Architecture Patterns](tauri-architecture-patterns.mdc)** - Tauri v2 patterns, command structure, and state management
+- **[Event System Patterns](event-system-patterns.mdc)** - Event-driven architecture and communication patterns
+- **[Settings and Persistence](settings-and-persistence.mdc)** - Configuration management and data persistence
 
-### [no-micromanaging-over-engineering.mdc](mdc:no-micromanaging-over-engineering.mdc)
+### Agent System
 
-Trust the AI agent's decisions. No hardcoded pattern detection or micromanaging. Execute what the agent provides.
+- **[Agent Iteration Limits](agent-iteration-limits.mdc)** - Managing agent execution limits and continuation system
+- **[Agent Trigger Modes](agent-trigger-modes.mdc)** - Different modes of agent activation and execution
+- **[Constants Management](constants-management.mdc)** - Rust-to-TypeScript constants generation and management
 
-### [tauri-architecture-patterns.mdc](mdc:tauri-architecture-patterns.mdc)
+### Specialized Systems  
 
-Comprehensive Tauri v2 patterns including commands, state management, async operations, and frontend integration.
+- **[Voice System Architecture](voice-system-architecture.mdc)** - Voice transcription and always-listening functionality
+- **[Event Listener Rules](event-listener-rules.md)** - Frontend event handling patterns and safety
+- **[Event Listener Safety](event-listener-safety.mdc)** - Safety patterns for event listeners
 
-### [event-system-patterns.mdc](mdc:event-system-patterns.mdc)
+## Usage Guidelines
 
-Event system architecture, listener management, and frontend-backend communication patterns.
+### For AI Assistants
 
-## Token Management & Performance
+1. **Read relevant rules** before making changes to understand patterns
+2. **Follow established patterns** rather than creating new ones
+3. **Reference rule files** when explaining architectural decisions
+4. **Update rules** when introducing new patterns or fixing issues
 
-### [token-optimization-visual-compression.mdc](mdc:token-optimization-visual-compression.mdc) **NEW**
+### For Developers
 
-**CRITICAL**: Visual Context Compression system for handling token overflow issues. Converts 50,000+ token screenshots to ~50 token summaries, achieving 70%+ token reduction for extended autonomous workflows.
+1. **Create new rules** when establishing new architectural patterns
+2. **Update existing rules** when patterns evolve or issues are discovered
+3. **Use `.mdc` extension** for Cursor-specific markdown files
+4. **Reference code files** using `[filename](mdc:path/to/file)` syntax
 
-### [memory-management-optimization.mdc](mdc:memory-management-optimization.mdc) **NEW**
+## Recent Updates
 
-Advanced memory management patterns, cross-agent memory sharing, conversation integrity, and performance monitoring for enterprise-grade AI agent operations.
+### 2024-01 - Agent Control Systems
 
-## Enterprise AI Architecture
+- **NEW**: [Agent Iteration Limits](agent-iteration-limits.mdc) - Comprehensive guide to iteration limits and continuation UX
+- **NEW**: [Constants Management](constants-management.mdc) - Rust-to-TypeScript constants generation system
+- **UPDATED**: Improved agent execution control and user experience patterns
 
-### [enterprise-ai-agent-architecture.mdc](mdc:enterprise-ai-agent-architecture.mdc) **NEW**
+### Key Improvements
 
-Next-generation enterprise AI agent architecture positioning Juno beyond traditional GenAI through autonomous decision-making, real-time data integration, and OS-level interaction capabilities.
+- **Fixed infinite agent execution** by implementing proper iteration limits (15 steps)
+- **Improved continuation UX** with dual toast notifications prioritizing stop over continue
+- **Consolidated constants system** eliminating duplication between generated and manual files
+- **Enhanced debugging guides** for common agent execution issues
 
-## Agent Development
+## File Naming Convention
 
-### [agent-prompt-guidelines.mdc](mdc:agent-prompt-guidelines.mdc)
+- Use `.mdc` extension for Cursor-specific markdown files
+- Use descriptive, hyphenated names (e.g., `agent-iteration-limits.mdc`)
+- Group related rules by system/domain
+- Include metadata headers with title, description, and tags
 
-Prompt engineering patterns and guidelines for effective AI agent communication.
+## Cross-References
 
-### [agent-iteration-limits.mdc](mdc:agent-iteration-limits.mdc)
+Rules frequently reference each other and core codebase files:
 
-Agent execution patterns, iteration limits, and continuation system architecture.
+- Agent rules reference event system patterns
+- Event patterns reference Tauri architecture  
+- Voice system integrates with agent trigger modes
+- Constants management affects all system communication
 
-### [agent-trigger-modes.mdc](mdc:agent-trigger-modes.mdc)
-
-Voice activation patterns and agent trigger mode configuration.
-
-## Tool Management
-
-### [anthropic-computer-use-api-compliance.mdc](mdc:anthropic-computer-use-api-compliance.mdc)
-
-Official Anthropic Computer Use API compliance and implementation patterns.
-
-### [tool-consolidation-patterns.mdc](mdc:tool-consolidation-patterns.mdc)
-
-Tool consolidation strategies, batching optimization, and performance improvements.
-
-## System Integration
-
-### [clean-architecture-maintenance.mdc](mdc:clean-architecture-maintenance.mdc)
-
-Clean architecture principles, modular design patterns, and maintenance guidelines.
-
-### [constants-management.mdc](mdc:constants-management.mdc)
-
-Constants generation, synchronization, and management across frontend/backend.
-
-### [settings-and-persistence.mdc](mdc:settings-and-persistence.mdc)
-
-Settings management, persistence patterns, and configuration synchronization.
-
-## Voice & Audio
-
-### [voice-system-architecture.mdc](mdc:voice-system-architecture.mdc)
-
-Voice transcription, audio processing, and voice command integration patterns.
-
-## Cloud & Networking
-
-### [cloud-connection-fix.mdc](mdc:cloud-connection-fix.mdc)
-
-Cloud connectivity, authentication, and connection management patterns.
-
-### [cloud-testing-patterns.mdc](mdc:cloud-testing-patterns.mdc)
-
-Cloud service testing, mocking, and integration validation patterns.
-
-### [websocket-troubleshooting.mdc](mdc:websocket-troubleshooting.mdc)
-
-WebSocket connection management, error handling, and troubleshooting patterns.
-
-## Development & Testing
-
-### [keyboard-shortcut-validation.mdc](mdc:keyboard-shortcut-validation.mdc)
-
-Keyboard shortcut implementation, validation, and cross-platform compatibility.
-
-### [event-listener-rules.md](mdc:event-listener-rules.md)
-
-Event listener safety, lifecycle management, and memory leak prevention.
-
-### [event-listener-safety.mdc](mdc:event-listener-safety.mdc)
-
-Enhanced event listener safety patterns and best practices.
-
-### [appstate-helper-methods-fix.mdc](mdc:appstate-helper-methods-fix.mdc)
-
-AppState helper methods and state management utilities.
-
-## Critical Performance Optimizations
-
-### Token Management Crisis Resolution
-
-The Visual Context Compression system addresses the critical token overflow issue where Anthropic's API was rejecting requests due to exceeding 200,000 token limits (observed: 240,048 tokens). This system:
-
-- **Reduces Token Usage by 70%+**: Screenshots consuming 50,000+ tokens are compressed to ~50 tokens
-- **Enables Extended Workflows**: Agents can operate for hours without hitting token limits
-- **Maintains Context**: Visual summaries preserve essential UI context and interaction history
-- **Production Ready**: Automatic compression, fallback strategies, and error recovery
-
-### Enterprise AI Positioning
-
-The enterprise architecture rules position Juno as:
-
-- **Autonomous Agent**: Self-optimizing workflows with minimal human intervention
-- **Cross-System Integration**: Seamless operation across all enterprise systems
-- **Cost Efficient**: 70%+ reduction in operational API costs
-- **Scalable**: Extended autonomous workflows without technical limitations
-- **Compliant**: Enterprise-grade security and audit capabilities
-
-## Rule Development Guidelines
-
-### Creating New Rules
-
-1. Use `.mdc` extension for Cursor-specific markdown
-2. Reference files using `[filename.ext](mdc:filename.ext)` format
-3. Include practical code examples and implementation patterns
-4. Focus on actionable guidance for AI development
-5. Document both the problem and the solution
-
-### Rule Categories
-
-- **Architecture**: Core system design and patterns
-- **Performance**: Optimization strategies and bottleneck resolution
-- **Integration**: External system connectivity and data flow
-- **Security**: Access control, validation, and compliance
-- **Development**: Coding standards, testing, and maintenance
-
-### Best Practices
-
-- Keep rules focused and actionable
-- Include code examples and implementation details
-- Reference specific files and functions where applicable
-- Document performance impact and metrics
-- Provide troubleshooting guidance
-
-## Enterprise Value Proposition
-
-These rules establish Juno as a next-generation enterprise AI agent capable of:
-
-1. **Autonomous Operation**: Extended workflows without human intervention
-2. **Token Efficiency**: 70%+ cost reduction through intelligent optimization
-3. **Cross-Agent Orchestration**: Specialist agents with shared context
-4. **Production Scalability**: Enterprise-grade reliability and performance
-5. **Competitive Differentiation**: Beyond traditional GenAI limitations
-
-The comprehensive rule system ensures consistent development practices that maintain Juno's position as a leading enterprise AI agent solution.
-
-## Quick Reference
-
-### Most Critical Rules
-
-1. [token-optimization-visual-compression.mdc](mdc:token-optimization-visual-compression.mdc) - Prevents token overflow
-2. [memory-management-optimization.mdc](mdc:memory-management-optimization.mdc) - Ensures conversation integrity
-3. [enterprise-ai-agent-architecture.mdc](mdc:enterprise-ai-agent-architecture.mdc) - Strategic positioning
-4. [no-backward-compatibility.mdc](mdc:no-backward-compatibility.mdc) - Clean development approach
-5. [tauri-architecture-patterns.mdc](mdc:tauri-architecture-patterns.mdc) - Technical foundation
-
-### Emergency References
-
-- Token overflow issues → Visual Context Compression
-- Memory corruption → Memory Manager recovery patterns
-- Agent performance → Enterprise optimization strategies
-- System integration → MCP and cross-agent patterns
-- Production deployment → Enterprise architecture guidelines
+This interconnected documentation helps maintain consistency across the complex Juno architecture.

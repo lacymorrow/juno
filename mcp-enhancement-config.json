@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "filesystem": {
-      "command": "npx",
+      "command": "npx", 
       "args": ["@modelcontextprotocol/server-filesystem", "/Users"],
       "description": "Secure file operations across the system"
     },
@@ -70,7 +70,7 @@
       "description": "Research a topic with multiple sources and create structured output",
       "workflow": [
         "1. Use tavily-search MCP to find recent articles and papers",
-        "2. Use firecrawl MCP to extract full content from promising URLs",
+        "2. Use firecrawl MCP to extract full content from promising URLs",  
         "3. Use memory MCP to store and organize findings",
         "4. Use filesystem MCP to create a comprehensive research document",
         "5. Use computer use tools to open and present the document"
@@ -119,7 +119,7 @@
       "description": "Set up environment variables for API access",
       "required_keys": [
         "GITHUB_PERSONAL_ACCESS_TOKEN - For GitHub integration",
-        "OPENAI_API_KEY - For additional AI model access",
+        "OPENAI_API_KEY - For additional AI model access", 
         "TAVILY_API_KEY - For advanced web search",
         "FIRECRAWL_API_KEY - For web data extraction",
         "NOTION_API_KEY - For Notion workspace access",
@@ -141,7 +141,7 @@
     "workflow_optimization": [
       "Combine external data with local computer automation",
       "Chain multiple tools for complex multi-step tasks",
-      "Reduce manual work through intelligent automation",
+      "Reduce manual work through intelligent automation", 
       "Create comprehensive solutions spanning multiple platforms",
       "Enable agents to be truly helpful rather than just reactive"
     ],

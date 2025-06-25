@@ -77,6 +77,7 @@ fn is_app_menu_event(event_id: &str) -> bool {
         constants::app_menu_ids::CHECK_FOR_UPDATES |
         constants::app_menu_ids::SETTINGS |
         constants::app_menu_ids::NEW_CHAT |
+        constants::app_menu_ids::CLEAR_HISTORY |
         constants::app_menu_ids::IMPORT_CHAT |
         constants::app_menu_ids::EXPORT_CHAT |
         constants::app_menu_ids::TOGGLE_FLOATING_BAR |

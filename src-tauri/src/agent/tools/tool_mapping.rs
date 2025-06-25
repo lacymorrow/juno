@@ -71,10 +71,6 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("get_system_info", ToolCategory::Desktop);
     map.insert("manage_audio", ToolCategory::Desktop);
 
-    // Accessibility tools (native macOS element interaction)
-    map.insert("accessibility_scan", ToolCategory::Desktop);
-    map.insert("accessibility_click", ToolCategory::Desktop);
-
     // Basic tools (file operations, commands, etc.)
             map.insert("bash_command", ToolCategory::Basic);
             map.insert("list_files", ToolCategory::Basic);

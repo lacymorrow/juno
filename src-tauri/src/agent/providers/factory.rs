@@ -12,7 +12,6 @@ use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
 use crate::agent::core::AgentError;
 use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
-use crate::agent::tools::accessibility_tools::AccessibilityTools;
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::state::AppState;
 
@@ -792,9 +791,6 @@ impl BrainFactory {
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
-        // Register native accessibility tools for element-level interaction
-        Self::register_accessibility_tools(provider, app_handle.clone()).await?;
-
         // Register self-improvement tools (per-provider instance, development mode only)
         if let Err(e) =
             crate::agent::tools::register_self_improvement_tools_with_provider(provider).await
@@ -819,56 +815,6 @@ impl BrainFactory {
         info!("✅ Computer Use tools registered successfully for provider instance");
 
         // Lock is automatically released when _lock goes out of scope
-        Ok(())
-    }
-
-    /// Register native accessibility tools for element-level interaction
-    pub async fn register_accessibility_tools(
-        provider: &mut LocalToolProvider,
-        app_handle: tauri::AppHandle,
-    ) -> Result<(), String> {
-        info!("🔧 Registering native accessibility tools...");
-
-        // Create accessibility tools instance
-        let accessibility_tools = AccessibilityTools::new();
-
-        // Get tool definitions
-        let tool_definitions = AccessibilityTools::get_tool_definitions();
-
-        for tool_def in tool_definitions {
-            let tool_name = tool_def["name"].as_str().unwrap_or("unknown").to_string();
-            let description = tool_def["description"].as_str().unwrap_or("").to_string();
-            let input_schema = tool_def["input_schema"].clone();
-
-            info!("🔧 Registering accessibility tool: {}", tool_name);
-
-            // Create tool definition for the provider
-            let tool_definition = crate::agent::core::ToolDefinition {
-                name: tool_name.clone(),
-                description,
-                input_schema,
-            };
-
-            // Create tool executor
-            let tools_clone = accessibility_tools.clone();
-            let app_handle_clone = app_handle.clone();
-            let tool_name_clone = tool_name.clone();
-
-            let executor = move |input: serde_json::Value| {
-                let tools = tools_clone.clone();
-                let app = app_handle_clone.clone();
-                let name = tool_name_clone.clone();
-
-                async move {
-                    tools.execute_tool(&name, &input, &app).await
-                }
-            };
-
-            // Register the tool
-            provider.register_async_tool(tool_definition, executor).await;
-        }
-
-        info!("🔧 Native accessibility tools registered successfully");
         Ok(())
     }
 }

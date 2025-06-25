@@ -46,6 +46,11 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+N")
         .build(app)?;
 
+    let clear_history_menu_item = MenuItemBuilder::new("Clear History")
+        .id(constants::app_menu_ids::CLEAR_HISTORY)
+        .accelerator("CmdOrCtrl+Shift+Delete")
+        .build(app)?;
+
     let import_chat_menu_item = MenuItemBuilder::new("Import Chat...")
         .id(constants::app_menu_ids::IMPORT_CHAT)
         .accelerator("CmdOrCtrl+O")
@@ -58,6 +63,8 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
 
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&new_chat_menu_item)
+        .separator()
+        .item(&clear_history_menu_item)
         .separator()
         .item(&import_chat_menu_item)
         .item(&export_chat_menu_item)
@@ -273,6 +280,12 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[Menu] New Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::NEW_CHAT_REQUESTED, ()) {
                 error!("[Menu] Failed to emit new chat event: {}", e);
+            }
+        }
+        constants::app_menu_ids::CLEAR_HISTORY => {
+            info!("[Menu] Clear History menu item clicked");
+            if let Err(e) = app_handle.emit(constants::events::menu::CLEAR_HISTORY_REQUESTED, ()) {
+                error!("[Menu] Failed to emit clear history event: {}", e);
             }
         }
         constants::app_menu_ids::IMPORT_CHAT => {
