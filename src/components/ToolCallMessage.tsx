@@ -31,6 +31,76 @@ export function ToolCallRequest({
   const [isExpanded, setIsExpanded] = useState(false);
   const hasArgs = toolArgs && Object.keys(toolArgs).length > 0;
 
+  // Format computer tool names for better readability
+  const formatToolName = (name: string) => {
+    // Handle computer use tools with descriptive names
+    if (name.startsWith("computer/")) {
+      return name;
+    }
+    return name;
+  };
+
+  // Extract action description from computer tool names
+  const getActionDescription = (name: string) => {
+    if (name.startsWith("computer/")) {
+      const action = name.replace("computer/", "");
+
+      // Handle specific patterns
+      if (action.startsWith("click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords ? `Click at (${coords[1]}, ${coords[2]})` : "Click";
+      }
+      if (action.startsWith("right_click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords
+          ? `Right-click at (${coords[1]}, ${coords[2]})`
+          : "Right-click";
+      }
+      if (action.startsWith("double_click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords
+          ? `Double-click at (${coords[1]}, ${coords[2]})`
+          : "Double-click";
+      }
+      if (action.startsWith("type(")) {
+        const text = action.match(/type\("(.+?)"\)/);
+        return text ? `Type "${text[1]}"` : "Type text";
+      }
+      if (action.startsWith("press_key(")) {
+        const key = action.match(/press_key\((.+?)\)/);
+        return key ? `Press ${key[1]}` : "Press key";
+      }
+      if (action.startsWith("scroll_")) {
+        const match = action.match(
+          /scroll_(\w+)\((\d+),\s*(\d+)\s*×\s*(\d+)\)/
+        );
+        return match
+          ? `Scroll ${match[1]} ${match[4]}x at (${match[2]}, ${match[3]})`
+          : action.replace(/_/g, " ");
+      }
+      if (action.startsWith("drag(")) {
+        const coords = action.match(/drag\((\d+),(\d+)\s*→\s*(\d+),(\d+)\)/);
+        return coords
+          ? `Drag from (${coords[1]}, ${coords[2]}) to (${coords[3]}, ${coords[4]})`
+          : "Drag";
+      }
+      if (action === "screenshot") {
+        return "Take screenshot";
+      }
+      if (action === "get_cursor_position") {
+        return "Get cursor position";
+      }
+
+      // Default: capitalize and replace underscores
+      return action.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+
+    return null;
+  };
+
+  const displayName = formatToolName(toolName);
+  const actionDescription = getActionDescription(toolName);
+
   return (
     <div className="max-w-[85%] mb-3">
       {/* Tool call header */}
@@ -46,8 +116,13 @@ export function ToolCallRequest({
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <span className="font-medium shrink-0">Tool Call:</span>
           <code className="font-mono bg-purple-100 dark:bg-purple-900/50 px-2 py-0.5 rounded text-sm">
-            {toolName}
+            {displayName}
           </code>
+          {actionDescription && (
+            <span className="text-purple-600 dark:text-purple-400 text-xs">
+              {actionDescription}
+            </span>
+          )}
         </div>
         {hasArgs && (
           <button
@@ -96,6 +171,76 @@ export function ToolCallResult({
   const [isExpanded, setIsExpanded] = useState(false);
   const hasOutput = toolOutput !== undefined && toolOutput !== null;
 
+  // Format computer tool names for better readability (reuse from ToolCallRequest)
+  const formatToolName = (name: string) => {
+    // Handle computer use tools with descriptive names
+    if (name.startsWith("computer/")) {
+      return name;
+    }
+    return name;
+  };
+
+  // Extract action description from computer tool names (reuse from ToolCallRequest)
+  const getActionDescription = (name: string) => {
+    if (name.startsWith("computer/")) {
+      const action = name.replace("computer/", "");
+
+      // Handle specific patterns
+      if (action.startsWith("click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords ? `Click at (${coords[1]}, ${coords[2]})` : "Click";
+      }
+      if (action.startsWith("right_click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords
+          ? `Right-click at (${coords[1]}, ${coords[2]})`
+          : "Right-click";
+      }
+      if (action.startsWith("double_click(")) {
+        const coords = action.match(/\((\d+),\s*(\d+)\)/);
+        return coords
+          ? `Double-click at (${coords[1]}, ${coords[2]})`
+          : "Double-click";
+      }
+      if (action.startsWith("type(")) {
+        const text = action.match(/type\("(.+?)"\)/);
+        return text ? `Type "${text[1]}"` : "Type text";
+      }
+      if (action.startsWith("press_key(")) {
+        const key = action.match(/press_key\((.+?)\)/);
+        return key ? `Press ${key[1]}` : "Press key";
+      }
+      if (action.startsWith("scroll_")) {
+        const match = action.match(
+          /scroll_(\w+)\((\d+),\s*(\d+)\s*×\s*(\d+)\)/
+        );
+        return match
+          ? `Scroll ${match[1]} ${match[4]}x at (${match[2]}, ${match[3]})`
+          : action.replace(/_/g, " ");
+      }
+      if (action.startsWith("drag(")) {
+        const coords = action.match(/drag\((\d+),(\d+)\s*→\s*(\d+),(\d+)\)/);
+        return coords
+          ? `Drag from (${coords[1]}, ${coords[2]}) to (${coords[3]}, ${coords[4]})`
+          : "Drag";
+      }
+      if (action === "screenshot") {
+        return "Take screenshot";
+      }
+      if (action === "get_cursor_position") {
+        return "Get cursor position";
+      }
+
+      // Default: capitalize and replace underscores
+      return action.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+
+    return null;
+  };
+
+  const displayName = formatToolName(toolName);
+  const actionDescription = getActionDescription(toolName);
+
   return (
     <div className="max-w-[85%] mb-3">
       {/* Tool result header */}
@@ -125,8 +270,20 @@ export function ToolCallResult({
                 : "bg-red-100 dark:bg-red-900/50"
             )}
           >
-            {toolName}
+            {displayName}
           </code>
+          {actionDescription && (
+            <span
+              className={cn(
+                "text-xs",
+                success
+                  ? "text-green-600 dark:text-green-400"
+                  : "text-red-600 dark:text-red-400"
+              )}
+            >
+              {actionDescription}
+            </span>
+          )}
         </div>
         {hasOutput && (
           <button
