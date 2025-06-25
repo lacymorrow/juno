@@ -2483,20 +2483,21 @@ pub async fn register_anthropic_computer_use_tools(
                     return Err("Error: view_range must contain exactly 2 elements [start_line, end_line]".to_string());
                 }
 
-                let start = view_range[0].as_i64()
-                    .ok_or_else(|| "Error: view_range start must be an integer".to_string())? as usize;
+                let start_i64 = view_range[0].as_i64()
+                    .ok_or_else(|| "Error: view_range start must be an integer".to_string())?;
                 let end = view_range[1].as_i64()
                     .ok_or_else(|| "Error: view_range end must be an integer".to_string())?;
 
                 // Validate line numbers are positive (1-indexed as per spec)
-                if start < 1 && start != 0 {
+                if start_i64 < 1 {
                     return Err("Error: view_range start must be positive (1-indexed)".to_string());
                 }
 
+                let start = start_i64 as usize;
                 let lines: Vec<&str> = content.lines().collect();
 
                 // Handle 1-indexed line numbers as per official spec
-                let start_idx = if start > 0 { start - 1 } else { 0 };
+                let start_idx = start - 1;
                 let end_idx = if end == -1 {
                     lines.len()
                 } else if end < 1 {
