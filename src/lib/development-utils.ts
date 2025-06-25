@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 /**
  * Development mode detection utilities
  *
@@ -10,16 +12,8 @@
  */
 export const isDevelopment = async (): Promise<boolean> => {
 	try {
-		if (typeof window !== 'undefined') {
-			// Tauri v2 API access pattern
-			if ((window as any).__TAURI_INTERNALS__?.invoke) {
-				// Use Tauri's backend to check debug mode
-				const tauriInvoke = (window as any).__TAURI_INTERNALS__.invoke;
-				const result = await tauriInvoke('get_debug_mode');
-				return result;
-			}
-		}
-		throw new Error('No Tauri environment detected');
+		const result = await invoke<boolean>('get_debug_mode');
+		return result;
 	} catch (error) {
 		console.warn('Failed to check async development mode:', error);
 		return false;
