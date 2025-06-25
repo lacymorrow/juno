@@ -7,12 +7,10 @@ use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
 use serde_json::{json, Value};
-use std::sync::Arc;
 use tauri::Manager;
 use tracing::{info, warn, error};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::io;
 
 // --- Security and Validation Helpers ---
 
@@ -581,13 +579,49 @@ pub async fn execute_bash_tool(
         None, // debug_mode
     ).await.map_err(|e| format!("Bash command failed: {}", e))?;
 
-    // Parse the JSON result from bash_command
-    let result_json: Value = serde_json::from_str(&result)
-        .map_err(|e| format!("Failed to parse bash command result: {}", e))?;
+    // Log the raw result for debugging
+    info!("Raw bash_command result: {}", result);
 
+    // The bash_command function returns a JSON string containing stdout, stderr, exit_code, etc.
+    // We need to parse this JSON to extract the specific fields we want to return
+    let result_json: Value = serde_json::from_str(&result)
+        .map_err(|e| {
+            // If JSON parsing fails, provide detailed error information
+            error!("Failed to parse bash_command result as JSON. Error: {}, Raw result: '{}'", e, result);
+            format!("Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'", e, result)
+        })?;
+
+    // Extract stdout and exit_code from the parsed JSON with better error handling
+    let stdout = result_json.get("stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            warn!("Missing or invalid 'stdout' field in bash command result: {}", result_json);
+            ""
+        });
+
+    let exit_code = result_json.get("exit_code")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| {
+            warn!("Missing or invalid 'exit_code' field in bash command result: {}", result_json);
+            -1
+        });
+
+    // Also extract stderr for completeness (even though we don't return it in the final result)
+    let stderr = result_json.get("stderr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let success = result_json.get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(exit_code == 0);
+
+    info!("Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}",
+          stdout, stderr, exit_code, success);
+
+    // Return the result in the format expected by the Anthropic Computer Use API
     Ok(json!({
-        "output": result_json["stdout"].as_str().unwrap_or(""),
-        "exit_code": result_json["exit_code"].as_i64().unwrap_or(-1)
+        "output": stdout,
+        "exit_code": exit_code
     }))
 }
 
@@ -667,17 +701,17 @@ pub async fn execute_str_replace_tool(
             // Detect original line ending style
             let original_line_ending = detect_line_ending(&content);
 
-            // Perform replacement
-            let mut new_content = content.replace(old_str, new_str);
-
-            // Normalize the new content to preserve original line ending style
-            if original_line_ending == "\r\n" {
-                // If original was CRLF, ensure replacement maintains CRLF
-                new_content = new_content.replace("\r\n", "\n").replace('\n', "\r\n");
+            // Normalize the replacement text to match the original file's line ending style
+            let normalized_new_str = if original_line_ending == "\r\n" {
+                // If original uses CRLF, normalize replacement text to use CRLF
+                new_str.replace("\r\n", "\n").replace('\n', "\r\n")
             } else {
-                // If original was LF, ensure replacement maintains LF
-                new_content = new_content.replace("\r\n", "\n");
-            }
+                // If original uses LF, normalize replacement text to use LF
+                new_str.replace("\r\n", "\n")
+            };
+
+            // Perform replacement with normalized replacement text
+            let new_content = content.replace(old_str, &normalized_new_str);
 
             // Write back to file
             fs::write(&file_path, &new_content)
