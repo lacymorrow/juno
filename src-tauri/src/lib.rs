@@ -648,6 +648,11 @@ pub fn run() {
             generate_device_id,
             execute_remote_command,
             get_cloud_connection_diagnostics,
+            // Cloud Test Commands (new)
+            commands::cloud_test::test_cloud_backend_connection,
+            commands::cloud_test::get_cloud_config_status,
+            commands::cloud_test::enable_cloud_backend,
+            commands::cloud_test::disable_cloud_backend,
             // Production Cloud Connector Commands
             commands::cloud::handle_cloud_message,
             commands::cloud::start_production_cloud_connector,
