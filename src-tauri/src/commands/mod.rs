@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use tracing::{info, warn};
 
 // Declare the submodules
+pub mod accessibility;
 pub mod app_url;
 pub mod autostart;
 pub mod core;
@@ -54,6 +55,10 @@ pub mod ui_token_selection;
 pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
+pub use self::accessibility::{
+    accessibility_scan, accessibility_click, test_accessibility_permissions,
+    get_accessibility_tool_definitions, execute_accessibility_tool
+};
 pub use self::autostart::*;
 pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;

@@ -46,17 +46,11 @@ export function useConversation() {
         });
     }, [pruneConversationIfNeeded]);
 
-    // Function to start a new chat (clear conversation and reset state)
+    // Function to start a new chat (clear conversation and reset input)
     const startNewChat = useCallback(() => {
-        console.log("Starting new chat - clearing conversation");
-        setConversation([]); // Direct clear for new chat
-        setQuery("");
-    }, []);
-
-    // Function to clear conversation history
-    const clearConversation = useCallback(() => {
-        console.log("Clearing conversation history");
-        setConversation([]); // Direct clear for history clear
+        console.log("Starting new chat - clearing conversation and input");
+        setConversation([]); // Clear conversation
+        setQuery(""); // Clear input field
     }, []);
 
     // Add a system message to conversation
@@ -157,7 +151,6 @@ export function useConversation() {
         setConversationWithPruning,
         setQuery,
         startNewChat,
-        clearConversation,
         updateConversation,
 
         // Message operations

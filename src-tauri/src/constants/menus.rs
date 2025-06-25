@@ -27,7 +27,6 @@ pub mod app_menu_ids {
 
     // File Menu
     pub const NEW_CHAT: &str = "new-chat";
-    pub const CLEAR_HISTORY: &str = "clear-history";
     pub const IMPORT_CHAT: &str = "import-chat";
     pub const EXPORT_CHAT: &str = "export-chat";
 
