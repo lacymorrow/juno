@@ -12,7 +12,6 @@ use crate::cloud::config::CloudConfig;
 use crate::cloud::auth::DeviceAuth;
 use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
-use serde_json::json;
 
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
@@ -31,6 +30,9 @@ pub struct ProductionCloudConnector {
     // Connection management
     connection_id: Arc<TokioMutex<Option<String>>>,
     connection_state: Arc<TokioMutex<ConnectorState>>,
+
+    // WebSocket sender for outgoing messages
+    ws_sender: Arc<TokioMutex<Option<futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>,
 
     // Command tracking
     pending_commands: Arc<TokioMutex<HashMap<String, oneshot::Sender<DeviceResponse>>>>,
@@ -373,6 +375,7 @@ impl ProductionCloudConnector {
             app_handle,
             connection_id: Arc::new(TokioMutex::new(None)),
             connection_state: Arc::new(TokioMutex::new(ConnectorState::Disconnected)),
+            ws_sender: Arc::new(TokioMutex::new(None)),
             pending_commands: Arc::new(TokioMutex::new(HashMap::new())),
             command_tx,
             command_rx: Arc::new(TokioMutex::new(command_rx)),
@@ -497,7 +500,6 @@ impl ProductionCloudConnector {
 
         // Use native Rust WebSocket connection instead of JavaScript
         use tokio_tungstenite::{connect_async, tungstenite::Message};
-        use futures_util::{SinkExt, StreamExt};
 
         let url = self.config.server_url.clone();
         let (ws_stream, _) = connect_async(&url).await
@@ -507,7 +509,10 @@ impl ProductionCloudConnector {
         self.set_connection_state(ConnectorState::Connected).await;
 
         // Split the WebSocket stream for concurrent read/write
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
+
+        // Store the WebSocket sender for later use
+        *self.ws_sender.lock().await = Some(ws_sender);
 
         // Authenticate first
         let auth_data = self.auth.create_auth_message()?;
@@ -521,8 +526,17 @@ impl ProductionCloudConnector {
         };
 
         let auth_json = serde_json::to_string(&auth_message)?;
-        ws_sender.send(Message::Text(auth_json)).await
-            .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
+
+        // Send authentication message using stored sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                sender.send(Message::Text(auth_json)).await
+                    .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
+            } else {
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
 
         info!("🔐 Authentication message sent");
 
@@ -533,7 +547,7 @@ impl ProductionCloudConnector {
                     let response: WebSocketMessage = serde_json::from_str(&text)?;
                     if response.message_type == MessageType::Auth {
                         if let Some(success) = response.data.get("success").and_then(|s| s.as_bool()) {
-                            if success {
+                                                        if success {
                                 info!("✅ Authentication successful");
                                 self.set_connection_state(ConnectorState::Authenticated).await;
                             } else {
@@ -665,17 +679,49 @@ impl ProductionCloudConnector {
         Ok(())
     }
 
-    /// Handle sending a command to the cloud (simplified for native WebSocket)
+    /// Handle sending a command to the cloud using stored WebSocket sender
     async fn handle_send_command(&self, command: CloudCommand) -> Result<(), CloudError> {
         let start_time = Instant::now();
         let command_id = command.id.clone();
 
         log::info!("🚀 Executing tracked command: {} ({:?})", command_id, command.command_type);
 
-        // With native WebSocket implementation, commands are sent directly through the WebSocket stream
-        // This method now just tracks the command execution
+        // Create WebSocket message
+        let ws_message = WebSocketMessage {
+            message_type: MessageType::Command,
+            data: serde_json::to_value(&command)?,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        // Send command using stored WebSocket sender
+        let mut success = false;
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                match sender.send(Message::Text(message_json)).await {
+                    Ok(()) => {
+                        success = true;
+                        log::debug!("📤 Command {} sent successfully", command_id);
+                    },
+                    Err(e) => {
+                        log::error!("❌ Failed to send command {}: {}", command_id, e);
+                        return Err(CloudError::NetworkError(format!("Failed to send command: {}", e)));
+                    }
+                }
+            } else {
+                log::error!("❌ WebSocket sender not available for command {}", command_id);
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
+
         let execution_time = start_time.elapsed();
-        self.track_command_execution(true, execution_time).await;
+        self.track_command_execution(success, execution_time).await;
 
         log::info!("✅ Command {} completed in {:?}", command_id, execution_time);
         Ok(())
@@ -693,10 +739,45 @@ impl ProductionCloudConnector {
         }
     }
 
-    /// Send status update to cloud (simplified for native WebSocket)
+    /// Send status update to cloud using stored WebSocket sender
     async fn send_status_update(&self) -> Result<(), CloudError> {
-        // With native WebSocket implementation, status updates are handled in the background task
-        debug!("Status update requested (handled by background task)");
+        debug!("📊 Sending status update to cloud");
+
+        // Create device status
+        let device_status = self.create_device_status().await?;
+
+        // Create WebSocket message
+        let ws_message = WebSocketMessage {
+            message_type: MessageType::Status,
+            data: serde_json::to_value(&device_status)?,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        // Send status update using stored WebSocket sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                match sender.send(Message::Text(message_json)).await {
+                    Ok(()) => {
+                        debug!("✅ Status update sent successfully");
+                    },
+                    Err(e) => {
+                        warn!("⚠️ Failed to send status update: {}", e);
+                        return Err(CloudError::NetworkError(format!("Failed to send status update: {}", e)));
+                    }
+                }
+            } else {
+                warn!("⚠️ WebSocket sender not available for status update");
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
+
         Ok(())
     }
 
@@ -721,11 +802,42 @@ impl ProductionCloudConnector {
                 // Update last heartbeat time
                 *self.last_heartbeat.lock().await = Some(SystemTime::now());
 
-                // With native WebSocket implementation, heartbeats are handled automatically
-                // in the WebSocket message loop, so we just track the heartbeat time here
-                debug!("💓 Heartbeat tick - connection healthy");
+                // Send heartbeat message
+                if let Err(e) = self.send_heartbeat().await {
+                    warn!("Failed to send heartbeat: {}", e);
+                } else {
+                    debug!("💓 Heartbeat sent successfully");
+                }
             }
         }
+    }
+
+    /// Send heartbeat message to maintain connection
+    async fn send_heartbeat(&self) -> Result<(), CloudError> {
+        let ws_message = WebSocketMessage {
+            message_type: MessageType::Heartbeat,
+            data: serde_json::json!({"timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()}),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        // Send heartbeat using stored WebSocket sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                sender.send(Message::Text(message_json)).await
+                    .map_err(|e| CloudError::NetworkError(format!("Failed to send heartbeat: {}", e)))?;
+            } else {
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
+
+        Ok(())
     }
 
     /// Status reporting loop
@@ -893,7 +1005,18 @@ impl ProductionCloudConnector {
             warn!("Failed to send disconnect message");
         }
 
-        // With native WebSocket implementation, the connection is closed when the task ends
+        // Close WebSocket connection
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(mut sender) = sender_guard.take() {
+                use tokio_tungstenite::tungstenite::Message;
+                if let Err(e) = sender.send(Message::Close(None)).await {
+                    warn!("Failed to send close message: {}", e);
+                }
+                info!("🔌 WebSocket sender closed");
+            }
+        }
+
         // Clear connection state
         *self.connection_id.lock().await = None;
         self.set_connection_state(ConnectorState::Disconnected).await;
@@ -984,6 +1107,7 @@ impl Clone for ProductionCloudConnector {
             app_handle: self.app_handle.clone(),
             connection_id: self.connection_id.clone(),
             connection_state: self.connection_state.clone(),
+            ws_sender: self.ws_sender.clone(),
             pending_commands: self.pending_commands.clone(),
             command_tx: self.command_tx.clone(),
             command_rx: self.command_rx.clone(),
