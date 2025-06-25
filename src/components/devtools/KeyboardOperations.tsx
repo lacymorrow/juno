@@ -8,7 +8,7 @@ import { invokeCommand } from '@/lib/utils';
 const KeyboardOperations: React.FC = () => {
   const [textToType, setTextToType] = useState<string>('Hello from DevTools!');
   const [globalTextToType, setGlobalTextToType] = useState<string>('Global text');
-  const [keyToPress, setKeyToPress] = useState<string>('Return');
+  // REMOVED: keyToPress state - consolidated into computer tool
   const [modifierKey, setModifierKey] = useState<string>('shift');
   const [clipboardContent, setClipboardContent] = useState<string>('');
   const [clipboardResult, setClipboardResult] = useState<string | null>(null);
@@ -38,29 +38,10 @@ const KeyboardOperations: React.FC = () => {
     );
   };
 
-  const handlePressKey = async () => {
-    if (!keyToPress.trim()) {
-      toast.error('Please enter a key to press.');
-      return;
-    }
-    await invokeCommand(
-      'dev_press_key',
-      { key: keyToPress.trim() },
-      'pressKey'
-    );
-  };
-
-  const handleHoldKey = async () => {
-    if (!modifierKey.trim()) {
-      toast.error('Please enter a modifier key to hold.');
-      return;
-    }
-    await invokeCommand(
-      'dev_hold_key',
-      { key: modifierKey.trim() },
-      'holdKey'
-    );
-  };
+  // REMOVED: handlePressKey and handleHoldKey functions
+  // These have been consolidated into the official Anthropic Computer Use API
+  // Use the 'computer' tool with actions: "key" and "hold_key" instead
+  // This eliminates redundancy and ensures API compliance
 
   const handleReleaseKey = async () => {
     if (!modifierKey.trim()) {
@@ -136,15 +117,11 @@ const KeyboardOperations: React.FC = () => {
         </div>
       </div>
 
+      {/* REMOVED: Press Key and Hold Key sections - consolidated into computer tool */}
       <div className="space-y-2">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
           <Keyboard className="h-4 w-4" />
-          <Input
-            placeholder="Key to press (e.g., Return, Tab)"
-            value={keyToPress}
-            onChange={(e) => setKeyToPress(e.target.value)}
-          />
-          <Button onClick={handlePressKey}>Press Key</Button>
+          <span>Press Key & Hold Key: Use 'computer' tool with actions "key" and "hold_key" instead</span>
         </div>
       </div>
 
@@ -156,7 +133,6 @@ const KeyboardOperations: React.FC = () => {
             value={modifierKey}
             onChange={(e) => setModifierKey(e.target.value)}
           />
-          <Button onClick={handleHoldKey}>Hold Key</Button>
           <Button onClick={handleReleaseKey}>Release Key</Button>
         </div>
       </div>

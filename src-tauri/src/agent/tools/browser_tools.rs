@@ -20,7 +20,7 @@
 //! Used by: Web automation agents, browser-based tasks, web scraping workflows
 //! Registration: Tool definitions returned by `get_browser_tool_definitions()`
 
-use crate::agent::structs::ToolDefinition;
+use crate::agent::core::ToolDefinition;
 use serde_json::json;
 
 /// Returns the complete set of browser automation tool definitions.

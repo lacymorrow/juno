@@ -14,7 +14,7 @@ use crate::agent::implementations::{
 use crate::agent::prompts::PromptManager;
 use crate::agent::providers::config::AgentMode;
 use crate::agent::providers::factory::BrainFactory;
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::agent::tools::{
     basic_tools::register_basic_tools, browser_tools::get_browser_tool_definitions,
     desktop_tools::setup_tools,
@@ -995,7 +995,7 @@ async fn register_orchestrator_delegation_tools(
     let specialist_provider_arc = std::sync::Arc::new(specialist_provider);
 
     // Delegate to Browser Agent
-    let browser_delegation_def = crate::agent::structs::ToolDefinition {
+    let browser_delegation_def = crate::agent::core::ToolDefinition {
         name: agent::tool_names::DELEGATE_TO_BROWSER_AGENT.to_string(),
         description: "Delegate web browsing, navigation, and web interaction tasks to the browser specialist agent".to_string(),
         input_schema: json!({
@@ -1048,7 +1048,7 @@ async fn register_orchestrator_delegation_tools(
         .await;
 
     // Delegate to Desktop Agent
-    let desktop_delegation_def = crate::agent::structs::ToolDefinition {
+    let desktop_delegation_def = crate::agent::core::ToolDefinition {
         name: agent::tool_names::DELEGATE_TO_DESKTOP_AGENT.to_string(),
         description: "Delegate desktop automation, clicking, typing, and system interaction tasks to the desktop specialist agent".to_string(),
         input_schema: json!({
@@ -1101,7 +1101,7 @@ async fn register_orchestrator_delegation_tools(
         .await;
 
     // Delegate to File Agent
-    let file_delegation_def = crate::agent::structs::ToolDefinition {
+    let file_delegation_def = crate::agent::core::ToolDefinition {
         name: agent::tool_names::DELEGATE_TO_FILE_AGENT.to_string(),
         description: "Delegate file operations, code editing, terminal commands, and development tasks to the file specialist agent".to_string(),
         input_schema: json!({

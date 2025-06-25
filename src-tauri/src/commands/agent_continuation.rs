@@ -1,4 +1,4 @@
-use crate::agent::structs::AgentError;
+use crate::agent::core::AgentError;
 use crate::constants::agent::config::{
     CONTINUATION_REQUEST_TIMEOUT_SECONDS, DEFAULT_CONTINUATION_ADDITIONAL_STEPS,
 };

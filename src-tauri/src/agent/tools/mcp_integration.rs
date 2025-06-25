@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
+use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::constants::agent;
 
 /// Configuration for an external MCP server

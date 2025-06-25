@@ -1,0 +1,146 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Tool Consolidation Patterns
+
+## 🎯 **Core Principle: Single Source of Truth**
+
+Every functionality should have **exactly one canonical implementation**. This rule prevents redundancy, reduces maintenance overhead, and ensures consistent behavior across the Juno AI Computer Use Agent.
+
+## 🚫 **Anti-Patterns to Avoid**
+
+### ❌ **Tool Duplication**
+```rust
+// BAD: Multiple tools for same functionality
+"press_key" -> press_key_function()
+"dev_press_key" -> dev_press_key_function() // REDUNDANT
+"computer" -> computer_tool_with_key_action() // CANONICAL
+```
+
+### ❌ **Wrapper Functions Without Value**
+```rust
+// BAD: Unnecessary wrapper
+async fn press_key_wrapper(key: String) -> Result<()> {
+    computer_tool(ComputerAction::Key { text: key }).await
+}
+```
+
+### ❌ **Multiple APIs for Same Operation**
+```typescript
+// BAD: Multiple ways to do same thing
+await invoke('press_key', { key: 'Return' });
+await invoke('dev_press_key', { key: 'Return' });
+await invoke('computer', { action: 'key', text: 'Return' }); // CANONICAL
+```
+
+## ✅ **Consolidation Patterns**
+
+### **1. Identify Canonical Implementation**
+Always prefer:
+- **Official API specifications** (e.g., Anthropic Computer Use API)
+- **Most feature-complete implementation**
+- **Most actively maintained version**
+
+### **2. Migration Strategy**
+```rust
+// Step 1: Mark deprecated tools
+#[deprecated(note = "Use computer tool with action: 'key' instead")]
+pub async fn press_key() -> Result<()> { ... }
+
+// Step 2: Update all consumers
+// OLD: press_key("Return")
+// NEW: computer_tool(ComputerAction::Key { text: "Return".to_string() })
+
+// Step 3: Remove deprecated tools completely
+// (No backward compatibility needed for new applications)
+```
+
+### **3. Documentation Pattern**
+```rust
+// --- Release Key Tool ---
+// NOTE: This tool is KEPT as it provides functionality not available in the official Anthropic API
+// Use this for releasing keys that were held indefinitely (without duration)
+let release_key_def = ToolDefinition { ... };
+```
+
+## 📋 **Implementation Guidelines**
+
+### **For Tool Registration**
+See [desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs):
+```rust
+// ✅ GOOD: Single canonical tool with clear documentation
+let computer_def = ToolDefinition {
+    name: "computer".to_string(),
+    description: "Official Anthropic Computer Use API...".to_string(),
+    // ...
+};
+
+// ❌ REMOVED: Redundant tools
+// let press_key_def = ToolDefinition { ... }; // Use computer tool instead
+```
+
+### **For Command Registry**
+See [registry.rs](mdc:src-tauri/src/commands/registry.rs):
+```rust
+// ✅ GOOD: Clear documentation of removed commands
+// REMOVED: "dev_press_key", "dev_hold_key" - Use computer tool with official Anthropic API instead
+pub const DEV_KEYBOARD: &[&str] = &[
+    "dev_type_text",
+    "dev_release_key", // Kept - provides unique functionality
+    "dev_global_type_text",
+];
+```
+
+### **For Agent Implementation**
+See [desktop_agent.rs](mdc:src-tauri/src/agents/desktop_agent.rs):
+```rust
+// ✅ GOOD: Single tool handling with comprehensive actions
+"computer" => {
+    let action = tool_call.input.get("action")...;
+    match action {
+        "key" => handle_key_action(...),
+        "hold_key" => handle_hold_key_action(...),
+        "type" => handle_type_action(...),
+        // ...
+    }
+}
+
+// ❌ REMOVED: Redundant tool handlers
+// "press_key" => handle_press_key(...), // Consolidated into computer tool
+```
+
+## 🔍 **Consolidation Checklist**
+
+Before adding any new tool:
+- [ ] Check if functionality already exists in another tool
+- [ ] Verify against official API specifications
+- [ ] Document why new tool is necessary (unique functionality)
+- [ ] Plan migration path for any deprecated tools
+- [ ] Update agent prompts to guide correct tool usage
+
+## 🎯 **Benefits of Consolidation**
+
+1. **Reduced Complexity**: Fewer tools to learn and maintain
+2. **Better Performance**: Tool batching works more effectively
+3. **Consistency**: Single behavior pattern for similar operations
+4. **Maintainability**: Changes only need to be made in one place
+5. **API Compliance**: Alignment with official specifications
+
+## 📚 **Related Files**
+
+- [Tool Mapping](mdc:src-tauri/src/agent/tools/tool_mapping.rs) - Tool categorization
+- [Prompt Templates](mdc:src-tauri/src/agent/prompts/templates.rs) - Agent guidance
+- [Anthropic Computer Use](mdc:src-tauri/src/agent/tools/anthropic_computer_use.rs) - Official API implementation
+- [Consolidation Summary](mdc:KEYBOARD_TOOL_CONSOLIDATION_SUMMARY.md) - Recent example
+
+## 🚀 **Future Consolidation Opportunities**
+
+Watch for these patterns that may indicate consolidation opportunities:
+- Multiple tools with similar names (`tool_v1`, `tool_v2`, `dev_tool`)
+- Tools that perform subset of another tool's functionality
+- Tools that require multiple calls to achieve what one tool could do
+- Tools that duplicate official API functionality
+
+Remember: **Simplicity is the ultimate sophistication.**

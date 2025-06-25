@@ -139,140 +139,18 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 required: Vec::new(),
             },
         },
-        ToolDefinition {
-            name: "mouse_move".to_string(),
-            description: "Moves the mouse cursor to specified coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "Target X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Target Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "left_mouse_down".to_string(),
-            description: "Presses and holds the left mouse button at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "left_mouse_up".to_string(),
-            description: "Releases the left mouse button at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "left_click".to_string(),
-            description: "Performs a left mouse click at coordinates, optionally holding modifier keys.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    // Add optional modifier keys parameter
-                    props.insert("modifier_keys".to_string(), ToolParameter {
-                        type_: "array".to_string(),
-                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
-                        // items: Some(Box::new(ToolParameter { type_: "string".to_string(), description: "A modifier key (e.g., 'shift', 'cmd', 'ctrl', 'alt')".to_string() })) // Define item type if schema supports it
-                    });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
-            },
-        },
-        ToolDefinition {
-            name: "right_click".to_string(),
-            description: "Performs a right mouse click at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "middle_click".to_string(),
-            description: "Performs a middle mouse click at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "double_click".to_string(),
-            description: "Double-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "triple_click".to_string(),
-            description: "Triple-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "left_click_drag".to_string(),
-            description: "Drags the mouse with the left button held down.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("start_x".to_string(), ToolParameter { type_: "number".to_string(), description: "Starting X coordinate.".to_string() });
-                    props.insert("start_y".to_string(), ToolParameter { type_: "number".to_string(), description: "Starting Y coordinate.".to_string() });
-                    props.insert("end_x".to_string(), ToolParameter { type_: "number".to_string(), description: "Ending X coordinate.".to_string() });
-                    props.insert("end_y".to_string(), ToolParameter { type_: "number".to_string(), description: "Ending Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["start_x".to_string(), "start_y".to_string(), "end_x".to_string(), "end_y".to_string()],
-            },
-        },
+        // REMOVED: Redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
+        // All mouse operations consolidated into the computer tool:
+        // - mouse_move → computer tool with action: "mouse_move"
+        // - left_mouse_down → computer tool with action: "left_mouse_down"
+        // - left_mouse_up → computer tool with action: "left_mouse_up"
+        // - left_click → computer tool with action: "left_click"
+        // - right_click → computer tool with action: "right_click"
+        // - middle_click → computer tool with action: "middle_click"
+        // - double_click → computer tool with action: "double_click"
+        // - triple_click → computer tool with action: "triple_click"
+        // - left_click_drag → computer tool with action: "left_click_drag"
+        // This eliminates redundancy and ensures 100% compliance with the official specification.
         ToolDefinition {
             name: "scroll_at_position".to_string(),
             description: "Scrolls the view at a specific coordinate, optionally holding modifier keys.".to_string(),

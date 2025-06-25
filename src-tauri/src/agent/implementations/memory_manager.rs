@@ -1,4 +1,4 @@
-use crate::agent::structs::{
+use crate::agent::core::{
     AgentError,
     Message,
     Role,

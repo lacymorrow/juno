@@ -27,6 +27,12 @@ pub enum AgentError {
     InputError(String),
     #[error("Output processing error: {0}")]
     OutputError(String),
+    #[error("Invalid output: {0}")]
+    InvalidOutput(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Tool unavailable: {0}")]
+    ToolUnavailable(String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
     #[error("Tool disabled: {0}")]
@@ -39,6 +45,18 @@ pub enum AgentError {
     Unknown(String),
     #[error("General error: {0}")]
     Other(String),
+}
+
+impl From<&str> for AgentError {
+    fn from(error: &str) -> Self {
+        AgentError::Unknown(error.to_string())
+    }
+}
+
+impl From<String> for AgentError {
+    fn from(error: String) -> Self {
+        AgentError::Unknown(error)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
