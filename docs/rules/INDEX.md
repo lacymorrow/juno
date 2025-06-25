@@ -19,6 +19,11 @@
 - **[WebSocket Troubleshooting](../../.cursor/rules/websocket-troubleshooting.mdc)** - WebSocket debugging patterns and solutions
 - **[Cloud Testing Patterns](../../.cursor/rules/cloud-testing-patterns.mdc)** - Comprehensive testing and verification guide
 
+### Specialized Tool Implementations ✅ **NEW**
+
+- **[Safari Tools Implementation](../../.cursor/rules/safari-tools-implementation.mdc)** - Phase 2 completed: 3-5x faster Safari automation
+- **[Accessibility Tools Implementation](../../.cursor/rules/accessibility-tools-implementation.mdc)** - Enhanced multi-tier accessibility system
+
 ### Overview Documents
 
 - **[README](README.md)** - Project overview and getting started guide
@@ -36,6 +41,8 @@ Juno AI Computer Use Agent is a **production-ready** macOS desktop application t
 - **Hierarchical Agent Architecture**: Orchestrator + specialist agents
 - **Real-Time Hardware Monitoring**: CPU, memory, disk, display metrics
 - **Professional UI**: Complete frontend with modal system and settings
+- **Safari Tools Integration**: 3-5x faster Safari automation via AppleScript/JavaScript injection
+- **Enhanced Accessibility Tools**: Multi-tier accessibility system with native macOS API integration
 
 ## 📚 Documentation Structure
 

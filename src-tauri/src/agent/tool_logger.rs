@@ -814,7 +814,128 @@ impl ToolMetadata {
         // Pattern-based categorization for tools without configuration
         let (icon, action_verb, category, notification_level, estimated_duration) = match tool_name
         {
-            // Screenshot tools - always highly visible
+            // Computer use tools - specific patterns for Anthropic Computer Use
+            name if name.starts_with("computer/screenshot") => (
+                "📸",
+                "Taking screenshot",
+                "Computer Use",
+                "standard",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/click(") => (
+                "👆",
+                "Clicking",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/right_click(") => (
+                "🖱️",
+                "Right-clicking",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/middle_click(") => (
+                "🖱️",
+                "Middle-clicking",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/double_click(") => (
+                "👆",
+                "Double-clicking",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/triple_click(") => (
+                "👆",
+                "Triple-clicking",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/drag(") => (
+                "🖱️",
+                "Dragging",
+                "Computer Use",
+                "minimal",
+                Some("short"),
+            ),
+            name if name.starts_with("computer/move_to(") => (
+                "↗️",
+                "Moving cursor",
+                "Computer Use",
+                "silent",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/mouse_down(") => (
+                "🖱️",
+                "Mouse down",
+                "Computer Use",
+                "silent",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/mouse_up(") => (
+                "🖱️",
+                "Mouse up",
+                "Computer Use",
+                "silent",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/scroll_") => (
+                "📜",
+                "Scrolling",
+                "Computer Use",
+                "minimal",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/type(") => (
+                "⌨️",
+                "Typing",
+                "Computer Use",
+                "standard",
+                Some("short"),
+            ),
+            name if name.starts_with("computer/press_key(") => (
+                "🔤",
+                "Pressing key",
+                "Computer Use",
+                "standard",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/hold_key(") => (
+                "🔤",
+                "Holding key",
+                "Computer Use",
+                "standard",
+                Some("short"),
+            ),
+            name if name.starts_with("computer/wait(") => (
+                "⏳",
+                "Waiting",
+                "Computer Use",
+                "minimal",
+                Some("medium"),
+            ),
+            name if name.starts_with("computer/get_cursor_position") => (
+                "📍",
+                "Getting cursor position",
+                "Computer Use",
+                "silent",
+                Some("instant"),
+            ),
+            name if name.starts_with("computer/") => (
+                "🖥️",
+                "Computer action",
+                "Computer Use",
+                "standard",
+                Some("short"),
+            ),
+
+            // General screenshot tools - always highly visible
             name if name.contains("screenshot") => (
                 "📸",
                 "Taking screenshot",
