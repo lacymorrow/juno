@@ -36,12 +36,12 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 100,
-            max_tokens: 32000, // Conservative estimate for context window
-            min_messages_to_keep: 10,
+            max_messages: 50,       // Reduced from 100 to be more aggressive
+            max_tokens: 150000,     // Reduced from 32000 to stay well under 200K API limit
+            min_messages_to_keep: 5, // Reduced from 10 for emergency pruning
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 10,
+            summarization_batch_size: 15, // Increased to summarize more aggressively
             enable_metrics: true,
             enable_summary_cache: true,
         }
@@ -114,13 +114,52 @@ impl AdvancedMemoryManager {
         }
     }
 
-    /// Estimate token count for a message (rough approximation)
+    /// Estimate token count for a message with proper base64 image handling
     fn estimate_message_tokens(message: &Message) -> usize {
-        let content_tokens = message.content.len() / 4; // Rough estimate: 4 chars per token
+        // Enhanced token estimation that properly handles base64 images
+        let mut total_tokens = 0;
+
+        // Estimate text content tokens
+        let content = &message.content;
+
+        // Check if content contains base64 images (common patterns)
+        if content.contains("data:image/") || content.contains("base64,") ||
+           (content.len() > 1000 && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
+            // This looks like base64 image data - use more accurate estimation
+            // Base64 images typically use ~1 token per 20-25 characters (not 4)
+            total_tokens += content.len() / 20; // More conservative estimate for images
+            log::debug!("Detected base64 image content: {} chars = ~{} tokens", content.len(), content.len() / 20);
+        } else {
+            // Regular text content - use standard 4 chars per token
+            total_tokens += content.len() / 4;
+        }
+
+        // Add tool call tokens
         let tool_call_tokens = message.tool_calls.as_ref()
-            .map(|calls| calls.iter().map(|call| call.name.len() / 4 + 50).sum()) // Extra for structure
+            .map(|calls| {
+                calls.iter().map(|call| {
+                    let base_tokens = call.name.len() / 4 + 50; // Basic structure
+
+                    // Check if tool call input contains base64 images
+                    let input_str = call.input.to_string();
+                    if input_str.contains("data:image/") || input_str.contains("base64,") {
+                        // Tool call with image - much higher token count
+                        base_tokens + (input_str.len() / 20)
+                    } else {
+                        base_tokens + (input_str.len() / 4)
+                    }
+                }).sum()
+            })
             .unwrap_or(0);
-        content_tokens + tool_call_tokens
+
+        total_tokens += tool_call_tokens;
+
+        // Log warning for very large messages
+        if total_tokens > 50000 {
+            log::warn!("Large message detected: ~{} tokens (content length: {})", total_tokens, content.len());
+        }
+
+        total_tokens
     }
 
     /// Estimate total token count for all messages
