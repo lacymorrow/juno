@@ -2393,7 +2393,11 @@ pub async fn register_anthropic_computer_use_tools(
     provider
         .register_async_tool(computer_tool_def, computer_tool_exec)
         .await;
-    info!("Registered tool: computer (Anthropic Computer Use)");
+    info!("✅ Registered tool: computer (Anthropic Computer Use)");
+
+    // DEBUG: Verify registration immediately after
+    debug!("🔧 VERIFICATION: Just registered 'computer' tool");
+    debug!("🔧 Provider executor count after computer tool registration should be at least 1");
 
     // Text Editor Tool (text_editor_20250429) - Claude 4 version without undo_edit
     let text_editor_tool_def = ToolDefinition {
