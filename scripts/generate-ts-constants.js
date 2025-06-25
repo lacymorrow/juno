@@ -139,9 +139,12 @@ function parseModuleConstants(rustCode) {
     // Parse nested modules first
     const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
     let moduleMatch;
+    const moduleMatches = [];
 
     while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
-        const [, moduleName, moduleContent] = moduleMatch;
+        const [fullMatch, moduleName, moduleContent] = moduleMatch;
+        moduleMatches.push(fullMatch);
+
         const moduleConstants = parseSimpleConstants(moduleContent);
 
         // Prefix module constants with module name
@@ -150,8 +153,13 @@ function parseModuleConstants(rustCode) {
         });
     }
 
-    // Also parse any top-level constants
-    const topLevelConstants = parseSimpleConstants(rustCode);
+    // Parse top-level constants by removing module content first to avoid duplicates
+    let codeWithoutModules = rustCode;
+    moduleMatches.forEach(moduleMatch => {
+        codeWithoutModules = codeWithoutModules.replace(moduleMatch, '');
+    });
+
+    const topLevelConstants = parseSimpleConstants(codeWithoutModules);
     Object.assign(allConstants, topLevelConstants);
 
     return allConstants;
