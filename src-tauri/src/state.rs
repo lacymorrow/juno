@@ -377,7 +377,7 @@ where
 // that the old Arc<StdMutex<T>> interface expected
 
 /// Backward compatibility value holder that synchronizes with grouped state
-struct CompatValue<T, S> {
+pub struct CompatValue<T, S> {
     shared_state: Arc<StdMutex<S>>,
     getter: fn(&S) -> T,
     setter: fn(&mut S, T) -> (),
@@ -419,22 +419,31 @@ where
     T: Clone,
 {
     /// Get current value - public method for backward compatibility
-    pub fn lock(&self) -> Result<CompatGuard<T, S>, std::sync::PoisonError<()>> {
-        // Return a guard that can read/write the synchronized value
-        Ok(CompatGuard {
-            compat_value: self,
-            current_value: self.get(),
+    pub fn lock(&self) -> Result<AtomicCompatGuard<T, S>, std::sync::PoisonError<std::sync::MutexGuard<S>>> {
+        // Hold the actual mutex lock for the entire duration to prevent race conditions
+        let state_guard = self.shared_state.lock()?;
+        let current_value = (self.getter)(&*state_guard);
+        Ok(AtomicCompatGuard {
+            state_guard,
+            current_value,
+            getter: self.getter,
+            setter: self.setter,
+            value_changed: false,
         })
     }
 }
 
 /// Guard that provides the expected interface for backward compatibility
-struct CompatGuard<'a, T: Clone, S> {
-    compat_value: &'a CompatValue<T, S>,
+/// FIXED: Now holds the actual mutex lock to prevent race conditions
+pub struct AtomicCompatGuard<'a, T: Clone, S> {
+    state_guard: std::sync::MutexGuard<'a, S>,
     current_value: T,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    value_changed: bool,
 }
 
-impl<'a, T: Clone, S> std::ops::Deref for CompatGuard<'a, T, S> {
+impl<'a, T: Clone, S> std::ops::Deref for AtomicCompatGuard<'a, T, S> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -442,16 +451,43 @@ impl<'a, T: Clone, S> std::ops::Deref for CompatGuard<'a, T, S> {
     }
 }
 
-impl<'a, T: Clone, S> std::ops::DerefMut for CompatGuard<'a, T, S> {
+impl<'a, T: Clone, S> std::ops::DerefMut for AtomicCompatGuard<'a, T, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.value_changed = true;
         &mut self.current_value
     }
 }
 
-impl<'a, T: Clone, S> Drop for CompatGuard<'a, T, S> {
+impl<'a, T: Clone, S> Drop for AtomicCompatGuard<'a, T, S> {
     fn drop(&mut self) {
-        // Write back the value when the guard is dropped
-        self.compat_value.set(self.current_value.clone());
+        if self.value_changed {
+            // Only write back if the value was actually changed through DerefMut
+            (self.setter)(&mut *self.state_guard, self.current_value.clone());
+        }
+        // The MutexGuard will be dropped here, releasing the lock
+    }
+}
+
+impl<'a, T: Clone, S> AtomicCompatGuard<'a, T, S> {
+    /// Get the current value through the held lock
+    pub fn get(&self) -> T {
+        self.current_value.clone()
+    }
+
+    /// Set the value through the held lock
+    pub fn set(&mut self, value: T) {
+        self.current_value = value.clone();
+        (self.setter)(&mut *self.state_guard, value);
+        self.value_changed = false; // Reset since we already wrote to state
+    }
+
+    /// Replace the current value and return the old value
+    pub fn replace(&mut self, value: T) -> T {
+        let old_value = self.current_value.clone();
+        self.current_value = value.clone();
+        (self.setter)(&mut *self.state_guard, value);
+        self.value_changed = false; // Reset since we already wrote to state
+        old_value
     }
 }
 
@@ -2419,3 +2455,4 @@ mod tests {
         assert!(!config.enabled);
     }
 }
+
