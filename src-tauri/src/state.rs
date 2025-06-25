@@ -251,6 +251,210 @@ impl Default for InputSettings {
     }
 }
 
+/// Synchronized wrapper for backward compatibility
+/// This provides Deref/DerefMut to the actual value while keeping state synchronized
+struct SyncWrapper<T, S> {
+    shared_state: Arc<StdMutex<S>>,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, S> SyncWrapper<T, S>
+where
+    T: Clone,
+{
+    fn new(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> T,
+        setter: fn(&mut S, T) -> (),
+    ) -> Self {
+        Self {
+            shared_state,
+            getter,
+            setter,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    // Specialized constructors for common types
+    fn new_bool(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> bool,
+        setter: fn(&mut S, bool) -> (),
+    ) -> SyncWrapper<bool, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> String,
+        setter: fn(&mut S, String) -> (),
+    ) -> SyncWrapper<String, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_f32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> f32,
+        setter: fn(&mut S, f32) -> (),
+    ) -> SyncWrapper<f32, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_u32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> u32,
+        setter: fn(&mut S, u32) -> (),
+    ) -> SyncWrapper<u32, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_vec_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Vec<String>,
+        setter: fn(&mut S, Vec<String>) -> (),
+    ) -> SyncWrapper<Vec<String>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_option_string(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Option<String>,
+        setter: fn(&mut S, Option<String>) -> (),
+    ) -> SyncWrapper<Option<String>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_option_u32(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> Option<u32>,
+        setter: fn(&mut S, Option<u32>) -> (),
+    ) -> SyncWrapper<Option<u32>, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_keyboard_shortcuts(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> KeyboardShortcuts,
+        setter: fn(&mut S, KeyboardShortcuts) -> (),
+    ) -> SyncWrapper<KeyboardShortcuts, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_agent_trigger_mode(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> AgentTriggerMode,
+        setter: fn(&mut S, AgentTriggerMode) -> (),
+    ) -> SyncWrapper<AgentTriggerMode, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+
+    fn new_dictation_trigger_mode(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> DictationTriggerMode,
+        setter: fn(&mut S, DictationTriggerMode) -> (),
+    ) -> SyncWrapper<DictationTriggerMode, S> {
+        SyncWrapper::new(shared_state, getter, setter)
+    }
+}
+
+impl<T, S> std::ops::Deref for SyncWrapper<T, S>
+where
+    T: Clone,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // We can't return a reference to the actual value since it's behind a lock
+        // Instead we need to use a different approach - we'll need to rethink this
+        // For now, we'll implement a custom value holder
+        unimplemented!("Direct deref not possible with synchronized wrapper - use explicit get/set methods")
+    }
+}
+
+// Instead of implementing Deref/DerefMut, we'll implement the actual value semantics
+// that the old Arc<StdMutex<T>> interface expected
+
+/// Backward compatibility value holder that synchronizes with grouped state
+struct CompatValue<T, S> {
+    shared_state: Arc<StdMutex<S>>,
+    getter: fn(&S) -> T,
+    setter: fn(&mut S, T) -> (),
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, S> CompatValue<T, S>
+where
+    T: Clone,
+{
+    fn new(
+        shared_state: Arc<StdMutex<S>>,
+        getter: fn(&S) -> T,
+        setter: fn(&mut S, T) -> (),
+    ) -> Self {
+        Self {
+            shared_state,
+            getter,
+            setter,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    fn get(&self) -> T {
+        let state_guard = self.shared_state.lock().unwrap();
+        (self.getter)(&*state_guard)
+    }
+
+    fn set(&self, value: T) {
+        let mut state_guard = self.shared_state.lock().unwrap();
+        (self.setter)(&mut *state_guard, value);
+    }
+}
+
+// We need to implement a custom wrapper that behaves like the old interface
+// but synchronizes with the actual shared state
+impl<T, S> CompatValue<T, S>
+where
+    T: Clone,
+{
+    /// Get current value - public method for backward compatibility
+    pub fn lock(&self) -> Result<CompatGuard<T, S>, std::sync::PoisonError<()>> {
+        // Return a guard that can read/write the synchronized value
+        Ok(CompatGuard {
+            compat_value: self,
+            current_value: self.get(),
+        })
+    }
+}
+
+/// Guard that provides the expected interface for backward compatibility
+struct CompatGuard<'a, T: Clone, S> {
+    compat_value: &'a CompatValue<T, S>,
+    current_value: T,
+}
+
+impl<'a, T: Clone, S> std::ops::Deref for CompatGuard<'a, T, S> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.current_value
+    }
+}
+
+impl<'a, T: Clone, S> std::ops::DerefMut for CompatGuard<'a, T, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.current_value
+    }
+}
+
+impl<'a, T: Clone, S> Drop for CompatGuard<'a, T, S> {
+    fn drop(&mut self) {
+        // Write back the value when the guard is dropped
+        self.compat_value.set(self.current_value.clone());
+    }
+}
+
 /// Application state structure - Simplified with grouped settings
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
@@ -603,150 +807,222 @@ impl AppState {
             .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))
     }
 
-    // Backward compatibility methods - These provide the old Arc<StdMutex<T>> interface
-    // but now return references to the actual shared state
-    pub fn tts_provider(&self) -> Arc<StdMutex<String>> {
-        warn!("DEPRECATED: tts_provider() creates disconnected copies. Use get_tts_provider()/set_tts_provider() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.tts_provider.clone()))
+    // FIXED: Backward compatibility methods now return synchronized wrappers
+    // that delegate to the actual shared state instead of disconnected copies
+    pub fn tts_provider(&self) -> Arc<CompatValue<String, AudioSettings>> {
+        warn!("DEPRECATED: tts_provider() method. Use get_tts_provider()/set_tts_provider() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.tts_provider.clone(),
+            |settings, value| settings.tts_provider = value,
+        ))
     }
 
-    pub fn dictation_active(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: dictation_active() creates disconnected copies. Use get_dictation_active()/set_dictation_active() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.dictation_active))
+    pub fn dictation_active(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: dictation_active() method. Use get_dictation_active()/set_dictation_active() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.dictation_active,
+            |settings, value| settings.dictation_active = value,
+        ))
     }
 
-    pub fn dictation_clipboard_enabled(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: dictation_clipboard_enabled() creates disconnected copies. Use get_dictation_clipboard_enabled()/set_dictation_clipboard_enabled() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.dictation_clipboard_enabled))
+    pub fn dictation_clipboard_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: dictation_clipboard_enabled() method. Use get_dictation_clipboard_enabled()/set_dictation_clipboard_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.dictation_clipboard_enabled,
+            |settings, value| settings.dictation_clipboard_enabled = value,
+        ))
     }
 
-    pub fn sound_enabled(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: sound_enabled() creates disconnected copies. Use get_sound_enabled()/set_sound_enabled() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.sound_enabled))
+    pub fn sound_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: sound_enabled() method. Use get_sound_enabled()/set_sound_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.sound_enabled,
+            |settings, value| settings.sound_enabled = value,
+        ))
     }
 
-    pub fn always_listening_active(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: always_listening_active() creates disconnected copies. Use get_always_listening_active()/set_always_listening_active() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.always_listening_active))
+    pub fn always_listening_active(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_active() method. Use get_always_listening_active()/set_always_listening_active() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_active,
+            |settings, value| settings.always_listening_active = value,
+        ))
     }
 
-    pub fn always_listening_sensitivity(&self) -> Arc<StdMutex<f32>> {
-        warn!("DEPRECATED: always_listening_sensitivity() creates disconnected copies. Use get_always_listening_sensitivity()/set_always_listening_sensitivity() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.always_listening_sensitivity))
+    pub fn always_listening_sensitivity(&self) -> Arc<CompatValue<f32, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_sensitivity() method. Use get_always_listening_sensitivity()/set_always_listening_sensitivity() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_sensitivity,
+            |settings, value| settings.always_listening_sensitivity = value,
+        ))
     }
 
-    pub fn always_listening_wake_words(&self) -> Arc<StdMutex<Vec<String>>> {
-        warn!("DEPRECATED: always_listening_wake_words() creates disconnected copies. Use get_always_listening_wake_words()/set_always_listening_wake_words() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.always_listening_wake_words.clone()))
+    pub fn always_listening_wake_words(&self) -> Arc<CompatValue<Vec<String>, AudioSettings>> {
+        warn!("DEPRECATED: always_listening_wake_words() method. Use get_always_listening_wake_words()/set_always_listening_wake_words() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.always_listening_wake_words.clone(),
+            |settings, value| settings.always_listening_wake_words = value,
+        ))
     }
 
-    pub fn notification_sound_enabled(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: notification_sound_enabled() creates disconnected copies. Use get_notification_sound_enabled()/set_notification_sound_enabled() instead.");
-        let audio_settings = self.audio_settings.lock().unwrap();
-        Arc::new(StdMutex::new(audio_settings.notification_sound_enabled))
+    pub fn notification_sound_enabled(&self) -> Arc<CompatValue<bool, AudioSettings>> {
+        warn!("DEPRECATED: notification_sound_enabled() method. Use get_notification_sound_enabled()/set_notification_sound_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.audio_settings.clone(),
+            |settings| settings.notification_sound_enabled,
+            |settings, value| settings.notification_sound_enabled = value,
+        ))
     }
 
-    pub fn agent_execution_active(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: agent_execution_active() creates disconnected copies. Use is_agent_executing() instead.");
-        let agent_execution = self.agent_execution.lock().unwrap();
-        Arc::new(StdMutex::new(agent_execution.execution_active))
+    pub fn agent_execution_active(&self) -> Arc<CompatValue<bool, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_execution_active() method. Use is_agent_executing() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.execution_active,
+            |execution, value| execution.execution_active = value,
+        ))
     }
 
-    pub fn agent_execution_id(&self) -> Arc<StdMutex<Option<String>>> {
-        warn!("DEPRECATED: agent_execution_id() creates disconnected copies. Use get_current_agent_execution_id() instead.");
-        let agent_execution = self.agent_execution.lock().unwrap();
-        Arc::new(StdMutex::new(agent_execution.execution_id.clone()))
+    pub fn agent_execution_id(&self) -> Arc<CompatValue<Option<String>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_execution_id() method. Use get_current_agent_execution_id() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.execution_id.clone(),
+            |execution, value| execution.execution_id = value,
+        ))
     }
 
-    pub fn agent_current_step(&self) -> Arc<StdMutex<Option<u32>>> {
-        warn!("DEPRECATED: agent_current_step() creates disconnected copies. Use get_agent_current_step() instead.");
-        let agent_execution = self.agent_execution.lock().unwrap();
-        Arc::new(StdMutex::new(agent_execution.current_step))
+    pub fn agent_current_step(&self) -> Arc<CompatValue<Option<u32>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_current_step() method. Use get_agent_current_step() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.current_step,
+            |execution, value| execution.current_step = value,
+        ))
     }
 
-    pub fn agent_max_steps(&self) -> Arc<StdMutex<Option<u32>>> {
-        warn!("DEPRECATED: agent_max_steps() creates disconnected copies. Use get_agent_max_steps() instead.");
-        let agent_execution = self.agent_execution.lock().unwrap();
-        Arc::new(StdMutex::new(agent_execution.max_steps))
+    pub fn agent_max_steps(&self) -> Arc<CompatValue<Option<u32>, AgentExecutionState>> {
+        warn!("DEPRECATED: agent_max_steps() method. Use get_agent_max_steps() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.max_steps,
+            |execution, value| execution.max_steps = value,
+        ))
     }
 
-    pub fn tool_approval_required(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: tool_approval_required() creates disconnected copies. Use is_tool_approval_required()/set_tool_approval_required() instead.");
-        let agent_execution = self.agent_execution.lock().unwrap();
-        Arc::new(StdMutex::new(agent_execution.tool_approval_required))
+    pub fn tool_approval_required(&self) -> Arc<CompatValue<bool, AgentExecutionState>> {
+        warn!("DEPRECATED: tool_approval_required() method. Use is_tool_approval_required()/set_tool_approval_required() instead.");
+        Arc::new(CompatValue::new(
+            self.agent_execution.clone(),
+            |execution| execution.tool_approval_required,
+            |execution, value| execution.tool_approval_required = value,
+        ))
     }
 
-    pub fn bar_ui_state(&self) -> Arc<StdMutex<String>> {
-        warn!("DEPRECATED: bar_ui_state() creates disconnected copies. Use get_bar_ui_state()/set_bar_ui_state() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.bar_ui_state.clone()))
+    pub fn bar_ui_state(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: bar_ui_state() method. Use get_bar_ui_state()/set_bar_ui_state() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.bar_ui_state.clone(),
+            |settings, value| settings.bar_ui_state = value,
+        ))
     }
 
-    pub fn performance_monitoring_enabled(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: performance_monitoring_enabled() creates disconnected copies. Use get_performance_monitoring_enabled()/set_performance_monitoring_enabled() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.performance_monitoring_enabled))
+    pub fn performance_monitoring_enabled(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: performance_monitoring_enabled() method. Use get_performance_monitoring_enabled()/set_performance_monitoring_enabled() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.performance_monitoring_enabled,
+            |settings, value| settings.performance_monitoring_enabled = value,
+        ))
     }
 
-    pub fn debug_mode(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: debug_mode() creates disconnected copies. Use get_debug_mode()/set_debug_mode() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.debug_mode))
+    pub fn debug_mode(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: debug_mode() method. Use get_debug_mode()/set_debug_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.debug_mode,
+            |settings, value| settings.debug_mode = value,
+        ))
     }
 
-    pub fn notification_type(&self) -> Arc<StdMutex<String>> {
-        warn!("DEPRECATED: notification_type() creates disconnected copies. Use get_notification_type()/set_notification_type() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.notification_type.clone()))
+    pub fn notification_type(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: notification_type() method. Use get_notification_type()/set_notification_type() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_type.clone(),
+            |settings, value| settings.notification_type = value,
+        ))
     }
 
-    pub fn notification_duration(&self) -> Arc<StdMutex<u32>> {
-        warn!("DEPRECATED: notification_duration() creates disconnected copies. Use get_notification_duration()/set_notification_duration() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.notification_duration))
+    pub fn notification_duration(&self) -> Arc<CompatValue<u32, UISettings>> {
+        warn!("DEPRECATED: notification_duration() method. Use get_notification_duration()/set_notification_duration() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_duration,
+            |settings, value| settings.notification_duration = value,
+        ))
     }
 
-    pub fn notification_position(&self) -> Arc<StdMutex<String>> {
-        warn!("DEPRECATED: notification_position() creates disconnected copies. Use get_notification_position()/set_notification_position() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.notification_position.clone()))
+    pub fn notification_position(&self) -> Arc<CompatValue<String, UISettings>> {
+        warn!("DEPRECATED: notification_position() method. Use get_notification_position()/set_notification_position() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_position.clone(),
+            |settings, value| settings.notification_position = value,
+        ))
     }
 
-    pub fn notification_show_icons(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: notification_show_icons() creates disconnected copies. Use get_notification_show_icons()/set_notification_show_icons() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.notification_show_icons))
+    pub fn notification_show_icons(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: notification_show_icons() method. Use get_notification_show_icons()/set_notification_show_icons() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_show_icons,
+            |settings, value| settings.notification_show_icons = value,
+        ))
     }
 
-    pub fn notification_persist_important(&self) -> Arc<StdMutex<bool>> {
-        warn!("DEPRECATED: notification_persist_important() creates disconnected copies. Use get_notification_persist_important()/set_notification_persist_important() instead.");
-        let ui_settings = self.ui_settings.lock().unwrap();
-        Arc::new(StdMutex::new(ui_settings.notification_persist_important))
+    pub fn notification_persist_important(&self) -> Arc<CompatValue<bool, UISettings>> {
+        warn!("DEPRECATED: notification_persist_important() method. Use get_notification_persist_important()/set_notification_persist_important() instead.");
+        Arc::new(CompatValue::new(
+            self.ui_settings.clone(),
+            |settings| settings.notification_persist_important,
+            |settings, value| settings.notification_persist_important = value,
+        ))
     }
 
-    pub fn keyboard_shortcuts(&self) -> Arc<StdMutex<KeyboardShortcuts>> {
-        warn!("DEPRECATED: keyboard_shortcuts() creates disconnected copies. Use get_keyboard_shortcuts()/set_keyboard_shortcuts() instead.");
-        let input_settings = self.input_settings.lock().unwrap();
-        Arc::new(StdMutex::new(input_settings.keyboard_shortcuts.clone()))
+    pub fn keyboard_shortcuts(&self) -> Arc<CompatValue<KeyboardShortcuts, InputSettings>> {
+        warn!("DEPRECATED: keyboard_shortcuts() method. Use get_keyboard_shortcuts()/set_keyboard_shortcuts() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.keyboard_shortcuts.clone(),
+            |settings, value| settings.keyboard_shortcuts = value,
+        ))
     }
 
-    pub fn agent_trigger_mode(&self) -> Arc<StdMutex<AgentTriggerMode>> {
-        warn!("DEPRECATED: agent_trigger_mode() creates disconnected copies. Use get_agent_trigger_mode()/set_agent_trigger_mode() instead.");
-        let input_settings = self.input_settings.lock().unwrap();
-        Arc::new(StdMutex::new(input_settings.agent_trigger_mode.clone()))
+    pub fn agent_trigger_mode(&self) -> Arc<CompatValue<AgentTriggerMode, InputSettings>> {
+        warn!("DEPRECATED: agent_trigger_mode() method. Use get_agent_trigger_mode()/set_agent_trigger_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.agent_trigger_mode.clone(),
+            |settings, value| settings.agent_trigger_mode = value,
+        ))
     }
 
-    pub fn dictation_trigger_mode(&self) -> Arc<StdMutex<DictationTriggerMode>> {
-        warn!("DEPRECATED: dictation_trigger_mode() creates disconnected copies. Use get_dictation_trigger_mode()/set_dictation_trigger_mode() instead.");
-        let input_settings = self.input_settings.lock().unwrap();
-        Arc::new(StdMutex::new(input_settings.dictation_trigger_mode.clone()))
+    pub fn dictation_trigger_mode(&self) -> Arc<CompatValue<DictationTriggerMode, InputSettings>> {
+        warn!("DEPRECATED: dictation_trigger_mode() method. Use get_dictation_trigger_mode()/set_dictation_trigger_mode() instead.");
+        Arc::new(CompatValue::new(
+            self.input_settings.clone(),
+            |settings| settings.dictation_trigger_mode.clone(),
+            |settings, value| settings.dictation_trigger_mode = value,
+        ))
     }
 
     // Method to trigger cancellation
