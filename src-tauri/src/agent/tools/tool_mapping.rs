@@ -71,6 +71,18 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("get_system_info", ToolCategory::Desktop);
     map.insert("manage_audio", ToolCategory::Desktop);
 
+    // Accessibility tools (native macOS element interaction)
+    map.insert("accessibility_scan", ToolCategory::Desktop);
+    map.insert("accessibility_click", ToolCategory::Desktop);
+
+    // Safari DOM tools (Safari-specific browser automation)
+    map.insert("safari_extract_dom", ToolCategory::Browser);
+    map.insert("safari_click_element", ToolCategory::Browser);
+    map.insert("safari_type_text", ToolCategory::Browser);
+    map.insert("safari_get_url", ToolCategory::Browser);
+    map.insert("safari_navigate", ToolCategory::Browser);
+    map.insert("safari_list_clickable_elements", ToolCategory::Browser);
+
     // Basic tools (file operations, commands, etc.)
             map.insert("bash_command", ToolCategory::Basic);
             map.insert("list_files", ToolCategory::Basic);
