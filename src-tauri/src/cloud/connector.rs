@@ -540,76 +540,97 @@ impl ProductionCloudConnector {
 
         info!("🔐 Authentication message sent");
 
-                // Handle authentication response synchronously with robust error handling
-        let (auth_result, message_buffer) = match self.handle_authentication_response(&mut ws_receiver).await {
-            Ok((result, buffer)) => (result, buffer),
-            Err((auth_error, recovered_buffer)) => {
-                // Authentication failed - but we recovered the buffered messages to prevent message loss
-                error!("🔥 Authentication failed but recovered {} buffered messages: {}", recovered_buffer.len(), auth_error);
-
-                // If we have buffered messages, log them for debugging
-                if !recovered_buffer.is_empty() {
-                    warn!("📦 Buffered messages from failed authentication will be lost:");
-                    for (i, msg) in recovered_buffer.iter().enumerate() {
-                        debug!("  [{}]: {}", i, msg);
-                    }
-                }
-
-                // For now, return the error as authentication is required
-                // In the future, we could consider processing buffered messages before failing
-                return Err(auth_error);
-            }
-        };
-
-        if !auth_result {
-            return Err(CloudError::AuthenticationFailed("Authentication failed".to_string()));
-        }
-
-        info!("✅ Authentication successful, starting message handling");
-        self.set_connection_state(ConnectorState::Authenticated).await;
-
-        // Now start background task for general message handling (post-authentication)
+        // Start background task for authentication and message handling
+        // This fixes the ownership violation by moving ws_receiver into the task
         let app_handle = self.app_handle.clone();
         let connection_state = self.connection_state.clone();
         let ws_sender_clone = self.ws_sender.clone();
+        let auth_clone = self.auth.clone();
+
+        // Use a channel to signal authentication completion
+        let (auth_tx, auth_rx) = tokio::sync::oneshot::channel();
 
         tokio::spawn(async move {
-            // First, process any messages that were buffered during authentication
-            if !message_buffer.is_empty() {
-                info!("📦 Processing {} buffered messages from authentication phase", message_buffer.len());
-                for buffered_text in message_buffer {
-                    Self::process_websocket_message(
-                        buffered_text,
-                        &app_handle,
-                        &connection_state
-                    ).await;
-                }
-                info!("✅ Finished processing buffered messages");
-            }
+            // Handle authentication response within the spawned task
+            let auth_result = match Self::handle_authentication_response_in_task(
+                &mut ws_receiver,
+                &auth_clone,
+                &app_handle,
+                &connection_state
+            ).await {
+                Ok((auth_success, message_buffer)) => {
+                    if auth_success {
+                        info!("✅ Authentication successful, starting message handling");
 
-            // Handle incoming messages (authentication already completed)
-            while let Some(msg) = ws_receiver.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        Self::process_websocket_message(
-                            text,
-                            &app_handle,
-                            &connection_state
-                        ).await;
-                    },
-                    Ok(Message::Close(_)) => {
-                        info!("🔌 WebSocket closed by server");
-                        let mut state = connection_state.lock().await;
-                        *state = ConnectorState::Disconnected;
-                        break;
-                    },
-                    Err(e) => {
-                        error!("❌ WebSocket error: {}", e);
-                        let mut state = connection_state.lock().await;
-                        *state = ConnectorState::Error(e.to_string());
-                        break;
-                    },
-                    _ => {}
+                        // Set authenticated state
+                        {
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Authenticated;
+                        }
+
+                        // Process any buffered messages from authentication
+                        if !message_buffer.is_empty() {
+                            info!("📦 Processing {} buffered messages from authentication phase", message_buffer.len());
+                            for buffered_text in message_buffer {
+                                Self::process_websocket_message(
+                                    buffered_text,
+                                    &app_handle,
+                                    &connection_state
+                                ).await;
+                            }
+                            info!("✅ Finished processing buffered messages");
+                        }
+
+                        // Signal successful authentication
+                        let _ = auth_tx.send(Ok(()));
+                        true
+                    } else {
+                        error!("❌ Authentication failed");
+                        let _ = auth_tx.send(Err(CloudError::AuthenticationFailed("Authentication failed".to_string())));
+                        false
+                    }
+                },
+                Err((auth_error, recovered_buffer)) => {
+                    error!("🔥 Authentication failed but recovered {} buffered messages: {}", recovered_buffer.len(), auth_error);
+
+                    if !recovered_buffer.is_empty() {
+                        warn!("📦 Buffered messages from failed authentication will be lost:");
+                        for (i, msg) in recovered_buffer.iter().enumerate() {
+                            debug!("  [{}]: {}", i, msg);
+                        }
+                    }
+
+                    let _ = auth_tx.send(Err(auth_error));
+                    false
+                }
+            };
+
+            // Only continue message handling if authentication succeeded
+            if auth_result {
+                // Handle incoming messages (authentication already completed)
+                while let Some(msg) = ws_receiver.next().await {
+                    match msg {
+                        Ok(Message::Text(text)) => {
+                            Self::process_websocket_message(
+                                text,
+                                &app_handle,
+                                &connection_state
+                            ).await;
+                        },
+                        Ok(Message::Close(_)) => {
+                            info!("🔌 WebSocket closed by server");
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Disconnected;
+                            break;
+                        },
+                        Err(e) => {
+                            error!("❌ WebSocket error: {}", e);
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Error(e.to_string());
+                            break;
+                        },
+                        _ => {}
+                    }
                 }
             }
 
@@ -620,9 +641,17 @@ impl ProductionCloudConnector {
             }
         });
 
-        self.set_connection_state(ConnectorState::Ready).await;
-        info!("✅ Enhanced cloud connector established with hardware monitoring");
-        Ok(())
+        // Wait for authentication to complete before setting Ready state
+        // This fixes the race condition
+        match auth_rx.await {
+            Ok(Ok(())) => {
+                self.set_connection_state(ConnectorState::Ready).await;
+                info!("✅ Enhanced cloud connector established with hardware monitoring");
+                Ok(())
+            },
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(CloudError::AuthenticationFailed("Authentication channel closed".to_string()))
+        }
     }
 
     /// Process a WebSocket message (extracted for reuse in buffered message processing)
@@ -662,11 +691,13 @@ impl ProductionCloudConnector {
         }
     }
 
-    /// Handle authentication response synchronously with robust error handling
+    /// Handle authentication response within the spawned task with robust error handling
     /// Returns (auth_success, buffered_messages) - buffered messages are preserved even on auth failure
-    async fn handle_authentication_response(
-        &self,
-        ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>
+    async fn handle_authentication_response_in_task(
+        ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+        auth: &DeviceAuth,
+        _app_handle: &AppHandle,
+        _connection_state: &Arc<TokioMutex<ConnectorState>>
     ) -> Result<(bool, Vec<String>), (CloudError, Vec<String>)> {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -692,7 +723,7 @@ impl ProductionCloudConnector {
                                     if ws_message.message_type == MessageType::Auth {
                                         // Handle authentication response with robust parsing
                                         // CRITICAL: Do not use ? operator here as it would lose buffered messages on error
-                                        match self.parse_authentication_response(ws_message.data).await {
+                                        match Self::parse_authentication_response(ws_message.data).await {
                                             Ok(auth_result) => {
                                                 return Ok((auth_result, message_buffer));
                                             },
@@ -749,7 +780,7 @@ impl ProductionCloudConnector {
     }
 
     /// Parse authentication response with comprehensive error handling
-    async fn parse_authentication_response(&self, data: serde_json::Value) -> Result<bool, CloudError> {
+    async fn parse_authentication_response(data: serde_json::Value) -> Result<bool, CloudError> {
         // Check for success field
         match data.get("success") {
             Some(success_value) => {
