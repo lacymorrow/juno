@@ -346,21 +346,30 @@ function handleEditCut() {
 
 		if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
 			if (activeElement.selectionStart !== null && activeElement.selectionEnd !== null) {
-				const selectedText = activeElement.value.substring(
-					activeElement.selectionStart,
-					activeElement.selectionEnd
-				);
+				// Capture selection values before async operation to prevent race condition
+				const selectionStart = activeElement.selectionStart;
+				const selectionEnd = activeElement.selectionEnd;
+				const originalValue = activeElement.value;
+
+				const selectedText = originalValue.substring(selectionStart, selectionEnd);
 
 				if (selectedText) {
 					// Copy to clipboard
 					navigator.clipboard.writeText(selectedText).then(() => {
-						// Remove selected text
-						const newValue =
-							activeElement.value.substring(0, activeElement.selectionStart!) +
-							activeElement.value.substring(activeElement.selectionEnd!);
+						// Verify element still exists and values haven't changed unexpectedly
+						if (activeElement && activeElement.value === originalValue) {
+							// Remove selected text using captured values
+							const newValue =
+								originalValue.substring(0, selectionStart) +
+								originalValue.substring(selectionEnd);
 
-						activeElement.value = newValue;
-						activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+							activeElement.value = newValue;
+							// Set cursor position to where the cut happened
+							activeElement.setSelectionRange(selectionStart, selectionStart);
+							activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+						}
+					}).catch(error => {
+						console.warn('[Menu] Failed to write to clipboard during cut:', error);
 					});
 					return;
 				}
