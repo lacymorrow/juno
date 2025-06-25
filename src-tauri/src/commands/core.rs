@@ -257,15 +257,6 @@ pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub(crate) async fn dev_wait(duration_sec: f64, state: State<'_, AppState>) -> Result<(), String> {
-    let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
-    info!("Executing dev_wait for {} seconds ({} ms)", duration_sec, duration_ms);
-    let desktop = state.get_desktop()?;
-    desktop.wait(duration_ms)
-        .map_err(|e| format!("Error during wait: {}", e))
-}
-
-#[tauri::command]
 pub(crate) async fn dev_get_clipboard(state: State<'_, AppState>) -> Result<String, String> {
     info!("Executing dev_get_clipboard");
     let desktop = state.get_desktop()?;
