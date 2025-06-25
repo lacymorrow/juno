@@ -347,6 +347,8 @@ impl Desktop {
                         );
                         props
                     },
+                    // Note: Only action is universally required. Other parameters are conditionally required based on action.
+                    // This matches the official Anthropic Computer Use specification.
                     required: vec!["action".to_string()],
                 },
             },
@@ -1149,6 +1151,269 @@ impl Desktop {
                 }
             }
             // --- End Bash Handler ---
+
+            // --- Computer Tool Handler (Official Anthropic Computer Use) ---
+            "computer" => {
+                #[derive(Deserialize)]
+                struct ComputerArgs {
+                    action: String,
+                    coordinate: Option<Vec<f64>>,
+                    start_coordinate: Option<Vec<f64>>,
+                    end_coordinate: Option<Vec<f64>>,
+                    text: Option<String>,
+                    scroll_direction: Option<String>,
+                    scroll_amount: Option<f64>,
+                    duration: Option<u64>,
+                }
+                let parsed_args: ComputerArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing computer args: {}", e))
+                })?;
+
+                match parsed_args.action.as_str() {
+                    "screenshot" => {
+                        let base64_screenshot = self.capture_screenshot_base64()?;
+                        Ok(json!({ "screenshot": base64_screenshot }))
+                    }
+                    "left_click" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for left_click action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.left_click(coords[0], coords[1], None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "right_click" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for right_click action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.right_click(coords[0], coords[1], None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "middle_click" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for middle_click action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.middle_click(coords[0], coords[1], None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "double_click" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for double_click action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.double_click(coords[0], coords[1], None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "triple_click" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for triple_click action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.triple_click(coords[0], coords[1], None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "left_click_drag" => {
+                        let start_coords = parsed_args.start_coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("start_coordinate required for left_click_drag action".to_string())
+                        })?;
+                        let end_coords = parsed_args.end_coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("end_coordinate required for left_click_drag action".to_string())
+                        })?;
+                        if start_coords.len() != 2 || end_coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("start_coordinate and end_coordinate must be [x, y] arrays".to_string()));
+                        }
+                        self.left_click_drag(start_coords[0], start_coords[1], end_coords[0], end_coords[1])?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "mouse_move" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for mouse_move action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.mouse_move(coords[0], coords[1])?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "left_mouse_down" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for left_mouse_down action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.left_mouse_down(coords[0], coords[1])?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "left_mouse_up" => {
+                        let coords = parsed_args.coordinate.ok_or_else(|| {
+                            AutomationError::InvalidArgument("coordinate required for left_mouse_up action".to_string())
+                        })?;
+                        if coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                        }
+                        self.left_mouse_up(coords[0], coords[1])?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "type" => {
+                        let text = parsed_args.text.ok_or_else(|| {
+                            AutomationError::InvalidArgument("text required for type action".to_string())
+                        })?;
+                        self.type_text(&text)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "key" => {
+                        let key = parsed_args.text.ok_or_else(|| {
+                            AutomationError::InvalidArgument("text (key combination) required for key action".to_string())
+                        })?;
+                        self.press_key(&key, None)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "hold_key" => {
+                        let key = parsed_args.text.ok_or_else(|| {
+                            AutomationError::InvalidArgument("text (key name) required for hold_key action".to_string())
+                        })?;
+                        self.hold_key(&key, parsed_args.duration)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "scroll" => {
+                        let direction = parsed_args.scroll_direction.ok_or_else(|| {
+                            AutomationError::InvalidArgument("scroll_direction required for scroll action".to_string())
+                        })?;
+                        let amount = parsed_args.scroll_amount.unwrap_or(3.0);
+                        if let Some(coords) = parsed_args.coordinate {
+                            if coords.len() != 2 {
+                                return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            }
+                            self.scroll_at_position(coords[0], coords[1], &direction, amount)?;
+                        } else {
+                            self.scroll_at_current_position(&direction, amount)?;
+                        }
+                        Ok(json!({"status": "success"}))
+                    }
+                    "wait" => {
+                        let duration = parsed_args.duration.ok_or_else(|| {
+                            AutomationError::InvalidArgument("duration required for wait action".to_string())
+                        })?;
+                        self.wait(duration)?;
+                        Ok(json!({"status": "success"}))
+                    }
+                    "cursor_position" => {
+                        let (x, y) = self.cursor_position()?;
+                        Ok(json!({"x": x, "y": y}))
+                    }
+                    _ => {
+                        Err(AutomationError::InvalidArgument(format!("Unknown computer action: {}", parsed_args.action)))
+                    }
+                }
+            }
+            // --- End Computer Tool Handler ---
+
+            // --- str_replace_based_edit_tool Handler (Official Anthropic Tool) ---
+            "str_replace_based_edit_tool" => {
+                #[derive(Deserialize)]
+                struct EditToolArgs {
+                    command: String,
+                    path: String,
+                    file_text: Option<String>,
+                    old_str: Option<String>,
+                    new_str: Option<String>,
+                    insert_line: Option<usize>,
+                }
+                let parsed_args: EditToolArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing str_replace_based_edit_tool args: {}", e))
+                })?;
+
+                match parsed_args.command.as_str() {
+                    "view" => {
+                        match fs::read_to_string(&parsed_args.path) {
+                            Ok(content) => Ok(json!({ "content": content })),
+                            Err(e) => Err(AutomationError::Internal(format!("Failed to read file '{}': {}", parsed_args.path, e))),
+                        }
+                    }
+                    "create" => {
+                        let content = parsed_args.file_text.ok_or_else(|| {
+                            AutomationError::InvalidArgument("file_text required for create command".to_string())
+                        })?;
+                        match fs::OpenOptions::new().write(true).create_new(true).open(&parsed_args.path) {
+                            Ok(mut file) => {
+                                use std::io::Write;
+                                match file.write_all(content.as_bytes()) {
+                                    Ok(_) => Ok(json!({ "status": format!("File '{}' created successfully.", parsed_args.path) })),
+                                    Err(e) => Err(AutomationError::Internal(format!("Failed to write content to file '{}': {}", parsed_args.path, e))),
+                                }
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                                Err(AutomationError::Internal(format!("File '{}' already exists. Cannot create.", parsed_args.path)))
+                            }
+                            Err(e) => {
+                                Err(AutomationError::Internal(format!("Failed to create file '{}': {}", parsed_args.path, e)))
+                            }
+                        }
+                    }
+                    "str_replace" => {
+                        let old_str = parsed_args.old_str.ok_or_else(|| {
+                            AutomationError::InvalidArgument("old_str required for str_replace command".to_string())
+                        })?;
+                        let new_str = parsed_args.new_str.ok_or_else(|| {
+                            AutomationError::InvalidArgument("new_str required for str_replace command".to_string())
+                        })?;
+                        let content = match fs::read_to_string(&parsed_args.path) {
+                            Ok(c) => c,
+                            Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.path, e))),
+                        };
+                        let new_content = content.replace(&old_str, &new_str);
+                        match fs::write(&parsed_args.path, new_content) {
+                            Ok(_) => Ok(json!({ "status": format!("File '{}' updated successfully with replacements.", parsed_args.path) })),
+                            Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
+                        }
+                    }
+                    "insert" => {
+                        let new_str = parsed_args.new_str.ok_or_else(|| {
+                            AutomationError::InvalidArgument("new_str required for insert command".to_string())
+                        })?;
+                        let insert_line = parsed_args.insert_line.ok_or_else(|| {
+                            AutomationError::InvalidArgument("insert_line required for insert command".to_string())
+                        })?;
+                        let content = match fs::read_to_string(&parsed_args.path) {
+                            Ok(c) => c,
+                            Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for insertion: {}", parsed_args.path, e))),
+                        };
+
+                        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                        let insertion_point = insert_line.saturating_sub(1).min(lines.len());
+                        lines.insert(insertion_point, new_str);
+
+                        let new_content = lines.join("\n");
+                        let final_content = if content.ends_with('\n') || content.is_empty() {
+                            format!("{}\n", new_content)
+                        } else {
+                            new_content
+                        };
+
+                        match fs::write(&parsed_args.path, final_content) {
+                            Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' at line {}.", parsed_args.path, insert_line) })),
+                            Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
+                        }
+                    }
+                    _ => {
+                        Err(AutomationError::InvalidArgument(format!("Unknown str_replace_based_edit_tool command: {}", parsed_args.command)))
+                    }
+                }
+            }
+            // --- End str_replace_based_edit_tool Handler ---
 
             _ => {
                 error!("Unknown tool called: {}", name);
