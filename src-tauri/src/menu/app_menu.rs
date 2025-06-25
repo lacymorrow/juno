@@ -1,6 +1,7 @@
 use tauri::{
     AppHandle,
     Emitter,
+    Manager,
     menu::{Menu, PredefinedMenuItem, SubmenuBuilder, MenuItemBuilder}
 };
 use tracing::{info, error};
@@ -70,15 +71,46 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .build()?;
 
     // Edit Menu with standard keyboard shortcuts
+    // Create custom menu items with proper labels and IDs for web content compatibility
+    let undo_item = MenuItemBuilder::new("Undo")
+        .id("edit-undo")
+        .accelerator("CmdOrCtrl+Z")
+        .build(app)?;
+
+    let redo_item = MenuItemBuilder::new("Redo")
+        .id("edit-redo")
+        .accelerator("CmdOrCtrl+Shift+Z")
+        .build(app)?;
+
+    let cut_item = MenuItemBuilder::new("Cut")
+        .id("edit-cut")
+        .accelerator("CmdOrCtrl+X")
+        .build(app)?;
+
+    let copy_item = MenuItemBuilder::new("Copy")
+        .id("edit-copy")
+        .accelerator("CmdOrCtrl+C")
+        .build(app)?;
+
+    let paste_item = MenuItemBuilder::new("Paste")
+        .id("edit-paste")
+        .accelerator("CmdOrCtrl+V")
+        .build(app)?;
+
+    let select_all_item = MenuItemBuilder::new("Select All")
+        .id("edit-select-all")
+        .accelerator("CmdOrCtrl+A")
+        .build(app)?;
+
     let edit_submenu = SubmenuBuilder::new(app, "Edit")
-        .item(&PredefinedMenuItem::undo(app, None)?)
-        .item(&PredefinedMenuItem::redo(app, None)?)
+        .item(&undo_item)
+        .item(&redo_item)
         .separator()
-        .item(&PredefinedMenuItem::cut(app, None)?)
-        .item(&PredefinedMenuItem::copy(app, None)?)
-        .item(&PredefinedMenuItem::paste(app, None)?)
+        .item(&cut_item)
+        .item(&copy_item)
+        .item(&paste_item)
         .separator()
-        .item(&PredefinedMenuItem::select_all(app, None)?)
+        .item(&select_all_item)
         .build()?;
 
     // View Menu
@@ -205,6 +237,44 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             });
         }
 
+        // Edit Menu - Handle predefined menu items explicitly for web content
+        "edit-undo" => {
+            info!("[Menu] Undo menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-undo", ()) {
+                error!("[Menu] Failed to emit undo event: {}", e);
+            }
+        }
+        "edit-redo" => {
+            info!("[Menu] Redo menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-redo", ()) {
+                error!("[Menu] Failed to emit redo event: {}", e);
+            }
+        }
+        "edit-cut" => {
+            info!("[Menu] Cut menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-cut", ()) {
+                error!("[Menu] Failed to emit cut event: {}", e);
+            }
+        }
+        "edit-copy" => {
+            info!("[Menu] Copy menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-copy", ()) {
+                error!("[Menu] Failed to emit copy event: {}", e);
+            }
+        }
+        "edit-paste" => {
+            info!("[Menu] Paste menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-paste", ()) {
+                error!("[Menu] Failed to emit paste event: {}", e);
+            }
+        }
+        "edit-select-all" => {
+            info!("[Menu] Select All menu item clicked");
+            if let Err(e) = app_handle.emit("menu-edit-select-all", ()) {
+                error!("[Menu] Failed to emit select all event: {}", e);
+            }
+        }
+
         // File Menu
         constants::app_menu_ids::NEW_CHAT => {
             info!("[Menu] New Chat menu item clicked");
@@ -318,4 +388,31 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[Menu] Unhandled menu event: {:?}", event_id);
         }
     }
+}
+
+/// Setup menu for all windows that should support Edit menu functionality
+pub fn setup_menu_for_all_windows(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    info!("🔗 Setting up menu for all windows...");
+
+    // Get the app menu
+    let app_menu = setup_app_menu(app_handle)?;
+
+    // Set menu on main app (this covers the main window)
+    app_handle.set_menu(app_menu.clone())?;
+
+    // List of window labels that should have the menu
+    let window_labels = ["main", "settings", "onboarding"];
+
+    for label in window_labels {
+        if let Some(window) = app_handle.get_window(label) {
+            if let Err(e) = window.set_menu(app_menu.clone()) {
+                error!("[Menu] Failed to set menu for window '{}': {}", label, e);
+            } else {
+                info!("[Menu] ✅ Menu set for window '{}'", label);
+            }
+        }
+    }
+
+    info!("✅ Menu setup completed for all windows");
+    Ok(())
 }
