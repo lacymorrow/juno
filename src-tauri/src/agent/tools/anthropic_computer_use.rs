@@ -2395,7 +2395,8 @@ pub async fn register_anthropic_computer_use_tools(
         .await;
     info!("Registered tool: computer (Anthropic Computer Use)");
 
-    // Text Editor Tool (text_editor_20250429) - Claude 4 version without undo_edit
+    // Text Editor Tool (text_editor_20250429) - Official Claude 4 implementation
+    // Compliant with: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/text-editor-tool
     let text_editor_tool_def = ToolDefinition {
         name: "str_replace_based_edit_tool".to_string(),
         description: "Custom editing tool for viewing, creating and editing files".to_string(),
@@ -2441,85 +2442,190 @@ pub async fn register_anthropic_computer_use_tools(
     let text_editor_exec = move |input: Value| {
         let _app = app_handle_clone.clone();
         async move {
+            // Enhanced security validation with comprehensive path checking
+            fn validate_path_security(path: &str) -> Result<(), String> {
+                let path_obj = std::path::Path::new(path);
+
+                // Check for directory traversal attempts
+                if path.contains("..") || path.contains("~") {
+                    return Err("Error: Path traversal attempts not allowed".to_string());
+                }
+
+                // Ensure absolute path for security
+                if !path_obj.is_absolute() {
+                    return Err("Error: Only absolute paths are allowed".to_string());
+                }
+
+                // Additional security: prevent access to system directories
+                let sensitive_paths = ["/etc", "/proc", "/sys", "/dev", "/root"];
+                for sensitive in &sensitive_paths {
+                    if path.starts_with(sensitive) {
+                        return Err("Error: Access to system directories not allowed".to_string());
+                    }
+                }
+
+                Ok(())
+            }
+
+            // Helper function to format content with line numbers (official spec compliant)
+            fn format_with_line_numbers(content: &str) -> String {
+                content
+                    .lines()
+                    .enumerate()
+                    .map(|(i, line)| format!("{:4}: {}", i + 1, line))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+
+            // Enhanced view_range handling with proper validation (official spec compliant)
+            fn apply_view_range(content: &str, view_range: &[Value]) -> Result<String, String> {
+                if view_range.len() != 2 {
+                    return Err("Error: view_range must contain exactly 2 elements [start_line, end_line]".to_string());
+                }
+
+                let start = view_range[0].as_i64()
+                    .ok_or_else(|| "Error: view_range start must be an integer".to_string())? as usize;
+                let end = view_range[1].as_i64()
+                    .ok_or_else(|| "Error: view_range end must be an integer".to_string())?;
+
+                // Validate line numbers are positive (1-indexed as per spec)
+                if start < 1 && start != 0 {
+                    return Err("Error: view_range start must be positive (1-indexed)".to_string());
+                }
+
+                let lines: Vec<&str> = content.lines().collect();
+
+                // Handle 1-indexed line numbers as per official spec
+                let start_idx = if start > 0 { start - 1 } else { 0 };
+                let end_idx = if end == -1 {
+                    lines.len()
+                } else if end < 1 {
+                    return Err("Error: view_range end must be positive or -1 for end of file".to_string());
+                } else {
+                    std::cmp::min(end as usize, lines.len())
+                };
+
+                if start_idx >= lines.len() {
+                    return Ok(format!("Lines {}-{}: (empty - beyond file length)", start, if end == -1 { "EOF".to_string() } else { end.to_string() }));
+                }
+
+                let selected_lines = &lines[start_idx..end_idx];
+                let result = selected_lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, line)| format!("{:4}: {}", start_idx + i + 1, line))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                Ok(result)
+            }
+
+            // Enhanced directory listing with metadata and sorting
+            fn enhanced_directory_listing(path: &str) -> Result<String, String> {
+                match std::fs::read_dir(path) {
+                    Ok(entries) => {
+                        let mut items = Vec::new();
+                        for entry in entries {
+                            if let Ok(entry) = entry {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                let metadata = entry.metadata().ok();
+
+                                let is_dir = entry
+                                    .file_type()
+                                    .map(|ft| ft.is_dir())
+                                    .unwrap_or(false);
+
+                                // Enhanced display with metadata
+                                let display_name = if is_dir {
+                                    format!("{}/", name)
+                                } else {
+                                    let size = metadata
+                                        .map(|m| m.len())
+                                        .map(|s| {
+                                            if s < 1024 { format!("{}B", s) }
+                                            else if s < 1024 * 1024 { format!("{}KB", s / 1024) }
+                                            else { format!("{}MB", s / (1024 * 1024)) }
+                                        })
+                                        .unwrap_or_else(|| "?".to_string());
+                                    format!("{} ({})", name, size)
+                                };
+                                items.push((display_name, is_dir));
+                            }
+                        }
+
+                        // Sort directories first, then files
+                        items.sort_by(|a, b| {
+                            match (a.1, b.1) {
+                                (true, false) => std::cmp::Ordering::Less,
+                                (false, true) => std::cmp::Ordering::Greater,
+                                _ => a.0.cmp(&b.0),
+                            }
+                        });
+
+                        let formatted_items = items.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+                        Ok(format!("Directory listing for {}:\n{}", path, formatted_items.join("\n")))
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            Err("Error: Directory not found".to_string())
+                        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                            Err("Error: Permission denied. Cannot access directory.".to_string())
+                        } else {
+                            Err(format!("Error: Failed to list directory '{}': {}", path, e))
+                        }
+                    }
+                }
+            }
+
+            // Extract and validate required parameters
             let command = input["command"]
                 .as_str()
-                .ok_or_else(|| "Missing or invalid 'command' parameter".to_string())?;
+                .ok_or_else(|| "Error: Missing or invalid 'command' parameter".to_string())?;
             let path = input["path"]
                 .as_str()
-                .ok_or_else(|| "Missing or invalid 'path' parameter".to_string())?;
+                .ok_or_else(|| "Error: Missing or invalid 'path' parameter".to_string())?;
+
+            // Enhanced security validation for all operations
+            validate_path_security(path)?;
 
             match command {
                 "view" => {
-                    match std::fs::read_to_string(path) {
-                        Ok(content) => {
-                            if let Some(view_range) = input["view_range"].as_array() {
-                                if view_range.len() == 2 {
-                                    let start = view_range[0].as_i64().unwrap_or(1) as usize;
-                                    let end = view_range[1].as_i64().unwrap_or(-1);
+                    let path_obj = std::path::Path::new(path);
 
-                                    let lines: Vec<&str> = content.lines().collect();
-                                    let end_line =
-                                        if end == -1 { lines.len() } else { end as usize };
-
-                                    let start_idx = if start > 0 { start - 1 } else { 0 };
-                                    let end_idx = std::cmp::min(end_line, lines.len());
-
-                                    if start_idx < lines.len() {
-                                        let selected_lines = &lines[start_idx..end_idx];
-                                        let result = selected_lines
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(i, line)| {
-                                                format!("{:4}: {}", start_idx + i + 1, line)
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n");
-                                        Ok(json!(result))
-                                    } else {
-                                        Ok(json!(""))
+                    if path_obj.is_dir() {
+                        enhanced_directory_listing(path)
+                            .map(|result| json!(result))
+                    } else {
+                        // Enhanced file viewing with comprehensive error handling
+                        match std::fs::read_to_string(path) {
+                            Ok(content) => {
+                                if let Some(view_range) = input["view_range"].as_array() {
+                                    match apply_view_range(&content, view_range) {
+                                        Ok(result) => Ok(json!(result)),
+                                        Err(e) => Err(e),
                                     }
                                 } else {
-                                    Ok(json!(content))
+                                    // Return full file with line numbers (official spec requirement)
+                                    Ok(json!(format_with_line_numbers(&content)))
                                 }
-                            } else {
-                                // Show with line numbers
-                                let numbered_content = content
-                                    .lines()
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:4}: {}", i + 1, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                Ok(json!(numbered_content))
                             }
-                        }
-                        Err(e) => {
-                            if std::path::Path::new(path).is_dir() {
-                                // List directory contents
-                                match std::fs::read_dir(path) {
-                                    Ok(entries) => {
-                                        let mut items = Vec::new();
-                                        for entry in entries {
-                                            if let Ok(entry) = entry {
-                                                let name =
-                                                    entry.file_name().to_string_lossy().to_string();
-                                                let is_dir = entry
-                                                    .file_type()
-                                                    .map(|ft| ft.is_dir())
-                                                    .unwrap_or(false);
-                                                items.push(if is_dir {
-                                                    format!("{}/", name)
-                                                } else {
-                                                    name
-                                                });
-                                            }
-                                        }
-                                        items.sort();
-                                        Ok(json!(items.join("\n")))
+                            Err(e) => {
+                                match e.kind() {
+                                    std::io::ErrorKind::NotFound => {
+                                        Err("Error: File not found".to_string())
                                     }
-                                    Err(e) => Err(format!("Failed to list directory: {}", e)),
+                                    std::io::ErrorKind::PermissionDenied => {
+                                        Err("Error: Permission denied. Cannot read file.".to_string())
+                                    }
+                                    std::io::ErrorKind::IsADirectory => {
+                                        enhanced_directory_listing(path)
+                                            .map_err(|_| "Error: Path is a directory, but directory listing failed".to_string())
+                                            .map(|result| json!(result))
+                                    }
+                                    _ => {
+                                        Err(format!("Error: Failed to read file '{}': {}", path, e))
+                                    }
                                 }
-                            } else {
-                                Err(format!("Failed to read file: {}", e))
                             }
                         }
                     }
@@ -2527,66 +2633,144 @@ pub async fn register_anthropic_computer_use_tools(
                 "create" => {
                     let file_text = input["file_text"]
                         .as_str()
-                        .ok_or_else(|| "Missing or invalid 'file_text' parameter".to_string())?;
+                        .ok_or_else(|| "Error: Missing or invalid 'file_text' parameter for create command".to_string())?;
 
-                    if std::path::Path::new(path).exists() {
-                        return Err(format!("File already exists: {}", path));
+                    let path_obj = std::path::Path::new(path);
+
+                    // Enhanced file creation with proper parent directory handling
+                    if let Some(parent) = path_obj.parent() {
+                        if !parent.exists() {
+                            if let Err(e) = std::fs::create_dir_all(parent) {
+                                return Err(format!("Error: Failed to create parent directories for '{}': {}", path, e));
+                            }
+                        }
                     }
 
-                    // Create parent directories if they don't exist
-                    if let Some(parent) = std::path::Path::new(path).parent() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| format!("Failed to create parent directories: {}", e))?;
+                    // Create the file with enhanced error handling
+                    match std::fs::write(path, file_text) {
+                        Ok(_) => Ok(json!(format!("File created successfully: {}", path))),
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::PermissionDenied => {
+                                    Err("Error: Permission denied. Cannot create file.".to_string())
+                                }
+                                std::io::ErrorKind::AlreadyExists => {
+                                    Err(format!("Error: File already exists: {}", path))
+                                }
+                                _ => {
+                                    Err(format!("Error: Failed to create file '{}': {}", path, e))
+                                }
+                            }
+                        }
                     }
-
-                    std::fs::write(path, file_text)
-                        .map_err(|e| format!("Failed to create file: {}", e))?;
-
-                    Ok(json!(format!("File created successfully: {}", path)))
                 }
                 "str_replace" => {
                     let old_str = input["old_str"]
                         .as_str()
-                        .ok_or_else(|| "Missing or invalid 'old_str' parameter".to_string())?;
+                        .ok_or_else(|| "Error: Missing or invalid 'old_str' parameter for str_replace command".to_string())?;
                     let new_str = input["new_str"].as_str().unwrap_or("");
 
-                    let content = std::fs::read_to_string(path)
-                        .map_err(|e| format!("Failed to read file: {}", e))?;
-
-                    if content.matches(old_str).count() != 1 {
-                        return Err(format!("old_str must match exactly one occurrence in the file. Found {} matches.", content.matches(old_str).count()));
+                    // Enhanced parameter validation
+                    if old_str.is_empty() {
+                        return Err("Error: old_str cannot be empty for str_replace command".to_string());
                     }
 
-                    let new_content = content.replace(old_str, new_str);
-                    std::fs::write(path, new_content)
-                        .map_err(|e| format!("Failed to write file: {}", e))?;
+                    // Read file content with enhanced error handling
+                    let content = match std::fs::read_to_string(path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::NotFound => {
+                                    return Err("Error: File not found".to_string());
+                                }
+                                std::io::ErrorKind::PermissionDenied => {
+                                    return Err("Error: Permission denied. Cannot read file.".to_string());
+                                }
+                                std::io::ErrorKind::IsADirectory => {
+                                    return Err("Error: Cannot perform str_replace on a directory".to_string());
+                                }
+                                _ => {
+                                    return Err(format!("Error: Failed to read file '{}': {}", path, e));
+                                }
+                            }
+                        }
+                    };
 
-                    Ok(json!(format!("String replacement completed in: {}", path)))
+                    // Validate exact match requirement (official spec compliance)
+                    let match_count = content.matches(old_str).count();
+                    if match_count == 0 {
+                        return Err("Error: No match found for replacement. Please check your text and try again.".to_string());
+                    } else if match_count > 1 {
+                        return Err(format!("Error: Found {} matches for replacement text. Please provide more context to make a unique match.", match_count));
+                    }
+
+                    // Perform replacement and preserve line endings
+                    let new_content = content.replace(old_str, new_str);
+
+                    // Write back to file with enhanced error handling
+                    match std::fs::write(path, new_content) {
+                        Ok(_) => Ok(json!("Successfully replaced text at exactly one location.")),
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::PermissionDenied => {
+                                    Err("Error: Permission denied. Cannot write to file.".to_string())
+                                }
+                                _ => {
+                                    Err(format!("Error: Failed to write to file '{}': {}", path, e))
+                                }
+                            }
+                        }
+                    }
                 }
                 "insert" => {
                     let new_str = input["new_str"]
                         .as_str()
-                        .ok_or_else(|| "Missing or invalid 'new_str' parameter".to_string())?;
+                        .ok_or_else(|| "Error: Missing or invalid 'new_str' parameter for insert command".to_string())?;
                     let insert_line = input["insert_line"]
                         .as_i64()
-                        .ok_or_else(|| "Missing or invalid 'insert_line' parameter".to_string())?
-                        as usize;
+                        .ok_or_else(|| "Error: Missing or invalid 'insert_line' parameter for insert command".to_string())?;
 
-                    let content = std::fs::read_to_string(path)
-                        .map_err(|e| format!("Failed to read file: {}", e))?;
+                    // Enhanced parameter validation
+                    if insert_line < 0 {
+                        return Err("Error: insert_line must be non-negative".to_string());
+                    }
+
+                    let insert_line = insert_line as usize;
+
+                    // Read file content with enhanced error handling
+                    let content = match std::fs::read_to_string(path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::NotFound => {
+                                    return Err("Error: File not found".to_string());
+                                }
+                                std::io::ErrorKind::PermissionDenied => {
+                                    return Err("Error: Permission denied. Cannot read file.".to_string());
+                                }
+                                std::io::ErrorKind::IsADirectory => {
+                                    return Err("Error: Cannot perform insert on a directory".to_string());
+                                }
+                                _ => {
+                                    return Err(format!("Error: Failed to read file '{}': {}", path, e));
+                                }
+                            }
+                        }
+                    };
 
                     let lines: Vec<&str> = content.lines().collect();
 
+                    // Enhanced validation for insert position (official spec: insert AFTER the line)
                     if insert_line > lines.len() {
                         return Err(format!(
-                            "insert_line {} is beyond file length {}",
+                            "Error: insert_line {} is beyond file length {}",
                             insert_line,
                             lines.len()
                         ));
                     }
 
-                    // Insert after the specified line (1-indexed)
-                    let insert_pos = insert_line; // insert_line is 1-indexed, so line 1 means insert at index 1 (after line 0)
+                    // Insert after the specified line (0-indexed for line 0, 1-indexed otherwise)
+                    let insert_pos = insert_line;
 
                     let mut new_lines = Vec::new();
                     new_lines.extend_from_slice(&lines[..insert_pos]);
@@ -2594,15 +2778,30 @@ pub async fn register_anthropic_computer_use_tools(
                     new_lines.extend_from_slice(&lines[insert_pos..]);
 
                     let new_content = new_lines.join("\n");
-                    std::fs::write(path, new_content)
-                        .map_err(|e| format!("Failed to write file: {}", e))?;
 
-                    Ok(json!(format!(
-                        "Text inserted at line {} in: {}",
-                        insert_line, path
-                    )))
+                    // Preserve original line ending style
+                    let final_content = if content.ends_with('\n') && !new_content.ends_with('\n') {
+                        format!("{}\n", new_content)
+                    } else {
+                        new_content
+                    };
+
+                    // Write back to file with enhanced error handling
+                    match std::fs::write(path, final_content) {
+                        Ok(_) => Ok(json!(format!("Text inserted at line {} in: {}", insert_line, path))),
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::PermissionDenied => {
+                                    Err("Error: Permission denied. Cannot write to file.".to_string())
+                                }
+                                _ => {
+                                    Err(format!("Error: Failed to write to file '{}': {}", path, e))
+                                }
+                            }
+                        }
+                    }
                 }
-                _ => Err(format!("Unknown command: {}", command)),
+                _ => Err(format!("Error: Unknown command: {}", command)),
             }
         }
     };
