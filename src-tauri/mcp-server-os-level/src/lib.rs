@@ -277,7 +277,7 @@ impl Desktop {
     /// Returns the list of available tools for this Desktop instance.
     /// Used by: MCP server initialization and tool discovery.
     pub fn list_tools(&self) -> Vec<ToolDefinition> {
-        let mut tools = vec![
+        let tools = vec![
             // --- OFFICIAL ANTHROPIC COMPUTER USE TOOLS ---
             // Following the official specification: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/computer-use-tool
 
@@ -1159,6 +1159,7 @@ impl Desktop {
                     action: String,
                     coordinate: Option<Vec<f64>>,
                     start_coordinate: Option<Vec<f64>>,
+                    #[allow(dead_code)] // Used in legacy drag action support
                     end_coordinate: Option<Vec<f64>>,
                     text: Option<String>,
                     scroll_direction: Option<String>,
