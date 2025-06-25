@@ -429,26 +429,43 @@ function handleEditCopy() {
 function handleEditPaste() {
 	console.log('[Menu] Handling paste');
 
-	// Try to paste from clipboard
-	navigator.clipboard.readText().then(text => {
-		if (document.activeElement) {
-			const activeElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement;
+	// Capture active element state before async operation to prevent race condition
+	const capturedActiveElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement;
 
-			if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-				if (activeElement.selectionStart !== null && activeElement.selectionEnd !== null) {
-					// Insert text at cursor position
+	if (capturedActiveElement && (capturedActiveElement.tagName === 'INPUT' || capturedActiveElement.tagName === 'TEXTAREA')) {
+		if (capturedActiveElement.selectionStart !== null && capturedActiveElement.selectionEnd !== null) {
+			// Capture selection values before async operation to prevent race condition
+			const selectionStart = capturedActiveElement.selectionStart;
+			const selectionEnd = capturedActiveElement.selectionEnd;
+			const originalValue = capturedActiveElement.value;
+
+			// Try to paste from clipboard
+			navigator.clipboard.readText().then(text => {
+				// Verify element still exists and values haven't changed unexpectedly
+				if (capturedActiveElement && capturedActiveElement.value === originalValue) {
+					// Insert text at cursor position using captured values
 					const newValue =
-						activeElement.value.substring(0, activeElement.selectionStart) +
+						originalValue.substring(0, selectionStart) +
 						text +
-						activeElement.value.substring(activeElement.selectionEnd);
+						originalValue.substring(selectionEnd);
 
-					activeElement.value = newValue;
-					activeElement.dispatchEvent(new Event('input', { bubbles: true }));
-					return;
+					capturedActiveElement.value = newValue;
+					// Set cursor position to end of pasted content
+					const newCursorPosition = selectionStart + text.length;
+					capturedActiveElement.setSelectionRange(newCursorPosition, newCursorPosition);
+					capturedActiveElement.dispatchEvent(new Event('input', { bubbles: true }));
 				}
-			}
+			}).catch(error => {
+				console.warn('[Menu] Unable to read clipboard:', error);
+				// Fallback to keyboard shortcut
+				simulateKeyboardShortcut('v', true);
+			});
+			return;
 		}
+	}
 
+	// Fallback for non-input elements or when clipboard API fails
+	navigator.clipboard.readText().then(text => {
 		// Try using execCommand as fallback
 		try {
 			document.execCommand('insertText', false, text);
