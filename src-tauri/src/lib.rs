@@ -6,6 +6,9 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers as ShortcutModifiers, Shortcut}; // Global shortcuts
 use tracing::{error, info, warn};
 
+// Settings manager import
+use crate::settings::manager::SettingsManager;
+
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
 
@@ -649,6 +652,11 @@ pub fn run() {
             generate_device_id,
             execute_remote_command,
             get_cloud_connection_diagnostics,
+            // Cloud Test Commands (new)
+            commands::cloud_test::test_cloud_backend_connection,
+            commands::cloud_test::get_cloud_config_status,
+            commands::cloud_test::enable_cloud_backend,
+            commands::cloud_test::disable_cloud_backend,
             // Production Cloud Connector Commands
             commands::cloud::handle_cloud_message,
             commands::cloud::start_production_cloud_connector,
@@ -825,6 +833,18 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            // --- Initialize Settings Manager ---
+            let settings_manager = match SettingsManager::new(app_handle.clone()) {
+                Ok(manager) => manager,
+                Err(e) => {
+                    tracing::error!("Failed to initialize SettingsManager: {}", e);
+                    return Err(e.into());
+                }
+            };
+
+            // Manage the SettingsManager state
+            app.manage(settings_manager);
 
             // --- Initialize Application State Management ---
             let state_app_handle = app_handle.clone();

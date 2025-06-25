@@ -13,6 +13,12 @@
 - **[Comprehensive Voice Guide](COMPREHENSIVE_VOICE_GUIDE.md)** - Three-mode voice system with debugging
 - **[Research Implementation Guide](RESEARCH_IMPLEMENTATION_GUIDE.md)** ✅ **UPDATED**
 
+### Cloud Connectivity Guides ✅ **NEW**
+
+- **[Cloud Connection Fix](../../.cursor/rules/cloud-connection-fix.mdc)** - Complete solution for cloud connectivity issues
+- **[WebSocket Troubleshooting](../../.cursor/rules/websocket-troubleshooting.mdc)** - WebSocket debugging patterns and solutions
+- **[Cloud Testing Patterns](../../.cursor/rules/cloud-testing-patterns.mdc)** - Comprehensive testing and verification guide
+
 ### Overview Documents
 
 - **[README](README.md)** - Project overview and getting started guide
@@ -89,6 +95,39 @@ Juno AI Computer Use Agent is a **production-ready** macOS desktop application t
 - Research citation standards and documentation requirements
 - Performance validation and benchmarking methodology
 - Implementation phases and success metrics framework
+
+#### ☁️ [Cloud Connection Fix](../../.cursor/rules/cloud-connection-fix.mdc) ✅ **NEW**
+
+**Purpose**: Complete solution for cloud connectivity issues  
+**Contents**:
+
+- Root cause analysis of WebSocket connection failures
+- Native Rust WebSocket implementation vs JavaScript bridge
+- Configuration fixes and stored settings corrections
+- Architecture improvements and performance benefits
+- Complete troubleshooting guide and user instructions
+
+#### 🌐 [WebSocket Troubleshooting](../../.cursor/rules/websocket-troubleshooting.mdc) ✅ **NEW**
+
+**Purpose**: WebSocket debugging patterns and solutions  
+**Contents**:
+
+- Import resolution errors and frontend/backend patterns
+- Connection URL issues and authentication failures
+- Event listener debugging and state monitoring
+- Error recovery patterns and performance monitoring
+- File references and debugging tools
+
+#### 🧪 [Cloud Testing Patterns](../../.cursor/rules/cloud-testing-patterns.mdc) ✅ **NEW**
+
+**Purpose**: Comprehensive testing and verification guide  
+**Contents**:
+
+- Test script architecture and verification patterns
+- Debugging patterns and performance benchmarks
+- Integration testing checklist and troubleshooting decision tree
+- Monitoring and alerting thresholds
+- Complete test execution workflows
 
 #### 🎨 [UI-Guided Visual Token Selection Plan](../UI_GUIDED_VISUAL_TOKEN_SELECTION_PLAN.md) 🚧 **WEEK 3 IN PROGRESS**
 
@@ -175,6 +214,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - ✅ **Hierarchical Agent Architecture** - Orchestrator + specialists
 - ✅ **Real-Time Monitoring** - Hardware metrics and performance analytics
 - ✅ **Professional UI** - Complete frontend with accessibility support
+- ✅ **Cloud Connectivity** - Native WebSocket with authentication and remote control
 
 ### Production Status
 
@@ -212,6 +252,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - Voice issues: Use **Comprehensive Voice Guide** debugging section
 - System issues: Reference **System Architecture Guide**
 - Security issues: Follow **Security Guide** validation procedures
+- Cloud connectivity: Use **Cloud Connection Fix** and **WebSocket Troubleshooting** guides
 - General issues: Check **Production Ready Guide** for common patterns
 
 ## 📝 Maintenance Notes

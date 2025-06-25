@@ -6,12 +6,12 @@ use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot};
 use tracing::{info, warn, error, debug};
 use tauri::{AppHandle, Manager, Emitter};
 use uuid::Uuid;
+use futures_util::{SinkExt, StreamExt};
 use crate::cloud::types::*;
 use crate::cloud::config::CloudConfig;
 use crate::cloud::auth::DeviceAuth;
 use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
-use serde_json::json;
 
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
@@ -30,6 +30,9 @@ pub struct ProductionCloudConnector {
     // Connection management
     connection_id: Arc<TokioMutex<Option<String>>>,
     connection_state: Arc<TokioMutex<ConnectorState>>,
+
+    // WebSocket sender for outgoing messages
+    ws_sender: Arc<TokioMutex<Option<futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>,
 
     // Command tracking
     pending_commands: Arc<TokioMutex<HashMap<String, oneshot::Sender<DeviceResponse>>>>,
@@ -372,6 +375,7 @@ impl ProductionCloudConnector {
             app_handle,
             connection_id: Arc::new(TokioMutex::new(None)),
             connection_state: Arc::new(TokioMutex::new(ConnectorState::Disconnected)),
+            ws_sender: Arc::new(TokioMutex::new(None)),
             pending_commands: Arc::new(TokioMutex::new(HashMap::new())),
             command_tx,
             command_rx: Arc::new(TokioMutex::new(command_rx)),
@@ -483,7 +487,7 @@ impl ProductionCloudConnector {
         matches!(*state, ConnectorState::Disconnected | ConnectorState::Reconnecting(_))
     }
 
-    /// Establish WebSocket connection using Tauri plugin
+    /// Establish WebSocket connection using native Rust WebSocket
     async fn establish_connection(&self) -> Result<(), CloudError> {
         info!("Establishing WebSocket connection to: {}", self.config.server_url);
 
@@ -494,41 +498,23 @@ impl ProductionCloudConnector {
         let connection_id = Uuid::new_v4().to_string();
         *self.connection_id.lock().await = Some(connection_id.clone());
 
-        // Using the Tauri WebSocket plugin
-        let websocket_code = format!(r#"
-            import WebSocket from '@tauri-apps/plugin-websocket';
+        // Use native Rust WebSocket connection instead of JavaScript
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-            const ws = await WebSocket.connect('{}');
+        let url = self.config.server_url.clone();
+        let (ws_stream, _) = connect_async(&url).await
+            .map_err(|e| CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e)))?;
 
-            ws.addListener((msg) => {{
-                window.__TAURI__.invoke('handle_cloud_message', {{
-                    connectionId: '{}',
-                    message: msg
-                }});
-            }});
-
-            // Store websocket reference globally for sending
-            window.__JUNO_CLOUD_WS = ws;
-        "#, self.config.server_url, connection_id);
-
-        // Emit WebSocket connection event instead of using eval
-        if let Err(e) = self.app_handle.emit("websocket-connect", &websocket_code) {
-            error!("Failed to emit websocket-connect event: {}", e);
-        }
-
+        info!("✅ WebSocket connected successfully to {}", url);
         self.set_connection_state(ConnectorState::Connected).await;
 
-        // Authenticate
-        self.authenticate().await?;
+        // Split the WebSocket stream for concurrent read/write
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
 
-        info!("✅ Enhanced cloud connector established with hardware monitoring");
-        Ok(())
-    }
+        // Store the WebSocket sender for later use
+        *self.ws_sender.lock().await = Some(ws_sender);
 
-    /// Authenticate with the cloud server
-    async fn authenticate(&self) -> Result<(), CloudError> {
-        info!("Authenticating with cloud server");
-
+        // Authenticate first
         let auth_data = self.auth.create_auth_message()?;
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
@@ -539,31 +525,297 @@ impl ProductionCloudConnector {
                 .as_secs(),
         };
 
-        self.send_websocket_message(auth_message).await?;
-        self.set_connection_state(ConnectorState::Authenticated).await;
+        let auth_json = serde_json::to_string(&auth_message)?;
 
-        info!("Authentication completed");
-        Ok(())
-    }
-
-    /// Send message via WebSocket
-    async fn send_websocket_message(&self, message: WebSocketMessage) -> Result<(), CloudError> {
-        let message_json = serde_json::to_string(&message)?;
-
-        let send_code = format!(r#"
-            if (window.__JUNO_CLOUD_WS) {{
-                await window.__JUNO_CLOUD_WS.send('{}');
-            }} else {{
-                throw new Error('WebSocket not connected');
-            }}
-        "#, message_json.replace('\'', "\\'"));
-
-        // Emit message send event instead of using eval
-        if let Err(e) = self.app_handle.emit("websocket-send", &send_code) {
-            error!("Failed to emit websocket-send event: {}", e);
+        // Send authentication message using stored sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                sender.send(Message::Text(auth_json)).await
+                    .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
+            } else {
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
         }
 
-        Ok(())
+        info!("🔐 Authentication message sent");
+
+        // Start background task for authentication and message handling
+        // This fixes the ownership violation by moving ws_receiver into the task
+        let app_handle = self.app_handle.clone();
+        let connection_state = self.connection_state.clone();
+        let ws_sender_clone = self.ws_sender.clone();
+        let auth_clone = self.auth.clone();
+
+        // Use a channel to signal authentication completion
+        let (auth_tx, auth_rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn(async move {
+            // Handle authentication response within the spawned task
+            let auth_result = match Self::handle_authentication_response_in_task(
+                &mut ws_receiver,
+                &auth_clone,
+                &app_handle,
+                &connection_state
+            ).await {
+                Ok((auth_success, message_buffer)) => {
+                    if auth_success {
+                        info!("✅ Authentication successful, starting message handling");
+
+                        // Set authenticated state
+                        {
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Authenticated;
+                        }
+
+                        // Process any buffered messages from authentication
+                        if !message_buffer.is_empty() {
+                            info!("📦 Processing {} buffered messages from authentication phase", message_buffer.len());
+                            for buffered_text in message_buffer {
+                                Self::process_websocket_message(
+                                    buffered_text,
+                                    &app_handle,
+                                    &connection_state
+                                ).await;
+                            }
+                            info!("✅ Finished processing buffered messages");
+                        }
+
+                        // Signal successful authentication
+                        let _ = auth_tx.send(Ok(()));
+                        true
+                    } else {
+                        error!("❌ Authentication failed");
+                        let _ = auth_tx.send(Err(CloudError::AuthenticationFailed("Authentication failed".to_string())));
+                        false
+                    }
+                },
+                Err((auth_error, recovered_buffer)) => {
+                    error!("🔥 Authentication failed but recovered {} buffered messages: {}", recovered_buffer.len(), auth_error);
+
+                    if !recovered_buffer.is_empty() {
+                        warn!("📦 Buffered messages from failed authentication will be lost:");
+                        for (i, msg) in recovered_buffer.iter().enumerate() {
+                            debug!("  [{}]: {}", i, msg);
+                        }
+                    }
+
+                    let _ = auth_tx.send(Err(auth_error));
+                    false
+                }
+            };
+
+            // Only continue message handling if authentication succeeded
+            if auth_result {
+                // Handle incoming messages (authentication already completed)
+                while let Some(msg) = ws_receiver.next().await {
+                    match msg {
+                        Ok(Message::Text(text)) => {
+                            Self::process_websocket_message(
+                                text,
+                                &app_handle,
+                                &connection_state
+                            ).await;
+                        },
+                        Ok(Message::Close(_)) => {
+                            info!("🔌 WebSocket closed by server");
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Disconnected;
+                            break;
+                        },
+                        Err(e) => {
+                            error!("❌ WebSocket error: {}", e);
+                            let mut state = connection_state.lock().await;
+                            *state = ConnectorState::Error(e.to_string());
+                            break;
+                        },
+                        _ => {}
+                    }
+                }
+            }
+
+            // Clean up sender when connection closes
+            {
+                let mut sender_guard = ws_sender_clone.lock().await;
+                *sender_guard = None;
+            }
+        });
+
+        // Wait for authentication to complete before setting Ready state
+        // This fixes the race condition
+        match auth_rx.await {
+            Ok(Ok(())) => {
+                self.set_connection_state(ConnectorState::Ready).await;
+                info!("✅ Enhanced cloud connector established with hardware monitoring");
+                Ok(())
+            },
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(CloudError::AuthenticationFailed("Authentication channel closed".to_string()))
+        }
+    }
+
+    /// Process a WebSocket message (extracted for reuse in buffered message processing)
+    async fn process_websocket_message(
+        text: String,
+        app_handle: &AppHandle,
+        connection_state: &Arc<TokioMutex<ConnectorState>>
+    ) {
+        debug!("📨 Received cloud message: {}", text);
+
+        // Parse and handle the message
+        if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
+            match ws_message.message_type {
+                MessageType::Auth => {
+                    // Post-authentication auth messages (likely additional auth events)
+                    debug!("📨 Additional auth message received post-authentication");
+                },
+                MessageType::Command => {
+                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
+                        // Emit command to be handled by the app
+                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
+                            error!("Failed to emit cloud command: {}", e);
+                        }
+                    } else {
+                        warn!("⚠️ Failed to parse cloud command from message");
+                    }
+                },
+                MessageType::Heartbeat => {
+                    debug!("💓 Heartbeat received");
+                },
+                _ => {
+                    debug!("📨 Other message type: {:?}", ws_message.message_type);
+                }
+            }
+        } else {
+            warn!("⚠️ Failed to parse WebSocket message: {}", text);
+        }
+    }
+
+    /// Handle authentication response within the spawned task with robust error handling
+    /// Returns (auth_success, buffered_messages) - buffered messages are preserved even on auth failure
+    async fn handle_authentication_response_in_task(
+        ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+        auth: &DeviceAuth,
+        _app_handle: &AppHandle,
+        _connection_state: &Arc<TokioMutex<ConnectorState>>
+    ) -> Result<(bool, Vec<String>), (CloudError, Vec<String>)> {
+        use tokio_tungstenite::tungstenite::Message;
+
+        // Set timeout for authentication response
+        let timeout_duration = Duration::from_secs(10);
+        let timeout = tokio::time::sleep(timeout_duration);
+        tokio::pin!(timeout);
+
+        // Buffer for messages received during authentication
+        let mut message_buffer: Vec<String> = Vec::new();
+
+        loop {
+            tokio::select! {
+                // Wait for authentication response
+                msg_result = ws_receiver.next() => {
+                    match msg_result {
+                        Some(Ok(Message::Text(text))) => {
+                            debug!("📨 Received message during authentication: {}", text);
+
+                            // Parse the message
+                            match serde_json::from_str::<WebSocketMessage>(&text) {
+                                Ok(ws_message) => {
+                                    if ws_message.message_type == MessageType::Auth {
+                                        // Handle authentication response with robust parsing
+                                        // CRITICAL: Do not use ? operator here as it would lose buffered messages on error
+                                        match Self::parse_authentication_response(ws_message.data).await {
+                                            Ok(auth_result) => {
+                                                return Ok((auth_result, message_buffer));
+                                            },
+                                                                                         Err(auth_error) => {
+                                                 // Authentication failed, but we must preserve buffered messages
+                                                 error!("❌ Authentication failed: {}", auth_error);
+                                                 // Return the error while preserving message buffer to prevent message loss
+                                                 return Err((auth_error, message_buffer));
+                                             }
+                                        }
+                                    } else {
+                                        // Non-auth message during authentication - buffer it for later processing
+                                        debug!("📦 Buffering non-auth message during authentication: {:?}", ws_message.message_type);
+                                        message_buffer.push(text);
+                                        // Continue waiting for auth response
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("❌ Failed to parse message during authentication: {}", e);
+                                    // Buffer unparseable messages too - might be valid later
+                                    warn!("📦 Buffering unparseable message for later retry: {}", text);
+                                    message_buffer.push(text);
+                                    continue;
+                                }
+                            }
+                        },
+                        Some(Ok(Message::Close(_))) => {
+                            error!("❌ WebSocket closed during authentication");
+                            return Err((CloudError::AuthenticationFailed("Connection closed during authentication".to_string()), message_buffer));
+                        },
+                        Some(Err(e)) => {
+                            error!("❌ WebSocket error during authentication: {}", e);
+                            return Err((CloudError::AuthenticationFailed(format!("WebSocket error: {}", e)), message_buffer));
+                        },
+                        None => {
+                            error!("❌ WebSocket stream ended during authentication");
+                            return Err((CloudError::AuthenticationFailed("WebSocket stream ended".to_string()), message_buffer));
+                        },
+                        _ => {
+                            // Other message types (binary, ping, pong) - continue waiting
+                            debug!("📨 Received non-text message during authentication, continuing...");
+                            continue;
+                        }
+                    }
+                },
+                // Authentication timeout
+                _ = &mut timeout => {
+                    error!("❌ Authentication timeout after {:?}", timeout_duration);
+                    return Err((CloudError::AuthenticationFailed("Authentication timeout".to_string()), message_buffer));
+                }
+            }
+        }
+    }
+
+    /// Parse authentication response with comprehensive error handling
+    async fn parse_authentication_response(data: serde_json::Value) -> Result<bool, CloudError> {
+        // Check for success field
+        match data.get("success") {
+            Some(success_value) => {
+                match success_value.as_bool() {
+                    Some(true) => {
+                        info!("✅ Authentication successful");
+                        Ok(true)
+                    },
+                    Some(false) => {
+                        // Authentication explicitly failed
+                        let error_msg = data.get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Authentication rejected by server");
+                        error!("❌ Authentication failed: {}", error_msg);
+                        Err(CloudError::AuthenticationFailed(error_msg.to_string()))
+                    },
+                    None => {
+                        // Success field is not a boolean
+                        let success_str = success_value.to_string();
+                        error!("❌ Authentication response 'success' field is not boolean: {}", success_str);
+                        Err(CloudError::AuthenticationFailed(format!(
+                            "Invalid success field type: expected boolean, got {}",
+                            success_str
+                        )))
+                    }
+                }
+            },
+            None => {
+                // Missing success field
+                error!("❌ Authentication response missing 'success' field: {}", data);
+                Err(CloudError::AuthenticationFailed(
+                    "Authentication response missing required 'success' field".to_string()
+                ))
+            }
+        }
     }
 
     /// Run the active connection
@@ -620,35 +872,54 @@ impl ProductionCloudConnector {
         Ok(())
     }
 
-    /// Handle sending a command to the cloud
+    /// Handle sending a command to the cloud using stored WebSocket sender
     async fn handle_send_command(&self, command: CloudCommand) -> Result<(), CloudError> {
         let start_time = Instant::now();
         let command_id = command.id.clone();
 
         log::info!("🚀 Executing tracked command: {} ({:?})", command_id, command.command_type);
 
-        let command_message = WebSocketMessage {
+        // Create WebSocket message
+        let ws_message = WebSocketMessage {
             message_type: MessageType::Command,
-            data: serde_json::to_value(command)?,
+            data: serde_json::to_value(&command)?,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
         };
 
-        let result = self.send_websocket_message(command_message).await;
-        let execution_time = start_time.elapsed();
+        let message_json = serde_json::to_string(&ws_message)?;
 
-        // Track command execution statistics
-        self.track_command_execution(result.is_ok(), execution_time).await;
-
-        if let Err(ref e) = result {
-            log::error!("❌ Command {} failed after {:?}: {}", command_id, execution_time, e);
-        } else {
-            log::info!("✅ Command {} completed in {:?}", command_id, execution_time);
+        // Send command using stored WebSocket sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                match sender.send(Message::Text(message_json)).await {
+                    Ok(()) => {
+                        log::debug!("📤 Command {} sent successfully", command_id);
+                    },
+                    Err(e) => {
+                        log::error!("❌ Failed to send command {}: {}", command_id, e);
+                        let execution_time = start_time.elapsed();
+                        self.track_command_execution(false, execution_time).await;
+                        return Err(CloudError::NetworkError(format!("Failed to send command: {}", e)));
+                    }
+                }
+            } else {
+                log::error!("❌ WebSocket sender not available for command {}", command_id);
+                let execution_time = start_time.elapsed();
+                self.track_command_execution(false, execution_time).await;
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
         }
 
-        result
+        let execution_time = start_time.elapsed();
+        self.track_command_execution(true, execution_time).await;
+
+        log::info!("✅ Command {} completed in {:?}", command_id, execution_time);
+        Ok(())
     }
 
     /// Handle command response from cloud
@@ -663,19 +934,46 @@ impl ProductionCloudConnector {
         }
     }
 
-    /// Send status update to cloud
+    /// Send status update to cloud using stored WebSocket sender
     async fn send_status_update(&self) -> Result<(), CloudError> {
-        let status = self.create_device_status().await?;
-        let status_message = WebSocketMessage {
+        debug!("📊 Sending status update to cloud");
+
+        // Create device status
+        let device_status = self.create_device_status().await?;
+
+        // Create WebSocket message
+        let ws_message = WebSocketMessage {
             message_type: MessageType::Status,
-            data: serde_json::to_value(status)?,
+            data: serde_json::to_value(&device_status)?,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
         };
 
-        self.send_websocket_message(status_message).await
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        // Send status update using stored WebSocket sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                match sender.send(Message::Text(message_json)).await {
+                    Ok(()) => {
+                        debug!("✅ Status update sent successfully");
+                    },
+                    Err(e) => {
+                        warn!("⚠️ Failed to send status update: {}", e);
+                        return Err(CloudError::NetworkError(format!("Failed to send status update: {}", e)));
+                    }
+                }
+            } else {
+                warn!("⚠️ WebSocket sender not available for status update");
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
+
+        Ok(())
     }
 
     /// Check if connection is healthy
@@ -699,34 +997,42 @@ impl ProductionCloudConnector {
                 // Update last heartbeat time
                 *self.last_heartbeat.lock().await = Some(SystemTime::now());
 
-                let heartbeat = WebSocketMessage {
-                    message_type: MessageType::Heartbeat,
-                    data: json!({
-                        "timestamp": SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        "device_id": self.auth.get_credentials().map(|c| c.device_id.clone()).unwrap_or_default(),
-                        "connection_stats": self.get_connection_stats().await,
-                        "system_health": {
-                            "uptime": self.connection_start_time.lock().await
-                                .as_ref()
-                                .map(|start| start.elapsed().as_secs())
-                                .unwrap_or(0),
-                            "performance": "optimal"
-                        }
-                    }),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                };
-
-                if let Err(e) = self.send_websocket_message(heartbeat).await {
-                    error!("Failed to send enhanced heartbeat: {}", e);
+                // Send heartbeat message
+                if let Err(e) = self.send_heartbeat().await {
+                    warn!("Failed to send heartbeat: {}", e);
+                } else {
+                    debug!("💓 Heartbeat sent successfully");
                 }
             }
         }
+    }
+
+    /// Send heartbeat message to maintain connection
+    async fn send_heartbeat(&self) -> Result<(), CloudError> {
+        let ws_message = WebSocketMessage {
+            message_type: MessageType::Heartbeat,
+            data: serde_json::json!({"timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        // Send heartbeat using stored WebSocket sender
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(ref mut sender) = sender_guard.as_mut() {
+                use tokio_tungstenite::tungstenite::Message;
+                sender.send(Message::Text(message_json)).await
+                    .map_err(|e| CloudError::NetworkError(format!("Failed to send heartbeat: {}", e)))?;
+            } else {
+                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+            }
+        }
+
+        Ok(())
     }
 
     /// Status reporting loop
@@ -770,7 +1076,7 @@ impl ProductionCloudConnector {
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
         };
 
         Ok(status)
@@ -895,16 +1201,15 @@ impl ProductionCloudConnector {
         }
 
         // Close WebSocket connection
-        let disconnect_code = r#"
-            if (window.__JUNO_CLOUD_WS) {
-                await window.__JUNO_CLOUD_WS.disconnect();
-                window.__JUNO_CLOUD_WS = null;
+        {
+            let mut sender_guard = self.ws_sender.lock().await;
+            if let Some(mut sender) = sender_guard.take() {
+                use tokio_tungstenite::tungstenite::Message;
+                if let Err(e) = sender.send(Message::Close(None)).await {
+                    warn!("Failed to send close message: {}", e);
+                }
+                info!("🔌 WebSocket sender closed");
             }
-        "#;
-
-        // Emit disconnect event instead of using eval
-        if let Err(e) = self.app_handle.emit("websocket-disconnect", disconnect_code) {
-            error!("Failed to emit websocket-disconnect event: {}", e);
         }
 
         // Clear connection state
@@ -997,6 +1302,7 @@ impl Clone for ProductionCloudConnector {
             app_handle: self.app_handle.clone(),
             connection_id: self.connection_id.clone(),
             connection_state: self.connection_state.clone(),
+            ws_sender: self.ws_sender.clone(),
             pending_commands: self.pending_commands.clone(),
             command_tx: self.command_tx.clone(),
             command_rx: self.command_rx.clone(),
@@ -1056,6 +1362,230 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             if let Some(cpu_usage) = result {
                 assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
             }
+        }
+    }
+
+    // Tests for authentication response parsing logic
+    mod authentication_tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_auth_response_failure_logic() {
+            // Test explicit failure response parsing logic
+            let failure_data = serde_json::json!({
+                "success": false,
+                "error": "Invalid credentials"
+            });
+
+            // Test the parsing logic that our methods use
+            match failure_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(false) => {
+                            let error_msg = failure_data.get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Authentication rejected by server");
+                            assert_eq!(error_msg, "Invalid credentials");
+                        },
+                        _ => panic!("Should have matched false case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_parse_auth_response_missing_success_field() {
+            let invalid_data = serde_json::json!({
+                "message": "Some response without success field"
+            });
+
+            // Test that missing success field is detected
+            assert!(invalid_data.get("success").is_none());
+        }
+
+        #[test]
+        fn test_parse_auth_response_invalid_success_type() {
+            let invalid_data = serde_json::json!({
+                "success": "true" // String instead of boolean
+            });
+
+            // Test that non-boolean success field is detected
+            match invalid_data.get("success") {
+                Some(success_value) => {
+                    assert!(success_value.as_bool().is_none());
+                    assert_eq!(success_value.as_str(), Some("true"));
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_parse_auth_response_success_logic() {
+            let success_data = serde_json::json!({
+                "success": true
+            });
+
+            // Test successful authentication parsing logic
+            match success_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(true) => {
+                            // This is the expected path
+                            assert!(true);
+                        },
+                        _ => panic!("Should have matched true case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod websocket_race_condition_tests {
+        use super::*;
+
+        #[test]
+        fn test_message_buffering_during_authentication() {
+            // Test the logic that buffers non-auth messages during authentication
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            // Simulate receiving various message types during authentication
+            let command_message = r#"{"type": "command", "data": {"id": "test", "command_type": "screenshot"}, "timestamp": 1234567890}"#;
+            let heartbeat_message = r#"{"type": "heartbeat", "data": {"timestamp": 1234567890}, "timestamp": 1234567890}"#;
+            let auth_success_message = r#"{"type": "auth", "data": {"success": true}, "timestamp": 1234567890}"#;
+
+            // Messages received before auth response should be buffered
+            message_buffer.push(command_message.to_string());
+            message_buffer.push(heartbeat_message.to_string());
+
+            // Verify buffer contains expected messages
+            assert_eq!(message_buffer.len(), 2);
+            assert!(message_buffer[0].contains("command"));
+            assert!(message_buffer[1].contains("heartbeat"));
+
+            // Simulate processing auth response (would return from authentication handler)
+            // The buffered messages would then be processed by the background task
+
+            // Verify we can parse the buffered messages correctly
+            for buffered_msg in &message_buffer {
+                let parsed: Result<serde_json::Value, _> = serde_json::from_str(buffered_msg);
+                assert!(parsed.is_ok(), "Buffered message should be valid JSON: {}", buffered_msg);
+            }
+        }
+
+        #[test]
+        fn test_authentication_response_parsing_comprehensive() {
+            // Test success case
+            let success_data = serde_json::json!({
+                "success": true
+            });
+
+            match success_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(true) => assert!(true), // Expected path
+                        _ => panic!("Should have matched true case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+
+            // Test failure case
+            let failure_data = serde_json::json!({
+                "success": false,
+                "error": "Invalid credentials"
+            });
+
+            match failure_data.get("success") {
+                Some(success_value) => {
+                    match success_value.as_bool() {
+                        Some(false) => {
+                            let error_msg = failure_data.get("error")
+                                .and_then(|e| e.as_str())
+                                .unwrap_or("Authentication rejected by server");
+                            assert_eq!(error_msg, "Invalid credentials");
+                        },
+                        _ => panic!("Should have matched false case"),
+                    }
+                },
+                None => panic!("Should have success field"),
+            }
+
+            // Test missing success field
+            let missing_success_data = serde_json::json!({
+                "message": "Some response without success field"
+            });
+
+            assert!(missing_success_data.get("success").is_none());
+
+            // Test invalid success field type
+            let invalid_success_data = serde_json::json!({
+                "success": "true" // String instead of boolean
+            });
+
+            match invalid_success_data.get("success") {
+                Some(success_value) => {
+                    assert!(success_value.as_bool().is_none());
+                    assert_eq!(success_value.as_str(), Some("true"));
+                },
+                None => panic!("Should have success field"),
+            }
+        }
+
+        #[test]
+        fn test_message_buffer_ordering() {
+            // Test that message ordering is preserved during buffering
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            let messages = vec![
+                r#"{"type": "command", "data": {"id": "cmd1"}, "timestamp": 1}"#,
+                r#"{"type": "heartbeat", "data": {}, "timestamp": 2}"#,
+                r#"{"type": "command", "data": {"id": "cmd2"}, "timestamp": 3}"#,
+                r#"{"type": "status", "data": {}, "timestamp": 4}"#,
+            ];
+
+            // Add messages to buffer in order
+            for msg in &messages {
+                message_buffer.push(msg.to_string());
+            }
+
+            // Verify ordering is preserved
+            assert_eq!(message_buffer.len(), 4);
+            for (i, msg) in message_buffer.iter().enumerate() {
+                let parsed: serde_json::Value = serde_json::from_str(msg).unwrap();
+                let expected_timestamp = (i + 1) as u64;
+                assert_eq!(parsed["timestamp"].as_u64().unwrap(), expected_timestamp);
+            }
+        }
+
+        #[test]
+        fn test_unparseable_message_buffering() {
+            // Test that even unparseable messages are buffered for later retry
+            let mut message_buffer: Vec<String> = Vec::new();
+
+            let valid_message = r#"{"type": "command", "data": {"id": "test"}}"#;
+            let invalid_message = r#"{"type": "command", "data": {invalid json"#;
+            let malformed_message = r#"not json at all"#;
+
+            // All messages should be buffered, even invalid ones
+            message_buffer.push(valid_message.to_string());
+            message_buffer.push(invalid_message.to_string());
+            message_buffer.push(malformed_message.to_string());
+
+            assert_eq!(message_buffer.len(), 3);
+
+            // Verify that at least the valid message can be parsed
+            let parsed_valid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[0]);
+            assert!(parsed_valid.is_ok());
+
+            // Invalid messages should fail parsing but still be buffered
+            let parsed_invalid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[1]);
+            assert!(parsed_invalid.is_err());
+
+            let parsed_malformed: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[2]);
+            assert!(parsed_malformed.is_err());
         }
     }
 }

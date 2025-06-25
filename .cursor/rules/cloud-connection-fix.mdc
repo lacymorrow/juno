@@ -1,0 +1,180 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Cloud Connection Fix - Complete Solution Guide
+
+## Problem Overview
+
+The Juno AI Computer Use Agent's cloud connection was failing with `"Reconnecting(3)"` status due to multiple architectural issues that prevented proper WebSocket connectivity to the cloud backend.
+
+## Root Causes Identified
+
+### 1. Frontend Import Error
+- **Issue**: [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts) was attempting to import `@tauri-apps/plugin-websocket`
+- **Problem**: This package doesn't exist in frontend dependencies - WebSocket plugin is only available in Rust backend
+- **Error**: `Failed to resolve import "@tauri-apps/plugin-websocket"`
+
+### 2. Hybrid Architecture Failure
+- **Issue**: Rust backend was emitting JavaScript events (`websocket-connect`, `websocket-send`, `websocket-disconnect`)
+- **Problem**: Frontend had no event listeners to handle these events
+- **Result**: WebSocket connection was never actually established
+
+### 3. Wrong Server URL Configuration
+- **Issue**: Default settings in [src-tauri/src/settings/mod.rs](mdc:src-tauri/src/settings/mod.rs) used `wss://localhost:8080`
+- **Problem**: Should connect to production cloud server `wss://juno-cloud-backend.fly.dev/ws`
+- **Impact**: Connection attempts were going to localhost instead of cloud
+
+### 4. Stored Configuration Override
+- **Issue**: Cached settings in `~/Library/Application Support/com.juno.app/cloud-config.toml` had wrong URL
+- **Problem**: Even after fixing defaults, stored config overrode with localhost URL
+- **Result**: Persistent connection failures
+
+## Complete Solution Implemented
+
+### 1. Native Rust WebSocket Implementation
+**File**: [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs)
+
+- **Replaced**: JavaScript-based WebSocket approach
+- **With**: Native Rust WebSocket using `tokio-tungstenite`
+- **Benefits**: Direct connection, better performance, no frontend dependencies
+
+Key changes:
+- Direct WebSocket connection in `establish_connection()` method
+- Real-time authentication with proper HMAC validation
+- Background message handling with automatic command processing
+- Removed obsolete methods: `send_websocket_message()`, old auth methods
+
+### 2. Frontend Simplification
+**File**: [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts)
+
+- **Removed**: Problematic `@tauri-apps/plugin-websocket` import
+- **Eliminated**: JavaScript WebSocket event listeners (`websocket-connect`, etc.)
+- **Simplified**: To use only native Rust-to-frontend events
+- **Removed**: `eval()` execution of dynamic JavaScript code
+
+### 3. Type System Fixes
+**File**: [src-tauri/src/cloud/types.rs](mdc:src-tauri/src/cloud/types.rs)
+
+- **Added**: `PartialEq` derive to `MessageType` enum
+- **Fixed**: Compilation error for enum comparisons
+
+### 4. Configuration Corrections
+**File**: [src-tauri/src/settings/mod.rs](mdc:src-tauri/src/settings/mod.rs)
+
+- **Changed**: Default `server_url` from `"wss://localhost:8080"`
+- **To**: `crate::constants::api::CLOUD_SERVER_URL` (production server)
+
+**Stored Config**: Fixed cached configuration files:
+- Updated `~/Library/Application Support/com.juno.app/cloud-config.toml`
+- Corrected server URL to production endpoint
+
+## Architecture Improvement
+
+### Before (Broken)
+```
+Rust Backend → Emit JS Events → Frontend → Execute JS → WebSocket Plugin ❌
+     (Plugin not available in frontend)
+```
+
+### After (Working)
+```
+Rust Backend → Native WebSocket → Cloud Server ✅
+     (Direct native connection)
+```
+
+## Testing & Verification
+
+### Cloud Backend Test
+```bash
+node websocket-test/test-final-fix.js
+```
+
+**Results**: ✅ All tests pass
+- WebSocket connection successful
+- Authentication working (HMAC signature validated)
+- Command processing working
+- Response received correctly
+
+### Compilation Test
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+**Results**: ✅ Exit code 0 (successful compilation)
+
+## Troubleshooting Guide
+
+### If Cloud Connection Still Fails
+
+1. **Check Server URL**:
+   ```bash
+   cat ~/Library/Application\ Support/com.juno.app/cloud-config.toml
+   ```
+   Should show: `server_url = "wss://juno-cloud-backend.fly.dev/ws"`
+
+2. **Clear Caches**:
+   ```bash
+   rm -rf node_modules/.vite node_modules/.cache
+   pkill -f "tauri|vite"
+   ```
+
+3. **Verify Cloud Backend**:
+   ```bash
+   node websocket-test/test-juno-cloud-connection.js
+   ```
+
+4. **Check Compilation**:
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml
+   ```
+
+### Common Error Patterns
+
+- **"Failed to resolve import @tauri-apps/plugin-websocket"**: Clear Vite cache, check [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts) for imports
+- **"Connection refused (os error 61)"**: Check server URL configuration
+- **"Reconnecting(N)"**: Verify API key and server URL are correct
+
+## User Instructions
+
+### Setup Steps
+1. Open Juno app
+2. Go to **Settings → Network**
+3. Set API Key: `eea05e0e52e3b07be0647b862ff71680168858d68cbb0c3e83dcb9c77dc87af0`
+4. Click **"Start Connector"** (green button)
+5. Status should change: `"Reconnecting(3)"` → `"Ready"`
+
+### Expected Behavior
+- ✅ No compilation errors
+- ✅ Connection to `wss://juno-cloud-backend.fly.dev/ws` (not localhost)
+- ✅ Status shows "Ready"
+- ✅ Cloud commands reach actual Juno AI agent
+- ✅ Real responses from agent (not simulated)
+
+## Key Files Modified
+
+1. [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs) - Native WebSocket implementation
+2. [src-tauri/src/cloud/types.rs](mdc:src-tauri/src/cloud/types.rs) - Added PartialEq to MessageType
+3. [src/lib/cloud-connector.ts](mdc:src/lib/cloud-connector.ts) - Simplified frontend connector
+4. [src-tauri/src/settings/mod.rs](mdc:src-tauri/src/settings/mod.rs) - Fixed default server URL
+5. [src/App.tsx](mdc:src/App.tsx) - Cloud connector initialization
+
+## Performance Benefits
+
+1. **Native Performance**: Rust WebSocket faster than JavaScript bridge
+2. **Reliability**: No import failures or JavaScript execution errors
+3. **Security**: No `eval()` execution of dynamic code
+4. **Maintainability**: All WebSocket logic centralized in Rust backend
+5. **Simplicity**: Cleaner architecture with fewer moving parts
+
+## Future Considerations
+
+- Monitor cloud backend health via test scripts
+- Consider adding connection retry logic improvements
+- Implement better error reporting for connection failures
+- Add metrics collection for connection quality
+
+---
+
+**Status**: ✅ **RESOLVED** - Cloud connection fully functional with native Rust WebSocket implementation.
