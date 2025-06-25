@@ -182,11 +182,16 @@ where
     // Get timestamp tracking state from AppState
     let (last_timestamp_shown, events_since_last) =
         if let Some(state) = app_handle.try_state::<AppState>() {
-            let tracker = state.timestamp_tracker.lock().unwrap();
-            (
-                tracker.last_timestamp_shown,
-                tracker.events_since_last_timestamp,
-            )
+            match state.timestamp_tracker.lock() {
+                Ok(tracker) => (
+                    tracker.last_timestamp_shown,
+                    tracker.events_since_last_timestamp,
+                ),
+                Err(e) => {
+                    warn!("Failed to acquire timestamp tracker lock: {}", e);
+                    (None, 0) // Safe fallback
+                }
+            }
         } else {
             warn!("AppState not available for timestamp tracking");
             (None, 0)
@@ -206,8 +211,15 @@ where
 
     // Update the timestamp tracker in AppState
     if let Some(state) = app_handle.try_state::<AppState>() {
-        let mut tracker = state.timestamp_tracker.lock().unwrap();
-        tracker.record_event(timestamp, entry.show_timestamp);
+        match state.timestamp_tracker.lock() {
+            Ok(mut tracker) => {
+                tracker.record_event(timestamp, entry.show_timestamp);
+            }
+            Err(e) => {
+                warn!("Failed to update timestamp tracker: {}", e);
+                // Continue without updating - not critical for operation
+            }
+        }
     }
 
     // Emit the event to the frontend
@@ -293,11 +305,16 @@ where
     // Get timestamp tracking state from AppState
     let (last_timestamp_shown, events_since_last) =
         if let Some(state) = app_handle.try_state::<AppState>() {
-            let tracker = state.timestamp_tracker.lock().unwrap();
-            (
-                tracker.last_timestamp_shown,
-                tracker.events_since_last_timestamp,
-            )
+            match state.timestamp_tracker.lock() {
+                Ok(tracker) => (
+                    tracker.last_timestamp_shown,
+                    tracker.events_since_last_timestamp,
+                ),
+                Err(e) => {
+                    warn!("Failed to acquire timestamp tracker lock: {}", e);
+                    (None, 0) // Safe fallback
+                }
+            }
         } else {
             warn!("AppState not available for timestamp tracking");
             (None, 0)
@@ -317,8 +334,15 @@ where
 
     // Update the timestamp tracker in AppState
     if let Some(state) = app_handle.try_state::<AppState>() {
-        let mut tracker = state.timestamp_tracker.lock().unwrap();
-        tracker.record_event(timestamp, entry.show_timestamp);
+        match state.timestamp_tracker.lock() {
+            Ok(mut tracker) => {
+                tracker.record_event(timestamp, entry.show_timestamp);
+            }
+            Err(e) => {
+                warn!("Failed to update timestamp tracker: {}", e);
+                // Continue without updating - not critical for operation
+            }
+        }
     }
 
     // Emit the event to the frontend
