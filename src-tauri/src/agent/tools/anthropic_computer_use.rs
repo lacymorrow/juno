@@ -1537,765 +1537,855 @@ pub async fn register_anthropic_computer_use_tools(
         }),
     };
 
-    let app_handle_clone = app_handle.clone();
-    let computer_tool_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
+    let app_handle_clone = Arc::new(app_handle.clone());
+    let computer_tool_exec = {
+        let app_handle_clone = app_handle_clone.clone();
+        move |input: Value| {
+            let app = (*app_handle_clone).clone();
+            async move {
+                let state_manager = app.state::<AppState>();
 
-            let action = input["action"]
-                .as_str()
-                .ok_or_else(|| "Missing or invalid 'action' parameter".to_string())?;
+                let action = input["action"]
+                    .as_str()
+                    .ok_or_else(|| "Missing or invalid 'action' parameter".to_string())?;
 
-            // Validate permissions based on the action type
-            match action {
-                "screenshot" => {
-                    // Screenshot requires screen recording permissions
-                    if let Err(e) = validate_permission(
-                        &app,
-                        RequiredPermission::ScreenRecording,
-                        "computer/screenshot",
-                    )
-                    .await
-                    {
-                        return Err(e.to_string());
-                    }
-                }
-                "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click"
-                | "double_click" | "triple_click" | "left_click_drag" | "mouse_move"
-                | "left_mouse_down" | "left_mouse_up" | "scroll" => {
-                    // Mouse and keyboard actions require accessibility permissions
-                    if let Err(e) = validate_permission(
-                        &app,
-                        RequiredPermission::Accessibility,
-                        &format!("computer/{}", action),
-                    )
-                    .await
-                    {
-                        return Err(e.to_string());
-                    }
-                }
-                "cursor_position" => {
-                    // Cursor position requires accessibility permissions
-                    if let Err(e) = validate_permission(
-                        &app,
-                        RequiredPermission::Accessibility,
-                        "computer/cursor_position",
-                    )
-                    .await
-                    {
-                        return Err(e.to_string());
-                    }
-                }
-                "wait" => {
-                    // Wait doesn't require special permissions
-                }
-                _ => {
-                    return Err(format!("Unknown computer action: {}", action));
-                }
-            }
-
-            match action {
-                "screenshot" => {
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-                    let enable_token_selection =
-                        input["enable_token_selection"].as_bool().unwrap_or(false);
-                    let enable_ubp = input["enable_ubp"].as_bool().unwrap_or(false);
-
-                    let enable_exploration = input["enable_exploration"].as_bool().unwrap_or(false);
-                    let screenshot_result = capture_screenshot_with_advanced_processing(
-                        &app,
-                        window_id,
-                        use_focused_window,
-                        enable_token_selection,
-                        enable_ubp,
-                        enable_exploration,
-                    )
-                    .await?;
-
-                    Ok(screenshot_result)
-                }
-                "cursor_position" => match state_manager.desktop.cursor_position() {
-                    Ok((x, y)) => Ok(json!([x, y])),
-                    Err(e) => Err(format!("Failed to get cursor position: {}", e)),
-                },
-                "mouse_move" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent mouse-move coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    tokio::task::block_in_place(|| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(async {
-                            crate::commands::mouse::dev_mouse_move(
-                                app.clone(),
-                                app.clone().state(),
-                                screen_x,
-                                screen_y,
-                            )
-                            .await
-                        })
-                    }).map_err(|e| format!("Mouse move failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "left_mouse_down" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent left-mouse-down coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    tokio::task::block_in_place(|| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(async {
-                            crate::commands::mouse::dev_left_mouse_down(
-                                app.clone(),
-                                app.clone().state(),
-                                screen_x,
-                                screen_y,
-                            )
-                            .await
-                        })
-                    }).map_err(|e| format!("Left mouse down failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "left_mouse_up" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent left-mouse-up coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    tokio::task::block_in_place(|| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(async {
-                            crate::commands::mouse::dev_left_mouse_up(
-                                app.clone(),
-                                app.clone().state(),
-                                screen_x,
-                                screen_y,
-                            )
-                            .await
-                        })
-                    }).map_err(|e| format!("Left mouse up failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "left_click" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-                    let modifiers = input["text"].as_str(); // Optional modifier keys
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let click_result = if use_focused_window {
-                        // Use focused window relative click with smooth movement
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_focused_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("left".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else if let Some(window_id_str) = window_id {
-                        // Use window relative click with smooth movement
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    window_id_str.to_string(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("left".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else {
-                        // Use global coordinates with smooth movement
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_left_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    };
-
-                    click_result.map_err(|e| format!("Left click failed: {}", e))?;
-
-                    // Verification: Check if clicking an input resulted in proper focus
-                    match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
+                // Validate permissions based on the action type
+                match action {
+                    "screenshot" => {
+                        // Screenshot requires screen recording permissions
+                        if let Err(e) = validate_permission(
+                            &app,
+                            RequiredPermission::ScreenRecording,
+                            "computer/screenshot",
+                        )
                         .await
-                    {
-                        Ok(true) => {
-                            info!("Action verification: Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
-                        }
-                        Ok(false) => {
-                            warn!("Action verification: Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Action verification: Failed to verify click at screen coordinates ({}, {}): {}",
-                                screen_x, screen_y, e
-                            );
+                        {
+                            return Err(e.to_string());
                         }
                     }
-
-                    Ok(json!({"success": true}))
-                }
-                "right_click" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-                    let modifiers = input["text"].as_str(); // Optional modifier keys
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent right-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let click_result = if use_focused_window {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_focused_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("right".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else if let Some(window_id_str) = window_id {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    window_id_str.to_string(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("right".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_right_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    };
-
-                    click_result.map_err(|e| format!("Right click failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "middle_click" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-                    let modifiers = input["text"].as_str(); // Optional modifier keys
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent middle-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let click_result = if use_focused_window {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_focused_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("middle".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else if let Some(window_id_str) = window_id {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    window_id_str.to_string(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("middle".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_middle_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    };
-
-                    click_result.map_err(|e| format!("Middle click failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "double_click" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-                    let modifiers = input["text"].as_str(); // Optional modifier keys
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent double-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let click_result = if use_focused_window {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_focused_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("double".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else if let Some(window_id_str) = window_id {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    window_id_str.to_string(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("double".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_double_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    };
-
-                    click_result.map_err(|e| format!("Double click failed: {}", e))?;
-
-                    // Verification: Check if double-clicking an input resulted in proper focus
-                    match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
+                    "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click"
+                    | "double_click" | "triple_click" | "left_click_drag" | "mouse_move"
+                    | "left_mouse_down" | "left_mouse_up" | "scroll" => {
+                        // Mouse and keyboard actions require accessibility permissions
+                        if let Err(e) = validate_permission(
+                            &app,
+                            RequiredPermission::Accessibility,
+                            &format!("computer/{}", action),
+                        )
                         .await
-                    {
-                        Ok(true) => {
-                            info!(
-                                "Action verification: Double-click at screen coordinates ({}, {}) successful",
-                                screen_x, screen_y
-                            );
-                        }
-                        Ok(false) => {
-                            warn!("Action verification: Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
-                        }
-                        Err(e) => {
-                            warn!("Action verification: Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                        {
+                            return Err(e.to_string());
                         }
                     }
-
-                    Ok(json!({"success": true}))
-                }
-                "triple_click" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
-                    }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-                    let modifiers = input["text"].as_str(); // Optional modifier keys
-                    let window_id = input["window_id"].as_str();
-                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent triple-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let click_result = if use_focused_window {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_focused_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("triple".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else if let Some(window_id_str) = window_id {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_window_relative_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    window_id_str.to_string(),
-                                    screen_x,
-                                    screen_y,
-                                    Some("triple".to_string()),
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    } else {
-                        tokio::task::block_in_place(|| {
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(async {
-                                crate::commands::mouse::dev_triple_click(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
-                                    screen_x,
-                                    screen_y,
-                                    modifiers.map(|s| s.to_string()),
-                                )
-                                .await
-                            })
-                        })
-                    };
-
-                    click_result.map_err(|e| format!("Triple click failed: {}", e))?;
-
-                    // Verification: Check if triple-clicking an input resulted in proper focus
-                    match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
+                    "cursor_position" => {
+                        // Cursor position requires accessibility permissions
+                        if let Err(e) = validate_permission(
+                            &app,
+                            RequiredPermission::Accessibility,
+                            "computer/cursor_position",
+                        )
                         .await
-                    {
-                        Ok(true) => {
-                            info!(
-                                "Action verification: Triple-click at screen coordinates ({}, {}) successful",
-                                screen_x, screen_y
-                            );
-                        }
-                        Ok(false) => {
-                            warn!("Action verification: Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
-                        }
-                        Err(e) => {
-                            warn!("Action verification: Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                        {
+                            return Err(e.to_string());
                         }
                     }
-
-                    Ok(json!({"success": true}))
+                    "wait" => {
+                        // Wait doesn't require special permissions
+                    }
+                    _ => {
+                        return Err(format!("Unknown computer action: {}", action));
+                    }
                 }
-                "left_click_drag" => {
-                    let start_coord = input["start_coordinate"].as_array().ok_or_else(|| {
-                        "Missing or invalid 'start_coordinate' parameter".to_string()
-                    })?;
-                    let end_coord = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
 
-                    if start_coord.len() != 2 || end_coord.len() != 2 {
-                        return Err("coordinates must be arrays of [x, y]".to_string());
+                match action {
+                    "screenshot" => {
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+                        let enable_token_selection =
+                            input["enable_token_selection"].as_bool().unwrap_or(false);
+                        let enable_ubp = input["enable_ubp"].as_bool().unwrap_or(false);
+
+                        let enable_exploration = input["enable_exploration"].as_bool().unwrap_or(false);
+                        let screenshot_result = capture_screenshot_with_advanced_processing(
+                            &app,
+                            window_id,
+                            use_focused_window,
+                            enable_token_selection,
+                            enable_ubp,
+                            enable_exploration,
+                        )
+                        .await?;
+
+                        Ok(screenshot_result)
                     }
+                    "cursor_position" => match state_manager.desktop.cursor_position() {
+                        Ok((x, y)) => Ok(json!([x, y])),
+                        Err(e) => Err(format!("Failed to get cursor position: {}", e)),
+                    },
+                    "mouse_move" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
-                    let screenshot_start_x = start_coord[0]
-                        .as_f64()
-                        .ok_or("Invalid start_x coordinate")?;
-                    let screenshot_start_y = start_coord[1]
-                        .as_f64()
-                        .ok_or("Invalid start_y coordinate")?;
-                    let screenshot_end_x =
-                        end_coord[0].as_f64().ok_or("Invalid end_x coordinate")?;
-                    let screenshot_end_y =
-                        end_coord[1].as_f64().ok_or("Invalid end_y coordinate")?;
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent mouse-move coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
 
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_start_x, screen_start_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_start_x,
-                            screenshot_start_y,
-                        );
-                    let (screen_end_x, screen_end_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_end_x,
-                            screenshot_end_y,
-                        );
-                    info!("Agent left-click-drag coordinate transformation: start screenshot ({}, {}) → screen ({}, {}), end screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_start_x, screenshot_start_y, screen_start_x, screen_start_y,
-                          screenshot_end_x, screenshot_end_y, screen_end_x, screen_end_y);
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_mouse_move(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                )
+                                .await
+                            })
+                        }).map_err(|e| format!("Mouse move failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "left_mouse_down" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
-                    tokio::task::block_in_place(|| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(async {
-                            crate::commands::mouse::dev_left_click_drag(
-                                app_handle.clone(),
-                                app_handle.clone().state(),
-                                screen_start_x,
-                                screen_start_y,
-                                screen_end_x,
-                                screen_end_y,
-                            )
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent left-mouse-down coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_left_mouse_down(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                )
+                                .await
+                            })
+                        }).map_err(|e| format!("Left mouse down failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "left_mouse_up" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent left-mouse-up coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_left_mouse_up(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_x,
+                                    screen_y,
+                                )
+                                .await
+                            })
+                        }).map_err(|e| format!("Left mouse up failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "left_click" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                        let modifiers = input["text"].as_str(); // Optional modifier keys
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let click_result = if use_focused_window {
+                            // Use focused window relative click with smooth movement
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_focused_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("left".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else if let Some(window_id_str) = window_id {
+                            // Use window relative click with smooth movement
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        window_id_str.to_string(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("left".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else {
+                            // Use global coordinates with smooth movement
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_left_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        };
+
+                        click_result.map_err(|e| format!("Left click failed: {}", e))?;
+
+                        // Verification: Check if clicking an input resulted in proper focus
+                        match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
                             .await
-                        })
-                    }).map_err(|e| format!("Left click drag failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "scroll" => {
-                    let coordinate = input["coordinate"]
-                        .as_array()
-                        .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
-                    if coordinate.len() != 2 {
-                        return Err("coordinate must be an array of [x, y]".to_string());
+                        {
+                            Ok(true) => {
+                                info!("Action verification: Click at screen coordinates ({}, {}) successful", screen_x, screen_y);
+                            }
+                            Ok(false) => {
+                                warn!("Action verification: Click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Action verification: Failed to verify click at screen coordinates ({}, {}): {}",
+                                    screen_x, screen_y, e
+                                );
+                            }
+                        }
+
+                        Ok(json!({"success": true}))
                     }
-                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
-
-                    // Transform screenshot coordinates to screen coordinates
-                    let (screen_x, screen_y) =
-                        crate::utils::coordinates::transform_to_screen_coordinates(
-                            screenshot_x,
-                            screenshot_y,
-                        );
-                    info!("Agent scroll coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
-                          screenshot_x, screenshot_y, screen_x, screen_y);
-
-                    let direction = input["scroll_direction"].as_str().ok_or_else(|| {
-                        "Missing or invalid 'scroll_direction' parameter".to_string()
-                    })?;
-                    let amount = input["scroll_amount"]
-                        .as_i64()
-                        .ok_or_else(|| "Missing or invalid 'scroll_amount' parameter".to_string())?
-                        as f64;
-
-                    state_manager
-                        .desktop
-                        .scroll_at_position(screen_x, screen_y, direction, amount)
-                        .map_err(|e| format!("Scroll failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "type" => {
-                    let text = input["text"]
-                        .as_str()
-                        .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
-
-                    // Verification: Ensure we have a focused, enabled text input before typing
-                    match verify_ready_for_text_input(&state_manager) {
-                        Ok(true) => {
-                            info!("Action verification: Ready to type text: '{}'", text);
+                    "right_click" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
                         }
-                        Ok(false) => {
-                            warn!("Action verification: No properly focused text input for typing. Attempting anyway...");
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Action verification: Failed to verify text input readiness: {}",
-                                e
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                        let modifiers = input["text"].as_str(); // Optional modifier keys
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
                             );
-                        }
+                        info!("Agent right-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let click_result = if use_focused_window {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_focused_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("right".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else if let Some(window_id_str) = window_id {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        window_id_str.to_string(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("right".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_right_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        };
+
+                        click_result.map_err(|e| format!("Right click failed: {}", e))?;
+                        Ok(json!({"success": true}))
                     }
+                    "middle_click" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                        let modifiers = input["text"].as_str(); // Optional modifier keys
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager
-                        .desktop
-                        .type_text(text)
-                        .map_err(|e| format!("Type text failed: {}", e))?;
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent middle-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
 
-                    info!(
-                        "Action completed: Successfully typed {} characters",
-                        text.len()
-                    );
-                    Ok(json!({"success": true}))
+                        let click_result = if use_focused_window {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_focused_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("middle".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else if let Some(window_id_str) = window_id {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        window_id_str.to_string(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("middle".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_middle_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        };
+
+                        click_result.map_err(|e| format!("Middle click failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "double_click" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                        let modifiers = input["text"].as_str(); // Optional modifier keys
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent double-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let click_result = if use_focused_window {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_focused_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("double".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else if let Some(window_id_str) = window_id {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        window_id_str.to_string(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("double".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_double_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        };
+
+                        click_result.map_err(|e| format!("Double click failed: {}", e))?;
+
+                        // Verification: Check if double-clicking an input resulted in proper focus
+                        match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
+                            .await
+                        {
+                            Ok(true) => {
+                                info!(
+                                    "Action verification: Double-click at screen coordinates ({}, {}) successful",
+                                    screen_x, screen_y
+                                );
+                            }
+                            Ok(false) => {
+                                warn!("Action verification: Double-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                            }
+                            Err(e) => {
+                                warn!("Action verification: Failed to verify double-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                            }
+                        }
+
+                        Ok(json!({"success": true}))
+                    }
+                    "triple_click" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                        let modifiers = input["text"].as_str(); // Optional modifier keys
+                        let window_id = input["window_id"].as_str();
+                        let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent triple-click coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let click_result = if use_focused_window {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_focused_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("triple".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else if let Some(window_id_str) = window_id {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_window_relative_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        window_id_str.to_string(),
+                                        screen_x,
+                                        screen_y,
+                                        Some("triple".to_string()),
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        } else {
+                            tokio::task::block_in_place(|| {
+                                let rt = tokio::runtime::Handle::current();
+                                rt.block_on(async {
+                                    crate::commands::mouse::dev_triple_click(
+                                        app.clone(),
+                                        app.clone().state(),
+                                        screen_x,
+                                        screen_y,
+                                        modifiers.map(|s| s.to_string()),
+                                    )
+                                    .await
+                                })
+                            })
+                        };
+
+                        click_result.map_err(|e| format!("Triple click failed: {}", e))?;
+
+                        // Verification: Check if triple-clicking an input resulted in proper focus
+                        match verify_input_focus_after_click(screen_x, screen_y, &state_manager, 500)
+                            .await
+                        {
+                            Ok(true) => {
+                                info!(
+                                    "Action verification: Triple-click at screen coordinates ({}, {}) successful",
+                                    screen_x, screen_y
+                                );
+                            }
+                            Ok(false) => {
+                                warn!("Action verification: Triple-click at screen coordinates ({}, {}) may not have achieved expected focus", screen_x, screen_y);
+                            }
+                            Err(e) => {
+                                warn!("Action verification: Failed to verify triple-click at screen coordinates ({}, {}): {}", screen_x, screen_y, e);
+                            }
+                        }
+
+                        Ok(json!({"success": true}))
+                    }
+                    "left_click_drag" => {
+                        let start_coord = input["start_coordinate"].as_array().ok_or_else(|| {
+                            "Missing or invalid 'start_coordinate' parameter".to_string()
+                        })?;
+                        let end_coord = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+
+                        if start_coord.len() != 2 || end_coord.len() != 2 {
+                            return Err("coordinates must be arrays of [x, y]".to_string());
+                        }
+
+                        let screenshot_start_x = start_coord[0]
+                            .as_f64()
+                            .ok_or("Invalid start_x coordinate")?;
+                        let screenshot_start_y = start_coord[1]
+                            .as_f64()
+                            .ok_or("Invalid start_y coordinate")?;
+                        let screenshot_end_x =
+                            end_coord[0].as_f64().ok_or("Invalid end_x coordinate")?;
+                        let screenshot_end_y =
+                            end_coord[1].as_f64().ok_or("Invalid end_y coordinate")?;
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_start_x, screen_start_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_start_x,
+                                screenshot_start_y,
+                            );
+                        let (screen_end_x, screen_end_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_end_x,
+                                screenshot_end_y,
+                            );
+                        info!("Agent left-click-drag coordinate transformation: start screenshot ({}, {}) → screen ({}, {}), end screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_start_x, screenshot_start_y, screen_start_x, screen_start_y,
+                              screenshot_end_x, screenshot_end_y, screen_end_x, screen_end_y);
+
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_left_click_drag(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    screen_start_x,
+                                    screen_start_y,
+                                    screen_end_x,
+                                    screen_end_y,
+                                )
+                                .await
+                            })
+                        }).map_err(|e| format!("Left click drag failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "scroll" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent scroll coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let direction = input["scroll_direction"].as_str().ok_or_else(|| {
+                            "Missing or invalid 'scroll_direction' parameter".to_string()
+                        })?;
+                        let amount = input["scroll_amount"]
+                            .as_i64()
+                            .ok_or_else(|| "Missing or invalid 'scroll_amount' parameter".to_string())?
+                            as f64;
+
+                        state_manager
+                            .desktop
+                            .scroll_at_position(screen_x, screen_y, direction, amount)
+                            .map_err(|e| format!("Scroll failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "type" => {
+                        let text = input["text"]
+                            .as_str()
+                            .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
+
+                        // Verification: Ensure we have a focused, enabled text input before typing
+                        match verify_ready_for_text_input(&state_manager) {
+                            Ok(true) => {
+                                info!("Action verification: Ready to type text: '{}'", text);
+                            }
+                            Ok(false) => {
+                                warn!("Action verification: No properly focused text input for typing. Attempting anyway...");
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Action verification: Failed to verify text input readiness: {}",
+                                    e
+                                );
+                            }
+                        }
+
+                        state_manager
+                            .desktop
+                            .type_text(text)
+                            .map_err(|e| format!("Type text failed: {}", e))?;
+
+                        info!(
+                            "Action completed: Successfully typed {} characters",
+                            text.len()
+                        );
+                        Ok(json!({"success": true}))
+                    }
+                    "key" => {
+                        let key_combo = input["text"]
+                            .as_str()
+                            .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
+
+                        state_manager
+                            .desktop
+                            .press_key(key_combo, None)
+                            .map_err(|e| format!("Key press failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "hold_key" => {
+                        let key = input["text"]
+                            .as_str()
+                            .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
+                        let duration = input["duration"]
+                            .as_u64()
+                            .ok_or_else(|| "Missing or invalid 'duration' parameter".to_string())?;
+
+                        state_manager
+                            .desktop
+                            .hold_key(key, Some(duration))
+                            .map_err(|e| format!("Hold key failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "wait" => {
+                        let duration_ms = input["duration"]
+                            .as_u64()
+                            .ok_or_else(|| "Missing or invalid 'duration' parameter".to_string())?
+                            * 1000; // Convert seconds to milliseconds
+
+                        state_manager
+                            .desktop
+                            .wait(duration_ms)
+                            .map_err(|e| format!("Wait failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "left_click_drag" => {
+                        let start_coord = input["start_coordinate"].as_array().ok_or_else(|| {
+                            "Missing or invalid 'start_coordinate' parameter".to_string()
+                        })?;
+                        let end_coord = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+
+                        if start_coord.len() != 2 || end_coord.len() != 2 {
+                            return Err("coordinates must be arrays of [x, y]".to_string());
+                        }
+
+                        let screenshot_start_x = start_coord[0]
+                            .as_f64()
+                            .ok_or("Invalid start_x coordinate")?;
+                        let screenshot_start_y = start_coord[1]
+                            .as_f64()
+                            .ok_or("Invalid start_y coordinate")?;
+                        let screenshot_end_x =
+                            end_coord[0].as_f64().ok_or("Invalid end_x coordinate")?;
+                        let screenshot_end_y =
+                            end_coord[1].as_f64().ok_or("Invalid end_y coordinate")?;
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_start_x, screen_start_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_start_x,
+                                screenshot_start_y,
+                            );
+                        let (screen_end_x, screen_end_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_end_x,
+                                screenshot_end_y,
+                            );
+                        info!("Agent left-click-drag coordinate transformation: start screenshot ({}, {}) → screen ({}, {}), end screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_start_x, screenshot_start_y, screen_start_x, screen_start_y,
+                              screenshot_end_x, screenshot_end_y, screen_end_x, screen_end_y);
+
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_left_click_drag(
+                                    app_handle.clone(),
+                                    app_handle.clone().state(),
+                                    screen_start_x,
+                                    screen_start_y,
+                                    screen_end_x,
+                                    screen_end_y,
+                                )
+                                .await
+                            })
+                        }).map_err(|e| format!("Left click drag failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    "scroll" => {
+                        let coordinate = input["coordinate"]
+                            .as_array()
+                            .ok_or_else(|| "Missing or invalid 'coordinate' parameter".to_string())?;
+                        if coordinate.len() != 2 {
+                            return Err("coordinate must be an array of [x, y]".to_string());
+                        }
+                        let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                        let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                        // Transform screenshot coordinates to screen coordinates
+                        let (screen_x, screen_y) =
+                            crate::utils::coordinates::transform_to_screen_coordinates(
+                                screenshot_x,
+                                screenshot_y,
+                            );
+                        info!("Agent scroll coordinate transformation: screenshot ({}, {}) → screen ({}, {})",
+                              screenshot_x, screenshot_y, screen_x, screen_y);
+
+                        let direction = input["scroll_direction"].as_str().ok_or_else(|| {
+                            "Missing or invalid 'scroll_direction' parameter".to_string()
+                        })?;
+                        let amount = input["scroll_amount"]
+                            .as_i64()
+                            .ok_or_else(|| "Missing or invalid 'scroll_amount' parameter".to_string())?
+                            as f64;
+
+                        state_manager
+                            .desktop
+                            .scroll_at_position(screen_x, screen_y, direction, amount)
+                            .map_err(|e| format!("Scroll failed: {}", e))?;
+                        Ok(json!({"success": true}))
+                    }
+                    _ => Err(format!("Unknown action: {}", action)),
                 }
-                "key" => {
-                    let key_combo = input["text"]
-                        .as_str()
-                        .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
-
-                    state_manager
-                        .desktop
-                        .press_key(key_combo, None)
-                        .map_err(|e| format!("Key press failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "hold_key" => {
-                    let key = input["text"]
-                        .as_str()
-                        .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
-                    let duration = input["duration"]
-                        .as_u64()
-                        .ok_or_else(|| "Missing or invalid 'duration' parameter".to_string())?;
-
-                    state_manager
-                        .desktop
-                        .hold_key(key, Some(duration))
-                        .map_err(|e| format!("Hold key failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                "wait" => {
-                    let duration_ms = input["duration"]
-                        .as_u64()
-                        .ok_or_else(|| "Missing or invalid 'duration' parameter".to_string())?
-                        * 1000; // Convert seconds to milliseconds
-
-                    state_manager
-                        .desktop
-                        .wait(duration_ms)
-                        .map_err(|e| format!("Wait failed: {}", e))?;
-                    Ok(json!({"success": true}))
-                }
-                _ => Err(format!("Unknown action: {}", action)),
             }
         }
     };
