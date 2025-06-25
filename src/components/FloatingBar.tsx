@@ -417,7 +417,7 @@ export function FloatingBar() {
   return (
     <div
       data-tauri-drag-region
-      className="w-screen h-screen flex items-start justify-start relative"
+      className="w-screen h-screen flex items-start justify-start relative overflow-hidden"
     >
       {/* Tooltip */}
       {/* {showTooltip && barState === "default" && (
