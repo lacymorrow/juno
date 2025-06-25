@@ -22,6 +22,8 @@
 //! Tools are registered with the `LocalToolProvider` and made available to AI agents.
 //! Each module exports registration functions and relevant types.
 
+pub mod accessibility_tools; // Native macOS accessibility tools for element-level interaction
+pub mod safari_dom_tools; // Safari-specific DOM analysis and interaction tools
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
 pub mod basic_tools; // Ensure basic_tools is declared
 pub mod browser_controller;
@@ -41,6 +43,7 @@ pub mod tool_mapping; // Add tool mapping service
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research // Enhanced Visual Reasoning System from CVPR 2025 research
 
+pub use accessibility_tools::{AccessibilityElement, AccessibilityTools}; // Export accessibility tools
 pub use basic_tools::*; // Export functions from basic_tools
 pub use browser_controller::BrowserController;
 pub use browser_tools::get_browser_tool_definitions;

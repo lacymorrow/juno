@@ -6,6 +6,8 @@ use tauri::{State, Emitter, AppHandle, WebviewUrl, WebviewWindowBuilder, Manager
 use tracing::{warn, info};
 
 // Declare the submodules
+pub mod accessibility;
+pub mod safari_dom;
 pub mod registry;
 pub mod app_url;
 pub mod autostart;
@@ -53,6 +55,15 @@ pub mod self_improvement; // Research-backed self-improving code generation syst
 pub mod debug_tools; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
+pub use self::accessibility::{
+    accessibility_scan, accessibility_click, test_accessibility_permissions,
+    get_accessibility_tool_definitions, execute_accessibility_tool
+};
+
+pub use self::safari_dom::{
+    safari_extract_dom, safari_click_element, safari_type_text, safari_get_url,
+    safari_navigate, safari_list_clickable_elements, safari_is_active, execute_safari_dom_tool
+};
 pub use self::autostart::*;
 pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;

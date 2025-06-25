@@ -400,10 +400,7 @@ impl Clone for LocalToolProvider {
             executors: Arc::clone(&self.executors),
             app_handle: self.app_handle.clone(),
             mcp_manager: self.mcp_manager.clone(),
-            error_recovery_stats: Arc::clone(&self.error_recovery_stats),
-            recovery_config: self.recovery_config.clone(),
-            tool_execution_history: Arc::clone(&self.tool_execution_history),
-            circuit_breakers: Arc::clone(&self.circuit_breakers),
+            recovery_stats: Arc::clone(&self.recovery_stats),
         }
     }
 }
