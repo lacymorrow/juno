@@ -203,64 +203,71 @@ pub async fn execute_str_replace_tool(
             let file_text = input["file_text"].as_str()
                 .ok_or_else(|| "Missing 'file_text' parameter for create command".to_string())?;
 
-            crate::commands::text_editor::text_editor_create(
-                path.to_string(),
-                file_text.to_string(),
-                app_handle.state(),
-                app_handle.clone(),
-            )
-            .await
-            .map(|_| json!({"success": true, "message": "File created successfully"}))
-            .map_err(|e| format!("Create failed: {}", e))
+            crate::commands::text_editor::text_editor_create(path.to_string(), file_text.to_string(), app_handle.state(), app_handle.clone())
+                .await
+                .map(|_| json!({"success": true, "message": "File created successfully"}))
+                .map_err(|e| format!("Create failed: {}", e))
         }
         "str_replace" => {
             let path = input["path"].as_str()
                 .ok_or_else(|| "Missing 'path' parameter for str_replace command".to_string())?;
             let old_str = input["old_str"].as_str()
                 .ok_or_else(|| "Missing 'old_str' parameter for str_replace command".to_string())?;
-            let new_str = input["new_str"].as_str()
-                .ok_or_else(|| "Missing 'new_str' parameter for str_replace command".to_string())?;
+            let new_str = input["new_str"].as_str().unwrap_or("");
 
-            crate::commands::text_editor::text_editor_str_replace(
-                path.to_string(),
-                old_str.to_string(),
-                new_str.to_string(),
-                app_handle.state(),
-                app_handle.clone(),
-            )
-            .await
-            .map(|_| json!({"success": true, "message": "String replacement completed"}))
-            .map_err(|e| format!("String replace failed: {}", e))
+            crate::commands::text_editor::text_editor_str_replace(path.to_string(), old_str.to_string(), new_str.to_string(), app_handle.state(), app_handle.clone())
+                .await
+                .map(|_| json!({"success": true, "message": "String replacement completed"}))
+                .map_err(|e| format!("String replace failed: {}", e))
         }
         _ => Err(format!("Unknown str_replace_based_edit_tool command: {}", command)),
     }
 }
 
-/// Register complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
+/// Register all official Anthropic Computer Use tools with the tool provider
 pub async fn register_anthropic_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("Registering complete Anthropic Computer Use tools...");
-
     // === COMPUTER TOOL ===
     let computer_tool_def = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use mouse and keyboard to interact with computer, and take screenshots.".to_string(),
+        description: "Use a computer like a human to interact with applications, take screenshots, click, type, and navigate. This is the official Anthropic Computer Use tool.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["key", "hold_key", "type", "cursor_position", "mouse_move", "left_mouse_down", "left_mouse_up", "left_click", "left_click_drag", "right_click", "middle_click", "double_click", "triple_click", "scroll", "wait", "screenshot"],
+                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "type", "key", "hold_key", "scroll", "wait", "cursor_position"],
                     "description": "The action to perform."
                 },
-                "coordinate": {"type": "array", "description": "(x, y) coordinates.", "items": {"type": "number"}},
-                "start_coordinate": {"type": "array", "description": "(x, y) start for drag.", "items": {"type": "number"}},
-                "text": {"type": "string", "description": "Text for type/key actions."},
-                "duration": {"type": "integer", "description": "Duration in seconds."},
-                "scroll_direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction."},
-                "scroll_amount": {"type": "integer", "description": "Scroll amount."}
+                "coordinate": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Array of [x, y] coordinates for click, mouse actions, and end position of drag actions."
+                },
+                "start_coordinate": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Array of [x, y] start coordinates for drag actions."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Text to type or key combination to press."
+                },
+                "scroll_direction": {
+                    "type": "string",
+                    "enum": ["up", "down", "left", "right"],
+                    "description": "Direction to scroll."
+                },
+                "scroll_amount": {
+                    "type": "number",
+                    "description": "Amount to scroll (default: 3)."
+                },
+                "duration": {
+                    "type": "number",
+                    "description": "Duration in milliseconds for wait or hold_key actions."
+                }
             },
             "required": ["action"]
         }),
