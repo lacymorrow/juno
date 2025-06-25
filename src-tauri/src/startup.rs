@@ -112,7 +112,14 @@ const DESKTOP_INIT_COOLDOWN_MS: u64 = 5000; // 5 seconds
 /// Initialize the Desktop Automation Engine with proper error handling and rate limiting
 pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     let cache = DESKTOP_CACHE.get_or_init(|| Mutex::new((0, None)));
-    let mut cache_guard = cache.lock().unwrap();
+    let mut cache_guard = match cache.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            warn!("Failed to acquire desktop engine cache lock: {}", e);
+            // For initialization functions, we can return None as fallback
+            return None;
+        }
+    };
     let (last_init, cached_desktop) = &mut *cache_guard;
 
     // Rate limiting check

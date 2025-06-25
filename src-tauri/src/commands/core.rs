@@ -414,77 +414,9 @@ pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> 
     Ok(result)
 }
 
-/// Reset all application settings to their default values
-#[tauri::command]
-pub async fn reset_all_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    info!("Resetting all settings to defaults");
-
-    // Reset TTS provider
-    {
-        let mut tts_provider = state.tts_provider.lock()
-            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
-        *tts_provider = "system".to_string();
-    }
-
-    // Reset sound settings
-    {
-        let mut sound_enabled = state.sound_enabled.lock()
-            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?;
-        *sound_enabled = true;
-    }
-
-    // Reset performance monitoring
-    let _ = state.set_performance_monitoring_enabled(true);
-
-    // Reset debug mode
-    let _ = state.set_debug_mode(false);
-
-    // Reset dictation settings
-    {
-        let mut dictation_clipboard = state.dictation_clipboard_enabled.lock()
-            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?;
-        *dictation_clipboard = true;
-    }
-
-    // Reset always listening settings
-    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone(), state.clone()).await {
-        warn!("Failed to stop always listening: {}", e);
-    }
-    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone(), state.clone()).await {
-        warn!("Failed to reset sensitivity: {}", e);
-    }
-    if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
-        vec!["hey juno".to_string(), "computer".to_string()],
-        app.clone(),
-        state.clone()
-    ).await {
-        warn!("Failed to reset wake words: {}", e);
-    }
-
-    // Reset keyboard shortcuts
-    if let Err(e) = crate::commands::shortcuts::reset_keyboard_shortcuts(app.clone(), state.clone()).await {
-        warn!("Failed to reset keyboard shortcuts: {}", e);
-    }
-
-    // Reset tool configuration
-    if let Err(e) = crate::commands::tools::reset_tool_configuration(app.clone(), state.clone()).await {
-        warn!("Failed to reset tool configuration: {}", e);
-    }
-
-    // Reset provider settings to defaults (this would require expanding provider commands)
-    // Note: This would need additional implementation in provider commands
-
-    // Reset cloud settings
-    if let Err(e) = crate::commands::cloud::disable_cloud(app.clone(), state.clone()).await {
-        warn!("Failed to disable cloud: {}", e);
-    }
-
-    info!("All settings have been reset to defaults");
-    Ok(())
-}
+// NOTE: reset_all_settings was removed and replaced with reset_centralized_settings
+// in src-tauri/src/commands/settings.rs to eliminate duplication and use proper
+// centralized settings management. The centralized version is the single source of truth.
 
 /// Cancel currently executing agent
 #[tauri::command]
