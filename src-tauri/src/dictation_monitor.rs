@@ -216,7 +216,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 
             // Force cleanup of app state
             let app_state = app_handle.state::<crate::state::AppState>();
-            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+            if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
                 *dictation_active = false;
             }
 
@@ -232,7 +232,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 
             // Force cleanup of app state
             let app_state = app_handle.state::<crate::state::AppState>();
-            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+            if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
                 *dictation_active = false;
             }
 

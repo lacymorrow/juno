@@ -384,19 +384,13 @@ pub async fn submit_query(
 
         // Force system TTS for offline response
         let current_provider = state
-            .tts_provider
-            .lock()
-            .map_err(|e| format!("Failed to access TTS provider: {}", e))?
-            .clone();
+            .get_tts_provider()
+            .map_err(|e| format!("Failed to access TTS provider: {}", e))?;
 
         // Temporarily switch to system TTS for offline message
-        {
-            let mut tts_provider = state
-                .tts_provider
-                .lock()
-                .map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
-            *tts_provider = "system".to_string();
-        }
+        state
+            .set_tts_provider("system".to_string())
+            .map_err(|e| format!("Failed to set TTS provider: {}", e))?;
 
         // Play offline message using system TTS
         if let Err(e) =
@@ -406,13 +400,9 @@ pub async fn submit_query(
         }
 
         // Restore original TTS provider
-        {
-            let mut tts_provider = state
-                .tts_provider
-                .lock()
-                .map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
-            *tts_provider = current_provider;
-        }
+        state
+            .set_tts_provider(current_provider)
+            .map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
 
         return Ok(());
     }
@@ -844,14 +834,9 @@ async fn execute_agent_internal(
             // For network errors, temporarily switch to system TTS to ensure the message is heard
             let should_force_system_tts = is_network_error || state_str == "Offline";
             let original_tts_provider = if should_force_system_tts {
-                let current_provider = state
-                    .tts_provider
-                    .lock()
-                    .map(|p| p.clone())
-                    .unwrap_or_default();
+                let current_provider = state.get_tts_provider().unwrap_or_default();
                 // Switch to system TTS for network errors
-                if let Ok(mut tts_provider) = state.tts_provider.lock() {
-                    *tts_provider = "system".to_string();
+                if let Ok(()) = state.set_tts_provider("system".to_string()) {
                     info!("Temporarily switched to system TTS for offline/network error message");
                 }
                 Some(current_provider)
@@ -870,12 +855,11 @@ async fn execute_agent_internal(
             // Store the original provider to restore later if needed
             if let Some(original_provider) = original_tts_provider {
                 // We'll restore it after TTS processing below
-                let tts_provider_ref = state.tts_provider.clone();
+                let state_ref = state.inner().clone();
                 tokio::task::spawn(async move {
                     // Give TTS time to process
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    if let Ok(mut tts_provider) = tts_provider_ref.lock() {
-                        *tts_provider = original_provider;
+                    if let Ok(()) = state_ref.set_tts_provider(original_provider) {
                         info!("Restored original TTS provider after offline/network error message");
                     }
                 });

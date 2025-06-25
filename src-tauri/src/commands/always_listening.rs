@@ -30,7 +30,7 @@ pub async fn start_always_listening_mode(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+    if let Ok(mut always_listening_active) = state.always_listening_active().lock() {
         *always_listening_active = true;
     } else {
         return Err("Failed to lock always listening state".to_string());
@@ -64,7 +64,7 @@ pub async fn start_always_listening_mode(
                     }
 
                     // Reset state on failure
-                    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+                    if let Ok(mut always_listening_active) = state.always_listening_active().lock() {
                         *always_listening_active = false;
                     }
 
@@ -82,7 +82,7 @@ pub async fn start_always_listening_mode(
             }
 
             // Reset state on failure
-            if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+            if let Ok(mut always_listening_active) = state.always_listening_active().lock() {
                 *always_listening_active = false;
             }
 
@@ -119,7 +119,7 @@ pub async fn stop_always_listening_mode(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+    if let Ok(mut always_listening_active) = state.always_listening_active().lock() {
         *always_listening_active = false;
     } else {
         return Err("Failed to lock always listening state".to_string());
@@ -226,7 +226,7 @@ pub async fn set_always_listening_sensitivity(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    if let Ok(mut sensitivity_state) = state.always_listening_sensitivity.lock() {
+    if let Ok(mut sensitivity_state) = state.always_listening_sensitivity().lock() {
         *sensitivity_state = sensitivity;
     } else {
         return Err("Failed to lock sensitivity state".to_string());
@@ -299,7 +299,7 @@ pub async fn set_always_listening_wake_words(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    if let Ok(mut wake_words_state) = state.always_listening_wake_words.lock() {
+    if let Ok(mut wake_words_state) = state.always_listening_wake_words().lock() {
         *wake_words_state = wake_words.clone();
     } else {
         return Err("Failed to lock wake words state".to_string());
@@ -354,15 +354,15 @@ pub async fn debug_always_listening_status(
     info!("[Command] debug_always_listening_status called");
 
     // Get app state
-    let is_active = state.always_listening_active.lock()
+    let is_active = state.always_listening_active().lock()
         .map(|active| *active)
         .unwrap_or(false);
 
-    let sensitivity = state.always_listening_sensitivity.lock()
+    let sensitivity = state.always_listening_sensitivity().lock()
         .map(|s| *s)
         .unwrap_or(0.5);
 
-    let wake_words = state.always_listening_wake_words.lock()
+    let wake_words = state.always_listening_wake_words().lock()
         .map(|w| w.clone())
         .unwrap_or_default();
 

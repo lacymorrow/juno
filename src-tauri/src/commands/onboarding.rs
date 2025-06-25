@@ -158,7 +158,7 @@ pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, St
 
     // Get current keyboard shortcuts for the onboarding display
     let app_state = app.state::<crate::state::AppState>();
-    let shortcuts = app_state.keyboard_shortcuts.lock()
+    let shortcuts = app_state.keyboard_shortcuts().lock()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
         .clone();
 
@@ -191,7 +191,7 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 
     // Check if global shortcuts are registered
     let app_state = app.state::<crate::state::AppState>();
-    let shortcuts = app_state.keyboard_shortcuts.lock()
+    let shortcuts = app_state.keyboard_shortcuts().lock()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
         .clone();
 

@@ -143,8 +143,8 @@ pub mod utils {
 
         // Reset dictation state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-            *dictation_active = false;
+        if let Err(e) = app_state.set_dictation_active(false) {
+            error!("Failed to reset dictation state during error recovery: {}", e);
         }
 
         if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
@@ -158,9 +158,7 @@ pub mod utils {
 
         // Stop agent execution
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut agent_execution_active) = app_state.agent_execution_active.lock() {
-            *agent_execution_active = false;
-        }
+        app_state.mark_agent_execution_finished();
 
         // Stop TTS if running
         crate::tts::stop_speech();

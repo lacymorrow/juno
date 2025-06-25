@@ -338,7 +338,7 @@ pub async fn handle_dictation_state_transition(app_handle: &AppHandle, active: b
     let app_state = app_handle.state::<AppState>();
 
     // Update dictation active state
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = active;
     } else {
         return Err("Failed to acquire dictation active lock".to_string());
@@ -416,7 +416,7 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     app_state.mark_agent_execution_finished();
 
     // Reset dictation state
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
         *dictation_active = false;
     }
 
@@ -464,7 +464,7 @@ pub async fn get_state_summary(app_handle: &AppHandle) -> Result<serde_json::Val
         },
         "dictation": {
             "active": app_state.is_dictation_active(),
-            "clipboard_enabled": app_state.dictation_clipboard_enabled.lock()
+            "clipboard_enabled": app_state.dictation_clipboard_enabled().lock()
                 .map(|enabled| *enabled)
                 .unwrap_or(false),
         },
@@ -486,10 +486,10 @@ pub async fn get_state_summary(app_handle: &AppHandle) -> Result<serde_json::Val
             "mode": app_state.is_debug_mode(),
         },
         "always_listening": {
-            "active": app_state.always_listening_active.lock()
+            "active": app_state.always_listening_active().lock()
                 .map(|active| *active)
                 .unwrap_or(false),
-            "sensitivity": app_state.always_listening_sensitivity.lock()
+            "sensitivity": app_state.always_listening_sensitivity().lock()
                 .map(|sensitivity| *sensitivity)
                 .unwrap_or(0.5),
         },

@@ -22,11 +22,8 @@ pub async fn set_dictation_clipboard_enabled(
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update state for backward compatibility
-    {
-        let mut clipboard_enabled = state.dictation_clipboard_enabled.lock()
-            .map_err(|e| format!("Failed to lock dictation_clipboard_enabled: {}", e))?;
-        *clipboard_enabled = enabled;
-    }
+    state.set_dictation_clipboard_enabled(enabled)
+        .map_err(|e| format!("Failed to set dictation_clipboard_enabled: {}", e))?;
 
     info!("Dictation Mode clipboard saving set to: {}", enabled);
     Ok(())
@@ -45,11 +42,8 @@ pub async fn get_dictation_clipboard_enabled(
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Sync with state for backward compatibility
-    {
-        let mut clipboard_enabled = state.dictation_clipboard_enabled.lock()
-            .map_err(|e| format!("Failed to lock dictation_clipboard_enabled: {}", e))?;
-        *clipboard_enabled = audio_settings.dictation_clipboard_enabled;
-    }
+    state.set_dictation_clipboard_enabled(audio_settings.dictation_clipboard_enabled)
+        .map_err(|e| format!("Failed to set dictation_clipboard_enabled: {}", e))?;
 
     tracing::debug!("Current Dictation Mode clipboard setting: {}", audio_settings.dictation_clipboard_enabled);
     Ok(audio_settings.dictation_clipboard_enabled)
