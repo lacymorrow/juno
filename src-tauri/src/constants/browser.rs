@@ -44,57 +44,70 @@ pub mod url_protocols {
     pub const FILE: &str = "file://";
     pub const FTP: &str = "ftp://";
 
-    // Common custom protocols that should be opened by system
-    pub const CUSTOM_PROTOCOLS: [&str; 12] = [
-        "mailto:",
-        "tel:",
-        "sms:",
-        "slack:",
-        "discord:",
-        "zoom:",
-        "teams:",
-        "spotify:",
-        "notion:",
-        "obsidian:",
-        "vscode:",
-        "jetbrains:",
-    ];
+    /// Web protocols that should be handled by the browser
+    const WEB_PROTOCOLS: [&str; 2] = ["http://", "https://"];
 
-    /// Check if URL has a custom protocol that should be handled by the system
-    pub fn is_custom_protocol(url: &str) -> bool {
+    /// Check if URL uses a web protocol that should be handled by the browser
+    pub fn is_web_protocol(url: &str) -> bool {
         let url_lower = url.to_lowercase();
+        WEB_PROTOCOLS.iter().any(|protocol| url_lower.starts_with(protocol))
+    }
 
-        // Allow standard web protocols in browser
-        if url_lower.starts_with(HTTP) || url_lower.starts_with(HTTPS) {
+    /// Check if URL has a protocol scheme (contains ':' after the scheme part)
+    pub fn has_protocol_scheme(url: &str) -> bool {
+        // Check if URL contains ':' but isn't a relative path
+        if !url.contains(':') {
             return false;
         }
 
-        // Check for custom protocols
-        CUSTOM_PROTOCOLS.iter().any(|protocol| url_lower.starts_with(protocol))
+        // Find the position of the first ':'
+        if let Some(colon_pos) = url.find(':') {
+            // Check if there are any path separators before the colon
+            // If so, it's likely a file path like "C:" on Windows
+            let before_colon = &url[..colon_pos];
+
+            // If the part before colon contains path separators, it's not a protocol
+            if before_colon.contains('/') || before_colon.contains('\\') {
+                return false;
+            }
+
+            // If it's just a single character (like "C:"), it's likely a Windows drive
+            if before_colon.len() == 1 {
+                return false;
+            }
+
+            // Otherwise, it's likely a protocol scheme
+            return true;
+        }
+
+        false
     }
 
     /// Check if URL should be opened in the system's default handler
     pub fn should_use_system_handler(url: &str) -> bool {
-        // First check for explicit custom protocols
-        if is_custom_protocol(url) {
+        // Handle relative paths and local files - these should be handled by browser navigation
+        if url.starts_with("/") || url.starts_with("./") || url.starts_with("../") {
+            return false;
+        }
+
+        // Handle URLs without any path separators and no protocol (like "index" or "page.html")
+        if !url.contains(':') && !url.contains('/') {
+            return false;
+        }
+
+        // If it's a web protocol, handle in browser
+        if is_web_protocol(url) {
+            return false;
+        }
+
+        // If it has a protocol scheme that's not web, use system handler
+        if has_protocol_scheme(url) {
             return true;
         }
 
-        let url_lower = url.to_lowercase();
-
-        // Don't use system handler for standard web protocols
-        if url_lower.starts_with("http://") || url_lower.starts_with("https://") {
-            return false;
-        }
-
-        // Don't use system handler for relative paths (browser navigation)
-        if url.starts_with("/") || url.starts_with("./") || url.starts_with("../") || !url.contains(":") {
-            return false;
-        }
-
-        // If URL contains ":" but isn't http/https and isn't a custom protocol,
-        // it might be another protocol scheme - use system handler
-        url.contains(":")
+        // For file paths with extensions but no protocol, let browser handle
+        // (these might be relative paths to local files)
+        false
     }
 }
 
@@ -153,6 +166,11 @@ mod tests {
         assert!(should_use_system_handler("zoom://meeting/123456"));
         assert!(should_use_system_handler("MAILTO:user@example.com")); // Case insensitive
         assert!(should_use_system_handler("TEL:+1234567890"));
+        assert!(should_use_system_handler("vscode://file/path/to/file"));
+        assert!(should_use_system_handler("notion://page/123"));
+        assert!(should_use_system_handler("discord://channel/123"));
+        assert!(should_use_system_handler("steam://run/123456"));
+        assert!(should_use_system_handler("spotify://playlist/123"));
     }
 
     #[test]
@@ -170,15 +188,39 @@ mod tests {
         assert!(should_use_system_handler("customapp://data"));
         assert!(should_use_system_handler("ftp://files.example.com"));
         assert!(should_use_system_handler("steam://run/123456"));
+        assert!(should_use_system_handler("myapp://custom/action"));
     }
 
     #[test]
     fn test_protocol_detection() {
-        assert!(is_custom_protocol("mailto:test@example.com"));
-        assert!(is_custom_protocol("tel:123"));
-        assert!(!is_custom_protocol("https://example.com"));
-        assert!(!is_custom_protocol("http://example.com"));
-        assert!(is_custom_protocol("vscode://file/path/to/file"));
-        assert!(is_custom_protocol("notion://page/123"));
+        assert!(has_protocol_scheme("mailto:test@example.com"));
+        assert!(has_protocol_scheme("tel:123"));
+        assert!(has_protocol_scheme("https://example.com"));
+        assert!(has_protocol_scheme("http://example.com"));
+        assert!(has_protocol_scheme("vscode://file/path/to/file"));
+        assert!(has_protocol_scheme("notion://page/123"));
+        assert!(has_protocol_scheme("ftp://server.com"));
+        assert!(has_protocol_scheme("steam://run/123"));
+
+        // These should NOT be detected as protocols
+        assert!(!has_protocol_scheme("/path/to/file"));
+        assert!(!has_protocol_scheme("./relative"));
+        assert!(!has_protocol_scheme("../parent"));
+        assert!(!has_protocol_scheme("filename.txt"));
+        assert!(!has_protocol_scheme("C:\\Windows\\file.txt")); // Windows path
+        assert!(!has_protocol_scheme("C:/Windows/file.txt")); // Windows path with forward slashes
+    }
+
+    #[test]
+    fn test_web_protocol_detection() {
+        assert!(is_web_protocol("https://example.com"));
+        assert!(is_web_protocol("http://example.com"));
+        assert!(is_web_protocol("HTTP://EXAMPLE.COM"));
+        assert!(is_web_protocol("HTTPS://EXAMPLE.COM"));
+
+        assert!(!is_web_protocol("mailto:user@example.com"));
+        assert!(!is_web_protocol("ftp://server.com"));
+        assert!(!is_web_protocol("file://path/to/file"));
+        assert!(!is_web_protocol("vscode://file"));
     }
 }
