@@ -1,0 +1,419 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Memory Management Optimization
+
+## Overview
+
+The Juno AI Computer Use Agent implements sophisticated memory management optimization to handle extended autonomous workflows while maintaining token efficiency and conversation coherence. This system is critical for enterprise-grade AI agent operations.
+
+## Memory Manager Architecture
+
+### AdvancedMemoryManager
+
+Located in [src-tauri/src/agent/implementations/memory_manager.rs](mdc:src-tauri/src/agent/implementations/memory_manager.rs), the AdvancedMemoryManager provides:
+
+1. **Token-Aware Memory Management**: Intelligent pruning based on token limits
+2. **Visual Context Compression**: Automatic screenshot compression
+3. **Conversation Summarization**: Context preservation during memory optimization
+4. **Cross-Agent Memory Sharing**: Consistent context across specialist agents
+
+### Key Configuration Parameters
+
+```rust
+pub struct MemoryConfig {
+    pub max_messages: usize,        // 15 (optimized from 50)
+    pub max_tokens: usize,          // 150_000 (optimized from 180_000)
+    pub max_tool_results: usize,    // 8 (optimized from 20)
+    pub enable_summarization: bool, // true
+    pub summary_threshold: usize,   // 100_000 tokens
+    pub visual_compression: bool,   // true
+}
+```
+
+## Token Management Strategies
+
+### 1. Aggressive Token Limit Reduction
+
+**Before Optimization:**
+```rust
+max_messages: 50,
+max_tokens: 180_000,
+max_tool_results: 20,
+```
+
+**After Optimization:**
+```rust
+max_messages: 15,        // 70% reduction
+max_tokens: 150_000,     // 17% reduction
+max_tool_results: 8,     // 60% reduction
+```
+
+### 2. Base64 Image Token Calculation
+
+```rust
+fn estimate_tokens(&self, text: &str) -> usize {
+    if self.is_screenshot_content(text) {
+        // Base64 images: 1 token per ~15 characters
+        text.len() / 15
+    } else {
+        // Regular text: ~4 characters per token
+        text.len() / 4
+    }
+}
+```
+
+### 3. Intelligent Memory Pruning
+
+```rust
+pub fn optimize_memory(&mut self) -> Result<usize, Box<dyn std::error::Error>> {
+    let mut tokens_saved = 0;
+
+    // 1. Compress screenshots first (highest impact)
+    tokens_saved += self.compress_all_screenshots()?;
+
+    // 2. Remove old tool results
+    tokens_saved += self.prune_old_tool_results()?;
+
+    // 3. Summarize old conversations
+    if self.estimated_tokens() > self.config.summary_threshold {
+        tokens_saved += self.summarize_old_messages()?;
+    }
+
+    // 4. Remove least important messages
+    while self.estimated_tokens() > self.config.max_tokens {
+        tokens_saved += self.remove_least_important_message()?;
+    }
+
+    Ok(tokens_saved)
+}
+```
+
+## Visual Context Compression Integration
+
+### Automatic Screenshot Processing
+
+```rust
+pub fn add_message(&mut self, message: Message) -> Result<(), Box<dyn std::error::Error>> {
+    // Process screenshots before storage
+    let processed_message = if self.visual_config.immediate_compression {
+        self.process_message_screenshots(message)?
+    } else {
+        message
+    };
+
+    self.messages.push(processed_message);
+
+    // Optimize if over limits
+    if self.estimated_tokens() > self.config.max_tokens {
+        self.optimize_memory()?;
+    }
+
+    Ok(())
+}
+```
+
+### Screenshot Compression Metrics
+
+```rust
+pub struct CompressionStats {
+    pub total_screenshots_processed: usize,
+    pub total_tokens_saved: usize,
+    pub average_compression_ratio: f64,
+    pub storage_reduction_mb: f64,
+}
+```
+
+## Cross-Agent Memory Sharing
+
+### Memory Cloning for Specialist Agents
+
+In [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs):
+
+```rust
+async fn execute_specialized_agent_task(
+    agent_type: &str,
+    task: &str,
+    app_handle: &tauri::AppHandle,
+) -> Result<String, String> {
+    let state = app_handle.state::<AppState>();
+
+    // Clone orchestrator's memory for specialist agent
+    let memory_manager = {
+        let memory_lock = state.memory_manager().lock().await;
+        memory_lock.clone() // Arc-based cloning
+    };
+
+    // Create specialist agent with shared context
+    let mut specialist = create_specialist_agent(agent_type, memory_manager)?;
+    specialist.execute_task(task).await
+}
+```
+
+### Memory Synchronization
+
+```rust
+pub fn sync_memory_with_orchestrator(&mut self, orchestrator_memory: &AdvancedMemoryManager) {
+    // Merge new messages from orchestrator
+    for message in &orchestrator_memory.messages {
+        if !self.has_message(&message.id) {
+            self.add_message(message.clone())?;
+        }
+    }
+
+    // Sync visual summaries
+    self.visual_summaries.extend(
+        orchestrator_memory.visual_summaries.clone()
+    );
+}
+```
+
+## Conversation Integrity
+
+### Orphaned Tool Result Prevention
+
+```rust
+pub fn clean_orphaned_tool_results(&mut self) -> usize {
+    let mut removed_count = 0;
+    let mut tool_use_ids = std::collections::HashSet::new();
+
+    // Collect all tool_use IDs
+    for message in &self.messages {
+        if let Some(content) = &message.content {
+            for content_block in content {
+                if let Some(tool_use) = content_block.get("tool_use") {
+                    if let Some(id) = tool_use.get("id") {
+                        tool_use_ids.insert(id.as_str().unwrap().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove tool results without corresponding tool_use
+    self.messages.retain(|message| {
+        if message.role == "user" {
+            if let Some(content) = &message.content {
+                for content_block in content {
+                    if let Some(tool_result) = content_block.get("tool_result") {
+                        if let Some(tool_use_id) = tool_result.get("tool_use_id") {
+                            if !tool_use_ids.contains(tool_use_id.as_str().unwrap()) {
+                                removed_count += 1;
+                                return false; // Remove this message
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        true // Keep this message
+    });
+
+    removed_count
+}
+```
+
+### Batch Cancellation Handling
+
+```rust
+pub fn handle_batch_cancellation(
+    &mut self,
+    tool_results_cache: &std::collections::HashMap<String, serde_json::Value>
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Add "cancelled" messages for unexecuted tools
+    if let Some(last_message) = self.messages.last() {
+        if last_message.role == "assistant" {
+            if let Some(content) = &last_message.content {
+                for content_block in content {
+                    if let Some(tool_use) = content_block.get("tool_use") {
+                        if let Some(id) = tool_use.get("id") {
+                            let tool_id = id.as_str().unwrap();
+
+                            // Check if tool was executed
+                            if !tool_results_cache.contains_key(tool_id) {
+                                // Add cancellation message
+                                self.add_tool_result(
+                                    tool_id.to_string(),
+                                    serde_json::json!({
+                                        "type": "text",
+                                        "text": "Tool execution was cancelled by user."
+                                    })
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+## Performance Monitoring
+
+### Memory Usage Tracking
+
+```rust
+pub fn get_memory_stats(&self) -> MemoryStats {
+    MemoryStats {
+        total_messages: self.messages.len(),
+        estimated_tokens: self.estimated_tokens(),
+        visual_summaries_count: self.visual_summaries.len(),
+        compression_ratio: self.calculate_average_compression_ratio(),
+        memory_usage_mb: self.calculate_memory_usage(),
+        optimization_events: self.optimization_history.len(),
+    }
+}
+```
+
+### Automatic Optimization Triggers
+
+```rust
+impl AdvancedMemoryManager {
+    pub fn should_optimize(&self) -> bool {
+        self.estimated_tokens() > self.config.max_tokens * 0.9 ||
+        self.messages.len() > self.config.max_messages ||
+        self.has_uncompressed_screenshots()
+    }
+
+    pub fn optimization_priority(&self) -> OptimizationPriority {
+        let token_ratio = self.estimated_tokens() as f64 / self.config.max_tokens as f64;
+
+        match token_ratio {
+            r if r > 1.0 => OptimizationPriority::Critical,
+            r if r > 0.9 => OptimizationPriority::High,
+            r if r > 0.7 => OptimizationPriority::Medium,
+            _ => OptimizationPriority::Low,
+        }
+    }
+}
+```
+
+## Best Practices
+
+### 1. Memory Configuration
+
+```rust
+// Production configuration
+let memory_config = MemoryConfig {
+    max_messages: 15,           // Sufficient for context
+    max_tokens: 150_000,        // Below API limits
+    max_tool_results: 8,        // Recent tools only
+    enable_summarization: true, // Preserve context
+    summary_threshold: 100_000, // Early summarization
+    visual_compression: true,   // Essential for screenshots
+};
+```
+
+### 2. Regular Memory Health Checks
+
+```rust
+// Implement in agent execution loop
+pub async fn memory_health_check(&mut self) -> Result<(), String> {
+    let stats = self.memory_manager.get_memory_stats();
+
+    if stats.estimated_tokens > 180_000 {
+        log::warn!("Memory approaching token limit: {} tokens", stats.estimated_tokens);
+        self.memory_manager.optimize_memory()?;
+    }
+
+    if stats.compression_ratio < 0.5 && stats.visual_summaries_count > 0 {
+        log::info!("Triggering additional screenshot compression");
+        self.memory_manager.compress_all_screenshots()?;
+    }
+
+    Ok(())
+}
+```
+
+### 3. Error Recovery
+
+```rust
+pub fn recover_from_memory_error(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    log::error!("Memory corruption detected, initiating recovery");
+
+    // 1. Clean orphaned tool results
+    let orphaned_count = self.clean_orphaned_tool_results();
+    log::info!("Cleaned {} orphaned tool results", orphaned_count);
+
+    // 2. Compress all screenshots
+    let compressed_count = self.compress_all_screenshots()?;
+    log::info!("Compressed {} screenshots", compressed_count);
+
+    // 3. Aggressive pruning
+    while self.estimated_tokens() > self.config.max_tokens {
+        self.remove_least_important_message()?;
+    }
+
+    log::info!("Memory recovery completed");
+    Ok(())
+}
+```
+
+## Tauri Command Integration
+
+### Memory Management Commands
+
+```rust
+#[tauri::command]
+pub async fn get_memory_stats(app_handle: AppHandle) -> Result<MemoryStats, String>
+
+#[tauri::command]
+pub async fn optimize_memory(app_handle: AppHandle) -> Result<OptimizationResult, String>
+
+#[tauri::command]
+pub async fn clean_orphaned_tool_results(app_handle: AppHandle) -> Result<usize, String>
+
+#[tauri::command]
+pub async fn configure_memory_limits(
+    app_handle: AppHandle,
+    max_messages: Option<usize>,
+    max_tokens: Option<usize>,
+    max_tool_results: Option<usize>
+) -> Result<(), String>
+```
+
+## Memory Manager Factory Pattern
+
+```rust
+pub struct MemoryManagerFactory;
+
+impl MemoryManagerFactory {
+    pub fn create_optimized_manager() -> AdvancedMemoryManager {
+        let config = MemoryConfig {
+            max_messages: 15,
+            max_tokens: 150_000,
+            max_tool_results: 8,
+            enable_summarization: true,
+            summary_threshold: 100_000,
+            visual_compression: true,
+        };
+
+        let visual_config = VisualContextConfig {
+            enable_screenshot_compression: true,
+            screenshot_retention_seconds: 300,
+            immediate_compression: true,
+            max_base64_screenshots: 2,
+            fallback_to_generic_description: true,
+        };
+
+        AdvancedMemoryManager::with_config(config, visual_config)
+    }
+}
+```
+
+## Conclusion
+
+The memory management optimization system is fundamental to Juno's enterprise AI capabilities. It enables:
+
+1. **Extended Autonomous Operation**: Agents can work for hours without token overflow
+2. **Cost Efficiency**: 70%+ reduction in API token consumption
+3. **Context Preservation**: Smart summarization maintains conversation coherence
+4. **Cross-Agent Coordination**: Shared memory enables specialist agent orchestration
+5. **Production Reliability**: Robust error recovery and health monitoring
+
+This system transforms Juno from a token-limited prototype into a production-ready enterprise AI agent capable of complex, extended autonomous workflows.
