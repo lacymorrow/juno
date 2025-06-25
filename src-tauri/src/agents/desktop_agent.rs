@@ -53,7 +53,7 @@ impl DesktopAgent {
                 // This handles all computer actions: click, type, scroll, screenshot, etc.
                 match crate::agent::tools::anthropic_computer_use::execute_computer_tool(
                     &self.app_handle,
-                    tool_call,
+                    tool_call.input.clone(),
                 ).await {
                     Ok(result) => Ok(ToolResult {
                         call_id: tool_call.id.clone(),
