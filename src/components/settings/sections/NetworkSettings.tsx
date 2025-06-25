@@ -23,11 +23,15 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 
 import { SettingsSectionProps } from "../types";
 
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
+  const [cloudTestPassword, setCloudTestPassword] = useState("");
+  const [cloudTestStatus, setCloudTestStatus] = useState("");
+  const [isCloudTesting, setIsCloudTesting] = useState(false);
 
   // JSON coercion function to fix common JSON issues
   const coerceJson = (jsonStr: string): string => {
@@ -202,6 +206,53 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     } catch (error) {
       console.error("Failed to toggle tool:", error);
       toast.error("Failed to toggle tool");
+    }
+  };
+
+  const handleSetCloudPassword = async () => {
+    if (!cloudTestPassword.trim()) {
+      toast.error("Please enter a password");
+      return;
+    }
+
+    try {
+      await invoke("update_cloud_config", {
+        enabled: true,
+        api_key: cloudTestPassword,
+        device_name: "Juno Test Agent",
+        auto_connect: true,
+      });
+      toast.success("Cloud test password set successfully");
+      setCloudTestStatus("Password set - ready for testing");
+    } catch (error) {
+      console.error("Failed to set cloud password:", error);
+      toast.error("Failed to set cloud password");
+    }
+  };
+
+  const handleTestCloudConnection = async () => {
+    setIsCloudTesting(true);
+    try {
+      const result = await invoke("test_cloud_backend_connection");
+      setCloudTestStatus(result as string);
+      toast.success("Cloud connection test completed");
+    } catch (error) {
+      console.error("Cloud test failed:", error);
+      setCloudTestStatus(`❌ Test failed: ${error}`);
+      toast.error("Cloud connection test failed");
+    } finally {
+      setIsCloudTesting(false);
+    }
+  };
+
+  const handleGetCloudStatus = async () => {
+    try {
+      const status = await invoke("get_cloud_config_status");
+      setCloudTestStatus(JSON.stringify(status, null, 2));
+      toast.success("Cloud status retrieved");
+    } catch (error) {
+      console.error("Failed to get cloud status:", error);
+      toast.error("Failed to get cloud status");
     }
   };
 
@@ -448,6 +499,112 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Cloud Control Testing */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Server size={20} />
+            Cloud Control Testing
+          </CardTitle>
+          <CardDescription>
+            Set a password/API key for cloud control testing and test the
+            connection
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="cloud-test-password">
+              Cloud Test Password/API Key
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id="cloud-test-password"
+                type="password"
+                value={cloudTestPassword}
+                onChange={(e) => setCloudTestPassword(e.target.value)}
+                placeholder="Enter test password or API key"
+                className="flex-1"
+              />
+              <Button
+                onClick={handleSetCloudPassword}
+                disabled={!cloudTestPassword.trim()}
+                className="flex items-center gap-2"
+              >
+                <Save size={16} />
+                Set Password
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              onClick={handleTestCloudConnection}
+              disabled={isCloudTesting}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${isCloudTesting ? "animate-spin" : ""}`}
+              />
+              Test Connection
+            </Button>
+            <Button
+              onClick={handleGetCloudStatus}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <CheckCircle size={16} />
+              Get Status
+            </Button>
+          </div>
+
+          {cloudTestStatus && (
+            <div className="space-y-2">
+              <Label>Test Status:</Label>
+              <div className="p-3 bg-muted/50 rounded font-mono text-sm whitespace-pre-wrap">
+                {cloudTestStatus}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-4 border-t text-sm text-muted-foreground">
+            <div className="space-y-2">
+              <p className="font-medium">Test with curl:</p>
+              <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
+                <div>
+                  <strong>1. Register device:</strong>
+                </div>
+                <code>
+                  {`
+                    curl -X POST -H "Content-Type: application/json" \
+                    -d '{"device_name":"test-agent","device_type":"desktop","platform":"macos"}' \
+                    https://juno-cloud-backend.fly.dev/api/register
+                  `}
+                </code>
+                <br />
+                <div>
+                  <strong>
+                    2. Send WebSocket command (use the API key from step 1):
+                  </strong>
+                </div>
+                <code>
+                  {`
+                    	node -e "const WebSocket = require('ws'); \
+                    const ws = new WebSocket('wss://juno-cloud-backend.fly.dev/ws'); \
+                    ws.on('open', () => { \
+                    &nbsp;&nbsp;ws.send(JSON.stringify({type:'auth',api_key:'YOUR_API_KEY'})); \
+                    &nbsp;&nbsp;setTimeout(() => ws.send(JSON.stringify({type:'command',command:'take_screenshot'})), 1000); \
+                    });"
+                  `}
+                </code>
+              </div>
+              <p className="text-xs text-yellow-600">
+                ⚠️ Use the password you set above as the API key for testing
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
