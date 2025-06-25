@@ -2647,9 +2647,21 @@ pub async fn register_anthropic_computer_use_tools(
                         }
                     }
 
-                    // Create the file with enhanced error handling
-                    match std::fs::write(path, file_text) {
-                        Ok(_) => Ok(json!(format!("File created successfully: {}", path))),
+                    // Create the file with fail-if-exists behavior using OpenOptions
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+
+                    match OpenOptions::new()
+                        .write(true)
+                        .create_new(true) // Fail if file already exists
+                        .open(path)
+                    {
+                        Ok(mut file) => {
+                            match file.write_all(file_text.as_bytes()) {
+                                Ok(_) => Ok(json!(format!("File created successfully: {}", path))),
+                                Err(e) => Err(format!("Error: Failed to write to file '{}': {}", path, e))
+                            }
+                        }
                         Err(e) => {
                             match e.kind() {
                                 std::io::ErrorKind::PermissionDenied => {
