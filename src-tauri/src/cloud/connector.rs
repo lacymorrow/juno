@@ -540,41 +540,14 @@ impl ProductionCloudConnector {
 
         info!("🔐 Authentication message sent");
 
-        // Wait for authentication response
-        if let Some(msg) = ws_receiver.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    let response: WebSocketMessage = serde_json::from_str(&text)?;
-                    if response.message_type == MessageType::Auth {
-                        if let Some(success) = response.data.get("success").and_then(|s| s.as_bool()) {
-                                                        if success {
-                                info!("✅ Authentication successful");
-                                self.set_connection_state(ConnectorState::Authenticated).await;
-                            } else {
-                                let error_msg = response.data.get("error")
-                                    .and_then(|e| e.as_str())
-                                    .unwrap_or("Authentication failed");
-                                return Err(CloudError::AuthenticationFailed(error_msg.to_string()));
-                            }
-                        }
-                    }
-                },
-                Ok(_) => {
-                    return Err(CloudError::AuthenticationFailed("Unexpected message type".to_string()));
-                },
-                Err(e) => {
-                    return Err(CloudError::NetworkError(format!("WebSocket error: {}", e)));
-                }
-            }
-        } else {
-            return Err(CloudError::AuthenticationFailed("No authentication response".to_string()));
-        }
-
-        // Start WebSocket message handling in background
+        // Start WebSocket message handling in background with proper authentication handling
         let app_handle = self.app_handle.clone();
         let connection_state = self.connection_state.clone();
+        let ws_sender_clone = self.ws_sender.clone();
 
         tokio::spawn(async move {
+            let mut authenticated = false;
+
             // Handle incoming messages
             while let Some(msg) = ws_receiver.next().await {
                 match msg {
@@ -584,16 +557,45 @@ impl ProductionCloudConnector {
                         // Parse and handle the message
                         if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
                             match ws_message.message_type {
-                                MessageType::Command => {
-                                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
-                                        // Emit command to be handled by the app
-                                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
-                                            error!("Failed to emit cloud command: {}", e);
+                                MessageType::Auth => {
+                                    if !authenticated {
+                                        // Handle authentication response
+                                        if let Some(success) = ws_message.data.get("success").and_then(|s| s.as_bool()) {
+                                            if success {
+                                                info!("✅ Authentication successful");
+                                                authenticated = true;
+                                                let mut state = connection_state.lock().await;
+                                                *state = ConnectorState::Authenticated;
+                                            } else {
+                                                let error_msg = ws_message.data.get("error")
+                                                    .and_then(|e| e.as_str())
+                                                    .unwrap_or("Authentication failed");
+                                                error!("❌ Authentication failed: {}", error_msg);
+                                                let mut state = connection_state.lock().await;
+                                                *state = ConnectorState::Error(format!("Authentication failed: {}", error_msg));
+                                                break;
+                                            }
                                         }
+                                    } else {
+                                        debug!("📨 Additional auth message received (ignoring)");
+                                    }
+                                },
+                                MessageType::Command => {
+                                    if authenticated {
+                                        if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
+                                            // Emit command to be handled by the app
+                                            if let Err(e) = app_handle.emit("cloud-command-received", &command) {
+                                                error!("Failed to emit cloud command: {}", e);
+                                            }
+                                        }
+                                    } else {
+                                        warn!("⚠️ Received command before authentication - ignoring");
                                     }
                                 },
                                 MessageType::Heartbeat => {
-                                    debug!("💓 Heartbeat received");
+                                    if authenticated {
+                                        debug!("💓 Heartbeat received");
+                                    }
                                 },
                                 _ => {
                                     debug!("📨 Other message type: {:?}", ws_message.message_type);
@@ -616,7 +618,40 @@ impl ProductionCloudConnector {
                     _ => {}
                 }
             }
+
+            // Clean up sender when connection closes
+            {
+                let mut sender_guard = ws_sender_clone.lock().await;
+                *sender_guard = None;
+            }
         });
+
+        // Wait for authentication to complete
+        let mut auth_timeout = tokio::time::interval(Duration::from_millis(100));
+        let mut attempts = 0;
+        const MAX_AUTH_ATTEMPTS: u32 = 50; // 5 seconds total
+
+        loop {
+            auth_timeout.tick().await;
+            attempts += 1;
+
+            let state = self.connection_state.lock().await;
+            match *state {
+                ConnectorState::Authenticated => {
+                    info!("✅ Authentication confirmed");
+                    break;
+                },
+                ConnectorState::Error(ref err) => {
+                    return Err(CloudError::AuthenticationFailed(err.clone()));
+                },
+                _ => {
+                    if attempts >= MAX_AUTH_ATTEMPTS {
+                        return Err(CloudError::AuthenticationFailed("Authentication timeout".to_string()));
+                    }
+                    // Continue waiting
+                }
+            }
+        }
 
         self.set_connection_state(ConnectorState::Ready).await;
         info!("✅ Enhanced cloud connector established with hardware monitoring");
