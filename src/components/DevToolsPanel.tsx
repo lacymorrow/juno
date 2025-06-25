@@ -14,6 +14,7 @@ import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
 import SelfImprovementPanel from "./devtools/SelfImprovementPanel";
+import { ToolDebugPanel } from "./devtools/ToolDebugPanel";
 import VisualizationSettings from "./devtools/VisualizationSettings";
 import WakeWordTesting from "./devtools/WakeWordTesting";
 import WindowOperations from "./devtools/WindowOperations";
@@ -169,6 +170,12 @@ const DevToolsPanel: React.FC = () => {
   return (
     <ScrollArea className="h-full w-full rounded-md border p-4">
       <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">🔧 Tool Configuration Debug</h2>
+          <Separator className="my-2" />
+          <ToolDebugPanel />
+        </div>
+
         <div>
           <h2 className="text-lg font-semibold">Cloud & WebSocket Testing</h2>
           <Separator className="my-2" />
