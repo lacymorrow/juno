@@ -796,6 +796,11 @@ pub fn run() {
             commands::self_improvement::run_performance_benchmarks,
             commands::self_improvement::get_system_health_metrics,
             commands::self_improvement::get_available_benchmarks,
+
+            // Debug Tool Commands
+            commands::debug_tools::debug_tool_configuration,
+            commands::debug_tools::debug_registered_tools,
+            commands::debug_tools::debug_reset_tool_config,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

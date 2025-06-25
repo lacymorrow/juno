@@ -345,15 +345,32 @@ impl ToolConfigManager {
     /// # Arguments
     /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
+        // CRITICAL FIX: Always enable essential Anthropic Computer Use tools
+        let essential_tools = ["computer", "screenshot", "bash"];
+        if essential_tools.contains(&tool_name) {
+            tracing::debug!("Tool '{}' is essential and always enabled", tool_name);
+            return true;
+        }
+
         if let Some(tool_config) = self.tools.get(tool_name) {
             if tool_config.required {
+                tracing::debug!("Tool '{}' is required and always enabled", tool_name);
                 return true; // Required tools are always enabled
             }
 
             // Check both tool-specific and category-wide settings
             let category_enabled = self.category_enabled.get(&tool_config.category).unwrap_or(&true);
-            tool_config.enabled && *category_enabled
+            let result = tool_config.enabled && *category_enabled;
+            tracing::debug!("Tool '{}' enabled check: tool_enabled={}, category_enabled={}, result={}",
+                tool_name, tool_config.enabled, category_enabled, result);
+            result
         } else {
+            // CRITICAL FIX: If essential tools are not in config, still enable them
+            if essential_tools.contains(&tool_name) {
+                tracing::warn!("Essential tool '{}' not found in config, but enabling anyway", tool_name);
+                return true;
+            }
+            tracing::debug!("Unknown tool '{}' disabled by default", tool_name);
             false // Unknown tools are disabled by default
         }
     }
