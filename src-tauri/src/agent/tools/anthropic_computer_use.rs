@@ -2339,8 +2339,8 @@ pub async fn register_anthropic_computer_use_tools(
                             let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
                                 crate::commands::mouse::dev_left_click_drag(
-                                    app_handle.clone(),
-                                    app_handle.clone().state(),
+                                    app.clone(),
+                                    app.clone().state(),
                                     screen_start_x,
                                     screen_start_y,
                                     screen_end_x,
