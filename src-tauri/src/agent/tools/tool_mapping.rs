@@ -34,6 +34,16 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("browser_get_current_url", ToolCategory::Browser);
     map.insert("browser_form", ToolCategory::Browser);
 
+    // Safari tools (specialized browser automation for Safari)
+    map.insert("safari_extract_dom", ToolCategory::Browser);
+    map.insert("safari_click_element", ToolCategory::Browser);
+    map.insert("safari_type_text", ToolCategory::Browser);
+    map.insert("safari_get_url", ToolCategory::Browser);
+    map.insert("safari_navigate", ToolCategory::Browser);
+    map.insert("safari_list_clickable_elements", ToolCategory::Browser);
+    map.insert("safari_execute_javascript", ToolCategory::Browser);
+    map.insert("safari_clear_cache", ToolCategory::Browser);
+
     // Desktop tools
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
     // dev_left_click, desktop_click, left_click → computer tool with action: "click"
@@ -181,7 +191,7 @@ impl ToolMappingService {
         }
 
         // Fallback to prefix matching for dynamically named tools
-        if tool_name.starts_with("browser_") {
+        if tool_name.starts_with("browser_") || tool_name.starts_with("safari_") {
             return Some(ToolCategory::Browser);
         }
         if tool_name.starts_with("dev_") || tool_name.starts_with("desktop_") {
