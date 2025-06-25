@@ -41,24 +41,64 @@ pub(crate) async fn dev_text_editor_create(
     content: String,
 ) -> Result<(), String> {
     let path_buf: PathBuf = path.into();
-    info!(path = %path_buf.display(), "[DEV_TOOL] Creating/overwriting file");
+    info!(path = %path_buf.display(), "[DEV_TOOL] Creating file");
 
-    // Store previous state for undo
-    let previous_content = fs::read_to_string(&path_buf).ok();
-    // Use original String for state update, convert PathBuf back for notification
-    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), previous_content) {
-        warn!("Failed to update undo state: {}", e);
+    // Create parent directories if they don't exist
+    if let Some(parent) = path_buf.parent() {
+        if !parent.exists() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                let err_msg = format!("Failed to create parent directories for '{}': {}", path_buf.display(), e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+        }
     }
 
-    match fs::write(&path_buf, content) {
-        Ok(_) => {
-            send_dev_tool_notification(&app, "File Operation", &format!("File '{}' created/updated.", path_buf.display()))?;
-            Ok(())
-        },
+    // Create the file with fail-if-exists behavior using OpenOptions
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true) // Fail if file already exists
+        .open(&path_buf)
+    {
+        Ok(mut file) => {
+            match file.write_all(content.as_bytes()) {
+                Ok(_) => {
+                    // Store state for undo (only after successful creation)
+                    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), None) {
+                        warn!("Failed to update undo state: {}", e);
+                    }
+
+                    send_dev_tool_notification(&app, "File Operation", &format!("File '{}' created.", path_buf.display()))?;
+                    Ok(())
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to write to file '{}': {}", path_buf.display(), e);
+                    error!("{}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
         Err(e) => {
-            let err_msg = format!("Failed to write file '{}': {}", path_buf.display(), e);
-            error!("{}", err_msg);
-            Err(err_msg)
+            match e.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    let err_msg = "Permission denied. Cannot create file.".to_string();
+                    error!("{}", err_msg);
+                    Err(err_msg)
+                }
+                std::io::ErrorKind::AlreadyExists => {
+                    let err_msg = format!("File already exists: {}", path_buf.display());
+                    error!("{}", err_msg);
+                    Err(err_msg)
+                }
+                _ => {
+                    let err_msg = format!("Failed to create file '{}': {}", path_buf.display(), e);
+                    error!("{}", err_msg);
+                    Err(err_msg)
+                }
+            }
         }
     }
 }
@@ -295,27 +335,68 @@ pub(crate) async fn text_editor_create(
     log_debug_operation("text_editor_create", &format!("Creating/overwriting file: {}", path_buf.display()), &debug_config);
     info!(path = %path_buf.display(), "Executing text_editor_create");
 
-    // Store previous state for undo
-    let previous_content = fs::read_to_string(&path_buf).ok();
-    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), previous_content) {
-        warn!("Failed to update undo state: {}", e);
+    // Create parent directories if they don't exist
+    if let Some(parent) = path_buf.parent() {
+        if !parent.exists() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                let error_msg = format!("Failed to create parent directories for '{}': {}", path_buf.display(), e);
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+        }
     }
 
-    match fs::write(&path_buf, content) {
-        Ok(_) => {
-            info!("Successfully created/updated file: {}", path_buf.display());
+    // Create the file with fail-if-exists behavior using OpenOptions
+    use std::fs::OpenOptions;
+    use std::io::Write;
 
-            // Send debug notification if enabled
-            if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "File Operation", &format!("File '{}' created/updated", path_buf.display()));
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true) // Fail if file already exists
+        .open(&path_buf)
+    {
+        Ok(mut file) => {
+            match file.write_all(content.as_bytes()) {
+                Ok(_) => {
+                    info!("Successfully created file: {}", path_buf.display());
+
+                    // Store state for undo (only after successful creation)
+                    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), None) {
+                        warn!("Failed to update undo state: {}", e);
+                    }
+
+                    // Send debug notification if enabled
+                    if debug_config.send_notifications {
+                        let _ = send_debug_notification(&app, "File Operation", &format!("File '{}' created", path_buf.display()));
+                    }
+
+                    Ok(())
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to write to file '{}': {}", path_buf.display(), e);
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
             }
-
-            Ok(())
         }
         Err(e) => {
-            let error_msg = format!("Failed to write file '{}': {}", path_buf.display(), e);
-            error!("{}", error_msg);
-            Err(error_msg)
+            match e.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    let error_msg = "Permission denied. Cannot create file.".to_string();
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
+                std::io::ErrorKind::AlreadyExists => {
+                    let error_msg = format!("File already exists: {}", path_buf.display());
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
+                _ => {
+                    let error_msg = format!("Failed to create file '{}': {}", path_buf.display(), e);
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
+            }
         }
     }
 }
