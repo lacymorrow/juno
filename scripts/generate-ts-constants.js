@@ -27,6 +27,7 @@ function parseRustConstants() {
         files: {},
         permissions: {},
         errors: {},
+        commands: {},
     };
 
     // Parse each constants module
@@ -70,6 +71,10 @@ function parseRustConstants() {
         // Parse errors module
         const errorsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'errors.rs'), 'utf8');
         constants.errors = parseModuleConstants(errorsFile);
+
+        // Parse commands module
+        const commandsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'commands.rs'), 'utf8');
+        constants.commands = parseModuleConstants(commandsFile);
 
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
@@ -131,25 +136,79 @@ function parseSimpleConstants(rustCode) {
 function parseModuleConstants(rustCode) {
     const allConstants = {};
 
-    // Parse nested modules first
-    const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
-    let moduleMatch;
+    // Parse nested modules with proper brace matching
+    const moduleMatches = parseModulesWithBraceMatching(rustCode);
 
-    while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
-        const [, moduleName, moduleContent] = moduleMatch;
+    moduleMatches.forEach(({ fullMatch, moduleName, moduleContent }) => {
         const moduleConstants = parseSimpleConstants(moduleContent);
 
         // Prefix module constants with module name
         Object.entries(moduleConstants).forEach(([key, value]) => {
             allConstants[`${moduleName.toUpperCase()}_${key}`] = value;
         });
-    }
+    });
 
-    // Also parse any top-level constants
-    const topLevelConstants = parseSimpleConstants(rustCode);
+    // Parse top-level constants by removing module content first to avoid duplicates
+    let codeWithoutModules = rustCode;
+    moduleMatches.forEach(({ fullMatch }) => {
+        codeWithoutModules = codeWithoutModules.replace(fullMatch, '');
+    });
+
+    const topLevelConstants = parseSimpleConstants(codeWithoutModules);
     Object.assign(allConstants, topLevelConstants);
 
     return allConstants;
+}
+
+/**
+ * Parse Rust modules with proper brace matching to handle nested braces correctly
+ */
+function parseModulesWithBraceMatching(rustCode) {
+    const modules = [];
+    const moduleStartRegex = /pub mod (\w+) \{/g;
+    let match;
+
+    while ((match = moduleStartRegex.exec(rustCode)) !== null) {
+        const moduleName = match[1];
+        const moduleStartIndex = match.index;
+        const contentStartIndex = match.index + match[0].length;
+
+        // Find the matching closing brace by counting braces
+        let braceCount = 1;
+        let currentIndex = contentStartIndex;
+
+        while (currentIndex < rustCode.length && braceCount > 0) {
+            const char = rustCode[currentIndex];
+            if (char === '{') {
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+            }
+            currentIndex++;
+        }
+
+        if (braceCount === 0) {
+            // Found the matching closing brace
+            const moduleEndIndex = currentIndex;
+            const fullMatch = rustCode.substring(moduleStartIndex, moduleEndIndex);
+            const moduleContent = rustCode.substring(contentStartIndex, currentIndex - 1);
+
+            modules.push({
+                fullMatch,
+                moduleName,
+                moduleContent
+            });
+
+            // Update the regex lastIndex to continue searching after this module
+            moduleStartRegex.lastIndex = moduleEndIndex;
+        } else {
+            // Unmatched braces - log warning and continue
+            console.warn(`Warning: Unmatched braces in module ${moduleName}`);
+            break;
+        }
+    }
+
+    return modules;
 }
 
 /**
@@ -211,6 +270,12 @@ ${Object.entries(constants.ui)
 
 export const AUDIO = {
 ${Object.entries(constants.audio)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const COMMANDS = {
+${Object.entries(constants.commands)
     .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
@@ -339,6 +404,7 @@ export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];
 export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS];
 export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
 export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
+export type CommandName = typeof COMMANDS[keyof typeof COMMANDS];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
 `;
 }

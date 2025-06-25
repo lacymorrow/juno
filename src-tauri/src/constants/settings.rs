@@ -153,6 +153,15 @@ pub mod defaults {
     pub const OPEN_SETTINGS: &str = "Ctrl+Comma";
 }
 
+/// Command names for settings operations (to prevent duplication)
+pub mod commands {
+    pub const GET_ALL_SETTINGS: &str = "get_all_settings";
+    pub const UPDATE_SETTINGS: &str = "update_settings";
+    pub const RESET_SETTINGS: &str = "reset_centralized_settings";
+    pub const EXPORT_SETTINGS: &str = "export_settings";
+    pub const IMPORT_SETTINGS: &str = "import_settings";
+}
+
 /// Event names for settings changes (for reactivity)
 pub mod events {
     pub const SETTINGS_CHANGED: &str = "settings_changed";

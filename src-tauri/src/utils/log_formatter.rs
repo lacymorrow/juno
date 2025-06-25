@@ -115,13 +115,21 @@ pub fn log_with_grouping(
     let tracker_key = component.to_string();
 
     let should_show_timestamp = {
-        let mut trackers = LOG_TRACKERS.lock().unwrap();
-        let tracker = trackers.entry(tracker_key.clone())
-            .or_insert_with(|| LogGroupTracker::new(config.clone()));
+        match LOG_TRACKERS.lock() {
+            Ok(mut trackers) => {
+                let tracker = trackers.entry(tracker_key.clone())
+                    .or_insert_with(|| LogGroupTracker::new(config.clone()));
 
-        let show = tracker.should_show_timestamp(timestamp);
-        tracker.record_event(timestamp, show);
-        show
+                let show = tracker.should_show_timestamp(timestamp);
+                tracker.record_event(timestamp, show);
+                show
+            }
+            Err(e) => {
+                // If the mutex is poisoned, log the error and fallback to showing timestamp
+                eprintln!("Log tracker mutex poisoned: {}. Showing timestamp as fallback.", e);
+                true // Safe fallback - show timestamp when uncertain
+            }
+        }
     };
 
     // Format the log message
@@ -182,6 +190,12 @@ pub fn log_agent_action(action: &str, details: Option<&str>) {
 
 /// Reset grouping state for a component (useful for new sessions)
 pub fn reset_grouping(component: &str) {
-    let mut trackers = LOG_TRACKERS.lock().unwrap();
-    trackers.remove(component);
+    match LOG_TRACKERS.lock() {
+        Ok(mut trackers) => {
+            trackers.remove(component);
+        }
+        Err(e) => {
+            eprintln!("Failed to reset log grouping for '{}': {}. Continuing without reset.", component, e);
+        }
+    }
 }

@@ -260,9 +260,25 @@ pub mod mouse_tracking {
         info!("[Tracking Delegate] Mouse Entered");
         let delegate_ptr = this as *const Object as u64;
 
-        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = TRACKED_WINDOWS.lock().unwrap().get(&delegate_ptr) {
-                if let Some(window) = handle.get_webview_window(window_label) {
+        let app_handle = match APP_HANDLE.lock() {
+            Ok(handle) => handle.as_ref().cloned(),
+            Err(e) => {
+                error!("[Tracking Delegate Error] Failed to acquire APP_HANDLE lock: {}", e);
+                return;
+            }
+        };
+
+        if let Some(handle) = app_handle {
+            let window_label = match TRACKED_WINDOWS.lock() {
+                Ok(tracked) => tracked.get(&delegate_ptr).cloned(),
+                Err(e) => {
+                    error!("[Tracking Delegate Error] Failed to acquire TRACKED_WINDOWS lock: {}", e);
+                    return;
+                }
+            };
+
+            if let Some(window_label) = window_label {
+                if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit("mouse-entered-window", ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
                 } else {
@@ -279,9 +295,25 @@ pub mod mouse_tracking {
         info!("[Tracking Delegate] Mouse Exited");
         let delegate_ptr = this as *const Object as u64;
 
-        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = TRACKED_WINDOWS.lock().unwrap().get(&delegate_ptr) {
-                if let Some(window) = handle.get_webview_window(window_label) {
+        let app_handle = match APP_HANDLE.lock() {
+            Ok(handle) => handle.as_ref().cloned(),
+            Err(e) => {
+                error!("[Tracking Delegate Error] Failed to acquire APP_HANDLE lock: {}", e);
+                return;
+            }
+        };
+
+        if let Some(handle) = app_handle {
+            let window_label = match TRACKED_WINDOWS.lock() {
+                Ok(tracked) => tracked.get(&delegate_ptr).cloned(),
+                Err(e) => {
+                    error!("[Tracking Delegate Error] Failed to acquire TRACKED_WINDOWS lock: {}", e);
+                    return;
+                }
+            };
+
+            if let Some(window_label) = window_label {
+                if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit("mouse-left-window", ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
                 } else {
@@ -299,8 +331,22 @@ pub mod mouse_tracking {
         info!("Setting up macOS tracking area for window: {}", window_label);
 
         // Store the AppHandle (only needs to be set once)
-        if APP_HANDLE.lock().unwrap().is_none() {
-            *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
+        let should_store_handle = match APP_HANDLE.lock() {
+            Ok(handle) => handle.is_none(),
+            Err(e) => {
+                error!("Failed to check APP_HANDLE status: {}", e);
+                return;
+            }
+        };
+
+        if should_store_handle {
+            match APP_HANDLE.lock() {
+                Ok(mut handle) => *handle = Some(app_handle.clone()),
+                Err(e) => {
+                    error!("Failed to store APP_HANDLE: {}", e);
+                    return;
+                }
+            }
         }
 
         let ns_window = match window.ns_window() {
@@ -353,8 +399,16 @@ pub mod mouse_tracking {
 
             // Store the mapping between delegate pointer and window label
             let delegate_ptr = delegate as u64;
-            TRACKED_WINDOWS.lock().unwrap().insert(delegate_ptr, window_label.clone());
-            info!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
+            match TRACKED_WINDOWS.lock() {
+                Ok(mut tracked) => {
+                    tracked.insert(delegate_ptr, window_label.clone());
+                    info!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
+                }
+                Err(e) => {
+                    error!("Failed to register delegate pointer for window '{}': {}", window_label, e);
+                    return;
+                }
+            }
 
             // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
             let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
