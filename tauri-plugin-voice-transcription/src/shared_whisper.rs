@@ -1,5 +1,5 @@
 use whisper_rs::{WhisperContext, WhisperContextParameters};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::path::Path;
 use crate::error::{Error, Result};
 use tracing::{info, error, warn, debug};
