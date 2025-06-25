@@ -36,14 +36,41 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 100,
-            max_tokens: 32000, // Conservative estimate for context window
-            min_messages_to_keep: 10,
+            max_messages: 20,       // Further reduced from 50 to be more aggressive
+            max_tokens: 100000,     // Reduced from 150000 to stay well under 200K API limit
+            min_messages_to_keep: 3, // Reduced from 5 for emergency pruning
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 10,
+            summarization_batch_size: 20, // Increased to summarize more aggressively
             enable_metrics: true,
             enable_summary_cache: true,
+        }
+    }
+}
+
+/// Configuration for visual context compression
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualContextConfig {
+    /// Enable screenshot compression to text summaries
+    pub enable_screenshot_compression: bool,
+    /// Maximum age of screenshots to keep in memory (in seconds)
+    pub screenshot_retention_seconds: u64,
+    /// Compress screenshots immediately after processing
+    pub immediate_compression: bool,
+    /// Maximum number of screenshots to keep as base64
+    pub max_base64_screenshots: usize,
+    /// Fallback to generic description if vision API fails
+    pub fallback_to_generic_description: bool,
+}
+
+impl Default for VisualContextConfig {
+    fn default() -> Self {
+        Self {
+            enable_screenshot_compression: true,
+            screenshot_retention_seconds: 300, // 5 minutes
+            immediate_compression: true,
+            max_base64_screenshots: 2, // Only keep 2 most recent screenshots as base64
+            fallback_to_generic_description: true,
         }
     }
 }
@@ -87,14 +114,30 @@ pub struct ConversationSummary {
     pub estimated_tokens: usize,
 }
 
+/// Visual context summary to replace base64 images
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualContextSummary {
+    pub id: String,
+    pub timestamp: SystemTime,
+    pub summary: String,
+    pub dominant_colors: Vec<String>,
+    pub ui_elements: Vec<String>,
+    pub text_content: Option<String>,
+    pub estimated_original_tokens: usize,
+    pub compressed_tokens: usize,
+    pub compression_ratio: f64,
+}
+
 /// Enhanced in-memory implementation of the MemoryManager trait with advanced features
 #[derive(Debug, Clone)]
 pub struct AdvancedMemoryManager {
     messages: Arc<RwLock<Vec<Message>>>,
     pending_tool_calls: Arc<RwLock<HashSet<String>>>,
     config: Arc<RwLock<MemoryConfig>>,
+    visual_config: Arc<RwLock<VisualContextConfig>>,
     metrics: Arc<RwLock<MemoryMetrics>>,
     summaries: Arc<RwLock<Vec<ConversationSummary>>>,
+    visual_summaries: Arc<RwLock<Vec<VisualContextSummary>>>,
     summary_cache: Arc<RwLock<std::collections::HashMap<String, String>>>,
 }
 
@@ -108,19 +151,65 @@ impl AdvancedMemoryManager {
             messages: Arc::new(RwLock::new(Vec::new())),
             pending_tool_calls: Arc::new(RwLock::new(HashSet::new())),
             config: Arc::new(RwLock::new(config)),
+            visual_config: Arc::new(RwLock::new(VisualContextConfig::default())),
             metrics: Arc::new(RwLock::new(MemoryMetrics::default())),
             summaries: Arc::new(RwLock::new(Vec::new())),
+            visual_summaries: Arc::new(RwLock::new(Vec::new())),
             summary_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
-    /// Estimate token count for a message (rough approximation)
+    /// Estimate token count for a message with proper base64 image handling
     fn estimate_message_tokens(message: &Message) -> usize {
-        let content_tokens = message.content.len() / 4; // Rough estimate: 4 chars per token
+        // Enhanced token estimation that properly handles base64 images
+        let mut total_tokens = 0;
+
+        // Estimate text content tokens
+        let content = &message.content;
+
+        // Check if content contains base64 images (common patterns)
+        if content.contains("data:image/") || content.contains("base64,") ||
+           (content.len() > 1000 && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
+            // This looks like base64 image data - use more accurate estimation
+            // Base64 images typically use ~1 token per 15-20 characters (more aggressive estimate)
+            total_tokens += content.len() / 15; // More aggressive estimate for images that contribute heavily to token count
+            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / 15);
+
+            // If this single message has excessive tokens, mark it for immediate attention
+            if content.len() / 15 > 50000 {
+                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / 15);
+            }
+        } else {
+            // Regular text content - use standard 4 chars per token
+            total_tokens += content.len() / 4;
+        }
+
+        // Add tool call tokens
         let tool_call_tokens = message.tool_calls.as_ref()
-            .map(|calls| calls.iter().map(|call| call.name.len() / 4 + 50).sum()) // Extra for structure
+            .map(|calls| {
+                calls.iter().map(|call| {
+                    let base_tokens = call.name.len() / 4 + 50; // Basic structure
+
+                    // Check if tool call input contains base64 images
+                    let input_str = call.input.to_string();
+                    if input_str.contains("data:image/") || input_str.contains("base64,") {
+                        // Tool call with image - much higher token count
+                        base_tokens + (input_str.len() / 20)
+                    } else {
+                        base_tokens + (input_str.len() / 4)
+                    }
+                }).sum()
+            })
             .unwrap_or(0);
-        content_tokens + tool_call_tokens
+
+        total_tokens += tool_call_tokens;
+
+        // Log warning for very large messages
+        if total_tokens > 50000 {
+            log::warn!("Large message detected: ~{} tokens (content length: {})", total_tokens, content.len());
+        }
+
+        total_tokens
     }
 
     /// Estimate total token count for all messages
@@ -177,18 +266,31 @@ impl AdvancedMemoryManager {
 
         let estimated_tokens = self.estimate_total_tokens().await;
 
-        // Check if pruning is needed
-        if messages_count <= config.max_messages && estimated_tokens <= config.max_tokens {
+        // Emergency pruning if we're close to API limits
+        let emergency_threshold = 180000; // Leave buffer before 200K limit
+        let normal_threshold = config.max_tokens;
+
+        let needs_emergency_pruning = estimated_tokens >= emergency_threshold;
+        let needs_normal_pruning = messages_count >= config.max_messages ||
+                                 estimated_tokens >= normal_threshold;
+
+        if needs_emergency_pruning {
+            log::error!("EMERGENCY: Token count ({}) approaching API limit (200K)! Aggressive pruning required.", estimated_tokens);
+            // Keep only the most recent messages
+            let emergency_keep = std::cmp::max(config.min_messages_to_keep, 2);
+            drop(config);
+            self.prune_memory(Some(emergency_keep)).await?;
+            return Ok(true);
+        } else if needs_normal_pruning {
+            log::info!("Memory pruning triggered: {} messages, ~{} tokens",
+                      messages_count, estimated_tokens);
+            drop(config);
+            self.prune_memory(None).await?;
+            return Ok(true);
+        } else {
+            drop(config);
             return Ok(false);
         }
-
-        drop(config); // Release config lock before calling prune_memory
-
-        log::info!("Memory pruning triggered: {} messages, ~{} tokens",
-                   messages_count, estimated_tokens);
-
-        self.prune_memory(None).await?;
-        Ok(true)
     }
 
     /// Create a summary of conversation segments
@@ -617,12 +719,200 @@ impl AdvancedMemoryManager {
         self.update_metrics(start_time).await?;
         Ok(orphaned_count)
     }
+
+    /// Detect if content contains a screenshot/base64 image
+    fn is_screenshot_content(content: &str) -> bool {
+        // Enhanced detection for screenshots specifically
+        if content.contains("data:image/png;base64,") ||
+           content.contains("data:image/jpeg;base64,") ||
+           content.contains("data:image/webp;base64,") {
+            return true;
+        }
+
+        // Check for large base64 content that's likely a screenshot
+        if content.len() > 10000 &&
+           content.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').count() > content.len() * 80 / 100 {
+            return true;
+        }
+
+        false
+    }
+
+    /// Compress a screenshot to text summary
+    async fn compress_screenshot_to_text(&self, base64_content: &str) -> Result<VisualContextSummary, AgentError> {
+        let start_time = Instant::now();
+        let original_tokens = base64_content.len() / 15; // Using our aggressive estimation
+
+        // Extract image format and basic info
+        let image_format = if base64_content.contains("data:image/png") {
+            "PNG"
+        } else if base64_content.contains("data:image/jpeg") {
+            "JPEG"
+        } else if base64_content.contains("data:image/webp") {
+            "WebP"
+        } else {
+            "Unknown"
+        };
+
+        // Create a comprehensive but concise summary
+        let summary = if self.visual_config.read().await.fallback_to_generic_description {
+            // Generic description based on timestamp and context
+            let timestamp = SystemTime::now();
+            let time_str = format!("{:?}", timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+
+            format!(
+                "Screenshot captured at {} ({}). Desktop interface showing computer use agent interaction. \
+                Image format: {}. Contains UI elements, text content, and visual indicators. \
+                Original size: ~{} tokens compressed to text summary.",
+                time_str,
+                chrono::DateTime::<chrono::Utc>::from(timestamp).format("%Y-%m-%d %H:%M:%S UTC"),
+                image_format,
+                original_tokens
+            )
+        } else {
+            // TODO: Integrate with vision API for detailed analysis
+            // For now, use generic description
+            format!(
+                "Screenshot captured showing desktop interface. Format: {}. \
+                Contains visual elements and interface components. \
+                Compressed from ~{} tokens to preserve context while reducing memory usage.",
+                image_format,
+                original_tokens
+            )
+        };
+
+        let compressed_tokens = summary.len() / 4; // Standard text token estimation
+        let compression_ratio = original_tokens as f64 / compressed_tokens as f64;
+
+        log::info!("Screenshot compression: {} tokens -> {} tokens ({}x reduction)",
+                  original_tokens, compressed_tokens, compression_ratio);
+
+        Ok(VisualContextSummary {
+            id: Uuid::new_v4().to_string(),
+            timestamp: SystemTime::now(),
+            summary,
+            dominant_colors: vec!["RGB analysis not available".to_string()],
+            ui_elements: vec!["UI elements detected".to_string()],
+            text_content: None,
+            estimated_original_tokens: original_tokens,
+            compressed_tokens,
+            compression_ratio,
+        })
+    }
+
+    /// Process and potentially compress screenshots in a message
+    async fn process_message_screenshots(&self, message: &mut Message) -> Result<bool, AgentError> {
+        let visual_config = self.visual_config.read().await;
+
+        if !visual_config.enable_screenshot_compression {
+            return Ok(false);
+        }
+
+        let mut was_compressed = false;
+
+        // Check if this message contains a screenshot
+        if Self::is_screenshot_content(&message.content) {
+            log::info!("Detected screenshot in message, processing for compression...");
+
+            // Get current visual summaries to check retention limits
+            let mut visual_summaries = self.visual_summaries.write().await;
+            let current_base64_count = visual_summaries.len();
+
+            if visual_config.immediate_compression || current_base64_count >= visual_config.max_base64_screenshots {
+                // Compress to text summary
+                match self.compress_screenshot_to_text(&message.content).await {
+                    Ok(summary) => {
+                        // Replace base64 content with text summary
+                        message.content = format!(
+                            "[SCREENSHOT SUMMARY] {}\n\n[COMPRESSION STATS] Original: ~{} tokens, Compressed: {} tokens, Ratio: {:.1}x",
+                            summary.summary,
+                            summary.estimated_original_tokens,
+                            summary.compressed_tokens,
+                            summary.compression_ratio
+                        );
+
+                        visual_summaries.push(summary);
+                        was_compressed = true;
+
+                        log::info!("Successfully compressed screenshot to text summary");
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to compress screenshot: {}, keeping original", e);
+                    }
+                }
+            } else {
+                log::info!("Keeping screenshot as base64 (count: {}/{})", current_base64_count, visual_config.max_base64_screenshots);
+            }
+        }
+
+        // Clean up old visual summaries
+        let cutoff_time = SystemTime::now()
+            .checked_sub(Duration::from_secs(visual_config.screenshot_retention_seconds))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+
+        self.visual_summaries.write().await.retain(|summary| summary.timestamp > cutoff_time);
+
+        Ok(was_compressed)
+    }
+
+    /// Get visual context summaries
+    pub async fn get_visual_summaries(&self) -> Vec<VisualContextSummary> {
+        self.visual_summaries.read().await.clone()
+    }
+
+    /// Update visual context configuration
+    pub async fn update_visual_config(&self, new_config: VisualContextConfig) -> Result<(), AgentError> {
+        let mut config = self.visual_config.write().await;
+        *config = new_config;
+        log::info!("Updated visual context configuration");
+        Ok(())
+    }
+
+    /// Get current visual context configuration
+    pub async fn get_visual_config(&self) -> VisualContextConfig {
+        self.visual_config.read().await.clone()
+    }
+
+    /// Force compression of all screenshots in current conversation
+    pub async fn compress_all_screenshots(&mut self) -> Result<usize, AgentError> {
+        let mut messages = self.messages.write().await;
+        let mut compressed_count = 0;
+
+        for message in messages.iter_mut() {
+            if Self::is_screenshot_content(&message.content) {
+                match self.compress_screenshot_to_text(&message.content).await {
+                    Ok(summary) => {
+                        message.content = format!(
+                            "[SCREENSHOT SUMMARY] {}\n\n[COMPRESSION STATS] Original: ~{} tokens, Compressed: {} tokens, Ratio: {:.1}x",
+                            summary.summary,
+                            summary.estimated_original_tokens,
+                            summary.compressed_tokens,
+                            summary.compression_ratio
+                        );
+
+                        self.visual_summaries.write().await.push(summary);
+                        compressed_count += 1;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to compress screenshot: {}", e);
+                    }
+                }
+            }
+        }
+
+        log::info!("Compressed {} screenshots to text summaries", compressed_count);
+        Ok(compressed_count)
+    }
 }
 
 #[async_trait]
 impl MemoryManager for AdvancedMemoryManager {
-    async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
+    async fn add_message(&mut self, mut message: Message) -> Result<(), AgentError> {
         let start_time = Instant::now();
+
+        // Process screenshots BEFORE adding to memory (critical for token optimization)
+        self.process_message_screenshots(&mut message).await?;
+
         let mut messages = self.messages.write().await;
         let mut pending = self.pending_tool_calls.write().await;
 

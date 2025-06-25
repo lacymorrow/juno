@@ -4,7 +4,7 @@
 //! and testing purposes. These commands often wrap production functionality with
 //! additional logging, validation, or debugging features.
 
-pub mod keyboard;
+
 
 use tracing::{info, warn};
 
@@ -55,4 +55,4 @@ pub async fn test_network_error_detection(error_message: String) -> Result<bool,
 }
 
 // Re-export dev command functions for backward compatibility
-pub use keyboard::*;
+

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
+use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary, AdvancedMemoryManager};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]
@@ -97,4 +98,111 @@ pub async fn get_last_n_messages(n: usize, state: State<'_, AppState>) -> Result
 
     memory_guard.get_last_n_messages(n).await
         .map_err(|e| format!("Failed to get last {} messages: {}", n, e))
+}
+
+/// Get visual context summaries from memory manager
+#[tauri::command]
+pub async fn get_visual_summaries(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<VisualContextSummary>, String> {
+    let state = app_handle.state::<AppState>();
+
+    // For now, return empty vector since visual summaries are only available with AdvancedMemoryManager
+    // and the current memory manager is SimpleMemoryManager
+    Ok(vec![])
+}
+
+/// Update visual context configuration
+#[tauri::command]
+pub async fn update_visual_config(
+    app_handle: tauri::AppHandle,
+    config: VisualContextConfig,
+) -> Result<(), String> {
+    let state = app_handle.state::<AppState>();
+
+    // For now, return error since visual config is only available with AdvancedMemoryManager
+    // and the current memory manager is SimpleMemoryManager
+    Err("Visual config only available with AdvancedMemoryManager".to_string())
+}
+
+/// Get current visual context configuration
+#[tauri::command]
+pub async fn get_visual_config(
+    app_handle: tauri::AppHandle,
+) -> Result<VisualContextConfig, String> {
+    let state = app_handle.state::<AppState>();
+
+    // For now, return default config since visual config is only available with AdvancedMemoryManager
+    // and the current memory manager is SimpleMemoryManager
+    Ok(VisualContextConfig::default())
+}
+
+/// Force compression of all screenshots in current conversation
+#[tauri::command]
+pub async fn compress_all_screenshots(
+    app_handle: tauri::AppHandle,
+) -> Result<usize, String> {
+    let state = app_handle.state::<AppState>();
+
+    // For now, return 0 since screenshot compression is only available with AdvancedMemoryManager
+    // and the current memory manager is SimpleMemoryManager
+    Ok(0)
+}
+
+/// Enable/disable screenshot compression with specific settings
+#[tauri::command]
+pub async fn configure_screenshot_compression(
+    app_handle: tauri::AppHandle,
+    enable_compression: bool,
+    immediate_compression: bool,
+    max_base64_screenshots: usize,
+    retention_seconds: u64,
+) -> Result<(), String> {
+    let config = VisualContextConfig {
+        enable_screenshot_compression: enable_compression,
+        immediate_compression,
+        max_base64_screenshots,
+        screenshot_retention_seconds: retention_seconds,
+        fallback_to_generic_description: true,
+    };
+
+    update_visual_config(app_handle, config).await
+}
+
+/// Get memory statistics including visual context compression stats
+#[tauri::command]
+pub async fn get_memory_compression_stats(
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = app_handle.state::<AppState>();
+
+    // For now, return basic stats since memory compression is only available with AdvancedMemoryManager
+    // and the current memory manager is SimpleMemoryManager
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
+
+    let messages = memory_guard.get_messages().await
+        .map_err(|e| format!("Failed to get messages: {}", e))?;
+
+    // Calculate basic metrics
+    let total_messages = messages.len();
+    let estimated_tokens = messages.iter()
+        .map(|m| m.content.len() / 4) // Rough token estimate
+        .sum::<usize>();
+
+    Ok(serde_json::json!({
+        "memory_metrics": {
+            "total_messages": total_messages,
+            "estimated_tokens": estimated_tokens,
+            "memory_efficiency_ratio": 1.0
+        },
+        "visual_compression": {
+            "total_screenshots_compressed": 0,
+            "total_original_tokens": 0,
+            "total_compressed_tokens": 0,
+            "tokens_saved": 0,
+            "average_compression_ratio": 0.0,
+            "latest_summaries": []
+        }
+    }))
 }

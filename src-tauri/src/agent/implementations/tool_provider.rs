@@ -27,15 +27,15 @@
 //! - 45% improvement in system observability with monitoring
 //!
 //! ### 4. Implementation Status:
-//! ✅ Exponential backoff retry logic with jitter
-//! ✅ Comprehensive tool call validation (input + schema)
-//! ✅ Tool output validation with size limits
-//! ✅ Circuit breaker pattern for failure isolation
-//! ✅ Error classification and recovery strategies
-//! ✅ Real-time monitoring and statistics
-//! ✅ Computer tool specific validations
-//! ✅ Browser tool specific validations
-//! ✅ MCP integration with reliability patterns
+//! Exponential backoff retry logic with jitter
+//! Comprehensive tool call validation (input + schema)
+//! Tool output validation with size limits
+//! Circuit breaker pattern for failure isolation
+//! Error classification and recovery strategies
+//! Real-time monitoring and statistics
+//! Computer tool specific validations
+//! Browser tool specific validations
+//! MCP integration with reliability patterns
 //!
 //! This represents the current state-of-the-art in computer use agent tool calling reliability.
 
@@ -384,7 +384,6 @@ impl ToolCircuitBreaker {
 }
 
 /// A ToolProvider holding tools in memory, supporting async execution and MCP integration.
-#[derive(Clone)]
 pub struct LocalToolProvider {
     definitions: Arc<RwLock<HashMap<String, ToolDefinition>>>,
     executors: Arc<RwLock<HashMap<String, AsyncToolExecutor>>>,
@@ -392,6 +391,21 @@ pub struct LocalToolProvider {
     mcp_manager: Option<Arc<Mutex<MCPManager>>>,
     // Simplified recovery stats - removed complex tracking
     recovery_stats: Arc<Mutex<SimpleRecoveryStats>>,
+}
+
+impl Clone for LocalToolProvider {
+    fn clone(&self) -> Self {
+        LocalToolProvider {
+            definitions: Arc::clone(&self.definitions),
+            executors: Arc::clone(&self.executors),
+            app_handle: self.app_handle.clone(),
+            mcp_manager: self.mcp_manager.clone(),
+            error_recovery_stats: Arc::clone(&self.error_recovery_stats),
+            recovery_config: self.recovery_config.clone(),
+            tool_execution_history: Arc::clone(&self.tool_execution_history),
+            circuit_breakers: Arc::clone(&self.circuit_breakers),
+        }
+    }
 }
 
 impl LocalToolProvider {
@@ -454,6 +468,8 @@ impl LocalToolProvider {
         {
             let mut definitions = self.definitions.write().await;
             definitions.insert(tool_name.clone(), definition);
+            debug!("Stored definition for tool: '{}'", tool_name);
+            debug!("Total definitions after insert: {}", definitions.len());
         }
 
         // Wrap the executor with additional error handling for display-related operations
@@ -486,6 +502,19 @@ impl LocalToolProvider {
         {
             let mut executors = self.executors.write().await;
             executors.insert(tool_name.clone(), wrapped_executor);
+            debug!("Stored executor for tool: '{}'", tool_name);
+            debug!("Total executors after insert: {}", executors.len());
+
+            // Verify the executor was actually stored
+            if executors.contains_key(&tool_name) {
+                debug!("Verified: Executor for '{}' is present in HashMap", tool_name);
+            } else {
+                error!("Executor for '{}' NOT found in HashMap after insertion!", tool_name);
+            }
+
+            // Show all currently stored executors
+            let all_executors: Vec<String> = executors.keys().cloned().collect();
+            debug!("All stored executors: {:?}", all_executors);
         }
 
         debug!("Registered async tool: {}", tool_name);
@@ -803,7 +832,15 @@ impl LocalToolProvider {
             } else {
                 // Execute local tool
                 let executors_guard = self.executors.read().await;
+
+                // Add comprehensive logging to diagnose the executor lookup issue
+                let available_executors: Vec<String> = executors_guard.keys().cloned().collect();
+                debug!("Tool execution attempt - Available executors: {:?}", available_executors);
+                debug!("Looking for executor: '{}'", tool_name);
+                debug!("Total executor count: {}", executors_guard.len());
+
                 if let Some(executor) = executors_guard.get(tool_name) {
+                    debug!("Found executor for tool: '{}'", tool_name);
                     match executor(tool_call.input.clone()).await {
                         Ok(output) => Ok(ToolResult {
                             call_id: tool_call.id.clone(),
@@ -812,6 +849,16 @@ impl LocalToolProvider {
                         Err(error_msg) => Err(AgentError::ToolError(error_msg)),
                     }
                 } else {
+                    error!("Tool executor not found in executors HashMap");
+                    error!("Requested tool: '{}'", tool_name);
+                    error!("Available executors: {:?}", available_executors);
+
+                    // Also check definitions HashMap for comparison
+                    let definitions_guard = self.definitions.read().await;
+                    let available_definitions: Vec<String> = definitions_guard.keys().cloned().collect();
+                    error!("Available definitions: {:?}", available_definitions);
+                    error!("Tool exists in definitions: {}", definitions_guard.contains_key(tool_name));
+
                     Err(AgentError::ToolNotFound(tool_call.name.clone()))
                 }
             }
