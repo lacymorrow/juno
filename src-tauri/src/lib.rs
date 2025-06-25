@@ -440,6 +440,13 @@ pub fn run() {
             clean_orphaned_tool_calls,
             get_conversation_messages,
             get_last_n_messages,
+            // Visual Context Compression Commands
+            get_visual_summaries,
+            update_visual_config,
+            get_visual_config,
+            compress_all_screenshots,
+            configure_screenshot_compression,
+            get_memory_compression_stats,
             // Error Recovery Commands
             initialize_error_recovery,
             create_checkpoint,
