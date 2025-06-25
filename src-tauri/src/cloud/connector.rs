@@ -917,7 +917,7 @@ impl ProductionCloudConnector {
     async fn send_heartbeat(&self) -> Result<(), CloudError> {
         let ws_message = WebSocketMessage {
             message_type: MessageType::Heartbeat,
-            data: serde_json::json!({"timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()}),
+            data: serde_json::json!({"timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -982,7 +982,7 @@ impl ProductionCloudConnector {
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
         };
 
         Ok(status)
