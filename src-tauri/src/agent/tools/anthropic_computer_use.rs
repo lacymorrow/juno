@@ -232,7 +232,7 @@ pub async fn register_anthropic_computer_use_tools(
     // === COMPUTER TOOL ===
     let computer_tool_def = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use a computer like a human to interact with applications, take screenshots, click, type, and navigate. This is the official Anthropic Computer Use tool.".to_string(),
+        description: "Use a computer like a human to interact with desktop applications through direct screen manipulation. This tool can capture screenshots to see the current state, click at specific coordinates, type text, press keys, scroll content, and perform drag operations. It provides complete desktop automation capabilities with pixel-perfect coordinate accuracy and supports all standard mouse and keyboard interactions. This is the official Anthropic Computer Use tool designed for autonomous computer operation.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -296,7 +296,7 @@ pub async fn register_anthropic_computer_use_tools(
     // === BASH TOOL ===
     let bash_tool_def = ToolDefinition {
         name: "bash".to_string(),
-        description: "Execute bash commands in the terminal. Use this for system operations, file management, and running scripts.".to_string(),
+        description: "Execute bash commands in a persistent terminal session with state preservation between commands. This tool maintains environment variables, working directory changes, and other session state across multiple command executions. It supports complex shell operations including file management, system administration, development workflows, and script execution. Use this for any command-line operations that require shell access or when you need to run system utilities and development tools.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -338,7 +338,7 @@ pub async fn register_anthropic_computer_use_tools(
     // === STR_REPLACE_BASED_EDIT_TOOL ===
     let str_replace_tool_def = ToolDefinition {
         name: "str_replace_based_edit_tool".to_string(),
-        description: "A tool for viewing, creating and editing files based on string replacement. Use this for precise text editing operations.".to_string(),
+        description: "A comprehensive file manipulation tool that supports viewing file contents, creating new files, and performing precise string-based text editing operations. This tool excels at making exact text replacements within files by finding specific strings and replacing them with new content. It's particularly useful for code editing, configuration file updates, and any text modification task that requires precision and reliability. The tool ensures data integrity by performing exact string matches before making any changes.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {

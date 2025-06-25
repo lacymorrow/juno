@@ -1,6 +1,7 @@
-use async_trait::async_trait;
 use super::core::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
+use super::providers::anthropic::ToolChoice;
 use crate::state::CancelReceiver;
+use async_trait::async_trait;
 use tauri::AppHandle;
 
 /// Manages the agent's memory (conversation history).
@@ -48,7 +49,10 @@ pub trait ToolProvider: Send + Sync {
 
     /// Executes multiple tool calls as a batch for improved performance.
     /// Default implementation falls back to sequential execution.
-    async fn execute_batch_tools(&self, tool_calls: Vec<ToolCall>) -> Result<Vec<ToolResult>, AgentError> {
+    async fn execute_batch_tools(
+        &self,
+        tool_calls: Vec<ToolCall>,
+    ) -> Result<Vec<ToolResult>, AgentError> {
         let mut results = Vec::new();
         for tool_call in tool_calls {
             results.push(self.execute_tool(tool_call).await?);
@@ -67,6 +71,17 @@ pub trait AgentBrain: Send + Sync {
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError>;
 
+    /// Takes the current memory, available tools, and tool choice, returns the next action.
+    async fn decide_next_action_with_tool_choice(
+        &self,
+        messages: &[Message],
+        available_tools: &[ToolDefinition],
+        tool_choice: Option<ToolChoice>,
+    ) -> Result<AgentAction, AgentError> {
+        // Default implementation ignores tool_choice and calls regular method
+        self.decide_next_action(messages, available_tools).await
+    }
+
     /// Check if this brain supports streaming
     fn supports_streaming(&self) -> bool {
         false // Default implementation - no streaming support
@@ -82,6 +97,20 @@ pub trait AgentBrain: Send + Sync {
     ) -> Result<AgentAction, AgentError> {
         // Default implementation ignores streaming parameters and calls regular method
         self.decide_next_action(messages, available_tools).await
+    }
+
+    /// Streaming version with tool choice support
+    async fn decide_next_action_streaming_with_tool_choice(
+        &self,
+        messages: &[Message],
+        available_tools: &[ToolDefinition],
+        app_handle: Option<AppHandle>,
+        message_id: Option<String>,
+        tool_choice: Option<ToolChoice>,
+    ) -> Result<AgentAction, AgentError> {
+        // Default implementation ignores tool_choice and calls regular streaming method
+        self.decide_next_action_streaming(messages, available_tools, app_handle, message_id)
+            .await
     }
 }
 
@@ -107,10 +136,7 @@ pub trait AgentRunnable: Send + Sync {
     ) -> Result<String, AgentError>;
 
     /// Executes a single step of the agent loop.
-    async fn step(
-        &mut self,
-        cancel_rx: CancelReceiver,
-    ) -> Result<AgentAction, AgentError>;
+    async fn step(&mut self, cancel_rx: CancelReceiver) -> Result<AgentAction, AgentError>;
 
     // Maybe add methods for pausing, resuming, stopping?
     // async fn pause(&mut self) -> Result<(), AgentError>;

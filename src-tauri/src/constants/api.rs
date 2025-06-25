@@ -35,6 +35,15 @@ pub mod http_headers {
     pub const APPLICATION_JSON: &str = "application/json";
     pub const AUTHORIZATION: &str = "Authorization";
     pub const USER_AGENT: &str = "User-Agent";
+    pub const ANTHROPIC_BETA: &str = "anthropic-beta";
+    pub const ANTHROPIC_VERSION: &str = "anthropic-version";
+}
+
+// Anthropic beta features
+pub mod anthropic_beta_headers {
+    pub const TOKEN_EFFICIENT_TOOLS: &str = "token-efficient-tools-2025-02-19";
+    pub const FINE_GRAINED_STREAMING: &str = "fine-grained-tool-streaming-2025-05-14";
+    pub const CODE_EXECUTION: &str = "code-execution-2025-05-22";
 }
 
 // Anthropic content types
@@ -58,6 +67,58 @@ pub mod provider_names {
     pub const ELEVENLABS: &str = "elevenlabs";
     pub const REPLICATE: &str = "replicate";
     pub const SYSTEM: &str = "system";
+}
+
+// Standard tool response structure
+pub mod tool_responses {
+    use serde::{Deserialize, Serialize};
+    use serde_json::Value;
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct StandardToolResponse {
+        pub success: bool,
+        pub result: Option<Value>,
+        pub error: Option<String>,
+        pub metadata: Option<Value>,
+    }
+
+    impl StandardToolResponse {
+        pub fn success(result: Value) -> Self {
+            StandardToolResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+                metadata: None,
+            }
+        }
+
+        pub fn success_with_metadata(result: Value, metadata: Value) -> Self {
+            StandardToolResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+                metadata: Some(metadata),
+            }
+        }
+
+        pub fn error(error_message: String) -> Self {
+            StandardToolResponse {
+                success: false,
+                result: None,
+                error: Some(error_message),
+                metadata: None,
+            }
+        }
+
+        pub fn error_with_result(error_message: String, partial_result: Value) -> Self {
+            StandardToolResponse {
+                success: false,
+                result: Some(partial_result),
+                error: Some(error_message),
+                metadata: None,
+            }
+        }
+    }
 }
 
 // Cloud networking constants

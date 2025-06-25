@@ -92,7 +92,7 @@ async fn register_additional_computer_use_tools(
 
     let scroll_def = ToolDefinition {
         name: "scroll".to_string(),
-        description: "Scrolls the currently active window/element. Requires accessibility permissions.".to_string(),
+        description: "Scrolls the currently active window or UI element in a specified direction and amount. This tool enables precise scrolling control within applications, web pages, documents, and any scrollable content areas. It supports scrolling in all four directions (up, down, left, right) with customizable scroll amounts for fine-grained control. Requires accessibility permissions to interact with system UI elements and provides smooth scrolling behavior that mimics natural user interaction.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -137,7 +137,7 @@ async fn register_additional_computer_use_tools(
 
     let wait_def = ToolDefinition {
         name: "wait".to_string(),
-        description: "Pauses execution for a specified duration.".to_string(),
+        description: "Pauses agent execution for a precise duration specified in milliseconds to allow for timing-sensitive operations. This tool is essential for coordinating actions that require delays, waiting for UI elements to load, or creating natural interaction patterns. It provides accurate timing control for scenarios such as waiting for animations to complete, giving applications time to process, or creating realistic interaction rhythms. Use this tool whenever you need to introduce deliberate delays in automation workflows.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -305,7 +305,7 @@ pub async fn register_desktop_tools(
     // capture_screenshot
     let capture_screenshot_def = ToolDefinition {
         name: "capture_screenshot".to_string(),
-        description: "Captures a screenshot of the entire desktop screen.".to_string(),
+        description: "Captures a high-quality screenshot of the entire desktop screen including all visible windows, applications, and desktop elements. This tool provides a complete visual snapshot of the current desktop state, which is essential for computer vision tasks, UI analysis, and visual navigation. The screenshot is returned as base64-encoded image data that can be analyzed for visual elements, text content, or coordinate planning for subsequent actions. Use this tool to understand the current visual state before performing click, scroll, or navigation operations.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
