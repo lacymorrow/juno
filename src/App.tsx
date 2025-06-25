@@ -221,13 +221,44 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState.activeModal, appState.isProcessing, handleStop]);
 
-  // Example prompt selection handler
+  // Example prompt selection handler - automatically submits the prompt
   const handleExamplePromptSelect = useCallback(
-    (prompt: string) => {
-      conversation.setQuery(prompt);
+    async (prompt: string) => {
+      if (!appState.canSubmit || !prompt.trim()) return;
+
+      const trimmedPrompt = prompt.trim();
+      console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
+
+      // Set the query briefly for UI feedback, then submit
+      conversation.setQuery(trimmedPrompt);
       scrolling.autoScrollToBottom(true);
+
+      // Auto-submit after a brief delay to show the query in the input
+      setTimeout(async () => {
+        appState.setIsProcessing(true);
+        conversation.addUserMessage(trimmedPrompt);
+        conversation.setQuery("");
+
+        try {
+          await invoke("submit_query", { query: trimmedPrompt });
+          console.log("✅ Example prompt submitted successfully");
+        } catch (error) {
+          console.error("❌ Failed to submit example prompt:", error);
+          conversation.addSystemMessage(`Failed to submit prompt: ${error}`);
+          appState.setIsProcessing(false);
+          playError();
+        }
+      }, 100); // Brief delay to show the prompt in the input field
     },
-    [conversation.setQuery, scrolling.autoScrollToBottom]
+    [
+      appState.canSubmit,
+      appState.setIsProcessing,
+      conversation.setQuery,
+      conversation.addUserMessage,
+      conversation.addSystemMessage,
+      scrolling.autoScrollToBottom,
+      playError,
+    ]
   );
 
   // Copy response handler
