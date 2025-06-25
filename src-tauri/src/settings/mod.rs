@@ -314,7 +314,7 @@ impl Default for CloudSettings {
     fn default() -> Self {
         Self {
             enabled: defaults::CLOUD_ENABLED,
-            server_url: "wss://localhost:8080".to_string(),
+            server_url: crate::constants::api::endpoints::CLOUD_SERVER_URL.to_string(),
             device_id: None,
             device_name: "Juno-Desktop".to_string(),
             api_key: None,

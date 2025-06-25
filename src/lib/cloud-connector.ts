@@ -121,7 +121,16 @@ export class ProductionCloudConnector {
     await listen('cloud-connector-error', (event) => {
       console.error('[CloudConnector] Connection error:', event.payload);
     });
+
+    // Listen for cloud commands from the native WebSocket connection
+    await listen('cloud-command-received', (event) => {
+      const command = event.payload;
+      console.log('[CloudConnector] Received cloud command:', command);
+      // Cloud commands are handled by the Rust backend
+    });
   }
+
+
 
   /**
    * Add a status change listener
