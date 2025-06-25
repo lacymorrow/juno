@@ -203,9 +203,9 @@ pub async fn execute_str_replace_tool(
             let file_text = input["file_text"].as_str()
                 .ok_or_else(|| "Missing 'file_text' parameter for create command".to_string())?;
 
-            crate::commands::text_editor::text_editor_create(path.to_string(), file_text.to_string())
+            crate::commands::text_editor::text_editor_create(path.to_string(), file_text.to_string(), app_handle.state(), app_handle.clone())
                 .await
-                .map(|result| json!({"success": true, "result": result}))
+                .map(|_| json!({"success": true, "message": "File created successfully"}))
                 .map_err(|e| format!("Create failed: {}", e))
         }
         "str_replace" => {
@@ -215,9 +215,9 @@ pub async fn execute_str_replace_tool(
                 .ok_or_else(|| "Missing 'old_str' parameter for str_replace command".to_string())?;
             let new_str = input["new_str"].as_str().unwrap_or("");
 
-            crate::commands::text_editor::text_editor_str_replace(path.to_string(), old_str.to_string(), new_str.to_string())
+            crate::commands::text_editor::text_editor_str_replace(path.to_string(), old_str.to_string(), new_str.to_string(), app_handle.state(), app_handle.clone())
                 .await
-                .map(|result| json!({"success": true, "result": result}))
+                .map(|_| json!({"success": true, "message": "String replacement completed"}))
                 .map_err(|e| format!("String replace failed: {}", e))
         }
         _ => Err(format!("Unknown str_replace_based_edit_tool command: {}", command)),
