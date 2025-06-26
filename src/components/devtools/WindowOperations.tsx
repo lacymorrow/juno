@@ -5,6 +5,20 @@ import { Input } from "@/components/ui/input";
 import { AppWindow, Maximize2, Move, X, Info, Focus } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
 
+/**
+ * WindowOperations Component
+ *
+ * IMPORTANT: Backend functions expect snake_case parameter names (window_id),
+ * not camelCase (windowId). This component correctly uses snake_case for all
+ * backend function calls to ensure proper parameter binding.
+ *
+ * Backend functions in src-tauri/src/commands/window.rs:
+ * - get_window_info(window_id: String, ...)
+ * - focus_window(window_id: String, ...)
+ * - resize_window(window_id: String, width: i32, height: i32, ...)
+ * - move_window(window_id: String, x: i32, y: i32, ...)
+ * - close_window(window_id: String, ...)
+ */
 const WindowOperations: React.FC = () => {
   const [windowListResult, setWindowListResult] = useState<string | null>(null);
   const [windowIdInfo, setWindowIdInfo] = useState<string>("");
@@ -145,14 +159,14 @@ const WindowOperations: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Consolidation Notice */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+      {/* Status Notice */}
+      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
         <div className="flex items-start space-x-2">
-          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div className="text-sm text-blue-800">
-            <strong>Tool Consolidation:</strong> This component now uses
-            production window management functions with built-in debug
-            capabilities instead of dev_* functions.
+          <Info className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-green-800">
+            <strong>✅ Fixed:</strong> Parameter naming bug resolved - all window
+            operations now correctly use snake_case (window_id) for backend
+            compatibility. Uses production functions with built-in debug capabilities.
           </div>
         </div>
       </div>
