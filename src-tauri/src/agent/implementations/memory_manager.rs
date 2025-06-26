@@ -909,7 +909,7 @@ impl AdvancedMemoryManager {
                         compressed_count += 1;
                     }
                     Err(e) => {
-                        log::warn!(templates::FAILED_TO_COMPRESS, "screenshot", e);
+                        log::warn!("Failed to compress {}: {}", "screenshot", e);
                     }
                 }
             }
