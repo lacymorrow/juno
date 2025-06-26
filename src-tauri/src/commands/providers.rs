@@ -10,7 +10,9 @@ use crate::constants::errors::{templates, components, actions};
 
 // Helper function for error formatting
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replace("{}", context).replace("{}", &error.to_string())
+    template
+        .replace("{0}", context)
+        .replace("{1}", &error.to_string())
 }
 
 /// Get the list of available providers
