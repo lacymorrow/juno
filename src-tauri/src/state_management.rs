@@ -4,10 +4,10 @@
 //! including state initialization, configuration loading, state transitions,
 //! and background state monitoring tasks.
 
-use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
 use crate::state::AppState;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager};
+use tracing::{error, info, warn};
 
 // Import sound commands for boot sound functionality
 use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
@@ -71,7 +71,10 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
 
     if !errors.is_empty() {
-        warn!("Some state initialization components had issues: {:?}", errors);
+        warn!(
+            "Some state initialization components had issues: {:?}",
+            errors
+        );
         // Don't fail completely - continue with partial initialization
     }
 
@@ -104,34 +107,65 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     let app_state = app_handle.state::<AppState>();
 
     // Load keyboard shortcuts from centralized settings
-    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_centralized_settings(&app_handle, &*app_state).await {
-        warn!("Failed to load keyboard shortcuts from centralized settings: {} - using defaults", e);
+    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_centralized_settings(
+        &app_handle,
+        &*app_state,
+    )
+    .await
+    {
+        warn!(
+            "Failed to load keyboard shortcuts from centralized settings: {} - using defaults",
+            e
+        );
     }
 
     // Load agent trigger mode from persistent storage
-    if let Err(e) = crate::commands::core::load_agent_trigger_mode_from_store(&app_handle, &*app_state).await {
+    if let Err(e) =
+        crate::commands::core::load_agent_trigger_mode_from_store(&app_handle, &*app_state).await
+    {
         warn!("Failed to load agent trigger mode: {} - using defaults", e);
     }
 
     // Load dictation trigger mode from persistent storage
-    if let Err(e) = crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &*app_state).await {
-        warn!("Failed to load dictation trigger mode: {} - using defaults", e);
+    if let Err(e) =
+        crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &*app_state)
+            .await
+    {
+        warn!(
+            "Failed to load dictation trigger mode: {} - using defaults",
+            e
+        );
     }
 
     // Load tool configuration from centralized settings
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager for tool config: {}", e))?;
-    if let Err(e) = crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(&settings_manager, &*app_state).await {
-        warn!("Failed to load tool configuration from centralized settings: {} - using defaults", e);
+    if let Err(e) = crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
+        &settings_manager,
+        &*app_state,
+    )
+    .await
+    {
+        warn!(
+            "Failed to load tool configuration from centralized settings: {} - using defaults",
+            e
+        );
     }
 
     // Register global shortcuts after loading configuration
-    if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle, &*app_state).await {
-        warn!("Failed to register global shortcuts: {} - continuing without shortcuts", e);
+    if let Err(e) =
+        crate::commands::shortcuts::update_global_shortcuts(&app_handle, &*app_state).await
+    {
+        warn!(
+            "Failed to register global shortcuts: {} - continuing without shortcuts",
+            e
+        );
     }
 
     // Initialize dictation input monitoring system
-    if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await {
+    if let Err(e) =
+        crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await
+    {
         error!("Failed to initialize dictation input monitoring: {}", e);
         return Err(format!("Dictation monitoring initialization failed: {}", e));
     }
@@ -150,15 +184,24 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
     let app_state = app_handle.state::<AppState>();
 
     // Load audio settings from centralized settings
-    if let Err(e) = crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &*app_state).await {
-        warn!("Failed to load audio settings from centralized settings: {} - using defaults", e);
+    if let Err(e) =
+        crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &*app_state)
+            .await
+    {
+        warn!(
+            "Failed to load audio settings from centralized settings: {} - using defaults",
+            e
+        );
     } else {
         info!("Successfully loaded audio settings from centralized settings");
     }
 
     // Initialize voice transcription plugin configuration
     if let Err(e) = initialize_voice_transcription_config(&app_handle).await {
-        warn!("Failed to initialize voice transcription config: {} - using defaults", e);
+        warn!(
+            "Failed to initialize voice transcription config: {} - using defaults",
+            e
+        );
     }
 
     info!("Audio settings state initialized successfully");
@@ -173,7 +216,9 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Create voice transcription config based on centralized settings
@@ -226,7 +271,9 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
 async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing onboarding state...");
 
-    if let Err(e) = crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await {
+    if let Err(e) =
+        crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await
+    {
         warn!("Failed to initialize onboarding system: {}", e);
         return Err(format!("Onboarding initialization failed: {}", e));
     }
@@ -239,7 +286,9 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
 async fn initialize_orchestrator_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing orchestrator state...");
 
-    if let Err(e) = crate::commands::orchestrator::init_orchestrator_with_app_handle(app_handle.clone()).await {
+    if let Err(e) =
+        crate::commands::orchestrator::init_orchestrator_with_app_handle(app_handle.clone()).await
+    {
         error!("Failed to initialize orchestrator system: {}", e);
         return Err(format!("Orchestrator initialization failed: {}", e));
     }
@@ -334,14 +383,15 @@ async fn start_mcp_retry_task(app_handle: AppHandle) {
 // Boot sound function removed - handled by app_setup module
 
 /// Handle state transitions for dictation mode
-pub async fn handle_dictation_state_transition(app_handle: &AppHandle, active: bool) -> Result<(), String> {
+pub async fn handle_dictation_state_transition(
+    app_handle: &AppHandle,
+    active: bool,
+) -> Result<(), String> {
     let app_state = app_handle.state::<AppState>();
 
     // Update dictation active state
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = active;
-    } else {
-        return Err("Failed to acquire dictation active lock".to_string());
+    if let Err(e) = app_state.set_dictation_active(active) {
+        return Err(format!("Failed to set dictation active state: {}", e));
     }
 
     // Emit state change event for UI
@@ -381,7 +431,10 @@ pub async fn handle_agent_execution_state_transition(
         return Err(format!("Failed to emit agent state event: {}", e));
     }
 
-    info!("Agent execution state transition completed: active={}", active);
+    info!(
+        "Agent execution state transition completed: active={}",
+        active
+    );
     Ok(())
 }
 
@@ -392,7 +445,10 @@ pub async fn handle_emergency_state_cleanup(app_handle: &AppHandle) -> Result<()
     let stop_coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
 
     // Use the stop coordinator to handle the emergency cleanup
-    if let Err(e) = stop_coordinator.stop_all_operations(app_handle, "emergency_state_cleanup").await {
+    if let Err(e) = stop_coordinator
+        .stop_all_operations(app_handle, "emergency_state_cleanup")
+        .await
+    {
         warn!("[State] Stop coordinator failed emergency cleanup: {}", e);
         // Fall back to direct cleanup if coordinator fails
         perform_direct_emergency_cleanup(app_handle).await
@@ -416,16 +472,21 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     app_state.mark_agent_execution_finished();
 
     // Reset dictation state
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = false;
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Stop always listening if active
     if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
         app_handle.clone(),
-        app_state.clone()
-    ).await {
-        warn!("[State] Failed to stop always listening during emergency cleanup: {}", e);
+        app_state.clone(),
+    )
+    .await
+    {
+        warn!(
+            "[State] Failed to stop always listening during emergency cleanup: {}",
+            e
+        );
     } else {
         info!("[State] Always listening stopped during emergency cleanup");
     }
@@ -444,8 +505,9 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     crate::commands::floating_bar::handle_backend_response(
         app_handle,
         "Stopped",
-        Some("All operations stopped.".to_string())
-    ).await;
+        Some("All operations stopped.".to_string()),
+    )
+    .await;
 
     info!("[State] Direct emergency state cleanup completed");
     Ok(())
@@ -464,9 +526,7 @@ pub async fn get_state_summary(app_handle: &AppHandle) -> Result<serde_json::Val
         },
         "dictation": {
             "active": app_state.is_dictation_active(),
-            "clipboard_enabled": app_state.dictation_clipboard_enabled().lock()
-                .map(|enabled| *enabled)
-                .unwrap_or(false),
+            "clipboard_enabled": app_state.get_dictation_clipboard_enabled().unwrap_or(false),
         },
         "cloud": {
             "enabled": app_state.is_cloud_enabled(),
@@ -486,12 +546,8 @@ pub async fn get_state_summary(app_handle: &AppHandle) -> Result<serde_json::Val
             "mode": app_state.is_debug_mode(),
         },
         "always_listening": {
-            "active": app_state.always_listening_active().lock()
-                .map(|active| *active)
-                .unwrap_or(false),
-            "sensitivity": app_state.always_listening_sensitivity().lock()
-                .map(|sensitivity| *sensitivity)
-                .unwrap_or(0.5),
+            "active": app_state.get_always_listening_active().unwrap_or(false),
+            "sensitivity": app_state.get_always_listening_sensitivity().unwrap_or(0.5),
         },
     });
 
@@ -512,15 +568,22 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
         issues.push("Both dictation and agent execution are active simultaneously".to_string());
     }
 
-    if !app_state.is_desktop_available() && (app_state.is_agent_executing() || app_state.is_dictation_active()) {
+    if !app_state.is_desktop_available()
+        && (app_state.is_agent_executing() || app_state.is_dictation_active())
+    {
         issues.push("Desktop not available but agent/dictation operations are active".to_string());
     }
 
     // Check permissions consistency
     if app_state.are_permissions_checked() {
         if let Some(permissions) = app_state.get_permissions_state().await {
-            if !permissions.accessibility.granted && (app_state.is_agent_executing() || app_state.is_dictation_active()) {
-                issues.push("Accessibility permissions missing but operations requiring them are active".to_string());
+            if !permissions.accessibility.granted
+                && (app_state.is_agent_executing() || app_state.is_dictation_active())
+            {
+                issues.push(
+                    "Accessibility permissions missing but operations requiring them are active"
+                        .to_string(),
+                );
             }
         }
     }

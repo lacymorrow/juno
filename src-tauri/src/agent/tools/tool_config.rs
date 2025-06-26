@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use tracing::info;
 
+// Import tool name constants
+use crate::constants::agent::tool_names;
+
 // Re-export MCP types for convenience
 pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
 
@@ -476,22 +479,22 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_anthropic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let anthropic_tools = vec![
-            ("computer", "Use mouse and keyboard to interact with computer, and take screenshots"),
-            ("accessibility_interface", "Use macOS accessibility APIs for precise UI interaction (preferred method)"),
-            ("str_replace_based_edit_tool", "Create, view, and edit files with precise text operations"),
-            ("bash", "Execute bash commands and shell operations"),
-            ("screenshot", "Take a screenshot of the current screen"),
-            ("click", "Click on screen coordinates"),
-            ("type", "Type text into the focused application"),
-            ("key", "Press keyboard keys and combinations"),
-            ("scroll", "Scroll in a direction"),
-            ("wait", "Wait for a specified duration"),
-            ("move", "Move mouse to coordinates"),
-            ("drag", "Drag from one coordinate to another"),
+            (tool_names::COMPUTER, "Use mouse and keyboard to interact with computer, and take screenshots"),
+            (tool_names::ACCESSIBILITY_INTERFACE, "Use macOS accessibility APIs for precise UI interaction (preferred method)"),
+            (tool_names::STR_REPLACE_BASED_EDIT_TOOL, "Create, view, and edit files with precise text operations"),
+            (tool_names::BASH, "Execute bash commands and shell operations"),
+            (tool_names::SCREENSHOT, "Take a screenshot of the current screen"),
+            (tool_names::CLICK, "Click on screen coordinates"),
+            (tool_names::TYPE, "Type text into the focused application"),
+            (tool_names::KEY, "Press keyboard keys and combinations"),
+            (tool_names::SCROLL, "Scroll in a direction"),
+            (tool_names::WAIT, "Wait for a specified duration"),
+            (tool_names::MOVE, "Move mouse to coordinates"),
+            (tool_names::DRAG, "Drag from one coordinate to another"),
         ];
 
         // Essential tools that are required for core functionality
-        let essential_tools = ["computer", "screenshot", "bash"];
+        let essential_tools = [tool_names::COMPUTER, tool_names::SCREENSHOT, tool_names::BASH];
 
         for (name, description) in anthropic_tools {
             let mut config = ToolConfig::new(
@@ -515,12 +518,12 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_desktop_tools(tools: &mut HashMap<String, ToolConfig>) {
         let desktop_tools = vec![
-            ("launch_application", "Launch applications by name"),
-            ("get_running_applications", "List currently running applications"),
-            ("focus_application", "Bring application to front"),
-            ("quit_application", "Quit an application"),
-            ("get_system_info", "Get system information"),
-            ("manage_audio", "Control system audio settings"),
+            (tool_names::LAUNCH_APPLICATION, "Launch applications by name"),
+            (tool_names::GET_RUNNING_APPLICATIONS, "List currently running applications"),
+            (tool_names::FOCUS_APPLICATION, "Bring application to front"),
+            (tool_names::QUIT_APPLICATION, "Quit an application"),
+            (tool_names::GET_SYSTEM_INFO, "Get system information"),
+            (tool_names::MANAGE_AUDIO, "Control system audio settings"),
         ];
 
         for (name, description) in desktop_tools {
@@ -539,12 +542,12 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_browser_tools(tools: &mut HashMap<String, ToolConfig>) {
         let browser_tools = vec![
-            ("browser_navigate", "Navigate to a URL"),
-            ("browser_click", "Click elements in the browser"),
-            ("browser_type", "Type text in browser forms"),
-            ("browser_scroll", "Scroll browser pages"),
-            ("browser_screenshot", "Take browser screenshots"),
-            ("browser_get_content", "Extract page content"),
+            (tool_names::BROWSER_NAVIGATE, "Navigate to a URL"),
+            (tool_names::BROWSER_CLICK, "Click elements in the browser"),
+            (tool_names::BROWSER_TYPE, "Type text in browser forms"),
+            (tool_names::BROWSER_SCROLL, "Scroll browser pages"),
+            (tool_names::BROWSER_SCREENSHOT, "Take browser screenshots"),
+            (tool_names::BROWSER_GET_CONTENT, "Extract page content"),
         ];
 
         for (name, description) in browser_tools {
@@ -563,10 +566,10 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_timer_tools(tools: &mut HashMap<String, ToolConfig>) {
         let timer_tools = vec![
-            ("create_timer", "Create a scheduled timer"),
-            ("list_timers", "List active timers"),
-            ("cancel_timer", "Cancel a timer"),
-            ("timer_status", "Check timer status"),
+            (tool_names::CREATE_TIMER, "Create a scheduled timer"),
+            (tool_names::LIST_TIMERS, "List active timers"),
+            (tool_names::CANCEL_TIMER, "Cancel a timer"),
+            (tool_names::TIMER_STATUS, "Check timer status"),
         ];
 
         for (name, description) in timer_tools {
@@ -585,13 +588,13 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_basic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let basic_tools = vec![
-            ("read_file", "Read file contents"),
-            ("write_file", "Write content to file"),
-            ("list_directory", "List directory contents"),
-            ("create_directory", "Create directories"),
-            ("delete_file", "Delete files"),
-            ("text_editor_edit", "Edit text files"),
-            ("execute_shell_command", "Execute shell commands"),
+            (tool_names::READ_FILE, "Read file contents"),
+            (tool_names::WRITE_FILE, "Write content to file"),
+            (tool_names::LIST_DIRECTORY, "List directory contents"),
+            (tool_names::CREATE_DIRECTORY, "Create directories"),
+            (tool_names::DELETE_FILE, "Delete files"),
+            (tool_names::TEXT_EDITOR_EDIT, "Edit text files"),
+            (tool_names::EXECUTE_SHELL_COMMAND, "Execute shell commands"),
         ];
 
         for (name, description) in basic_tools {
