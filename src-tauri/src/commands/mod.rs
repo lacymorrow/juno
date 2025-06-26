@@ -75,6 +75,10 @@ pub use self::dictation_state_manager::{
     update_dictation_component_state,
     transition_dictation_state
 };
+pub use self::element::*;
+pub use self::keyboard::*;
+pub use self::text_editor::*;
+pub use self::window::*;
 pub use self::floating_bar::{
     floating_bar_click, floating_bar_focus_change, floating_bar_input_blur,
     floating_bar_input_change, floating_bar_submit, get_floating_bar_config,
