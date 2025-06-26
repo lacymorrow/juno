@@ -18,8 +18,8 @@ pub(crate) async fn get_providers() -> Result<Vec<ProviderInfo>, String> {
 /// Get the current active provider
 #[tauri::command]
 pub(crate) async fn get_active_provider(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -33,8 +33,8 @@ pub(crate) async fn set_active_provider(
     app_handle: tauri::AppHandle,
     provider_id: String
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -119,8 +119,8 @@ pub(crate) async fn get_provider_settings(
     app_handle: tauri::AppHandle,
     provider_id: String
 ) -> Result<CentralizedProviderConfig, String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -138,8 +138,8 @@ pub(crate) async fn update_provider_api_key(
     provider_id: String,
     api_key: String
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -172,8 +172,8 @@ pub(crate) async fn update_provider_model(
     provider_id: String,
     model: String
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -206,8 +206,8 @@ pub(crate) async fn update_provider_max_tokens(
     provider_id: String,
     max_tokens: u32
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -240,8 +240,8 @@ pub(crate) async fn update_provider_temperature(
     provider_id: String,
     temperature: f32
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -274,8 +274,8 @@ pub(crate) async fn update_provider_system_prompt(
     provider_id: String,
     system_prompt: String
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -304,8 +304,8 @@ pub(crate) async fn update_provider_system_prompt(
 /// Get current agent mode
 #[tauri::command]
 pub(crate) async fn get_agent_mode(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let app_settings = settings_manager.get_all_settings().await
         .map_err(|e| format!("Failed to load settings: {}", e))?;
@@ -319,8 +319,8 @@ pub(crate) async fn set_agent_mode(
     app_handle: tauri::AppHandle,
     mode: String
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(&app.state())
-        .map_err(|e| format!(FAILED_TO_INITIALIZE, SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(&app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager", e))?;
 
     let _agent_mode = AgentMode::from_str(&mode)
         .ok_or_else(|| format!("Invalid agent mode: '{}'. Must be 'single' or 'multi'", mode))?;
