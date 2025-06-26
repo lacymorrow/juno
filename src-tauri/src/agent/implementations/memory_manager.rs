@@ -69,7 +69,7 @@ impl Default for VisualContextConfig {
             enable_screenshot_compression: true,
             screenshot_retention_seconds: 300, // 5 minutes
             immediate_compression: true,
-            max_base64_screenshots: 0, // Changed from 2 to 0 - compress ALL screenshots immediately
+            max_base64_screenshots: 1, // Changed from 2 to 1 - compress all but 1 screenshot immediately
             fallback_to_generic_description: true,
         }
     }
