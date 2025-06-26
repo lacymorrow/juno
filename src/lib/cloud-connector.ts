@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { COMMANDS, EVENTS } from './constants.generated';
 
 /**
  * Production Cloud Connector Frontend Integration
  *
  * This module provides a TypeScript interface for the production cloud connector
- * that enables remote control of the Juno AI Computer Use Agent.
+ * system with proper constants usage instead of hardcoded strings.
  */
 
 export interface CloudConnectorStatus {
@@ -46,7 +47,7 @@ export class ProductionCloudConnector {
     }
 
     try {
-      await invoke('start_production_cloud_connector');
+      await invoke(COMMANDS.CLOUD_START_PRODUCTION_CLOUD_CONNECTOR);
       this.isInitialized = true;
       console.log('[CloudConnector] Production cloud connector started successfully');
     } catch (error) {
@@ -65,7 +66,7 @@ export class ProductionCloudConnector {
     }
 
     try {
-      await invoke('stop_production_cloud_connector');
+      await invoke(COMMANDS.CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR);
       this.isInitialized = false;
       console.log('[CloudConnector] Production cloud connector stopped successfully');
     } catch (error) {
@@ -75,14 +76,26 @@ export class ProductionCloudConnector {
   }
 
   /**
-   * Get current connection status
+   * Get current cloud connector status
    */
   async getStatus(): Promise<CloudConnectorStatus> {
     try {
-      const status = await invoke<CloudConnectorStatus>('get_production_cloud_status');
+      const status = await invoke<CloudConnectorStatus>(COMMANDS.CLOUD_GET_PRODUCTION_CLOUD_STATUS);
       return status;
     } catch (error) {
       console.error('[CloudConnector] Failed to get status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cloud configuration status (for debugging/monitoring)
+   */
+  async getConfigStatus(): Promise<any> {
+    try {
+      return await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
+    } catch (error) {
+      console.error('[CloudConnector] Failed to get config status:', error);
       throw error;
     }
   }
@@ -105,7 +118,7 @@ export class ProductionCloudConnector {
    */
   private async setupEventListeners(): Promise<void> {
     // Listen for connection state changes
-    await listen('cloud-connector-state', (event) => {
+    await listen(EVENTS.CLOUD_CONNECTOR_STATE, (event) => {
       console.log('[CloudConnector] State changed:', event.payload);
       this.notifyStatusListeners();
     });
@@ -129,8 +142,6 @@ export class ProductionCloudConnector {
       // Cloud commands are handled by the Rust backend
     });
   }
-
-
 
   /**
    * Add a status change listener

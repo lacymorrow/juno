@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { COMMANDS } from "@/lib/constants.generated";
 
 import { SettingsSectionProps } from "../types";
 
@@ -247,7 +248,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleGetCloudStatus = async () => {
     try {
-      const status = await invoke("get_cloud_config_status");
+      const status = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
       setCloudTestStatus(JSON.stringify(status, null, 2));
       toast.success("Cloud status retrieved");
     } catch (error) {
@@ -257,16 +258,14 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   };
 
   const handleStartCloudConnector = async () => {
-    setIsCloudTesting(true);
     try {
-      await invoke("start_production_cloud_connector");
-      toast.success("Cloud connector started successfully");
-      setCloudTestStatus(
-        "✅ Cloud connector started - device should now be connected to cloud backend"
-      );
+      setIsCloudTesting(true);
+      await invoke(COMMANDS.CLOUD_START_PRODUCTION_CLOUD_CONNECTOR);
+      setCloudTestStatus("✅ Cloud connector started successfully");
+      toast.success("Cloud connector started");
     } catch (error) {
       console.error("Failed to start cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to start cloud connector: ${error}`);
+      setCloudTestStatus(`❌ Failed to start: ${error}`);
       toast.error("Failed to start cloud connector");
     } finally {
       setIsCloudTesting(false);
@@ -274,16 +273,14 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   };
 
   const handleStopCloudConnector = async () => {
-    setIsCloudTesting(true);
     try {
-      await invoke("stop_production_cloud_connector");
+      setIsCloudTesting(true);
+      await invoke(COMMANDS.CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR);
+      setCloudTestStatus("🛑 Cloud connector stopped");
       toast.success("Cloud connector stopped");
-      setCloudTestStatus(
-        "🛑 Cloud connector stopped - device disconnected from cloud backend"
-      );
     } catch (error) {
       console.error("Failed to stop cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to stop cloud connector: ${error}`);
+      setCloudTestStatus(`❌ Failed to stop: ${error}`);
       toast.error("Failed to stop cloud connector");
     } finally {
       setIsCloudTesting(false);
@@ -292,7 +289,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleGetProductionCloudStatus = async () => {
     try {
-      const status = await invoke("get_production_cloud_status");
+      const status = await invoke(COMMANDS.CLOUD_GET_PRODUCTION_CLOUD_STATUS);
       setCloudTestStatus(JSON.stringify(status, null, 2));
       toast.success("Production cloud status retrieved");
     } catch (error) {
