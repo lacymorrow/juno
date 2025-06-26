@@ -491,26 +491,34 @@ impl BrainFactory {
 
         match app_handle.store(SETTINGS_STORE_FILE) {
             Ok(store) => {
-                match store.get("agent.execution_mode") {
-                    Some(mode_value) => {
-                        if let Some(mode_str) = mode_value.as_str() {
-                            let mode = AgentMode::from_str(mode_str)
-                                .unwrap_or_else(|| {
-                                    warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
-                                    AgentMode::Multi
-                                });
-                            info!("Loaded agent mode from centralized settings: {:?}", mode);
-                            mode
+                // Access nested agent settings structure: { "agent": { "execution_mode": "..." } }
+                match store.get("agent") {
+                    Some(agent_value) => {
+                        if let Some(agent_obj) = agent_value.as_object() {
+                            if let Some(execution_mode_value) = agent_obj.get("execution_mode") {
+                                if let Some(mode_str) = execution_mode_value.as_str() {
+                                    let mode = AgentMode::from_str(mode_str)
+                                        .unwrap_or_else(|| {
+                                            warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
+                                            AgentMode::Multi
+                                        });
+                                    info!("Loaded agent mode from centralized settings: {:?}", mode);
+                                    return mode;
+                                } else {
+                                    warn!("Agent execution mode is not a string in settings. Using default.");
+                                }
+                            } else {
+                                info!("Agent execution mode not found in agent settings object. Using default.");
+                            }
                         } else {
-                            warn!("Agent execution mode is not a string in settings. Using default.");
-                            AgentMode::Multi
+                            warn!("Agent settings is not an object in settings store. Using default.");
                         }
                     }
                     None => {
-                        info!("Agent execution mode not found in settings. Using default.");
-                        AgentMode::Multi
+                        info!("Agent settings not found in settings store. Using default.");
                     }
                 }
+                AgentMode::Multi
             }
             Err(e) => {
                 warn!("Failed to access settings store for agent mode: {}. Using environment fallback.", e);
