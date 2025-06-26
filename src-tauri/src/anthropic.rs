@@ -388,24 +388,24 @@ pub async fn submit_query(
         // Force system TTS for offline response
         let current_provider = state
             .get_tts_provider()
-            .map_err(|e| format!(templates::FAILED_TO_ACCESS, "TTS provider", e))?;
+            .map_err(|e| format!("Failed to access TTS provider: {}", e))?;
 
         // Temporarily switch to system TTS for offline message
         state
             .set_tts_provider("system".to_string())
-            .map_err(|e| format!(templates::FAILED_TO_SET, "TTS provider", e))?;
+            .map_err(|e| format!("Failed to set TTS provider: {}", e))?;
 
         // Play offline message using system TTS
         if let Err(e) =
             crate::tts::invoke_tts(offline_message, state.clone(), app_handle.clone()).await
         {
-            warn!("{}", format!(templates::FAILED_TO_PROCESS, "play offline message via TTS", e));
+            warn!("Failed to process play offline message via TTS: {}", e);
         }
 
         // Restore original TTS provider
         state
             .set_tts_provider(current_provider)
-            .map_err(|e| format!(templates::FAILED_TO_RESTORE, "TTS provider", e))?;
+            .map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
 
         return Ok(());
     }
@@ -496,7 +496,7 @@ async fn execute_agent_internal(
     if let Err(e) =
         crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
     {
-        warn!("{} - continuing without escape key cancellation", format!(templates::FAILED_TO_CONFIGURE, "escape key for agent execution", e));
+        warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
     }
 
     // Reset cancellation signal for the new agent
@@ -512,7 +512,7 @@ async fn execute_agent_internal(
             Some(context)
         }
         Err(e) => {
-            warn!("{}", format!(templates::FAILED_TO_RETRIEVE, "system context", e));
+            warn!("Failed to retrieve system context: {}", e);
             None
         }
     };
@@ -526,7 +526,7 @@ async fn execute_agent_internal(
     {
         let mut memory_manager = memory_manager_arc.lock().await;
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
-            warn!("{}", format!(templates::FAILED_TO_PROCESS, "clean orphaned tool calls", e));
+            warn!("Failed to process clean orphaned tool calls: {}", e);
         }
 
         // Also clean up orphaned tool results that have no corresponding tool calls
@@ -539,7 +539,7 @@ async fn execute_agent_internal(
             }
             Ok(_) => {} // No orphaned results found
             Err(e) => {
-                warn!("{}", format!(templates::FAILED_TO_PROCESS, "clean orphaned tool results", e));
+                warn!("Failed to process clean orphaned tool results: {}", e);
             }
         }
     }
@@ -628,7 +628,7 @@ async fn execute_agent_internal(
             let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!(templates::FAILED_TO_INITIALIZE, components::AGENT_BRAIN, e);
+                    let err_msg = format!("Failed to initialize agent brain: {}", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events instead of backend-response
@@ -665,7 +665,7 @@ async fn execute_agent_internal(
             )
             .await
             {
-                let err_msg = format!(templates::FAILED_TO_REGISTER, "Computer Use tools for single agent", e);
+                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
                 error!("{}", err_msg);
                 return Err(err_msg);
             }
@@ -710,7 +710,7 @@ async fn execute_agent_internal(
             ) {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!(templates::FAILED_TO_INITIALIZE, components::ORCHESTRATOR, e);
+                    let err_msg = format!("Failed to initialize orchestrator: {}", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events instead of backend-response
@@ -796,7 +796,7 @@ async fn execute_agent_internal(
     if let Err(e) =
         crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
     {
-                warn!("{} - continuing anyway", format!(templates::FAILED_TO_CONFIGURE, "unregister escape key after agent execution", e));
+                warn!("Failed to configure unregister escape key after agent execution: {} - continuing anyway", e);
     }
 
     // --- Process Agent Result ---

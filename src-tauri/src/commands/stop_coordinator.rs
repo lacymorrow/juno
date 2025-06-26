@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use crate::state::AppState;
 use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
-use crate::constants::errors::prefixes::STOP_COORDINATOR;
+use crate::constants::errors::prefixes::STOP_COORDINATOR as STOP_COORDINATOR_PREFIX;
 
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
@@ -255,13 +255,13 @@ impl StopCoordinator {
 
     fn emit_tts_stop_event(&self, app_handle: &AppHandle) {
         if let Err(e) = app_handle.emit(events::tts::TTS_AUDIO_STOP, ()) {
-            warn!("{} {}", STOP_COORDINATOR, format!(FAILED_TO_EMIT, "TTS stop", e));
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, "TTS stop", e));
         }
     }
 
     fn emit_event(&self, app_handle: &AppHandle, event_name: &str) {
         if let Err(e) = app_handle.emit(event_name, ()) {
-            warn!("{} {}", STOP_COORDINATOR, format!(FAILED_TO_EMIT, event_name, e));
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, event_name, e));
         }
     }
 
