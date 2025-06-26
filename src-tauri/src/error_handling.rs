@@ -125,7 +125,7 @@ pub mod utils {
             });
 
             if let Err(e) = app_handle.emit(events::system::ERROR_OCCURRED, error_payload) {
-                error!("{}", format!(templates::FAILED_TO_EMIT, "error event", e));
+                error!("{}", format!("Failed to emit {}: {}", "error event", e));
             }
         }
     }
@@ -145,11 +145,11 @@ pub mod utils {
         // Reset dictation state
         let app_state = app_handle.state::<crate::state::AppState>();
         if let Err(e) = app_state.set_dictation_active(false) {
-            error!("{}", format!(templates::FAILED_TO_UPDATE, "dictation state during error recovery", e));
+            error!("Failed to update dictation state during error recovery: {}", e);
         }
 
         if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
-            error!("{}", format!(templates::FAILED_TO_EMIT, "dictation-active event after error recovery", e));
+            error!("{}", format!("Failed to emit {}: {}", "dictation-active event after error recovery", e));
         }
     }
 
@@ -165,7 +165,7 @@ pub mod utils {
         crate::tts::stop_speech();
 
         if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, false) {
-            error!("{}", format!(templates::FAILED_TO_EMIT, "agent-active event after error recovery", e));
+            error!("{}", format!("Failed to emit {}: {}", "agent-active event after error recovery", e));
         }
     }
 
@@ -197,14 +197,14 @@ pub mod utils {
         });
 
         if let Err(e) = app_handle.emit(events::permissions::GUIDANCE_NEEDED, guidance_payload) {
-            error!("{}", format!(templates::FAILED_TO_EMIT, "permission guidance event", e));
+            error!("{}", format!("Failed to emit {}: {}", "permission guidance event", e));
         }
     }
 
     /// Safe lock wrapper that logs errors instead of panicking
     pub fn safe_lock<'a, T>(mutex: &'a std::sync::Mutex<T>, operation: &str) -> Result<std::sync::MutexGuard<'a, T>, String> {
         mutex.lock().map_err(|e| {
-            let error_msg = format!(templates::FAILED_TO_ACCESS, format!("lock for {}", operation), e);
+            let error_msg = format!("Failed to access lock for {}: {}", operation, e);
             error!("{}", error_msg);
             error_msg
         })
@@ -240,7 +240,7 @@ pub mod utils {
         match value.parse() {
             Ok(parsed) => Some(parsed),
             Err(_) => {
-                warn!("{}", format!(templates::FAILED_TO_PROCESS, format!("parse {} from value: '{}'", field_name, value), "Invalid format"));
+                warn!("Failed to parse {} from value '{}': Invalid format", field_name, value);
                 None
             }
         }

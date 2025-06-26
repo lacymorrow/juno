@@ -1240,7 +1240,7 @@ impl AppState {
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
                     Ok(Err(e)) => {
-                        warn!("❌ {}", format!(templates::FAILED_TO_START, format!("MCP server '{}'", config.name), e));
+                        warn!("❌ Failed to start MCP server '{}': {}", config.name, e);
                         failed_servers.push(format!("{}: {}", config.name, e));
                     }
                     Err(_) => {

@@ -25,7 +25,7 @@ pub async fn invoke_system_tts(
     }
 
     let temp_file = NamedTempFile::new()
-        .map_err(|e| format!(templates::FAILED_TO_CREATE, "temporary file", e))?;
+        .map_err(|e| format!("Failed to create temporary file: {}", e))?;
     let temp_path = temp_file.path().to_path_buf();
 
     // Use .m4a extension for AAC audio, common on macOS
@@ -77,7 +77,7 @@ pub async fn invoke_system_tts(
                         Ok(base64_audio)
                     }
                     Err(e) => {
-                        let err_msg = format!(templates::FAILED_TO_LOAD, format!("generated audio file '{}'", output_path_str), e);
+                        let err_msg = format!("Failed to read generated audio file '{}': {}", output_path_str, e);
                         error!("{}", err_msg);
                         // Attempt cleanup even on error
                         let _ = fs::remove_file(&output_path);
@@ -94,7 +94,7 @@ pub async fn invoke_system_tts(
             }
         }
         Err(e) => {
-            let err_msg = format!(templates::FAILED_TO_START, "'say' command", e);
+            let err_msg = format!("Failed to start 'say' command: {}", e);
             error!("{}", err_msg);
             // Attempt cleanup even on error
             let _ = fs::remove_file(&output_path);

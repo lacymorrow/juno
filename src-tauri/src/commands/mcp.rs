@@ -196,18 +196,18 @@ pub async fn set_mcp_server_enabled(
     // Start or stop the server based on enabled status
     if enabled {
         if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), server_id.clone()).await {
-            error!("{}", format!(templates::FAILED_TO_START, "MCP server", e));
+            error!("Failed to start MCP server: {}", e);
         }
     } else {
         if let Err(e) = stop_mcp_server(app_handle.clone(), state.clone(), server_id).await {
-            error!("{}", format!(templates::FAILED_TO_STOP, "MCP server", e));
+            error!("Failed to stop MCP server: {}", e);
         }
     }
 
     // The start/stop functions will emit their own updates, but emit one more to be sure
     // This handles cases where the start/stop might fail but we still want to update the UI
     state.emit_mcp_state_update(&app_handle).await.unwrap_or_else(|e| {
-        warn!("{}", format!(templates::FAILED_TO_EMIT, "final MCP state update", e));
+        warn!("Failed to emit final MCP state update: {}", e);
     });
 
     Ok(())
@@ -289,7 +289,7 @@ pub async fn test_mcp_server_connection(
                     },
                     MCPServerStatus::Error(err) => {
                         test_manager.stop_server(&config.id).await?;
-                        Err(format!(templates::FAILED_TO_START, format!("Server '{}'", config.name), err))
+                        Err(format!("Failed to start Server '{}': {}", config.name, err))
                     },
                     MCPServerStatus::Timeout => {
                         test_manager.stop_server(&config.id).await?;
@@ -522,7 +522,7 @@ pub async fn troubleshoot_mcp_issues(
         .collect();
 
     if !failed_servers.is_empty() {
-        let error_msg = format!(templates::FAILED_TO_START, format!("{} MCP servers", failed_servers.len()), "Check individual error messages for details");
+        let error_msg = format!("Failed to start {} MCP servers: Check individual error messages for details", failed_servers.len());
         recommendations.push(error_msg);
     }
 

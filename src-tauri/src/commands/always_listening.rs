@@ -56,7 +56,7 @@ pub async fn start_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, true) {
-                        error!("{} {}", COMMAND, format!(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
 
                     // Update floating bar
@@ -150,7 +150,7 @@ pub async fn stop_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
-                        error!("{} {}", COMMAND, format!(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
 
                     // Update floating bar

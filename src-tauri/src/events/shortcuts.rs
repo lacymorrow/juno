@@ -31,7 +31,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{}", format!(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!("Failed to retrieve keyboard shortcuts: {}", e);
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -348,7 +348,7 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(format!(templates::FAILED_TO_EMIT, "test event", e));
+        return Err(format!("Failed to emit {}: {}", "test event", e));
     }
 
     Ok(())

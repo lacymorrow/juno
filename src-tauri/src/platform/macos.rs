@@ -199,14 +199,14 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
 
         // Single, safe focus attempt without aggressive looping
         if let Err(e) = window.set_focus() {
-            warn!("{}", format!(templates::FAILED_TO_UPDATE, "focus on floating bar window", e));
+            warn!("Failed to set focus on floating bar window: {}", e);
         } else {
             info!("Floating bar window focus set successfully");
         }
 
         // Simple window show to ensure visibility - much safer than NSWindow API calls
         if let Err(e) = window.show() {
-            warn!("{}", format!(templates::FAILED_TO_PROCESS, "show floating bar window", e));
+            warn!("Failed to show floating bar window: {}", e);
         } else {
             info!("Floating bar window shown successfully");
         }
@@ -222,18 +222,18 @@ fn activate_main_window(main_window: tauri::WebviewWindow<tauri::Wry>) {
 
         // Ensure main window is visible and focused
         if let Err(e) = main_window.show() {
-            warn!("{}", format!(templates::FAILED_TO_PROCESS, "show main window", e));
+            warn!("Failed to show main window: {}", e);
         }
 
         if let Err(e) = main_window.set_focus() {
-            warn!("{}", format!(templates::FAILED_TO_UPDATE, "focus on main window", e));
+            warn!("Failed to set focus on main window: {}", e);
         } else {
             info!("Main window focus set successfully - clicks should now work immediately");
         }
 
         // Unminimize if needed
         if let Err(e) = main_window.unminimize() {
-            warn!("{}", format!(templates::FAILED_TO_PROCESS, "unminimize main window", e));
+            warn!("Failed to unminimize main window: {}", e);
         }
     });
 }
@@ -264,7 +264,7 @@ pub mod mouse_tracking {
         let app_handle = match APP_HANDLE.lock() {
             Ok(handle) => handle.as_ref().cloned(),
             Err(e) => {
-                error!("[Tracking Delegate Error] {}", format!(templates::FAILED_TO_ACCESS, "APP_HANDLE lock", e));
+                error!("[Tracking Delegate Error] Failed to access APP_HANDLE lock: {}", e);
                 return;
             }
         };

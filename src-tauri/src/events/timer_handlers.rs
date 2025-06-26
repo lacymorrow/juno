@@ -422,8 +422,7 @@ impl TimerEventHandler {
         .await
         {
             return Err(TimerEventError::AgentUnavailable(format!(
-                templates::FAILED_TO_START,
-                "agent restart",
+                "Failed to start agent restart: {}",
                 e
             )));
         }
@@ -445,7 +444,7 @@ impl TimerEventHandler {
 
         // Emit event to notify about queued timer
         if let Err(e) = self.app_handle.emit(events::timer::QUEUED, &timer_data) {
-            warn!("{}", format!(templates::FAILED_TO_EMIT, "timer-queued event", e));
+            warn!("{}", format!("Failed to emit {}: {}", "timer-queued event", e));
         }
 
         Ok(())
@@ -513,7 +512,7 @@ impl TimerEventHandler {
 
             // Process the timer
             if let Err(e) = self.process_timer_internal(timer.clone()).await {
-                error!("{}", format!(templates::FAILED_TO_PROCESS, format!("queued timer {}", timer.id), e));
+                error!("Failed to process queued timer {}: {}", timer.id, e);
                 continue;
             }
 
