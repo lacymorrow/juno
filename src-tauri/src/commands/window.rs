@@ -340,11 +340,11 @@ pub(crate) async fn resize_window(
                     Ok(_) => {
                         info!("Successfully focused window '{}'", window_id);
 
-                        // Small delay to ensure focus has taken effect
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                         // Now resize the focused window using the engine
-                        let desktop = state.desktop.get_desktop()?;
+                        let desktop = state.get_desktop()?;
                         let engine = desktop.engine();
 
                         match engine.resize_window(width as f64, height as f64) {
@@ -431,11 +431,11 @@ pub(crate) async fn move_window(
                     Ok(_) => {
                         info!("Successfully focused window '{}'", window_id);
 
-                        // Small delay to ensure focus has taken effect
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                         // Now move the focused window using the engine
-                        let desktop = state.desktop.get_desktop()?;
+                        let desktop = state.get_desktop()?;
                         let engine = desktop.engine();
 
                         match engine.move_window(x as f64, y as f64) {
@@ -520,11 +520,11 @@ pub(crate) async fn close_window(
                     Ok(_) => {
                         info!("Successfully focused window '{}'", window_id);
 
-                        // Small delay to ensure focus has taken effect
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                         // Now close the focused window using the engine
-                        let desktop = state.desktop.get_desktop()?;
+                        let desktop = state.get_desktop()?;
                         let engine = desktop.engine();
 
                         match engine.close_window() {
