@@ -1,25 +1,27 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Emitter, Manager, State};
 
+use crate::agent::core::AgentError;
 use crate::agent::implementations::{
     agent_runner::DefaultAgentRunner, tool_provider::LocalToolProvider,
 };
+use crate::agent::intelligence::{AnalysisContext, OperationalMode, ToolChoiceIntelligence};
 use crate::agent::prompts::PromptManager;
+use crate::agent::providers::anthropic::ToolChoice;
 use crate::agent::providers::config::AgentMode;
 use crate::agent::providers::factory::BrainFactory;
-use crate::agent::core::AgentError;
 use crate::agent::tools::{
     basic_tools::register_basic_tools, browser_tools::get_browser_tool_definitions,
     desktop_tools::setup_tools,
 };
-use crate::agent::traits::{AgentRunnable, MemoryManager};
+use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager};
 use crate::constants::{agent, timeouts};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
@@ -424,6 +426,51 @@ pub async fn submit_query(
     Ok(())
 }
 
+/// Analyze user input and determine appropriate tool choice using intelligence system
+async fn analyze_tool_choice(
+    query: &str,
+    state: &tauri::State<'_, AppState>,
+    app_handle: &tauri::AppHandle,
+) -> Option<ToolChoice> {
+    // Determine operational mode based on current state
+    let mode = match state.get_dictation_active() {
+        Ok(true) => OperationalMode::Dictation,
+        _ => match state.get_always_listening_active() {
+            Ok(true) => OperationalMode::AlwaysListening,
+            _ => OperationalMode::Agent, // Default fallback
+        },
+    };
+
+    // Create tool choice intelligence system
+    let intelligence = ToolChoiceIntelligence::new(mode);
+
+    // Build analysis context from current state
+    let context = AnalysisContext {
+        previous_was_tool_call: false, // TODO: Could be enhanced by checking conversation history
+        last_tool_name: None,          // TODO: Could be enhanced by tracking last tool
+        last_tool_error: false,
+        conversation_length: 0,      // TODO: Could get from memory manager
+        available_tools: Vec::new(), // TODO: Could list from tool provider
+    };
+
+    // Analyze input and get decision
+    let decision = intelligence.analyze_input(query, &context);
+
+    if decision.confidence > 0.6 {
+        info!(
+            "Tool choice intelligence decision: {:?} (confidence: {:.2}, reasoning: {})",
+            decision.tool_choice, decision.confidence, decision.reasoning
+        );
+        decision.tool_choice
+    } else {
+        debug!(
+            "Tool choice intelligence below threshold: confidence {:.2}, using default behavior",
+            decision.confidence
+        );
+        None
+    }
+}
+
 /// Internal agent execution function - handles the actual agent logic
 async fn execute_agent_internal(
     query: String,
@@ -484,7 +531,10 @@ async fn execute_agent_internal(
         // Also clean up orphaned tool results that have no corresponding tool calls
         match memory_manager.clean_orphaned_tool_results().await {
             Ok(cleaned_count) if cleaned_count > 0 => {
-                info!("Cleaned {} orphaned tool results before agent execution", cleaned_count);
+                info!(
+                    "Cleaned {} orphaned tool results before agent execution",
+                    cleaned_count
+                );
             }
             Ok(_) => {} // No orphaned results found
             Err(e) => {
@@ -611,8 +661,13 @@ async fn execute_agent_internal(
             if let Err(e) = BrainFactory::register_computer_use_tools(
                 &mut single_agent_tool_provider,
                 app_handle.clone(),
-            ).await {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+            )
+            .await
+            {
+                let err_msg = format!(
+                    "Failed to register Computer Use tools for single agent: {}",
+                    e
+                );
                 error!("{}", err_msg);
                 return Err(err_msg);
             }
@@ -629,7 +684,9 @@ async fn execute_agent_internal(
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
-            info!("Single agent runner created with all tools including Computer Use capabilities.");
+            info!(
+                "Single agent runner created with all tools including Computer Use capabilities."
+            );
 
             info!("Starting single agent run...");
 
@@ -1181,8 +1238,8 @@ async fn execute_specialized_agent_task(
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
 
-	/// ERROR: CLEARS TOOLS BEFORE THEY FINISH
-	// let mut cloned_memory = specialist_memory;
+    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
+    // let mut cloned_memory = specialist_memory;
     // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
     //     warn!(
     //         "Failed to clean orphaned tool calls for {} agent: {}",
@@ -1386,7 +1443,9 @@ mod tests {
         assert!(!is_substantial_user_communication("Done"));
         assert!(!is_substantial_user_communication("Task completed"));
         assert!(!is_substantial_user_communication("Operation successful"));
-        assert!(!is_substantial_user_communication("File saved successfully"));
+        assert!(!is_substantial_user_communication(
+            "File saved successfully"
+        ));
         assert!(!is_substantial_user_communication("Command executed"));
         assert!(!is_substantial_user_communication("Finished"));
         assert!(!is_substantial_user_communication("Unable to complete"));
@@ -1402,7 +1461,9 @@ mod tests {
         assert!(is_substantial_user_communication("Based on my analysis, there are several improvements that can be made to optimize performance."));
         assert!(is_substantial_user_communication("The search results indicate that there are multiple matches for your query across different files."));
         assert!(is_substantial_user_communication("I located the configuration file you requested. It contains important settings for the application."));
-        assert!(is_substantial_user_communication("After reviewing the logs, I found several error messages that need attention."));
+        assert!(is_substantial_user_communication(
+            "After reviewing the logs, I found several error messages that need attention."
+        ));
 
         // Test edge cases
         assert!(is_substantial_user_communication("This is a longer message that provides detailed information about the task that was completed and what the user should know about the results."));
