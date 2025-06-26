@@ -10,6 +10,7 @@ use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info, warn};
 
 use crate::{constants, state};
+use crate::constants::events;
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -297,7 +298,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit dictation mode start event
-            if let Err(e) = app_handle.emit("dictation-active", true) {
+            if let Err(e) = app_handle.emit(events::dictation::STARTED, ()) {
                 error!(
                     "[Dictation Tap Mode] Failed to emit dictation-active event: {}",
                     e

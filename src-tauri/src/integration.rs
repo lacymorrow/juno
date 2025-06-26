@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 
 use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
+use crate::constants::events;
 
 /// Setup comprehensive application integration including plugins, event coordination, and component initialization
 pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -80,7 +81,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
 
         // Rebroadcast the event as app-dictation-started for backward compatibility
-        if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
+        if let Err(e) = app_handle_for_listener.emit(events::dictation::STARTED, event.payload()) {
             tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
         }
     });
@@ -182,7 +183,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Rebroadcast the event as app-dictation-partial-result for backward compatibility
         if let Err(e) =
-            app_handle_for_listener.emit("app-dictation-partial-result", event.payload())
+            app_handle_for_listener.emit(events::dictation::PARTIAL_RESULT, event.payload())
         {
             tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
         }
@@ -314,7 +315,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
             commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
 
             // Emit event to UI to show wake word was detected
-            if let Err(e) = app_handle_clone.emit("always-listening:wake-word-detected", ()) {
+            if let Err(e) = app_handle_clone.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
                 error!("[AlwaysListening] Failed to emit wake-word-detected event: {}", e);
             }
 
@@ -455,7 +456,7 @@ async fn handle_always_listening_stop_request(app_handle: &AppHandle) {
             info!("[AlwaysListening] Always listening stopped due to stop word");
 
             // Emit notification to UI
-            if let Err(e) = app_handle.emit("always-listening:stopped-by-command", ()) {
+            if let Err(e) = app_handle.emit(events::always_listening::STOPPED_BY_COMMAND, ()) {
                 error!(
                     "[AlwaysListening] Failed to emit stopped-by-command event: {}",
                     e
@@ -478,7 +479,7 @@ async fn handle_always_listening_command_processed(app_handle: &AppHandle) {
     info!("[AlwaysListening] Returning to wake word detection mode after command processing");
 
     // Emit event to return to wake word mode
-    if let Err(e) = app_handle.emit("always-listening:return-to-wake-word", ()) {
+    if let Err(e) = app_handle.emit(events::always_listening::RETURN_TO_WAKE_WORD, ()) {
         error!(
             "[AlwaysListening] Failed to emit return-to-wake-word event: {}",
             e

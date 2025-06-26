@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use crate::constants::events;
 
 /// Permission status information for frontend consumption
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,7 +377,7 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                 _ = interval.tick() => {
                     match check_permissions_status_native(app_clone.clone()).await {
                         Ok(status) => {
-                            if let Err(e) = app_clone.emit("permissions-changed", &status) {
+                            if let Err(e) = app_clone.emit(events::permissions::CHANGED, &status) {
                                 warn!("Failed to emit permissions change event: {}", e);
                             }
                         }

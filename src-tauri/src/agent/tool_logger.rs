@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
+use crate::constants::events;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -224,7 +225,7 @@ where
 
     // Emit the event to the frontend
     if let Some(window) = app_handle.get_window("main") {
-        if let Err(e) = window.emit("tool-usage", entry) {
+        if let Err(e) = window.emit(events::tools::USAGE, entry) {
             warn!("Failed to emit tool-usage event: {}", e);
         }
     } else {
@@ -347,7 +348,7 @@ where
 
     // Emit the event to the frontend
     if let Some(window) = app_handle.get_window("main") {
-        if let Err(e) = window.emit("tool-usage", entry) {
+        if let Err(e) = window.emit(events::tools::USAGE, entry) {
             warn!("Failed to emit tool-usage event: {}", e);
         }
     } else {
@@ -445,7 +446,7 @@ fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
         "Emitting agent-event: {:?}",
         sanitize_event_for_logging(&event)
     );
-    if let Err(e) = app_handle.emit("agent-event", event) {
+    if let Err(e) = app_handle.emit(events::agent::EVENT, event) {
         warn!("Failed to emit agent-event: {}", e);
     }
 }

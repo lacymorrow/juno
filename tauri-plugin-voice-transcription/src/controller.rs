@@ -10,6 +10,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationPar
 use hound;
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
+use juno::constants::events;
 
 use crate::error::{Error, Result};
 
@@ -240,7 +241,7 @@ impl VoiceController {
         info!("[VoiceController] Starting dictation...");
 
         // Emit dictation started event
-        app_handle.emit("voice-transcription:dictation-started", ())
+        app_handle.emit(events::voice_transcription::DICTATION_STARTED, ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
         // Clear the last processed audio buffer
@@ -528,7 +529,7 @@ impl VoiceController {
                     }
                 }
                 if !partial_text.is_empty() {
-                    let _ = app_handle.emit("voice-transcription:partial-result",
+                    let _ = app_handle.emit(events::voice_transcription::PARTIAL_RESULT,
                         serde_json::json!({ "text": partial_text }));
                 }
             }
@@ -630,23 +631,23 @@ impl VoiceController {
                     }
 
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
-                    let _ = app_handle.emit("voice-transcription:final-result",
+                    let _ = app_handle.emit(events::voice_transcription::FINAL_RESULT,
                         serde_json::json!({ "text": transcription_text }));
-                    let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
+                    let _ = app_handle.emit(events::voice_transcription::DICTATION_STOPPED, ());
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {:?}", e);
                     // Emit transcription error event for backend to handle
-                    let _ = app_handle.emit("voice-transcription:error", serde_json::json!({
+                    let _ = app_handle.emit(events::voice_transcription::ERROR, serde_json::json!({
                         "type": "transcription_failed",
                         "message": format!("Final transcription failed: {:?}", e)
                     }));
-                    let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
+                    let _ = app_handle.emit(events::voice_transcription::DICTATION_STOPPED, ());
                 }
             }
         } else {
             info!("[AudioThread] No audio to transcribe (empty buffer)");
-            let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
+            let _ = app_handle.emit(events::voice_transcription::DICTATION_STOPPED, ());
         }
     }
 

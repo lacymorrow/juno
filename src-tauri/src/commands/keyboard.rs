@@ -6,6 +6,7 @@ use crate::utils::key_parsing;
 use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
 use tracing::{info, error};
 use serde_json::json;
+use crate::constants::events;
 
 #[tauri::command]
 pub(crate) async fn type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -36,7 +37,7 @@ pub(crate) async fn type_text(text: String, app_handle: AppHandle, state: State<
             }
 
             // Emit key press visualization for typing (show the text being typed)
-            if let Err(e) = app_handle.emit("key-press-visualization", json!({
+            if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
                 "key": format!("Type: {}", text.chars().take(20).collect::<String>()),
                 "modifier": null
             })) {
@@ -93,7 +94,7 @@ pub(crate) async fn press_key(key: String, modifier: Option<String>, app_handle:
             }
 
             // Emit key press visualization event
-            if let Err(e) = app_handle.emit("key-press-visualization", json!({
+            if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
                 "key": final_key,
                 "modifier": final_modifier
             })) {
@@ -133,7 +134,7 @@ pub(crate) async fn global_type_text(text: String, app_handle: AppHandle, state:
             }
 
             // Emit key press visualization for global typing
-            if let Err(e) = app_handle.emit("key-press-visualization", json!({
+            if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
                 "key": format!("Global: {}", text.chars().take(20).collect::<String>()),
                 "modifier": null
             })) {
@@ -180,7 +181,7 @@ pub(crate) async fn hold_key(key: String, duration_ms: Option<u64>, app_handle: 
             }
 
             // Emit key press visualization for hold key
-            if let Err(e) = app_handle.emit("key-press-visualization", json!({
+            if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
                 "key": format!("Hold: {}", parsed_key),
                 "modifier": duration_ms.map(|d| format!("{}ms", d))
             })) {
@@ -224,7 +225,7 @@ pub(crate) async fn release_key(key: String, app_handle: AppHandle, state: State
             }
 
             // Emit key press visualization for release key
-            if let Err(e) = app_handle.emit("key-press-visualization", json!({
+            if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
                 "key": format!("Release: {}", parsed_key),
                 "modifier": null
             })) {

@@ -14,6 +14,7 @@ use crate::agent::core::{
 use crate::agent::tool_logger; // Added for logging
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
+use crate::constants::events;
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -527,7 +528,7 @@ where
 
         if let Err(e) = self
             .app_handle
-            .emit("tool-approval-request", approval_event)
+            .emit(events::tools::APPROVAL_REQUEST, approval_event)
         {
             log::error!("Failed to emit batch approval request: {}", e);
         }
@@ -748,7 +749,7 @@ where
 
         if let Err(e) = self
             .app_handle
-            .emit("tool-approval-request", approval_event)
+            .emit(events::tools::APPROVAL_REQUEST, approval_event)
         {
             log::error!("Failed to emit tool approval request: {}", e);
         }

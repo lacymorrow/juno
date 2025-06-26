@@ -22,7 +22,7 @@ use crate::agent::tools::{
     desktop_tools::setup_tools,
 };
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager};
-use crate::constants::{agent, timeouts};
+use crate::constants::{agent, timeouts, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 
@@ -969,7 +969,7 @@ async fn execute_agent_internal(
                 "error_message": error_text,
                 "original_query": trimmed_query
             });
-            if let Err(e) = error_event_handle.emit("agent-error", event_data) {
+            if let Err(e) = error_event_handle.emit(events::agent::ERROR, event_data) {
                 warn!("Failed to emit agent-error event: {}", e);
             }
         });

@@ -31,7 +31,7 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::constants::{app, audio};
+use crate::constants::{app, audio, events};
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1385,7 +1385,7 @@ impl AppState {
             "tools": tools
         });
 
-        if let Err(e) = app_handle.emit("mcp_state_updated", payload) {
+        if let Err(e) = app_handle.emit(events::system::MCP_STATE_UPDATED, payload) {
             warn!("Failed to emit MCP state update: {}", e);
             return Err(format!("Failed to emit MCP state update: {}", e));
         }

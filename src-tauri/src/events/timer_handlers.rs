@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use crate::constants::events;
 
 /// Agent system states for determining restart eligibility
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -442,7 +443,7 @@ impl TimerEventHandler {
         );
 
         // Emit event to notify about queued timer
-        if let Err(e) = self.app_handle.emit("timer-queued", &timer_data) {
+        if let Err(e) = self.app_handle.emit(events::timer::QUEUED, &timer_data) {
             warn!("Failed to emit timer-queued event: {}", e);
         }
 
