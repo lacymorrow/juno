@@ -1,85 +1,99 @@
-import React, { useState } from 'react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { FileText, Folder } from 'lucide-react';
-import { invokeCommand } from '@/lib/utils';
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { FileText, Folder, Info } from "lucide-react";
+import { invokeCommand } from "@/lib/utils";
 
 const FileOperations: React.FC = () => {
-  const [pathToList, setPathToList] = useState<string>('');
+  const [pathToList, setPathToList] = useState<string>("");
   const [fileListResult, setFileListResult] = useState<string | null>(null);
-  const [pathGetContent, setPathGetContent] = useState<string>('');
-  const [fileContentResult, setFileContentResult] = useState<string | null>(null);
-  const [pathSetContent, setPathSetContent] = useState<string>('');
-  const [fileContentToSet, setFileContentToSet] = useState<string>('');
+  const [pathGetContent, setPathGetContent] = useState<string>("");
+  const [fileContentResult, setFileContentResult] = useState<string | null>(
+    null
+  );
+  const [pathSetContent, setPathSetContent] = useState<string>("");
+  const [fileContentToSet, setFileContentToSet] = useState<string>("");
 
   const handleListFiles = async () => {
     if (!pathToList.trim()) {
-      toast.error('Please enter a path to list.');
+      toast.error("Please enter a path to list.");
       return;
     }
     setFileListResult(null);
     const result = await invokeCommand<string | null>(
-      'dev_list_files',
+      "list_files",
       { pathStr: pathToList.trim() },
-      'listFiles'
+      "listFiles"
     );
 
-    if (result !== null && typeof result === 'string') {
+    if (result !== null && typeof result === "string") {
       try {
         const parsedList = JSON.parse(result);
         const formattedList = parsedList
-          .map((entry: { is_dir: boolean; name: string }) =>
-            `${entry.is_dir ? '[D]' : '[F]'} ${entry.name}`
+          .map(
+            (entry: { is_dir: boolean; name: string }) =>
+              `${entry.is_dir ? "[D]" : "[F]"} ${entry.name}`
           )
-          .join('\n');
+          .join("\n");
         setFileListResult(formattedList);
       } catch (parseError) {
-        console.error('Failed to parse file list JSON:', parseError);
+        console.error("Failed to parse file list JSON:", parseError);
         setFileListResult(result);
-        toast.error('Received file list, but failed to parse or format.');
+        toast.error("Received file list, but failed to parse or format.");
       }
     } else if (result !== null) {
       setFileListResult(String(result));
-      toast.error('Received unexpected non-string result for file list.');
+      toast.error("Received unexpected non-string result for file list.");
     } else {
-      setFileListResult('(Failed to list files)');
+      setFileListResult("(Failed to list files)");
     }
   };
 
   const handleGetFileContent = async () => {
     if (!pathGetContent.trim()) {
-      toast.error('Please enter a file path to read.');
+      toast.error("Please enter a file path to read.");
       return;
     }
     setFileContentResult(null);
     const result = await invokeCommand<string | null>(
-      'dev_get_file_content',
+      "get_file_content",
       { pathStr: pathGetContent.trim() },
-      'getFileContent'
+      "getFileContent"
     );
     if (result !== null) {
       setFileContentResult(result);
     } else {
-      setFileContentResult('(Failed to get file content)');
+      setFileContentResult("(Failed to get file content)");
     }
   };
 
   const handleSetFileContent = async () => {
     if (!pathSetContent.trim()) {
-      toast.error('Please enter a file path to write to.');
+      toast.error("Please enter a file path to write to.");
       return;
     }
     await invokeCommand(
-      'dev_set_file_content',
+      "set_file_content",
       { pathStr: pathSetContent.trim(), content: fileContentToSet },
-      'setFileContent'
+      "setFileContent"
     );
   };
 
   return (
     <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+        <div className="flex items-start space-x-2">
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800">
+            <strong>Tool Consolidation:</strong> This component now uses
+            production file operation functions with built-in debug capabilities
+            instead of dev_* functions.
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Folder className="h-4 w-4" />

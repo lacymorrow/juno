@@ -503,7 +503,7 @@ pub fn run() {
             // right_click → computer tool with action: "right_click"
             // mouse_move → computer tool with action: "mouse_move"
             // This eliminates redundancy and ensures 100% compliance with the official specification.
-            dev_test_click_visualization, // Keep for QA testing
+            test_click_visualization, // Production function with debug capabilities
             // Production shell function with debug capabilities
             bash_command,
             // Production filesystem functions with debug capabilities
