@@ -5,6 +5,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
+use crate::constants::events;
 
 /// Centralized dictation state that coordinates all components
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,7 +131,7 @@ impl DictationStateManager {
         self.state_history.lock().await.push(event.clone());
 
         // Emit unified state change event
-        if let Err(e) = app_handle.emit("dictation-state-changed", &event) {
+        if let Err(e) = app_handle.emit(events::dictation_state::CHANGED, &event) {
             error!("[StateManager] Failed to emit state change event: {}", e);
         }
 
@@ -225,14 +226,14 @@ impl DictationStateManager {
         };
 
         // 6. Emit comprehensive reset events
-        if let Err(e) = app_handle.emit("dictation-active", false) {
+        if let Err(e) = app_handle.emit(events::dictation::ACTIVE, false) {
             error!(
                 "[StateManager] Failed to emit dictation-active event: {}",
                 e
             );
         }
 
-        if let Err(e) = app_handle.emit("dictation-state-force-reset", &reason) {
+        if let Err(e) = app_handle.emit(events::dictation_state::FORCE_RESET, &reason) {
             error!("[StateManager] Failed to emit force reset event: {}", e);
         }
 
@@ -368,7 +369,7 @@ impl DictationStateManager {
         crate::commands::floating_bar::handle_dictation_mode_change(app_handle, is_active).await;
 
         // Emit state events
-        if let Err(e) = app_handle.emit("dictation-active", is_active) {
+        if let Err(e) = app_handle.emit(events::dictation::ACTIVE, is_active) {
             error!(
                 "[StateManager] Failed to emit dictation-active event: {}",
                 e
@@ -596,14 +597,14 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
     };
 
     // Emit comprehensive reset events
-    if let Err(e) = app_handle.emit("dictation-active", false) {
+    if let Err(e) = app_handle.emit(events::dictation::ACTIVE, false) {
         error!(
             "[DictationStateManager] Failed to emit dictation-active event: {}",
             e
         );
     }
 
-    if let Err(e) = app_handle.emit("dictation-state-force-reset", "Force stop dictation") {
+    if let Err(e) = app_handle.emit(events::dictation_state::FORCE_RESET, "Force stop dictation") {
         error!(
             "[DictationStateManager] Failed to emit force reset event: {}",
             e

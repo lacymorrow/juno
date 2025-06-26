@@ -52,12 +52,12 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, warn, info};
 use std::time::{Duration, Instant};
 
-
 use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::tools::mcp_integration::MCPManager;
 use crate::agent::tools::ToolCategory;
 use crate::agent::traits::ToolProvider;
 use crate::state::AppState;
+use crate::constants::events;
 // Error recovery will be implemented in future iterations
 
 // Define an async tool function type
@@ -738,8 +738,6 @@ impl LocalToolProvider {
         }
     }
 
-
-
     /// Execute tool with simplified error recovery
     async fn execute_tool_with_recovery(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = tool_call.name.clone();
@@ -1411,7 +1409,7 @@ impl ToolProvider for LocalToolProvider {
 
         // Emit command execution start event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
-            if let Err(e) = app_handle.emit("command-execution-start", serde_json::json!({
+            if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_START, serde_json::json!({
                 "command": tool_name,
                 "id": command_id
             })) {
@@ -1430,7 +1428,7 @@ impl ToolProvider for LocalToolProvider {
                 warn!("{}", error_msg);
 
                 // Emit execution end event with error
-                if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+                if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
                     "id": command_id,
                     "success": false,
                     "duration": start_time.elapsed().as_millis() as u64,
@@ -1449,7 +1447,7 @@ impl ToolProvider for LocalToolProvider {
 
             // Emit validation failure event
             if let Some(ref app_handle) = self.app_handle {
-                if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+                if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
                     "id": command_id,
                     "success": false,
                     "duration": start_time.elapsed().as_millis() as u64,
@@ -1475,7 +1473,7 @@ impl ToolProvider for LocalToolProvider {
                 Err(e) => (false, Some(e.to_string())),
             };
 
-            if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+            if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
                 "id": command_id,
                 "success": success,
                 "duration": duration_ms,

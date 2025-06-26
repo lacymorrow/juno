@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use crate::constants::{events, errors::templates};
 
 /// Agent system states for determining restart eligibility
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -421,7 +422,8 @@ impl TimerEventHandler {
         .await
         {
             return Err(TimerEventError::AgentUnavailable(format!(
-                "Failed to restart agent: {}",
+                templates::FAILED_TO_START,
+                "agent restart",
                 e
             )));
         }
@@ -442,8 +444,8 @@ impl TimerEventHandler {
         );
 
         // Emit event to notify about queued timer
-        if let Err(e) = self.app_handle.emit("timer-queued", &timer_data) {
-            warn!("Failed to emit timer-queued event: {}", e);
+        if let Err(e) = self.app_handle.emit(events::timer::QUEUED, &timer_data) {
+            warn!("{}", format!(templates::FAILED_TO_EMIT, "timer-queued event", e));
         }
 
         Ok(())
@@ -511,7 +513,7 @@ impl TimerEventHandler {
 
             // Process the timer
             if let Err(e) = self.process_timer_internal(timer.clone()).await {
-                error!("Failed to process queued timer {}: {}", timer.id, e);
+                error!("{}", format!(templates::FAILED_TO_PROCESS, format!("queued timer {}", timer.id), e));
                 continue;
             }
 

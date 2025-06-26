@@ -4,6 +4,7 @@ use crate::agent::core::{
     Role,
 };
 use crate::agent::traits::MemoryManager;
+use crate::constants::errors::templates;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -846,7 +847,7 @@ impl AdvancedMemoryManager {
                         log::info!("Successfully compressed screenshot to text summary");
                     }
                     Err(e) => {
-                        log::error!("CRITICAL: Failed to compress screenshot: {}, keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
+                        log::error!("CRITICAL: Failed to compress screenshot: {} - keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
                         // In case of compression failure, we should still try to truncate the content to prevent overflow
                         if message.content.len() > 50000 {
                             log::warn!("Truncating oversized screenshot content to prevent API failure");
@@ -908,7 +909,7 @@ impl AdvancedMemoryManager {
                         compressed_count += 1;
                     }
                     Err(e) => {
-                        log::warn!("Failed to compress screenshot: {}", e);
+                        log::warn!("Failed to compress {}: {}", "screenshot", e);
                     }
                 }
             }

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter};
 use tracing::{debug, info, warn, error};
 use serde_json::json;
 use std::time::Instant;
+use crate::constants::events;
 
 /// Configuration for debug behavior
 #[derive(Debug, Clone)]
@@ -120,7 +121,7 @@ pub fn send_debug_notification(
     });
 
     app_handle
-        .emit("dev-tool-notification", payload)
+        .emit(events::dev::TOOL_NOTIFICATION, payload)
         .map_err(|e| format!("Failed to emit debug notification: {}", e))
 }
 

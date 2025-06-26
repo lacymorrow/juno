@@ -7,6 +7,7 @@ use tracing::{info, error};
 use crate::utils::coordinates;
 use crate::constants::{timeouts, events};
 use super::send_dev_tool_notification;
+use crate::constants::errors::templates::FAILED_TO_EMIT;
 
 // Smooth mouse movement configuration
 const SMOOTH_MOVEMENT_FPS: u64 = 60; // 60 FPS for smooth movement

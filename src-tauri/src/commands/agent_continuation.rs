@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, error, info, warn};
+use crate::constants::events;
 
 /// Request for agent continuation when max iterations reached
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +98,7 @@ impl ContinuationManager {
             "message": message
         });
 
-        if let Err(e) = app_handle.emit("agent-continuation-request", event_data) {
+        if let Err(e) = app_handle.emit(events::continuation::AGENT_REQUEST, event_data) {
             error!("Failed to emit agent-continuation-request event: {}", e);
             return Err(AgentError::Unknown(format!(
                 "Failed to request continuation: {}",
@@ -252,7 +253,7 @@ pub async fn respond_to_agent_continuation(
         "additional_steps": additional_steps
     });
 
-    if let Err(e) = app_handle.emit("agent-continuation-response", event_data) {
+    if let Err(e) = app_handle.emit(events::continuation::AGENT_RESPONSE, event_data) {
         warn!("Failed to emit agent-continuation-response event: {}", e);
     }
 
