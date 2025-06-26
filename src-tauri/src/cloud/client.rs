@@ -18,6 +18,7 @@ use super::types::{
     DeviceStatus, HardwareInfo, MessageType, SystemInfo, WebSocketMessage,
 };
 use crate::constants::permissions;
+use crate::constants::events;
 
 #[allow(dead_code)]
 type WsSender = futures_util::stream::SplitSink<
@@ -770,7 +771,7 @@ impl CloudClient {
             ConnectionState::Error(_) => "error",
         };
 
-        if let Err(e) = self.app_handle.emit("cloud-connection-state", state_str) {
+        if let Err(e) = self.app_handle.emit(events::cloud::CONNECTION_STATE, state_str) {
             error!("Failed to emit cloud connection state: {}", e);
         }
     }

@@ -4,6 +4,7 @@ use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tracing::{info, warn};
+use crate::constants::events;
 
 // Declare the submodules
 pub mod accessibility;
@@ -132,7 +133,7 @@ pub(crate) fn send_dev_tool_notification(
         "action": action,
         "message": message
     });
-    app.emit("dev-tool-notification", payload)
+    app.emit(events::dev::TOOL_NOTIFICATION, payload)
         .map_err(|e| format!("Failed to emit dev tool notification: {}", e))
 }
 

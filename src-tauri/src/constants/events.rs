@@ -60,6 +60,9 @@ pub mod voice_transcription {
     pub const FINAL_RESULT: &str = "voice-transcription:final-result";
     pub const DICTATION_STOPPED: &str = "voice-transcription:dictation-stopped";
     pub const ERROR: &str = "voice-transcription:error";
+    // Plugin-specific events
+    pub const DICTATION_STARTED: &str = "voice-transcription:dictation-started";
+    pub const PARTIAL_RESULT: &str = "voice-transcription:partial-result";
 }
 
 /// Timer events
@@ -103,6 +106,14 @@ pub mod menu {
     pub const ZOOM_WINDOW_REQUESTED: &str = "zoom-window-requested";
     pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
     pub const ABOUT_REQUESTED: &str = "about-requested";
+
+    // Edit menu events
+    pub const EDIT_UNDO: &str = "menu-edit-undo";
+    pub const EDIT_REDO: &str = "menu-edit-redo";
+    pub const EDIT_CUT: &str = "menu-edit-cut";
+    pub const EDIT_COPY: &str = "menu-edit-copy";
+    pub const EDIT_PASTE: &str = "menu-edit-paste";
+    pub const EDIT_SELECT_ALL: &str = "menu-edit-select-all";
 }
 
 /// Text-to-speech events
@@ -152,6 +163,7 @@ pub mod cloud {
     pub const WEBSOCKET_DISCONNECT: &str = "websocket-disconnect";
     pub const CONNECTOR_STATE: &str = "cloud-connector-state";
     pub const CONNECTION_STATE: &str = "cloud-connection-state";
+    pub const COMMAND_RECEIVED: &str = "cloud-command-received";
 }
 
 /// System and application events
@@ -206,6 +218,21 @@ pub mod dictation_state {
 pub mod shortcuts {
     pub const AGENT_MODE: &str = "shortcut-agent-mode";
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
+}
+
+/// Tool choice events
+pub mod tool_choice {
+    pub const CONFIG_CHANGED: &str = "tool-choice-config-changed";
+    pub const CONFIG_RESET: &str = "tool-choice-config-reset";
+    pub const ENABLED_CHANGED: &str = "tool-choice-enabled-changed";
+}
+
+/// Plugin events (namespaced with plugin:)
+pub mod plugin {
+    pub const VOICE_TRANSCRIPTION_DICTATION_STARTED: &str = "plugin:voice-transcription:dictation-started";
+    pub const VOICE_TRANSCRIPTION_DICTATION_STOPPED: &str = "plugin:voice-transcription:dictation-stopped";
+    pub const ALWAYS_LISTENING_STARTED: &str = "plugin:always-listening:started";
+    pub const ALWAYS_LISTENING_STOPPED: &str = "plugin:always-listening:stopped";
 }
 
 

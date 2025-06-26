@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 use log::{error, info};
+use crate::constants::events;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
@@ -202,7 +203,7 @@ pub async fn send_notification(
 
     // Send toast notification if enabled (emitted to frontend)
     if settings.notification_type == "toast" || settings.notification_type == "both" {
-        app.emit("toast-notification", &data).map_err(|e| format!("Failed to emit toast notification: {}", e))?;
+        app.emit(events::notifications::TOAST, &data).map_err(|e| format!("Failed to emit toast notification: {}", e))?;
         info!("Toast notification emitted successfully");
     }
 

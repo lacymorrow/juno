@@ -10,6 +10,7 @@ use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info, warn};
 
 use crate::{constants, state};
+use crate::constants::{events, errors::templates};
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -30,7 +31,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("Failed to get keyboard shortcuts: {}", e);
+            error!("{}", format!(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -297,7 +298,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit dictation mode start event
-            if let Err(e) = app_handle.emit("dictation-active", true) {
+            if let Err(e) = app_handle.emit(events::dictation::ACTIVE, true) {
                 error!(
                     "[Dictation Tap Mode] Failed to emit dictation-active event: {}",
                     e
@@ -347,7 +348,7 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(format!("Failed to emit test event: {}", e));
+        return Err(format!(templates::FAILED_TO_EMIT, "test event", e));
     }
 
     Ok(())

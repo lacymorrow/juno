@@ -6,6 +6,9 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::RwLock;
 use once_cell::sync::Lazy;
 use crate::state::AppState;
+use crate::constants::events;
+use crate::constants::errors::templates::FAILED_TO_EMIT;
+use crate::constants::errors::prefixes::STOP_COORDINATOR as STOP_COORDINATOR_PREFIX;
 
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
@@ -148,9 +151,7 @@ impl StopCoordinator {
             crate::tts::stop_speech();
 
             // Emit TTS stop event once
-            if let Err(e) = app_handle.emit("tts-stop-requested", ()) {
-                warn!("[StopCoordinator] Failed to emit TTS stop event: {}", e);
-            }
+            self.emit_tts_stop_event(app_handle);
             cleanup_results.push("TTS stopped".to_string());
             self.unregister_operation(&tts_op_id).await;
         }
@@ -248,9 +249,19 @@ impl StopCoordinator {
         ];
 
         for (event_name, value) in events.iter() {
-            if let Err(e) = app_handle.emit(event_name, value) {
-                warn!("[StopCoordinator] Failed to emit {} event: {}", event_name, e);
-            }
+            self.emit_event(app_handle, event_name);
+        }
+    }
+
+    fn emit_tts_stop_event(&self, app_handle: &AppHandle) {
+        if let Err(e) = app_handle.emit(events::tts::TTS_AUDIO_STOP, ()) {
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, "TTS stop", e));
+        }
+    }
+
+    fn emit_event(&self, app_handle: &AppHandle, event_name: &str) {
+        if let Err(e) = app_handle.emit(event_name, ()) {
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, event_name, e));
         }
     }
 

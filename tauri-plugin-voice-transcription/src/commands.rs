@@ -7,6 +7,7 @@ use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
 use tracing::{info, error};
 use serde_json::json;
+use crate::constants;
 
 /// Enhanced helper function to check VoiceController status and provide comprehensive error messages
 fn check_voice_controller_availability<R: tauri::Runtime>(
@@ -82,7 +83,7 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     voice_controller.start_dictation(&app)?;
 
     // Emit started event through the plugin system - sound will be handled automatically by backend
-    app.emit("plugin:voice-transcription:dictation-started", ())
+    app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED, ())
         .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
 
     info!("[Plugin] Dictation started successfully");
@@ -103,7 +104,7 @@ pub async fn stop_dictation<R: tauri::Runtime>(
 
     if result {
         // Emit stopped event through the plugin system - sound will be handled automatically by backend
-        app.emit("plugin:voice-transcription:dictation-stopped", ())
+        app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit dictation-stopped event: {}", e)))?;
     }
 
@@ -130,14 +131,14 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
         voice_controller.stop_dictation()?;
 
         // Sound will be handled automatically by backend event listener
-        app.emit("plugin:voice-transcription:dictation-stopped", ())
+        app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit dictation-stopped event: {}", e)))?;
         Ok(false)
     } else {
         match voice_controller.start_dictation(&app) {
             Ok(()) => {
                 // Sound will be handled automatically by backend event listener
-                app.emit("plugin:voice-transcription:dictation-started", ())
+                app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED, ())
                     .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
                 Ok(true)
             }
@@ -285,7 +286,7 @@ pub async fn start_always_listening<R: tauri::Runtime + 'static>(
     always_listening_controller.start_always_listening(&app)?;
 
     // Emit started event through the plugin system
-    app.emit("plugin:always-listening:started", ())
+    app.emit(constants::plugin::ALWAYS_LISTENING_STARTED, ())
         .map_err(|e| Error::EventError(format!("Failed to emit always-listening-started event: {}", e)))?;
 
     info!("[Plugin] Always listening started successfully");
@@ -306,7 +307,7 @@ pub async fn stop_always_listening<R: tauri::Runtime>(
 
     if result {
         // Emit stopped event through the plugin system
-        app.emit("plugin:always-listening:stopped", ())
+        app.emit(constants::plugin::ALWAYS_LISTENING_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit always-listening-stopped event: {}", e)))?;
     }
 
@@ -328,12 +329,12 @@ pub async fn toggle_always_listening<R: tauri::Runtime + 'static>(
 
     if was_active {
         always_listening_controller.stop_always_listening()?;
-        app.emit("plugin:always-listening:stopped", ())
+        app.emit(constants::plugin::ALWAYS_LISTENING_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit always-listening-stopped event: {}", e)))?;
         Ok(false)
     } else {
         always_listening_controller.start_always_listening(&app)?;
-        app.emit("plugin:always-listening:started", ())
+        app.emit(constants::plugin::ALWAYS_LISTENING_STARTED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit always-listening-started event: {}", e)))?;
         Ok(true)
     }

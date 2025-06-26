@@ -6,6 +6,7 @@
 use crate::agent::error_recovery::{
     AgentState, ErrorRecoveryManager, ExecutionCheckpoint, RecoveryConfig, RollbackInfo,
 };
+use crate::constants::errors::templates;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -119,7 +120,7 @@ pub async fn create_checkpoint(
             })
         }
         Err(e) => {
-            error!("Failed to create checkpoint: {}", e);
+            error!("{}", format!(templates::FAILED_TO_CREATE, "checkpoint", e));
             Ok(CheckpointResult {
                 success: false,
                 checkpoint_id: None,

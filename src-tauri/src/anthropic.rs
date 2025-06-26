@@ -22,7 +22,8 @@ use crate::agent::tools::{
     desktop_tools::setup_tools,
 };
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager};
-use crate::constants::{agent, timeouts};
+use crate::constants::{agent, timeouts, events};
+use crate::constants::errors::{templates, components};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 
@@ -398,7 +399,7 @@ pub async fn submit_query(
         if let Err(e) =
             crate::tts::invoke_tts(offline_message, state.clone(), app_handle.clone()).await
         {
-            warn!("Failed to play offline message via TTS: {}", e);
+            warn!("Failed to process play offline message via TTS: {}", e);
         }
 
         // Restore original TTS provider
@@ -495,7 +496,7 @@ async fn execute_agent_internal(
     if let Err(e) =
         crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
     {
-        warn!("Failed to register escape key for agent execution: {} - continuing without escape key cancellation", e);
+        warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
     }
 
     // Reset cancellation signal for the new agent
@@ -511,7 +512,7 @@ async fn execute_agent_internal(
             Some(context)
         }
         Err(e) => {
-            warn!("Failed to gather system context: {}", e);
+            warn!("Failed to retrieve system context: {}", e);
             None
         }
     };
@@ -525,7 +526,7 @@ async fn execute_agent_internal(
     {
         let mut memory_manager = memory_manager_arc.lock().await;
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
-            warn!("Failed to clean orphaned tool calls: {}", e);
+            warn!("Failed to process clean orphaned tool calls: {}", e);
         }
 
         // Also clean up orphaned tool results that have no corresponding tool calls
@@ -538,7 +539,7 @@ async fn execute_agent_internal(
             }
             Ok(_) => {} // No orphaned results found
             Err(e) => {
-                warn!("Failed to clean orphaned tool results: {}", e);
+                warn!("Failed to process clean orphaned tool results: {}", e);
             }
         }
     }
@@ -577,7 +578,7 @@ async fn execute_agent_internal(
                         Ok(controller) => controller,
                         Err(e) => {
                             let err_msg = format!(
-                                "Failed to initialize BrowserController for tool {}: {}",
+                                "Failed to start {}: {}",
                                 current_tool_name_captured, e
                             );
                             error!("{}", err_msg);
@@ -627,7 +628,7 @@ async fn execute_agent_internal(
             let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize single agent brain: {}", e);
+                    let err_msg = format!("Failed to initialize agent brain: {}", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events instead of backend-response
@@ -664,10 +665,7 @@ async fn execute_agent_internal(
             )
             .await
             {
-                let err_msg = format!(
-                    "Failed to register Computer Use tools for single agent: {}",
-                    e
-                );
+                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
                 error!("{}", err_msg);
                 return Err(err_msg);
             }
@@ -712,7 +710,7 @@ async fn execute_agent_internal(
             ) {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
+                    let err_msg = format!("Failed to initialize orchestrator: {}", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events instead of backend-response
@@ -798,10 +796,7 @@ async fn execute_agent_internal(
     if let Err(e) =
         crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
     {
-        warn!(
-            "Failed to unregister escape key after agent execution: {} - continuing anyway",
-            e
-        );
+                warn!("Failed to configure unregister escape key after agent execution: {} - continuing anyway", e);
     }
 
     // --- Process Agent Result ---
@@ -833,7 +828,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("Failed to play cancellation sound: {}", e);
+                        warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
                     }
                     (
                         "Cancelled".to_string(),
@@ -848,7 +843,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("Failed to play error sound: {}", e);
+                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
                     }
                     (
                         "Failed".to_string(),
@@ -866,7 +861,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("Failed to play network error sound: {}", e);
+                        warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
                     }
 
                     (
@@ -882,7 +877,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("Failed to play error sound: {}", e);
+                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 }
@@ -969,8 +964,8 @@ async fn execute_agent_internal(
                 "error_message": error_text,
                 "original_query": trimmed_query
             });
-            if let Err(e) = error_event_handle.emit("agent-error", event_data) {
-                warn!("Failed to emit agent-error event: {}", e);
+            if let Err(e) = error_event_handle.emit(events::agent::ERROR, event_data) {
+                warn!("{}", format!("{}: {}", "Failed to emit agent-error event", e));
             }
         });
     }
@@ -1013,7 +1008,7 @@ pub async fn handle_tts_completion(
     if let Err(e) =
         crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
     {
-        warn!("Failed to play success sound after TTS completion: {}", e);
+        warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
     }
 
     Ok(())

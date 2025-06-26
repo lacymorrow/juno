@@ -7,6 +7,7 @@
 //! - State management
 
 use tauri::{AppHandle, Emitter};
+use crate::constants::events;
 
 /// Sends a notification to the frontend dev tools
 pub fn send_dev_notification(
@@ -18,7 +19,7 @@ pub fn send_dev_notification(
         "action": action,
         "message": message
     });
-    app.emit("dev-tool-notification", payload)
+    app.emit(events::dev::TOOL_NOTIFICATION, payload)
         .map_err(|e| format!("Failed to emit dev tool notification: {}", e))
 }
 
