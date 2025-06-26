@@ -60,7 +60,7 @@ const WindowOperations: React.FC = () => {
       return;
     }
     setWindowInfoResult(null);
-    // Use production function instead of dev_get_window_info
+    // Backend expects: get_window_info(window_id: String, ...)
     const result = await invokeCommand<string | null>(
       "get_window_info",
       { window_id: windowIdInfo.trim() },
@@ -86,7 +86,7 @@ const WindowOperations: React.FC = () => {
       toast.error("Please enter a Window ID to focus.");
       return;
     }
-    // Use production function instead of dev_focus_window
+    // Backend expects: focus_window(window_id: String, ...)
     await invokeCommand(
       "focus_window",
       { window_id: windowIdFocus.trim() },
@@ -111,7 +111,7 @@ const WindowOperations: React.FC = () => {
       return;
     }
 
-    // Use production function instead of dev_resize_window
+    // Backend expects: resize_window(window_id: String, width: i32, height: i32, ...)
     await invokeCommand(
       "resize_window",
       { window_id: windowIdResize.trim(), width, height },
@@ -136,7 +136,7 @@ const WindowOperations: React.FC = () => {
       return;
     }
 
-    // Use production function instead of dev_move_window
+    // Backend expects: move_window(window_id: String, x: i32, y: i32, ...)
     await invokeCommand(
       "move_window",
       { window_id: windowIdMove.trim(), x, y },
@@ -149,7 +149,7 @@ const WindowOperations: React.FC = () => {
       toast.error("Please enter a Window ID to close.");
       return;
     }
-    // Use production function instead of dev_close_window
+    // Backend expects: close_window(window_id: String, ...)
     await invokeCommand(
       "close_window",
       { window_id: windowIdClose.trim() },
@@ -160,13 +160,13 @@ const WindowOperations: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Status Notice */}
-      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
         <div className="flex items-start space-x-2">
-          <Info className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-          <div className="text-sm text-green-800">
-            <strong>✅ Fixed:</strong> Parameter naming bug resolved - all window
-            operations now correctly use snake_case (window_id) for backend
-            compatibility. Uses production functions with built-in debug capabilities.
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800">
+            <strong>✅ Parameter Naming:</strong> All window operations use correct
+            snake_case parameter names (window_id, width, height, x, y) that match
+            backend function signatures. Frontend-backend parameter binding is properly aligned.
           </div>
         </div>
       </div>
