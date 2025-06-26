@@ -83,7 +83,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "list_files" | "dev_list_files" | "system_list_files" => {
+            "list_files" => {
                 let path = tool_call
                     .input
                     .get("path")
@@ -110,7 +110,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "get_file_content" | "dev_get_file_content" | "system_read_file" => {
+            "get_file_content" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -141,7 +141,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "set_file_content" | "dev_set_file_content" | "system_write_file" => {
+            "set_file_content" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
