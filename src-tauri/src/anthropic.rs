@@ -578,7 +578,7 @@ async fn execute_agent_internal(
                         Ok(controller) => controller,
                         Err(e) => {
                             let err_msg = format!(
-                                templates::FAILED_TO_START,
+                                "Failed to start {}: {}",
                                 current_tool_name_captured, e
                             );
                             error!("{}", err_msg);
