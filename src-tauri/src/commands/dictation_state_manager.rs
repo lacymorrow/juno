@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{info, warn, error, debug};
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use tracing::{debug, error, info, warn};
 
 /// Centralized dictation state that coordinates all components
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,7 +80,10 @@ impl DictationStateManager {
     ) -> Result<(), String> {
         // Prevent transitions during force reset
         if *self.force_reset_in_progress.lock().await {
-            debug!("[StateManager] Ignoring state transition during force reset: {:?}", new_state);
+            debug!(
+                "[StateManager] Ignoring state transition during force reset: {:?}",
+                new_state
+            );
             return Ok(());
         }
 
@@ -90,14 +93,23 @@ impl DictationStateManager {
 
             // Skip transition if already in exact same state (optimization and reduces log noise)
             if prev == new_state {
-                debug!("[StateManager] Already in exact target state {:?}, skipping transition", new_state);
+                debug!(
+                    "[StateManager] Already in exact target state {:?}, skipping transition",
+                    new_state
+                );
                 return Ok(());
             }
 
             // Validate state transition
             if !self.is_valid_transition(&prev, &new_state) {
-                error!("[StateManager] Invalid state transition from {:?} to {:?}", prev, new_state);
-                return Err(format!("Invalid state transition from {:?} to {:?}", prev, new_state));
+                error!(
+                    "[StateManager] Invalid state transition from {:?} to {:?}",
+                    prev, new_state
+                );
+                return Err(format!(
+                    "Invalid state transition from {:?} to {:?}",
+                    prev, new_state
+                ));
             }
 
             // Now safe to update state after validation passes
@@ -125,7 +137,10 @@ impl DictationStateManager {
         // Trigger component synchronization
         self.sync_all_components(app_handle, &new_state).await?;
 
-        info!("[StateManager] State transition: {:?} -> {:?} ({})", previous_state, new_state, event.reason);
+        info!(
+            "[StateManager] State transition: {:?} -> {:?} ({})",
+            previous_state, new_state, event.reason
+        );
         Ok(())
     }
 
@@ -158,8 +173,12 @@ impl DictationStateManager {
         // Check for inconsistencies
         let inconsistencies = self.detect_inconsistencies(&components).await;
         if inconsistencies.len() > self.inconsistency_threshold as usize {
-            warn!("[StateManager] Detected {} inconsistencies, triggering auto-recovery", inconsistencies.len());
-            self.auto_recover_from_inconsistencies(app_handle, inconsistencies).await?;
+            warn!(
+                "[StateManager] Detected {} inconsistencies, triggering auto-recovery",
+                inconsistencies.len()
+            );
+            self.auto_recover_from_inconsistencies(app_handle, inconsistencies)
+                .await?;
         }
 
         Ok(())
@@ -167,11 +186,18 @@ impl DictationStateManager {
 
     /// Comprehensive force reset that coordinates all components
     /// Direct reset to avoid recursion with stop coordinator
-    pub async fn force_reset_all_state(&self, app_handle: &AppHandle, reason: String) -> Result<String, String> {
+    pub async fn force_reset_all_state(
+        &self,
+        app_handle: &AppHandle,
+        reason: String,
+    ) -> Result<String, String> {
         // Set force reset flag to prevent race conditions
         *self.force_reset_in_progress.lock().await = true;
 
-        warn!("[StateManager] Starting comprehensive state reset: {}", reason);
+        warn!(
+            "[StateManager] Starting comprehensive state reset: {}",
+            reason
+        );
 
         // Direct reset without using stop coordinator to avoid recursion
         let voice_reset_result = self.reset_voice_controller(app_handle).await;
@@ -181,8 +207,8 @@ impl DictationStateManager {
 
         // 3. Reset app state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-            *dictation_active = false;
+        if let Err(e) = app_state.set_dictation_active(false) {
+            warn!("Failed to reset dictation active state: {}", e);
         }
 
         // 4. Reset floating bar
@@ -200,7 +226,10 @@ impl DictationStateManager {
 
         // 6. Emit comprehensive reset events
         if let Err(e) = app_handle.emit("dictation-active", false) {
-            error!("[StateManager] Failed to emit dictation-active event: {}", e);
+            error!(
+                "[StateManager] Failed to emit dictation-active event: {}",
+                e
+            );
         }
 
         if let Err(e) = app_handle.emit("dictation-state-force-reset", &reason) {
@@ -226,9 +255,7 @@ impl DictationStateManager {
 
         // Get real-time component states
         let app_state = app_handle.state::<crate::state::AppState>();
-        let real_app_state = app_state.dictation_active().lock()
-            .map(|active| *active)
-            .unwrap_or(false);
+        let real_app_state = app_state.is_dictation_active();
 
         let real_voice_state = match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
             Some(controller_state) => {
@@ -239,12 +266,14 @@ impl DictationStateManager {
             None => false
         };
 
-        let inconsistencies = self.detect_real_time_inconsistencies(
-            &current_state,
-            &component_states,
-            real_app_state,
-            real_voice_state,
-        ).await;
+        let inconsistencies = self
+            .detect_real_time_inconsistencies(
+                &current_state,
+                &component_states,
+                real_app_state,
+                real_voice_state,
+            )
+            .await;
 
         serde_json::json!({
             "unified_state": current_state,
@@ -295,27 +324,41 @@ impl DictationStateManager {
         }
     }
 
-    async fn sync_all_components(&self, app_handle: &AppHandle, target_state: &DictationState) -> Result<(), String> {
+    async fn sync_all_components(
+        &self,
+        app_handle: &AppHandle,
+        target_state: &DictationState,
+    ) -> Result<(), String> {
         let is_active = matches!(target_state, DictationState::Active { .. });
 
         // Sync app state
         let app_state = app_handle.state::<crate::state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-            *dictation_active = is_active;
+        if let Err(e) = app_state.set_dictation_active(is_active) {
+            warn!("Failed to sync dictation active state: {}", e);
         }
 
         // Handle escape key registration/unregistration
         if is_active {
             // Register escape key when dictation becomes active
-            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
-                warn!("[StateManager] Failed to register escape key for dictation: {}", e);
+            if let Err(e) =
+                crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
+            {
+                warn!(
+                    "[StateManager] Failed to register escape key for dictation: {}",
+                    e
+                );
             } else {
                 info!("[StateManager] Registered escape key for dictation");
             }
         } else {
             // Unregister escape key when dictation becomes inactive
-            if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
-                warn!("[StateManager] Failed to unregister escape key for dictation: {}", e);
+            if let Err(e) =
+                crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
+            {
+                warn!(
+                    "[StateManager] Failed to unregister escape key for dictation: {}",
+                    e
+                );
             } else {
                 info!("[StateManager] Unregistered escape key for dictation");
             }
@@ -326,7 +369,10 @@ impl DictationStateManager {
 
         // Emit state events
         if let Err(e) = app_handle.emit("dictation-active", is_active) {
-            error!("[StateManager] Failed to emit dictation-active event: {}", e);
+            error!(
+                "[StateManager] Failed to emit dictation-active event: {}",
+                e
+            );
         }
 
         Ok(())
@@ -389,12 +435,19 @@ impl DictationStateManager {
         app_handle: &AppHandle,
         inconsistencies: Vec<String>,
     ) -> Result<(), String> {
-        warn!("[StateManager] Auto-recovering from inconsistencies: {:?}", inconsistencies);
+        warn!(
+            "[StateManager] Auto-recovering from inconsistencies: {:?}",
+            inconsistencies
+        );
 
         self.force_reset_all_state(
             app_handle,
-            format!("Auto-recovery triggered by {} inconsistencies", inconsistencies.len())
-        ).await?;
+            format!(
+                "Auto-recovery triggered by {} inconsistencies",
+                inconsistencies.len()
+            ),
+        )
+        .await?;
 
         Ok(())
     }
@@ -469,13 +522,15 @@ pub async fn update_dictation_component_state(
 ) -> Result<(), String> {
     let manager = get_state_manager();
 
-    manager.update_component_state(
-        app_state_active,
-        voice_controller_active,
-        monitor_state_active,
-        floating_bar_state,
-        &app,
-    ).await?;
+    manager
+        .update_component_state(
+            app_state_active,
+            voice_controller_active,
+            monitor_state_active,
+            floating_bar_state,
+            &app,
+        )
+        .await?;
 
     info!("[StateManager] Component '{}' updated state", component);
     Ok(())
@@ -494,16 +549,20 @@ pub async fn transition_dictation_state(
     let state = match new_state.as_str() {
         "idle" => DictationState::Idle,
         "starting" => DictationState::Starting,
-        "active" => DictationState::Active { started_at: DictationStateManager::current_timestamp() },
+        "active" => DictationState::Active {
+            started_at: DictationStateManager::current_timestamp(),
+        },
         "stopping" => DictationState::Stopping,
         "force_resetting" => DictationState::ForceResetting,
-        error_msg if error_msg.starts_with("error:") => {
-            DictationState::Error { message: error_msg[6..].to_string() }
-        }
+        error_msg if error_msg.starts_with("error:") => DictationState::Error {
+            message: error_msg[6..].to_string(),
+        },
         _ => return Err(format!("Invalid state: {}", new_state)),
     };
 
-    manager.transition_to_state(state, reason, component, &app).await
+    manager
+        .transition_to_state(state, reason, component, &app)
+        .await
 }
 
 /// Force stop dictation (convenience function for stop operations)
@@ -520,8 +579,8 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
 
     // Reset app state
     let app_state = app_handle.state::<crate::state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = false;
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Reset floating bar with proper dictation mode change
@@ -538,23 +597,34 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
 
     // Emit comprehensive reset events
     if let Err(e) = app_handle.emit("dictation-active", false) {
-        error!("[DictationStateManager] Failed to emit dictation-active event: {}", e);
+        error!(
+            "[DictationStateManager] Failed to emit dictation-active event: {}",
+            e
+        );
     }
 
     if let Err(e) = app_handle.emit("dictation-state-force-reset", "Force stop dictation") {
-        error!("[DictationStateManager] Failed to emit force reset event: {}", e);
+        error!(
+            "[DictationStateManager] Failed to emit force reset event: {}",
+            e
+        );
     }
 
     // Transition to idle state
-    manager.transition_to_state(
-        DictationState::Idle,
-        "Force stop completed".to_string(),
-        "force_stop_dictation".to_string(),
-        app_handle,
-    ).await?;
+    manager
+        .transition_to_state(
+            DictationState::Idle,
+            "Force stop completed".to_string(),
+            "force_stop_dictation".to_string(),
+            app_handle,
+        )
+        .await?;
 
     if let Err(e) = voice_reset_result {
-        warn!("[DictationStateManager] Voice controller reset failed: {}", e);
+        warn!(
+            "[DictationStateManager] Voice controller reset failed: {}",
+            e
+        );
     }
 
     info!("[DictationStateManager] Force stop dictation completed");
@@ -566,13 +636,18 @@ pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
     let manager = get_state_manager();
 
     let target_state = if active {
-        DictationState::Active { started_at: DictationStateManager::current_timestamp() }
+        DictationState::Active {
+            started_at: DictationStateManager::current_timestamp(),
+        }
     } else {
         DictationState::Idle
     };
 
     // Note: This is a simplified sync - in practice you'd need an app_handle
     // This function is mainly for internal coordination
-    info!("[DictationStateManager] Syncing dictation state to: {:?}", target_state);
+    info!(
+        "[DictationStateManager] Syncing dictation state to: {:?}",
+        target_state
+    );
     Ok(())
 }

@@ -27,7 +27,6 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
-import { cloudConnector } from "@/lib/cloud-connector";
 
 function App() {
   // Initialize custom hooks

@@ -15,6 +15,28 @@ use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
 
+#[derive(Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "any")]
+    Any,
+    #[serde(rename = "none")]
+    None,
+    Tool {
+        #[serde(rename = "type")]
+        choice_type: String, // "tool"
+        name: String,
+    },
+}
+
+impl Default for ToolChoice {
+    fn default() -> Self {
+        ToolChoice::Auto
+    }
+}
+
 #[derive(Serialize, Debug)]
 struct AnthropicRequest {
     model: String,
@@ -25,6 +47,8 @@ struct AnthropicRequest {
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>, // Add streaming support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<ToolChoice>, // Add tool choice support
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -171,6 +195,7 @@ pub struct AnthropicBrain {
     max_tokens: u32,
     system_prompt: Option<String>, // Optional system prompt
     streaming_enabled: bool,       // New field for streaming support
+    default_tool_choice: Option<ToolChoice>, // Default tool choice behavior
 }
 
 impl AnthropicBrain {
@@ -191,6 +216,7 @@ impl AnthropicBrain {
             max_tokens,
             system_prompt,
             streaming_enabled: true, // Default to streaming for real-time user experience
+            default_tool_choice: None, // Default tool choice behavior
         })
     }
 
@@ -916,6 +942,7 @@ impl AgentBrain for AnthropicBrain {
             system: self.system_prompt.clone(),
             max_tokens: self.max_tokens,
             stream: None, // Will be set based on streaming mode
+            tool_choice: None, // Add tool choice support
         };
 
         // Enable streaming if configured and we have an app handle

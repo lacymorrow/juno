@@ -36,12 +36,12 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 20,       // Further reduced from 50 to be more aggressive
-            max_tokens: 100000,     // Reduced from 150000 to stay well under 200K API limit
-            min_messages_to_keep: 3, // Reduced from 5 for emergency pruning
+            max_messages: 15,       // Further reduced from 20 to be more aggressive
+            max_tokens: 80000,      // Reduced from 100000 to stay well under 200K API limit
+            min_messages_to_keep: 2, // Reduced from 3 for emergency pruning
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 20, // Increased to summarize more aggressively
+            summarization_batch_size: 25, // Increased from 20 to summarize more aggressively
             enable_metrics: true,
             enable_summary_cache: true,
         }
@@ -69,7 +69,7 @@ impl Default for VisualContextConfig {
             enable_screenshot_compression: true,
             screenshot_retention_seconds: 300, // 5 minutes
             immediate_compression: true,
-            max_base64_screenshots: 2, // Only keep 2 most recent screenshots as base64
+            max_base64_screenshots: 1, // Changed from 2 to 1 - compress all but 1 screenshot immediately
             fallback_to_generic_description: true,
         }
     }
@@ -805,6 +805,7 @@ impl AdvancedMemoryManager {
         let visual_config = self.visual_config.read().await;
 
         if !visual_config.enable_screenshot_compression {
+            log::warn!("Screenshot compression is disabled - this may cause token overflow!");
             return Ok(false);
         }
 
@@ -812,16 +813,24 @@ impl AdvancedMemoryManager {
 
         // Check if this message contains a screenshot
         if Self::is_screenshot_content(&message.content) {
-            log::info!("Detected screenshot in message, processing for compression...");
+            log::info!("Detected screenshot in message ({}+ chars), processing for compression...", message.content.len());
 
             // Get current visual summaries to check retention limits
             let mut visual_summaries = self.visual_summaries.write().await;
             let current_base64_count = visual_summaries.len();
 
+            // ALWAYS compress if immediate_compression is enabled OR we've exceeded the limit
+            // With max_base64_screenshots set to 0, this should always compress
             if visual_config.immediate_compression || current_base64_count >= visual_config.max_base64_screenshots {
+                log::info!("Compressing screenshot: immediate_compression={}, count={}/{}",
+                          visual_config.immediate_compression, current_base64_count, visual_config.max_base64_screenshots);
+
                 // Compress to text summary
                 match self.compress_screenshot_to_text(&message.content).await {
                     Ok(summary) => {
+                        log::info!("Screenshot compression successful: {} tokens -> {} tokens ({}x reduction)",
+                                  summary.estimated_original_tokens, summary.compressed_tokens, summary.compression_ratio);
+
                         // Replace base64 content with text summary
                         message.content = format!(
                             "[SCREENSHOT SUMMARY] {}\n\n[COMPRESSION STATS] Original: ~{} tokens, Compressed: {} tokens, Ratio: {:.1}x",
@@ -837,11 +846,16 @@ impl AdvancedMemoryManager {
                         log::info!("Successfully compressed screenshot to text summary");
                     }
                     Err(e) => {
-                        log::warn!("Failed to compress screenshot: {}, keeping original", e);
+                        log::error!("CRITICAL: Failed to compress screenshot: {}, keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
+                        // In case of compression failure, we should still try to truncate the content to prevent overflow
+                        if message.content.len() > 50000 {
+                            log::warn!("Truncating oversized screenshot content to prevent API failure");
+                            message.content = format!("[SCREENSHOT - TRUNCATED DUE TO COMPRESSION FAILURE] Original size: {} chars. Error: {}", message.content.len(), e);
+                        }
                     }
                 }
             } else {
-                log::info!("Keeping screenshot as base64 (count: {}/{})", current_base64_count, visual_config.max_base64_screenshots);
+                log::warn!("Keeping screenshot as base64 (count: {}/{})", current_base64_count, visual_config.max_base64_screenshots);
             }
         }
 

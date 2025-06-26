@@ -28,6 +28,106 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Escapes a string for safe inclusion in AppleScript string literals
+///
+/// This function comprehensively escapes all characters that could break
+/// AppleScript string literals or cause injection vulnerabilities:
+/// - Backslashes (\) -> (\\)
+/// - Double quotes (") -> (\")
+/// - Newlines (\n) -> (\\n)
+/// - Carriage returns (\r) -> (\\r)
+/// - Tabs (\t) -> (\\t)
+/// - Null bytes (\0) -> (\\0)
+/// - Vertical tabs (\x0B) -> (\\v)
+/// - Form feeds (\x0C) -> (\\f)
+/// - Backspaces (\x08) -> (\\b)
+/// - Bells (\x07) -> (\\a)
+fn escape_for_applescript(input: &str) -> String {
+    let mut result = String::with_capacity(input.len() * 2);
+
+    for char in input.chars() {
+        match char {
+            // Backslash must be escaped first to prevent double-escaping
+            '\\' => result.push_str("\\\\"),
+            // Double quotes must be escaped for AppleScript string literals
+            '"' => result.push_str("\\\""),
+            // Newline characters break AppleScript string literals
+            '\n' => result.push_str("\\n"),
+            // Carriage returns break AppleScript string literals
+            '\r' => result.push_str("\\r"),
+            // Tabs break AppleScript string literals
+            '\t' => result.push_str("\\t"),
+            // Null bytes can cause truncation
+            '\0' => result.push_str("\\0"),
+            // Vertical tabs
+            '\x0B' => result.push_str("\\v"),
+            // Form feeds
+            '\x0C' => result.push_str("\\f"),
+            // Backspaces
+            '\x08' => result.push_str("\\b"),
+            // Bells
+            '\x07' => result.push_str("\\a"),
+            // Other control characters (0x01-0x1F except those handled above)
+            c if c.is_control() && c != '\n' && c != '\r' && c != '\t' && c != '\0' && c != '\x0B' && c != '\x0C' && c != '\x08' && c != '\x07' => {
+                result.push_str(&format!("\\u{:04x}", c as u32));
+            },
+            // Regular characters pass through unchanged
+            c => result.push(c),
+        }
+    }
+
+    result
+}
+
+/// Validates JavaScript code for basic safety (additional security measure)
+///
+/// This provides a basic security check for user-provided JavaScript code
+/// to prevent obvious injection attempts. Not foolproof, but catches common patterns.
+fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
+    // Check for obviously dangerous patterns
+    let dangerous_patterns = [
+        "eval(",
+        "Function(",
+        "document.write(",
+        "innerHTML =",
+        "outerHTML =",
+        "location.href =",
+        "location.replace(",
+        "location.assign(",
+        "window.open(",
+        "fetch(",
+        "XMLHttpRequest",
+        "import(",
+        "require(",
+        "process.",
+        "global.",
+        "__dirname",
+        "__filename",
+        "fs.",
+        "child_process",
+    ];
+
+    let js_lower = javascript.to_lowercase();
+    for pattern in &dangerous_patterns {
+        if js_lower.contains(pattern) {
+            log::warn!("Potentially dangerous JavaScript pattern detected: {}", pattern);
+            return Err(AgentError::ToolError(format!(
+                "JavaScript contains potentially dangerous pattern: {}. Use with caution.",
+                pattern
+            )));
+        }
+    }
+
+    // Check for excessive length (prevent DoS)
+    if javascript.len() > 50000 {
+        return Err(AgentError::ToolError(
+            "JavaScript code exceeds maximum allowed length (50KB)".to_string()
+        ));
+    }
+
+    Ok(())
+}
+
 /// Safari Tools - Provides Safari-specific JavaScript injection and DOM automation
 #[derive(Debug)]
 pub struct SafariTools {
@@ -159,7 +259,7 @@ JSON.stringify(serializeDOMWithIds(document.body));
         "#;
 
         // Execute JavaScript in Safari with proper escaping
-        let escaped_js = js_to_inject.replace('"', r#"\""#);
+        let escaped_js = escape_for_applescript(js_to_inject);
         let applescript = format!(
             r#"tell application "Safari" to do JavaScript "{}" in current tab of first window"#,
             escaped_js
@@ -297,7 +397,7 @@ if (element) {{
             element_id
         );
 
-        let escaped_js = click_js.replace('"', r#"\""#);
+        let escaped_js = escape_for_applescript(&click_js);
         let applescript = format!(
             r#"tell application "Safari" to do JavaScript "{}" in current tab of first window"#,
             escaped_js
@@ -350,7 +450,8 @@ if (element) {{
         })?;
 
         // Generate JavaScript to type in the element
-        let escaped_text = text.replace('"', r#"\""#).replace('\n', r#"\n"#).replace('\r', r#"\r"#).replace('\t', r#"\t"#);
+        // Escape text for JavaScript string literals (single quotes used in JS)
+        let js_escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
         let type_js = format!(
             r#"
 var element = document.querySelector('[data-juno-safari-id="{}"]');
@@ -371,10 +472,10 @@ if (element) {{
     'ERROR: Element not found';
 }}
             "#,
-            element_id, escaped_text, escaped_text, escaped_text
+            element_id, js_escaped_text, js_escaped_text, js_escaped_text
         );
 
-        let escaped_js = type_js.replace('"', r#"\""#);
+        let escaped_js = escape_for_applescript(&type_js);
         let applescript = format!(
             r#"tell application "Safari" to do JavaScript "{}" in current tab of first window"#,
             escaped_js
@@ -440,7 +541,7 @@ if (element) {{
     pub fn navigate_to_url(&self, url: &str) -> Result<Value, AgentError> {
         log::info!("Navigating Safari to URL: {}", url);
 
-        let escaped_url = url.replace('"', r#"\""#);
+        let escaped_url = escape_for_applescript(url);
         let applescript = format!(
             r#"tell application "Safari" to set URL of current tab of first window to "{}""#,
             escaped_url
@@ -504,7 +605,10 @@ if (element) {{
             return Err(AgentError::ToolError("Safari is not the active application".to_string()));
         }
 
-        let escaped_js = javascript.replace('"', r#"\""#);
+        // Validate JavaScript for basic safety
+        validate_javascript_safety(javascript)?;
+
+        let escaped_js = escape_for_applescript(javascript);
         let applescript = format!(
             r#"tell application "Safari" to do JavaScript "{}" in current tab of first window"#,
             escaped_js
@@ -661,4 +765,119 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_applescript_escaping() {
+        // Test basic characters that should not be escaped
+        assert_eq!(escape_for_applescript("hello world"), "hello world");
+        assert_eq!(escape_for_applescript("test123"), "test123");
+
+        // Test double quotes (the original issue)
+        assert_eq!(escape_for_applescript(r#"say "hello""#), r#"say \"hello\""#);
+
+        // Test backslashes (must be escaped first to prevent double-escaping)
+        assert_eq!(escape_for_applescript(r"test\path"), r"test\\path");
+
+        // Test newlines and carriage returns
+        assert_eq!(escape_for_applescript("line1\nline2"), "line1\\nline2");
+        assert_eq!(escape_for_applescript("line1\r\nline2"), "line1\\r\\nline2");
+
+        // Test tabs
+        assert_eq!(escape_for_applescript("col1\tcol2"), "col1\\tcol2");
+
+        // Test null bytes
+        assert_eq!(escape_for_applescript("test\0end"), "test\\0end");
+
+        // Test combination of multiple dangerous characters
+        assert_eq!(
+            escape_for_applescript("alert(\"Hello\\nWorld!\");\r\n\ttab"),
+            "alert(\\\"Hello\\\\nWorld!\\\");\\r\\n\\ttab"
+        );
+
+        // Test control characters
+        assert_eq!(escape_for_applescript("test\x07bell"), "test\\abell");
+        assert_eq!(escape_for_applescript("test\x08backspace"), "test\\bbackspace");
+        assert_eq!(escape_for_applescript("test\x0Bvtab"), "test\\vvtab");
+        assert_eq!(escape_for_applescript("test\x0Cformfeed"), "test\\fformfeed");
+
+        // Test complex JavaScript injection scenario
+        let malicious_js = r#"';alert("XSS");var x='"#;
+        let escaped = escape_for_applescript(malicious_js);
+        assert_eq!(escaped, r#"';alert(\"XSS\");var x='"#);
+
+        // Test multi-line JavaScript with various dangerous characters
+        let complex_js = "function test() {\n\tconsole.log(\"Hello\\nWorld!\");\n\treturn true;\n}";
+        let escaped_complex = escape_for_applescript(complex_js);
+        assert_eq!(
+            escaped_complex,
+            "function test() {\\n\\tconsole.log(\\\"Hello\\\\nWorld!\\\");\\n\\treturn true;\\n}"
+        );
+    }
+
+    #[test]
+    fn test_javascript_safety_validation() {
+        // Test safe JavaScript
+        assert!(validate_javascript_safety("console.log('hello')").is_ok());
+        assert!(validate_javascript_safety("document.getElementById('test')").is_ok());
+        assert!(validate_javascript_safety("var x = 5; return x * 2;").is_ok());
+
+        // Test dangerous patterns
+        assert!(validate_javascript_safety("eval('malicious code')").is_err());
+        assert!(validate_javascript_safety("document.write('<script>')").is_err());
+        assert!(validate_javascript_safety("location.href = 'evil.com'").is_err());
+        assert!(validate_javascript_safety("window.open('popup')").is_err());
+        assert!(validate_javascript_safety("fetch('/steal-data')").is_err());
+        assert!(validate_javascript_safety("import('./malicious')").is_err());
+
+        // Test case insensitive detection
+        assert!(validate_javascript_safety("EVAL('code')").is_err());
+        assert!(validate_javascript_safety("Document.Write('test')").is_err());
+
+        // Test length limit
+        let long_js = "a".repeat(60000);
+        assert!(validate_javascript_safety(&long_js).is_err());
+
+        // Test acceptable length
+        let ok_js = "a".repeat(10000);
+        assert!(validate_javascript_safety(&ok_js).is_ok());
+    }
+
+    #[test]
+    fn test_safari_tools_creation() {
+        let tools = SafariTools::new();
+
+        // Test that cache starts empty
+        let cache = tools.element_cache.lock().unwrap();
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_safari_tool_definitions() {
+        let definitions = get_safari_tool_definitions();
+
+        // Verify we have all 8 expected tools
+        assert_eq!(definitions.len(), 8);
+
+        // Verify specific tool names
+        let tool_names: Vec<&String> = definitions.iter().map(|d| &d.name).collect();
+        assert!(tool_names.contains(&&"safari_extract_dom".to_string()));
+        assert!(tool_names.contains(&&"safari_click_element".to_string()));
+        assert!(tool_names.contains(&&"safari_type_text".to_string()));
+        assert!(tool_names.contains(&&"safari_get_url".to_string()));
+        assert!(tool_names.contains(&&"safari_navigate".to_string()));
+        assert!(tool_names.contains(&&"safari_list_clickable_elements".to_string()));
+        assert!(tool_names.contains(&&"safari_execute_javascript".to_string()));
+        assert!(tool_names.contains(&&"safari_clear_cache".to_string()));
+
+        // Verify all tools have descriptions and schemas
+        for tool in &definitions {
+            assert!(!tool.description.is_empty());
+            assert!(tool.input_schema.is_object());
+        }
+    }
 }
