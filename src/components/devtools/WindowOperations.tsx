@@ -49,7 +49,7 @@ const WindowOperations: React.FC = () => {
     // Use production function instead of dev_get_window_info
     const result = await invokeCommand<string | null>(
       "get_window_info",
-      { windowId: windowIdInfo.trim() },
+      { window_id: windowIdInfo.trim() },
       "getWindowInfo"
     );
     if (result !== null && typeof result === "string") {
@@ -75,7 +75,7 @@ const WindowOperations: React.FC = () => {
     // Use production function instead of dev_focus_window
     await invokeCommand(
       "focus_window",
-      { windowId: windowIdFocus.trim() },
+      { window_id: windowIdFocus.trim() },
       "focusWindow"
     );
   };
@@ -100,7 +100,7 @@ const WindowOperations: React.FC = () => {
     // Use production function instead of dev_resize_window
     await invokeCommand(
       "resize_window",
-      { windowId: windowIdResize.trim(), width, height },
+      { window_id: windowIdResize.trim(), width, height },
       "resizeWindow"
     );
   };
@@ -125,7 +125,7 @@ const WindowOperations: React.FC = () => {
     // Use production function instead of dev_move_window
     await invokeCommand(
       "move_window",
-      { windowId: windowIdMove.trim(), x, y },
+      { window_id: windowIdMove.trim(), x, y },
       "moveWindow"
     );
   };
@@ -138,7 +138,7 @@ const WindowOperations: React.FC = () => {
     // Use production function instead of dev_close_window
     await invokeCommand(
       "close_window",
-      { windowId: windowIdClose.trim() },
+      { window_id: windowIdClose.trim() },
       "closeWindow"
     );
   };
