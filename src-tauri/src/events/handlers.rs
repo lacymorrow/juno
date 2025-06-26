@@ -23,52 +23,70 @@ pub fn setup_event_listeners(app: &AppHandle) {
 fn setup_voice_transcription_listeners(app: &AppHandle) {
     // Listen for voice transcription final results
     let app_handle_for_listener = app.clone();
-    app.listen(constants::events::voice_transcription::FINAL_RESULT, move |event| {
-        let app_handle = app_handle_for_listener.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_voice_transcription_final_result(app_handle, event.payload()).await;
-        });
-    });
+    app.listen(
+        constants::events::voice_transcription::FINAL_RESULT,
+        move |event| {
+            let app_handle = app_handle_for_listener.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_voice_transcription_final_result(app_handle, event.payload()).await;
+            });
+        },
+    );
 
     // Listen for dictation stopped events
     let app_handle_for_listener = app.clone();
-    app.listen(constants::events::voice_transcription::DICTATION_STOPPED, move |event| {
-        let app_handle = app_handle_for_listener.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_voice_transcription_dictation_stopped(app_handle, event.payload().to_string())
+    app.listen(
+        constants::events::voice_transcription::DICTATION_STOPPED,
+        move |event| {
+            let app_handle = app_handle_for_listener.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_voice_transcription_dictation_stopped(
+                    app_handle,
+                    event.payload().to_string(),
+                )
                 .await;
-        });
-    });
+            });
+        },
+    );
 
     // Listen for voice transcription errors
     let app_handle_for_error_listener = app.clone();
-    app.listen(constants::events::voice_transcription::ERROR, move |_event| {
-        let app_handle = app_handle_for_error_listener.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_voice_transcription_error(app_handle).await;
-        });
-    });
+    app.listen(
+        constants::events::voice_transcription::ERROR,
+        move |_event| {
+            let app_handle = app_handle_for_error_listener.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_voice_transcription_error(app_handle).await;
+            });
+        },
+    );
 }
 
 /// Setup dictation event listeners
 fn setup_dictation_listeners(app: &AppHandle) {
     // Listen for dictation-transcription-start events
     let app_handle_for_dictation_start = app.clone();
-    app.listen(constants::events::dictation::TRANSCRIPTION_START, move |_event| {
-        let app_handle = app_handle_for_dictation_start.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_dictation_transcription_start(app_handle).await;
-        });
-    });
+    app.listen(
+        constants::events::dictation::TRANSCRIPTION_START,
+        move |_event| {
+            let app_handle = app_handle_for_dictation_start.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_dictation_transcription_start(app_handle).await;
+            });
+        },
+    );
 
     // Listen for dictation-cancel events
     let app_handle_for_dictation_cancel = app.clone();
-    app.listen(constants::events::dictation::TRANSCRIPTION_CANCEL, move |_event| {
-        let app_handle = app_handle_for_dictation_cancel.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_dictation_cancel(app_handle).await;
-        });
-    });
+    app.listen(
+        constants::events::dictation::TRANSCRIPTION_CANCEL,
+        move |_event| {
+            let app_handle = app_handle_for_dictation_cancel.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_dictation_cancel(app_handle).await;
+            });
+        },
+    );
 
     // Listen for dictation-stop events
     let app_handle_for_dictation_stop = app.clone();
@@ -81,12 +99,15 @@ fn setup_dictation_listeners(app: &AppHandle) {
 
     // Listen for force stop events
     let app_handle_for_force_stop = app.clone();
-    app.listen(constants::events::force_stop::TRANSCRIPTION, move |_event| {
-        let app_handle = app_handle_for_force_stop.clone();
-        tauri::async_runtime::spawn(async move {
-            handle_force_stop_transcription(app_handle).await;
-        });
-    });
+    app.listen(
+        constants::events::force_stop::TRANSCRIPTION,
+        move |_event| {
+            let app_handle = app_handle_for_force_stop.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_force_stop_transcription(app_handle).await;
+            });
+        },
+    );
 }
 
 /// Setup timer event listeners for processing timer-expired events
@@ -124,9 +145,7 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
 
     // Check if Dictation Mode is active to determine processing mode
     let app_state = app_handle.state::<state::AppState>();
-    let is_dictation_active = app_state
-        .get_dictation_active()
-        .unwrap_or(false);
+    let is_dictation_active = app_state.get_dictation_active().unwrap_or(false);
 
     // Extract text from payload
     let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
@@ -154,9 +173,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
             let app_state = app_handle.state::<state::AppState>();
 
             // Store to clipboard if enabled
-            let clipboard_enabled = app_state
-                .get_dictation_clipboard_enabled()
-                .unwrap_or(true);
+            let clipboard_enabled = app_state.get_dictation_clipboard_enabled().unwrap_or(true);
 
             if clipboard_enabled {
                 match crate::commands::core::set_clipboard(
@@ -202,8 +219,8 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
 
     // Reset Dictation Mode state after processing
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = false;
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Emit state change event for UI
@@ -305,8 +322,8 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
 async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     // Mark this as Dictation Mode in AppState BEFORE starting transcription
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = true;
+    if let Err(e) = app_state.set_dictation_active(true) {
+        warn!("Failed to set dictation active state: {}", e);
     }
 
     // Update floating bar manager to set dictation mode
@@ -360,8 +377,8 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
 
                 // Reset the dictation active flag
-                if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-                    *dictation_active = false;
+                if let Err(e) = app_state.set_dictation_active(false) {
+                    warn!("Failed to reset dictation active state: {}", e);
                 }
 
                 // Emit state change event for UI
@@ -387,8 +404,8 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
         error!("[Dictation Mode] Voice controller not found, cannot start dictation");
 
         // Reset the dictation active flag
-        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-            *dictation_active = false;
+        if let Err(e) = app_state.set_dictation_active(false) {
+            warn!("Failed to reset dictation active state: {}", e);
         }
 
         // Emit state change event for UI
@@ -416,9 +433,9 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     // Reset state
     {
         let app_state = app_handle.state::<state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-            *dictation_active = false;
-        };
+        if let Err(e) = app_state.set_dictation_active(false) {
+            warn!("Failed to reset dictation active state: {}", e);
+        }
     }
 }
 
@@ -437,9 +454,9 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // Reset state
     {
         let app_state = app_handle.state::<state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-            *dictation_active = false;
-        };
+        if let Err(e) = app_state.set_dictation_active(false) {
+            warn!("Failed to reset dictation active state: {}", e);
+        }
     }
 
     // Update floating bar manager
