@@ -35,9 +35,9 @@ pub async fn start_always_listening_mode(
 
     // Update app state
     if let Err(e) = state.set_always_listening_active(true) {
-        warn!("[Command] Failed to set always_listening_active: {}", e);
-    } else {
-        return Err("Failed to lock always listening state".to_string());
+        let err_msg = format!("Failed to set always_listening_active: {}", e);
+        error!("[Command] {}", err_msg);
+        return Err(err_msg);
     }
 
     // Call the plugin command
@@ -128,9 +128,9 @@ pub async fn stop_always_listening_mode(
 
     // Update app state
     if let Err(e) = state.set_always_listening_active(false) {
-        warn!("[Command] Failed to set always_listening_active: {}", e);
-    } else {
-        return Err("Failed to lock always listening state".to_string());
+        let err_msg = format!("Failed to set always_listening_active: {}", e);
+        error!("[Command] {}", err_msg);
+        return Err(err_msg);
     }
 
     // Call the plugin command
@@ -244,12 +244,9 @@ pub async fn set_always_listening_sensitivity(
 
     // Update app state
     if let Err(e) = state.set_always_listening_sensitivity(sensitivity) {
-        warn!(
-            "[Command] Failed to set always_listening_sensitivity: {}",
-            e
-        );
-    } else {
-        return Err("Failed to lock sensitivity state".to_string());
+        let err_msg = format!("Failed to set always_listening_sensitivity: {}", e);
+        error!("[Command] {}", err_msg);
+        return Err(err_msg);
     }
 
     // Call the plugin command if controller is available
@@ -327,9 +324,9 @@ pub async fn set_always_listening_wake_words(
 
     // Update app state
     if let Err(e) = state.set_always_listening_wake_words(wake_words.clone()) {
-        warn!("[Command] Failed to set always_listening_wake_words: {}", e);
-    } else {
-        return Err("Failed to lock wake words state".to_string());
+        let err_msg = format!("Failed to set always_listening_wake_words: {}", e);
+        error!("[Command] {}", err_msg);
+        return Err(err_msg);
     }
 
     // Call the plugin command if controller is available
