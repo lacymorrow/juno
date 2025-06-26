@@ -179,18 +179,6 @@ function App() {
         // The connection will be started when user clicks "Start Connector" in settings
         console.log("🌐 Cloud connector event listeners initialized");
 
-        // Initialize cloud connector event listeners
-        try {
-          // Only setup event listeners, don't start the connector automatically
-          // Connection will be started when user enables it in settings
-          console.log("🌐 Cloud connector event listeners initialized");
-        } catch (error) {
-          console.warn(
-            "🌐 Cloud connector event listener setup failed:",
-            error
-          );
-        }
-
         console.log(`🚀 Juno AI v${version} initialized`);
       } catch (error) {
         console.error("❌ Failed to initialize app:", error);
