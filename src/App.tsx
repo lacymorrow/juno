@@ -27,7 +27,6 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
-import { cloudConnector } from "@/lib/cloud-connector";
 
 function App() {
   // Initialize custom hooks
@@ -79,7 +78,7 @@ function App() {
       conversation.setQuery,
       conversation.addSystemMessage,
       playError,
-    ]
+    ],
   );
 
   // Enhanced stop handler
@@ -98,7 +97,7 @@ function App() {
         conversation.addSystemMessage(`❌ Error stopping operations: ${error}`);
       }
     },
-    [audioPlayback.stopAllAudio, conversation.addSystemMessage]
+    [audioPlayback.stopAllAudio, conversation.addSystemMessage],
   );
 
   // Update check handler
@@ -262,7 +261,7 @@ function App() {
       conversation.addSystemMessage,
       scrolling.autoScrollToBottom,
       playError,
-    ]
+    ],
   );
 
   // Copy response handler
@@ -271,10 +270,10 @@ function App() {
       conversation.handleCopyResponse(
         content,
         messageIndex,
-        appState.setCopyingMessageId
+        appState.setCopyingMessageId,
       );
     },
-    [conversation.handleCopyResponse, appState.setCopyingMessageId]
+    [conversation.handleCopyResponse, appState.setCopyingMessageId],
   );
 
   // Save response handler
@@ -284,10 +283,10 @@ function App() {
         content,
         format,
         messageIndex,
-        appState.setSavingMessageId
+        appState.setSavingMessageId,
       );
     },
-    [conversation.handleSaveResponse, appState.setSavingMessageId]
+    [conversation.handleSaveResponse, appState.setSavingMessageId],
   );
 
   // Render main UI
