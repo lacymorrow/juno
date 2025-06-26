@@ -173,81 +173,14 @@ pub fn init_shell_state(app_state: &AppState) {
     let _ = app_state.insert(ShellSessions::default());
 }
 
-#[tauri::command]
-pub(crate) async fn dev_bash_command(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    command: String,
-    timeout_seconds: Option<u64>,
-    restart: Option<bool>,
-) -> Result<String, String> {
-    let effective_restart = restart.unwrap_or(false);
-    let session_id = "default".to_string(); // For now we use a default session, could be parameterized later
+// ============================================================================
+// CONSOLIDATED: dev_ functions removed - use production functions instead
+// ============================================================================
 
-    info!(
-        "[DEV_TOOL] Executing bash command: \"{}\" (timeout: {:?}, restart: {})",
-        command,
-        timeout_seconds,
-        effective_restart
-    );
+// CONSOLIDATED: dev_bash_command removed - use bash_command production function
+// Located in this same file with debug capabilities enabled via debug_mode parameter
 
-    // Get shell sessions from state
-    let shell_sessions = state.get::<ShellSessions>()
-        .ok_or_else(|| "Shell session state not initialized".to_string())?;
-    let sessions_arc = shell_sessions.clone();
-    let mut sessions = sessions_arc.lock().map_err(|e| format!("Failed to lock shell sessions: {}", e))?;
-
-    // Handle restart or initialize if needed
-    if effective_restart || !sessions.contains_key(&session_id) {
-        if sessions.contains_key(&session_id) {
-            // Clean up existing session
-            info!("[DEV_TOOL] Restarting shell session");
-            let _ = sessions.remove(&session_id);
-        } else {
-            info!("[DEV_TOOL] Creating new shell session");
-        }
-
-        // Create new session
-        let session = ShellSession::new()?;
-        sessions.insert(session_id.clone(), session);
-    }
-
-    // Get the session and run the command
-    match sessions.get_mut(&session_id) {
-        Some(session) => {
-            let (stdout, stderr, exit_code, timed_out) = session.run_command(&command, timeout_seconds)?;
-
-            let success = exit_code.map_or(true, |code| code == 0);
-
-            let result_json = serde_json::json!({
-                "success": success,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": exit_code,
-                "timed_out": timed_out
-            });
-
-            let result_str = serde_json::to_string(&result_json)
-                .map_err(|e| format!("Failed to serialize bash command result: {}", e))?;
-
-            info!(
-                "[DEV_TOOL] Bash command '{}' finished. Success: {}, Timed out: {}",
-                command,
-                success,
-                timed_out
-            );
-
-            send_dev_tool_notification(
-                &app,
-                "Bash Command",
-                &format!("Command finished: {}", command),
-            )?;
-
-            Ok(result_str)
-        },
-        None => Err("Failed to get shell session".to_string())
-    }
-}
+// This function replaces the dev_ prefixed function by incorporating debug features conditionally
 
 // ============================================================================
 // PRODUCTION SHELL FUNCTION WITH UNIFIED DEBUG SYSTEM

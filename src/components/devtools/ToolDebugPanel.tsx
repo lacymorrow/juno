@@ -65,7 +65,7 @@ export function ToolDebugPanel() {
   };
 
   const computerTool = debugInfo?.tools.find(
-    (tool) => tool.name === "computer",
+    (tool) => tool.name === "computer"
   );
   const computerToolMissing = debugInfo && !computerTool;
 
@@ -111,7 +111,11 @@ export function ToolDebugPanel() {
 
         {computerTool && (
           <div
-            className={`p-2 rounded ${computerTool.enabled ? "bg-green-900/20 text-green-400" : "bg-red-900/20 text-red-400"}`}
+            className={`p-2 rounded ${
+              computerTool.enabled
+                ? "bg-green-900/20 text-green-400"
+                : "bg-red-900/20 text-red-400"
+            }`}
           >
             <strong>Computer Tool Status:</strong>
             <div>Enabled: {computerTool.enabled ? "YES" : "NO"}</div>
@@ -136,7 +140,7 @@ export function ToolDebugPanel() {
                 >
                   {category}: {enabled ? "ENABLED" : "DISABLED"}
                 </div>
-              ),
+              )
             )}
 
             <h5 className="font-bold mt-3 mb-1">All Tools:</h5>
@@ -144,7 +148,11 @@ export function ToolDebugPanel() {
               {debugInfo.tools.map((tool) => (
                 <div
                   key={tool.name}
-                  className={`text-sm ${tool.enabled ? "text-green-400" : "text-red-400"} ${tool.name === "computer" ? "font-bold bg-yellow-900/20" : ""}`}
+                  className={`text-sm ${
+                    tool.enabled ? "text-green-400" : "text-red-400"
+                  } ${
+                    tool.name === "computer" ? "font-bold bg-yellow-900/20" : ""
+                  }`}
                 >
                   {tool.name} ({tool.category}) -{" "}
                   {tool.enabled ? "ENABLED" : "DISABLED"}{" "}
@@ -164,7 +172,11 @@ export function ToolDebugPanel() {
               {registeredTools.map((tool) => (
                 <div
                   key={tool}
-                  className={`text-sm ${tool === "computer" ? "font-bold text-yellow-400 bg-yellow-900/20" : "text-gray-300"}`}
+                  className={`text-sm ${
+                    tool === "computer"
+                      ? "font-bold text-yellow-400 bg-yellow-900/20"
+                      : "text-gray-300"
+                  }`}
                 >
                   {tool}
                 </div>

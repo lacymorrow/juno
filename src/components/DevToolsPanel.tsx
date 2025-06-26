@@ -143,8 +143,9 @@ const DevToolsPanel: React.FC = () => {
       toast.error("Please enter an app name.");
       return;
     }
+    // Use production function instead of dev_open_app
     await invokeCommand(
-      "dev_open_app",
+      "open_application",
       { appName: appToOpen.trim() },
       "openApp"
     );
@@ -155,16 +156,20 @@ const DevToolsPanel: React.FC = () => {
       toast.error("Please enter a URL.");
       return;
     }
-    await invokeCommand("dev_open_url", { url: urlToOpen.trim() }, "openUrl");
+    // Use production function instead of dev_open_url
+    await invokeCommand("open_url", { url: urlToOpen.trim() }, "openUrl");
   };
 
   const handleWait = async () => {
-    const duration = parseInt(waitDuration, 10);
-    if (isNaN(duration) || duration <= 0) {
+    const durationMs = parseInt(waitDuration, 10);
+    if (isNaN(durationMs) || durationMs <= 0) {
       toast.error("Please enter a valid duration in milliseconds.");
       return;
     }
-    await invokeCommand("dev_wait", { duration }, "wait");
+    // Convert milliseconds to seconds for backend
+    const duration_sec = durationMs / 1000.0;
+    // Use production function instead of dev_wait
+    await invokeCommand("wait", { duration_sec }, "wait");
   };
 
   return (

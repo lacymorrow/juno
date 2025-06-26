@@ -116,18 +116,32 @@ async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Test command to manually trigger click visualization (from tools2)
+// CONSOLIDATED: dev_test_click_visualization removed - use test_click_visualization production function
+
+// Test command to manually trigger click visualization with production function
 #[tauri::command]
-pub(crate) async fn dev_test_click_visualization(
+pub(crate) async fn test_click_visualization(
     app: AppHandle,
+    state: State<'_, AppState>,
     x: f64,
     y: f64,
     color: Option<String>
 ) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
     let color_to_use = color.unwrap_or_else(|| "#FF0000".to_string()); // Default to red
-    info!("[DEV_TOOL] Testing click visualization at ({}, {}) with color {}", x, y, color_to_use);
+
+    log_debug_operation("test_click_visualization", &format!("Testing click visualization at ({}, {}) with color {}", x, y, color_to_use), &debug_config);
+    info!("Testing click visualization at ({}, {}) with color {}", x, y, color_to_use);
+
     create_click_visualization(&app, x, y, &color_to_use)?;
-    send_dev_tool_notification(&app, "Click Visualization", &format!("Visualized at ({}, {})", x, y))?;
+
+    // Send debug notification if enabled
+    if debug_config.send_notifications {
+        let _ = send_debug_notification(&app, "Click Visualization", &format!("Visualized at ({}, {})", x, y));
+    }
+
     Ok(())
 }
 
@@ -440,11 +454,13 @@ pub(crate) async fn qa_test_scroll(
     Ok(result_json)
 }
 
-// --- DEV TOOL COMMANDS (Keep main's versions with modifiers and logging) ---
+// CONSOLIDATED: dev_window_relative_click removed - use window_relative_click production function
+
+// --- PRODUCTION WINDOW RELATIVE CLICK FUNCTIONS WITH DEBUG CAPABILITIES ---
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub(crate) async fn dev_window_relative_click(
+pub(crate) async fn window_relative_click(
     app: AppHandle,
     state: State<'_, AppState>,
     window_id: String,
@@ -453,9 +469,14 @@ pub(crate) async fn dev_window_relative_click(
     click_type: Option<String>,
     modifier: Option<String>,
 ) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
 
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 
+    log_debug_operation("window_relative_click",
+        &format!("Window relative click: window_id={}, x={}, y={}, click_type={:?}, modifier={:?}",
+            window_id, x, y, click_type, modifier), &debug_config);
     info!(
         "Window relative click: window_id={}, x={}, y={}, click_type={:?}, modifier={:?}",
         window_id, x, y, click_type, modifier
@@ -487,19 +508,27 @@ pub(crate) async fn dev_window_relative_click(
     info!("Converted window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 
     // Perform the click using existing functionality
-    match click_type.as_deref().unwrap_or("left") {
+    let result = match click_type.as_deref().unwrap_or("left") {
         "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
+    };
+
+    // Send debug notification if enabled
+    if debug_config.send_notifications && result.is_ok() {
+        let _ = send_debug_notification(&app, "Window Relative Click",
+            &format!("Clicked at window ({}, {}) -> global ({}, {})", x, y, global_x, global_y));
     }
+
+    result
 }
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub(crate) async fn dev_window_relative_click(
+pub(crate) async fn window_relative_click(
     _app: AppHandle,
     _state: State<'_, AppState>,
     _window_id: String,
@@ -511,9 +540,11 @@ pub(crate) async fn dev_window_relative_click(
     Err("Window relative click is only supported on macOS currently.".to_string())
 }
 
+// CONSOLIDATED: dev_focused_window_relative_click removed - use focused_window_relative_click production function
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub(crate) async fn dev_focused_window_relative_click(
+pub(crate) async fn focused_window_relative_click(
     app: AppHandle,
     state: State<'_, AppState>,
     x: f64,
@@ -521,8 +552,14 @@ pub(crate) async fn dev_focused_window_relative_click(
     click_type: Option<String>,
     modifier: Option<String>,
 ) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 
+    log_debug_operation("focused_window_relative_click",
+        &format!("Focused window relative click: x={}, y={}, click_type={:?}, modifier={:?}",
+            x, y, click_type, modifier), &debug_config);
     info!(
         "Focused window relative click: x={}, y={}, click_type={:?}, modifier={:?}",
         x, y, click_type, modifier
@@ -579,19 +616,27 @@ pub(crate) async fn dev_focused_window_relative_click(
     info!("Converted focused window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 
     // Perform the click using existing functionality
-    match click_type.as_deref().unwrap_or("left") {
+    let result = match click_type.as_deref().unwrap_or("left") {
         "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
+    };
+
+    // Send debug notification if enabled
+    if debug_config.send_notifications && result.is_ok() {
+        let _ = send_debug_notification(&app, "Focused Window Relative Click",
+            &format!("Clicked at focused window ({}, {}) -> global ({}, {})", x, y, global_x, global_y));
     }
+
+    result
 }
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub(crate) async fn dev_focused_window_relative_click(
+pub(crate) async fn focused_window_relative_click(
     _app: AppHandle,
     _state: State<'_, AppState>,
     _x: f64,

@@ -62,7 +62,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_type_text" | "dev_global_type_text" | "desktop_type" => {
+            "type_text" | "global_type_text" | "desktop_type" => {
                 let text = tool_call
                     .input
                     .get("text")
@@ -85,7 +85,7 @@ impl DesktopAgent {
             }
             // REMOVED: "dev_press_key" - Use computer tool with action: "key" instead
             // This eliminates redundancy and ensures compliance with official Anthropic Computer Use API
-            "open_application" | "dev_open_application" | "desktop_open_app" => {
+            "open_application" | "desktop_open_app" => {
                 let app_name = tool_call
                     .input
                     .get("app_name")
@@ -111,7 +111,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_focus_window" | "desktop_focus_window" => {
+            "focus_window" | "desktop_focus_window" => {
                 let window_id = tool_call
                     .input
                     .get("window_id")
@@ -137,7 +137,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_scroll_window" | "desktop_scroll" => {
+            "scroll_window" | "desktop_scroll" => {
                 let direction = tool_call
                     .input
                     .get("direction")
@@ -185,7 +185,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_get_clipboard" => {
+            "get_clipboard" => {
                 let result = commands::core::get_clipboard(self.app_handle.clone(), state).await;
 
                 match result {
@@ -196,7 +196,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_set_clipboard" => {
+            "set_clipboard" => {
                 let content = tool_call
                     .input
                     .get("content")
@@ -224,7 +224,7 @@ impl DesktopAgent {
             // dev_left_click_drag → computer tool with action: "drag"
             // dev_left_mouse_down, dev_left_mouse_up → computer tool with action: "drag"
             // This eliminates 11 redundant tools and ~400 lines of duplicate code for 100% API compliance.
-            "dev_get_window_list" => {
+            "get_window_list" => {
                 let result =
                     commands::window::get_window_list(self.app_handle.clone(), state).await;
 
@@ -236,7 +236,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_find_element_by_selector" => {
+            "find_element_by_selector" => {
                 let selector = tool_call
                     .input
                     .get("selector")
@@ -278,8 +278,6 @@ impl SpecializedAgent for DesktopAgent {
                 tool_patterns: vec![
                     "click".to_string(),
                     "mouse".to_string(),
-                    "dev_click".to_string(),
-                    "dev_mouse".to_string(),
                 ],
                 confidence: 0.95,
             },
@@ -289,8 +287,6 @@ impl SpecializedAgent for DesktopAgent {
                 tool_patterns: vec![
                     "type".to_string(),
                     "key".to_string(),
-                    "dev_type".to_string(),
-                    "dev_key".to_string(),
                 ],
                 confidence: 0.95,
             },
@@ -300,7 +296,6 @@ impl SpecializedAgent for DesktopAgent {
                 tool_patterns: vec![
                     "app".to_string(),
                     "application".to_string(),
-                    "dev_open".to_string(),
                 ],
                 confidence: 0.90,
             },
@@ -311,7 +306,6 @@ impl SpecializedAgent for DesktopAgent {
                 tool_patterns: vec![
                     "window".to_string(),
                     "focus".to_string(),
-                    "dev_window".to_string(),
                 ],
                 confidence: 0.85,
             },
@@ -328,7 +322,7 @@ impl SpecializedAgent for DesktopAgent {
             AgentCapability {
                 name: "Clipboard Operations".to_string(),
                 description: "Read from and write to system clipboard".to_string(),
-                tool_patterns: vec!["clipboard".to_string(), "dev_clipboard".to_string()],
+                tool_patterns: vec!["clipboard".to_string()],
                 confidence: 0.90,
             },
         ]
