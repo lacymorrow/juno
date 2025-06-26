@@ -5,9 +5,9 @@
 
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, ShortcutEvent};
+use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
 use crate::{constants, state};
 
@@ -18,13 +18,17 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 /// Handle global shortcut events
 pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
-    println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
+    println!(
+        "[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}",
+        shortcut,
+        event.state()
+    );
 
     let app_state = app.state::<state::AppState>();
 
     // Get current keyboard shortcuts from state
-    let current_shortcuts = match app_state.keyboard_shortcuts().lock() {
-        Ok(shortcuts) => shortcuts.clone(),
+    let current_shortcuts = match app_state.get_keyboard_shortcuts() {
+        Ok(shortcuts) => shortcuts,
         Err(e) => {
             error!("Failed to get keyboard shortcuts: {}", e);
             return; // Exit early if we can't get shortcuts
@@ -35,8 +39,10 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let escape_shortcut = Shortcut::new(None, Code::Escape);
 
     // Parse shortcuts from configuration
-    let agent_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
-    let dictation_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.dictation_input);
+    let agent_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
+    let dictation_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.dictation_input);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if *shortcut == escape_shortcut {
@@ -64,8 +70,14 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         let app_handle_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
-            if let Err(e) = coordinator.stop_all_operations(&app_handle_clone, "Escape key pressed").await {
-                error!("[Escape Key] Failed to stop operations via coordinator: {}", e);
+            if let Err(e) = coordinator
+                .stop_all_operations(&app_handle_clone, "Escape key pressed")
+                .await
+            {
+                error!(
+                    "[Escape Key] Failed to stop operations via coordinator: {}",
+                    e
+                );
             }
         });
     }
@@ -79,17 +91,23 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         ShortcutState::Released => "released",
     };
 
-    if let Err(e) = app.emit("shortcut-agent-mode", serde_json::json!({
-        "state": shortcut_state,
-        "shortcut": "agent_mode_toggle"
-    })) {
-        error!("[Agent Mode Shortcut] Failed to emit shortcut detection event: {}", e);
+    if let Err(e) = app.emit(
+        "shortcut-agent-mode",
+        serde_json::json!({
+            "state": shortcut_state,
+            "shortcut": "agent_mode_toggle"
+        }),
+    ) {
+        error!(
+            "[Agent Mode Shortcut] Failed to emit shortcut detection event: {}",
+            e
+        );
     }
 
     // FIXED: Check agent trigger mode to determine behavior
     let app_state = app.state::<state::AppState>();
-    let trigger_mode = app_state.agent_trigger_mode().lock()
-        .map(|mode| mode.clone())
+    let trigger_mode = app_state
+        .get_agent_trigger_mode()
         .unwrap_or(state::AgentTriggerMode::Tap);
 
     match trigger_mode {
@@ -117,13 +135,15 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 /// Handle agent tap mode (original behavior)
 fn handle_agent_tap_mode(app: &AppHandle) {
     // Check if dictation is currently active by checking the VoiceController directly
-    let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        voice_controller_state.lock()
-            .map(|controller| controller.is_dictating())
-            .unwrap_or(false)
-    } else {
-        false
-    };
+    let is_dictation_active =
+        if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+            voice_controller_state
+                .lock()
+                .map(|controller| controller.is_dictating())
+                .unwrap_or(false)
+        } else {
+            false
+        };
 
     if is_dictation_active {
         info!("[Agent Mode Shortcut] Tap mode - stopping active dictation");
@@ -131,11 +151,15 @@ fn handle_agent_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Stop dictation
-            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+            if let Some(voice_controller_state) =
+                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
+            {
                 match tauri_plugin_voice_transcription::commands::stop_dictation(
                     app_handle.clone(),
-                    voice_controller_state
-                ).await {
+                    voice_controller_state,
+                )
+                .await
+                {
                     Ok(_) => {
                         info!("[Agent Mode] Stopped dictation successfully");
                     }
@@ -152,15 +176,22 @@ fn handle_agent_tap_mode(app: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             // Emit agent mode start event
             if let Err(e) = app_handle.emit("app-dictation-started", ()) {
-                error!("[Agent Mode] Failed to emit app-dictation-started event: {}", e);
+                error!(
+                    "[Agent Mode] Failed to emit app-dictation-started event: {}",
+                    e
+                );
             }
 
             // Start voice transcription for agent mode
-            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+            if let Some(voice_controller_state) =
+                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
+            {
                 match tauri_plugin_voice_transcription::commands::start_dictation(
                     app_handle.clone(),
-                    voice_controller_state
-                ).await {
+                    voice_controller_state,
+                )
+                .await
+                {
                     Ok(_) => {
                         info!("[Agent Mode] Started transcription successfully");
                     }
@@ -184,17 +215,23 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         ShortcutState::Released => "released",
     };
 
-    if let Err(e) = app.emit("shortcut-dictation-input", serde_json::json!({
-        "state": shortcut_state,
-        "shortcut": "dictation_input"
-    })) {
-        error!("[Dictation Input Shortcut] Failed to emit shortcut detection event: {}", e);
+    if let Err(e) = app.emit(
+        "shortcut-dictation-input",
+        serde_json::json!({
+            "state": shortcut_state,
+            "shortcut": "dictation_input"
+        }),
+    ) {
+        error!(
+            "[Dictation Input Shortcut] Failed to emit shortcut detection event: {}",
+            e
+        );
     }
 
     // FIXED: Check dictation trigger mode to determine behavior
     let app_state = app.state::<state::AppState>();
-    let trigger_mode = app_state.dictation_trigger_mode().lock()
-        .map(|mode| mode.clone())
+    let trigger_mode = app_state
+        .get_dictation_trigger_mode()
         .unwrap_or(state::DictationTriggerMode::Hold);
 
     match trigger_mode {
@@ -220,13 +257,15 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 /// Handle dictation tap mode (new functionality)
 fn handle_dictation_tap_mode(app: &AppHandle) {
     // Check if dictation is currently active by checking the VoiceController directly
-    let is_dictation_active = if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        voice_controller_state.lock()
-            .map(|controller| controller.is_dictating())
-            .unwrap_or(false)
-    } else {
-        false
-    };
+    let is_dictation_active =
+        if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+            voice_controller_state
+                .lock()
+                .map(|controller| controller.is_dictating())
+                .unwrap_or(false)
+        } else {
+            false
+        };
 
     if is_dictation_active {
         info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");
@@ -234,11 +273,15 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Stop dictation
-            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+            if let Some(voice_controller_state) =
+                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
+            {
                 match tauri_plugin_voice_transcription::commands::stop_dictation(
                     app_handle.clone(),
-                    voice_controller_state
-                ).await {
+                    voice_controller_state,
+                )
+                .await
+                {
                     Ok(_) => {
                         info!("[Dictation Tap Mode] Stopped dictation successfully");
                     }
@@ -255,15 +298,22 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             // Emit dictation mode start event
             if let Err(e) = app_handle.emit("dictation-active", true) {
-                error!("[Dictation Tap Mode] Failed to emit dictation-active event: {}", e);
+                error!(
+                    "[Dictation Tap Mode] Failed to emit dictation-active event: {}",
+                    e
+                );
             }
 
             // Start voice transcription for dictation mode
-            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+            if let Some(voice_controller_state) =
+                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
+            {
                 match tauri_plugin_voice_transcription::commands::start_dictation(
                     app_handle.clone(),
-                    voice_controller_state
-                ).await {
+                    voice_controller_state,
+                )
+                .await
+                {
                     Ok(_) => {
                         info!("[Dictation Tap Mode] Started transcription successfully");
                     }
@@ -281,7 +331,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
 pub async fn trigger_shortcut_test_event(
     app: AppHandle,
     shortcut_name: String,
-    state: String
+    state: String,
 ) -> Result<(), String> {
     let event_name = match shortcut_name.as_str() {
         "agent_mode_toggle" => "shortcut-agent-mode",
@@ -289,11 +339,14 @@ pub async fn trigger_shortcut_test_event(
         _ => return Err("Unknown shortcut name".to_string()),
     };
 
-    if let Err(e) = app.emit(event_name, serde_json::json!({
-        "state": state,
-        "shortcut": shortcut_name,
-        "test_mode": true
-    })) {
+    if let Err(e) = app.emit(
+        event_name,
+        serde_json::json!({
+            "state": state,
+            "shortcut": shortcut_name,
+            "test_mode": true
+        }),
+    ) {
         return Err(format!("Failed to emit test event: {}", e));
     }
 

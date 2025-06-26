@@ -101,8 +101,8 @@ pub(crate) fn run_check_accessibility() -> Result<(), String> {
 
 pub mod log_formatter;
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Get current timestamp in milliseconds
 pub fn current_timestamp_ms() -> u64 {
@@ -119,8 +119,8 @@ pub fn current_timestamp_ms() -> u64 {
 ///
 /// The directory is created if it doesn't exist.
 pub fn get_agent_preferred_directory() -> Result<PathBuf, String> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| "Could not determine home directory".to_string())?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
 
     let juno_dir = home_dir.join("Juno");
 
@@ -1562,11 +1562,7 @@ async fn get_voice_audio_state_safe(
 ) -> Option<VoiceAudioState> {
     if let Some(state) = app_state {
         // Get voice controller state if available
-        let is_dictation_active = if let Ok(dictation_guard) = state.dictation_active().lock() {
-            *dictation_guard
-        } else {
-            false
-        };
+        let is_dictation_active = state.is_dictation_active();
         let is_agent_executing = state.is_agent_executing();
 
         // Determine mode based on app state
@@ -1579,7 +1575,7 @@ async fn get_voice_audio_state_safe(
         };
 
         // Get TTS state if available
-        let is_speaking = if let Ok(_tts_provider) = state.tts_provider().lock() {
+        let is_speaking = if let Ok(_tts_provider) = state.get_tts_provider() {
             // Check if TTS is currently active (this is a simplified check)
             false // TODO: Implement actual TTS state checking
         } else {
