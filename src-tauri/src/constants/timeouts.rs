@@ -31,6 +31,10 @@ pub const NETWORK_TIMEOUT_SECONDS: u64 = 30;
 pub const HEARTBEAT_INTERVAL_SECONDS: u64 = 30;
 pub const STATUS_UPDATE_INTERVAL_SECONDS: u64 = 30;
 
+// HTTP client timeouts for API requests
+pub const HTTP_CONNECT_TIMEOUT_SECONDS: u64 = 10;  // Connection establishment timeout
+pub const HTTP_REQUEST_TIMEOUT_SECONDS: u64 = 120; // Total request timeout for LLM responses
+
 // Error recovery timeouts
 pub const ERROR_RECOVERY_MAX_RETRY_DELAY_SECONDS: u64 = 10;
 pub const ERROR_RECOVERY_TIMEOUT_THRESHOLD_SECONDS: u64 = 30;
