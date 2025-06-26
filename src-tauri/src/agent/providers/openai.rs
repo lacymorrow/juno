@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 
-use crate::agent::providers::factory::model_ids;
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 
@@ -86,9 +85,6 @@ struct OpenAIChoice {
 // --- OpenAIBrain Implementation --- //
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL: &str = model_ids::GPT_4O;
-const DEFAULT_MAX_TOKENS: u32 = 4096;
-const DEFAULT_TEMPERATURE: f32 = 0.7;
 
 #[derive(Clone)]
 pub struct OpenAIBrain {
@@ -107,12 +103,19 @@ impl OpenAIBrain {
         max_tokens: Option<u32>,
         temperature: Option<f32>,
     ) -> Result<Self, AgentError> {
+        use crate::agent::providers::factory::Provider;
+
+        // Use centralized defaults from provider configuration
+        let model = model.unwrap_or_else(|| Provider::OpenAI.default_model().to_string());
+        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
+        let temperature = temperature.unwrap_or(crate::constants::agent::config::DEFAULT_TEMPERATURE);
+
         Ok(OpenAIBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
-            temperature: temperature.unwrap_or(DEFAULT_TEMPERATURE),
+            model,
+            max_tokens,
+            temperature,
         })
     }
 

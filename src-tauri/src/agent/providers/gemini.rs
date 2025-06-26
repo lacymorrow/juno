@@ -5,7 +5,6 @@ use serde_json::Value;
 use std::env;
 use tracing;
 
-use crate::agent::providers::factory::model_ids;
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 
@@ -114,8 +113,6 @@ struct GeminiSafetyRating {
 }
 
 const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL: &str = model_ids::GEMINI_1_5_FLASH; // Smaller, faster model for orchestration
-const DEFAULT_MAX_TOKENS: i32 = 1024; // Smaller token limit for orchestrator
 
 #[derive(Clone)]
 pub struct GeminiBrain {
@@ -135,13 +132,20 @@ impl GeminiBrain {
         system_prompt: Option<String>,
         temperature: Option<f32>,
     ) -> Result<Self, AgentError> {
+        use crate::agent::providers::factory::Provider;
+
+        // Use centralized defaults from provider configuration
+        let model = model.unwrap_or_else(|| Provider::Gemini.default_model().to_string());
+        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_COMPACT);
+        let temperature = temperature.unwrap_or(0.1); // Low temperature for consistent routing decisions
+
         Ok(GeminiBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            model,
+            max_tokens,
             system_prompt,
-            temperature: temperature.unwrap_or(0.1), // Low temperature for consistent routing decisions
+            temperature,
         })
     }
 
