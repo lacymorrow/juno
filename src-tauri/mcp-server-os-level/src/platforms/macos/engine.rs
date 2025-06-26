@@ -1266,7 +1266,7 @@ impl AccessibilityEngine for MacOSEngine {
                 // For find_elements, we can use a simpler approach than find_element
                 // Convert path to a chain of selectors and apply them sequentially
                 debug!("Processing Path selector for find_elements: {}", path);
-                let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+                let _segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
                 // For now, just return the first element found by path selector
                 // A full implementation would need to collect all matching endpoints

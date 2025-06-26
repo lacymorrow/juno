@@ -150,6 +150,136 @@ fn detect_line_ending(content: &str) -> &'static str {
     }
 }
 
+/// Generate a descriptive tool name based on the computer action
+fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
+    match action {
+        "screenshot" => "computer/screenshot".to_string(),
+        "cursor_position" => "computer/get_cursor_position".to_string(),
+        "mouse_move" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/move_to({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/mouse_move".to_string()
+            }
+        },
+        "left_click" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/click({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/left_click".to_string()
+            }
+        },
+        "right_click" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/right_click({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/right_click".to_string()
+            }
+        },
+        "middle_click" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/middle_click({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/middle_click".to_string()
+            }
+        },
+        "double_click" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/double_click({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/double_click".to_string()
+            }
+        },
+        "triple_click" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/triple_click({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/triple_click".to_string()
+            }
+        },
+        "left_click_drag" => {
+            if let Some(start) = input["start_coordinate"].as_array() {
+                if let Some(end) = input["coordinate"].as_array() {
+                    format!("computer/drag({},{} → {},{})",
+                        start[0].as_f64().unwrap_or(0.0) as i32,
+                        start[1].as_f64().unwrap_or(0.0) as i32,
+                        end[0].as_f64().unwrap_or(0.0) as i32,
+                        end[1].as_f64().unwrap_or(0.0) as i32)
+                } else {
+                    "computer/left_click_drag".to_string()
+                }
+            } else {
+                "computer/left_click_drag".to_string()
+            }
+        },
+        "left_mouse_down" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/mouse_down({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/left_mouse_down".to_string()
+            }
+        },
+        "left_mouse_up" => {
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/mouse_up({}, {})",
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
+            } else {
+                "computer/left_mouse_up".to_string()
+            }
+        },
+        "scroll" => {
+            let direction = input["scroll_direction"].as_str().unwrap_or("up");
+            let amount = input["scroll_amount"].as_i64().unwrap_or(3);
+            if let Some(coord) = input["coordinate"].as_array() {
+                format!("computer/scroll_{}({},{} × {})",
+                    direction,
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32,
+                    amount)
+            } else {
+                format!("computer/scroll_{} × {}", direction, amount)
+            }
+        },
+        "type" => {
+            let text = input["text"].as_str().unwrap_or("");
+            if text.len() > 30 {
+                format!("computer/type(\"{}...\")", &text[..27])
+            } else {
+                format!("computer/type(\"{}\")", text)
+            }
+        },
+        "key" => {
+            let key = input["text"].as_str().unwrap_or("");
+            format!("computer/press_key({})", key)
+        },
+        "hold_key" => {
+            let key = input["text"].as_str().unwrap_or("");
+            let duration = input["duration"].as_u64().unwrap_or(1000);
+            format!("computer/hold_key({}, {}ms)", key, duration)
+        },
+        "wait" => {
+            let duration = input["duration"].as_u64().unwrap_or(1);
+            format!("computer/wait({}s)", duration)
+        },
+        _ => format!("computer/{}", action),
+    }
+}
+
 // --- Main computer tool execution function ---
 
 /// Execute computer tool
@@ -162,8 +292,24 @@ pub async fn execute_computer_tool(
 
     let state_manager = app_handle.state::<AppState>();
 
-    // Add permission validation for sensitive operations
-    match action {
+    // Generate descriptive tool name for better logging
+    let descriptive_tool_name = get_descriptive_tool_name(action, &input);
+
+    // Enhanced logging with descriptive tool name and action details
+    info!("🖥️ Computer Use: {} → {}", descriptive_tool_name, action);
+
+    // Log enhanced tool call request with descriptive name
+    crate::agent::tool_logger::log_enhanced_tool_call_request(
+        app_handle,
+        &descriptive_tool_name,
+        input.clone(),
+        Some(format!("Executing computer action: {}", action)),
+        Some(&*state_manager),
+    ).await;
+
+    // Execute action
+    let execution_start = std::time::Instant::now();
+    let result = match action {
         "screenshot" => {
             // Validate screen recording permission
             validate_permission(
@@ -556,7 +702,42 @@ pub async fn execute_computer_tool(
             }))
         }
         _ => Err(format!("Unknown action: {}", action)),
-    }
+    };
+
+    // Calculate execution time
+    let execution_time_ms = execution_start.elapsed().as_millis() as u64;
+
+    // Get screenshot from result if applicable
+    let screenshot_base64 = if action == "screenshot" {
+        match &result {
+            Ok(output) => output.as_str().map(|s| s.to_string()),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    // Enhanced result logging with descriptive name and execution time
+    let success = result.is_ok();
+    let result_content = if success {
+        Some(format!("✅ {} completed successfully in {}ms", descriptive_tool_name, execution_time_ms))
+    } else {
+        Some(format!("❌ {} failed", descriptive_tool_name))
+    };
+
+    crate::agent::tool_logger::log_enhanced_tool_call_result_with_inputs(
+        app_handle,
+        &descriptive_tool_name,
+        Some(input.clone()),
+        result.as_ref().unwrap_or(&json!({})).clone(),
+        success,
+        result_content,
+        screenshot_base64,
+        Some(execution_time_ms),
+        Some(&*app_handle.state::<AppState>()),
+    ).await;
+
+    result
 }
 
 /// Execute bash tool

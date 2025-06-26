@@ -219,6 +219,9 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 use commands::{
     accessibility_scan, accessibility_click, test_accessibility_permissions,
     get_accessibility_tool_definitions, execute_accessibility_tool,
+    safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
+    safari_get_url, safari_navigate, safari_list_clickable_elements,
+    safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
@@ -847,6 +850,18 @@ pub fn run() {
             test_accessibility_permissions,
             get_accessibility_tool_definitions,
             execute_accessibility_tool,
+
+            // Safari Tool Commands
+            safari_is_active,
+            safari_extract_dom,
+            safari_click_element,
+            safari_type_text,
+            safari_get_url,
+            safari_navigate,
+            safari_list_clickable_elements,
+            safari_execute_javascript,
+            safari_clear_cache,
+            execute_safari_tool,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

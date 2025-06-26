@@ -3,17 +3,33 @@ description:
 globs:
 alwaysApply: false
 ---
-# Native Accessibility Tools Implementation
+# Native Accessibility Tools Implementation (ENHANCED ✅)
 
 ## Overview
-The Juno AI Computer Use Agent now includes native macOS accessibility tools that provide element-level interaction capabilities as an alternative to coordinate-based automation. These tools use the existing [computer-use-ai-sdk](mdc:dotdot/src-tauri/mcp-server-os-level) infrastructure to provide reliable UI element discovery and interaction.
+The Juno AI Computer Use Agent now includes **comprehensive accessibility tools** that provide multi-tier element-level interaction capabilities. The system combines native macOS accessibility APIs with the Computer Use API's accessibility_interface for maximum automation reliability and semantic understanding.
+
+## Enhanced Agent Integration
+
+### Comprehensive Prompt Templates (NEW ✅)
+The accessibility tools are now **fully documented** in the agent prompt system with:
+
+- **`accessibility_first_strategy()`**: Comprehensive strategy documentation covering all accessibility methods
+- **`native_accessibility_tools()`**: Dedicated documentation for native macOS accessibility tools
+- **Multi-tier approach**: Clear guidance on when to use accessibility_interface vs native tools
+- **Integration across all agent modes**: Single-agent, multi-agent, desktop expert, browser expert
+
+### Tool Hierarchy Strategy
+1. **TIER 1**: `accessibility_interface` tool (Computer Use API) - comprehensive UI interaction
+2. **TIER 2**: Native macOS accessibility tools - `accessibility_scan` and `accessibility_click`
+3. **TIER 3**: Traditional coordinate-based interaction - fallback only
 
 ## Architecture
 
 ### Core Module
-- **[accessibility_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/accessibility_tools.rs)**: Main implementation with `AccessibilityTools` struct
-- **[accessibility.rs](mdc:dotdot/src-tauri/src/commands/accessibility.rs)**: Tauri commands for frontend/agent integration
-- **Tool Registration**: Integrated in [factory.rs](mdc:dotdot/src-tauri/src/agent/providers/factory.rs) via `register_accessibility_tools()`
+- **[accessibility_tools.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/accessibility_tools.rs)**: Main implementation with `AccessibilityTools` struct
+- **[accessibility.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/commands/accessibility.rs)**: Tauri commands for frontend/agent integration
+- **Tool Registration**: Integrated in [factory.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/providers/factory.rs) via `register_accessibility_tools()`
+- **Agent Templates**: Full documentation in [templates.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/prompts/templates.rs)
 
 ### Key Components
 
@@ -35,12 +51,12 @@ pub struct AccessibilityTools {
 
 ### Tool Registration
 Tools are automatically registered with the AI agent via:
-- [factory.rs](mdc:dotdot/src-tauri/src/agent/providers/factory.rs): `Self::register_accessibility_tools()`
-- [tool_mapping.rs](mdc:dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Desktop tools
-- [mod.rs](mdc:dotdot/src-tauri/src/agent/tools/mod.rs): Module exports
+- [factory.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/providers/factory.rs): `Self::register_accessibility_tools()`
+- [tool_mapping.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Desktop tools
+- [mod.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/mod.rs): Module exports
 
 ### Tauri Commands
-Available commands in [lib.rs](mdc:dotdot/src-tauri/src/lib.rs):
+Available commands in [lib.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/lib.rs):
 - `accessibility_scan`: Returns `Vec<AccessibilityElement>`
 - `accessibility_click`: Takes element ID, returns success boolean
 - `test_accessibility_permissions`: Checks accessibility permissions
@@ -133,25 +149,4 @@ pub struct AccessibilityElement {
 ### Adding New Accessibility Tools
 1. Add method to `AccessibilityTools` impl block
 2. Update `get_tool_definitions()` with new tool schema
-3. Add case in `execute_tool()` method
-4. Create corresponding Tauri command if needed
-5. Update tool mapping in [tool_mapping.rs](mdc:dotdot/src-tauri/src/agent/tools/tool_mapping.rs)
-
-### Testing Considerations
-- Requires macOS accessibility permissions for full testing
-- Test with built applications, not just development builds
-- Verify element caching and cleanup behavior
-- Test permission handling and graceful degradation
-
-### Future Enhancements
-- Application-specific element scanning
-- Enhanced element filtering and prioritization
-- Support for complex interaction patterns
-- Integration with Safari DOM analysis (Phase 2)
-
-## Related Files
-- [accessibility_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/accessibility_tools.rs): Core implementation
-- [accessibility.rs](mdc:dotdot/src-tauri/src/commands/accessibility.rs): Tauri commands
-- [factory.rs](mdc:dotdot/src-tauri/src/agent/providers/factory.rs): Tool registration
-- [tool_mapping.rs](mdc:dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Tool categorization
-- [computer-use-ai-sdk](mdc:dotdot/src-tauri/mcp-server-os-level): Underlying accessibility framework
+3. Add case in `
