@@ -41,7 +41,7 @@ pub fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> 
                     }
                 }
                 Err(e) => {
-                    let error_msg = format!(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
+                    let error_msg = format!("Failed to retrieve NSWindow for floating panel: {}", e);
                     warn!("{}", error_msg);
                     return Err(error_msg);
                 }
@@ -99,7 +99,7 @@ pub fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Value, Str
 pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
         // Get screen dimensions to ensure proper positioning
-        let monitor = window.current_monitor().map_err(|e| format!(templates::FAILED_TO_RETRIEVE, "monitor", e))?;
+        let monitor = window.current_monitor().map_err(|e| format!("Failed to retrieve monitor: {}", e))?;
 
         if let Some(monitor) = monitor {
             let screen_size = monitor.size();
@@ -114,7 +114,7 @@ pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Optio
             let clamped_y = final_y.clamp(0.0, (screen_size.height as f64) - 100.0); // Account for panel height
 
             let position = tauri::PhysicalPosition::new(clamped_x as i32, clamped_y as i32);
-            window.set_position(position).map_err(|e| format!(templates::FAILED_TO_UPDATE, "position", e))?;
+            window.set_position(position).map_err(|e| format!("Failed to update position: {}", e))?;
 
             info!("Positioned floating panel at ({}, {})", clamped_x, clamped_y);
         }
@@ -153,7 +153,7 @@ pub fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String
                     }
                 }
                 Err(e) => {
-                    let error_msg = format!(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
+                    let error_msg = format!("Failed to retrieve NSWindow for floating panel: {}", e);
                     warn!("{}", error_msg);
                     return Err(error_msg);
                 }

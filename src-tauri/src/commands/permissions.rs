@@ -379,7 +379,7 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                     match check_permissions_status_native(app_clone.clone()).await {
                         Ok(status) => {
                             if let Err(e) = app_clone.emit(events::permissions::CHANGED, &status) {
-                                warn!("{}", format!(FAILED_TO_EMIT, "permissions change", e));
+                                warn!("Failed to emit permissions change event: {}", e);
                             }
                         }
                         Err(e) => {

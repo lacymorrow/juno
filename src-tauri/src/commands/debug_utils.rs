@@ -217,7 +217,8 @@ pub mod validators {
 
     /// Validate coordinates are reasonable
     pub fn valid_coordinates(x: f64, y: f64) -> Result<(), String> {
-        if x < 0.0 || y < 0.0 || x > 10000.0 || y > 10000.0 {
+        if x < crate::constants::mouse::testing::MIN_COORDINATE_VALUE || y < crate::constants::mouse::testing::MIN_COORDINATE_VALUE ||
+           x > crate::constants::mouse::testing::MAX_COORDINATE_VALUE || y > crate::constants::mouse::testing::MAX_COORDINATE_VALUE {
             Err(format!("Coordinates ({}, {}) seem unreasonable", x, y))
         } else {
             Ok(())
@@ -246,8 +247,8 @@ pub mod validators {
     pub fn valid_duration_seconds(duration_sec: f64) -> Result<(), String> {
         if duration_sec < 0.0 {
             Err("Duration cannot be negative".to_string())
-        } else if duration_sec > 60.0 { // 60 seconds max
-            Err("Duration too long (max 60 seconds)".to_string())
+        } else if duration_sec > crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS { // 60 seconds max
+            Err(format!("Duration too long (max {} seconds)", crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS))
         } else {
             Ok(())
         }
