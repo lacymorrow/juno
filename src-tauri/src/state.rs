@@ -20,7 +20,7 @@ use playwright::api::playwright::Playwright;
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
-use crate::agent::implementations::memory_manager::SimpleMemoryManager;
+use crate::agent::implementations::memory_manager::{SimpleMemoryManager, AdvancedMemoryManager};
 // Import permissions types
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
@@ -514,7 +514,7 @@ pub struct AppState {
     // Async state that needs TokioMutex
     playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
-    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
+    pub memory_manager: Arc<TokioMutex<AdvancedMemoryManager>>,
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
@@ -556,7 +556,7 @@ impl AppState {
             // Initialize async state
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
-            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())),
+            memory_manager: Arc::new(TokioMutex::new(AdvancedMemoryManager::new())),
             permissions_state: Arc::new(TokioMutex::new(None)),
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             cloud_client: Arc::new(TokioMutex::new(None)),
@@ -1293,7 +1293,7 @@ impl AppState {
     }
 
     // Method to get the persistent memory manager
-    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<SimpleMemoryManager>> {
+    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<AdvancedMemoryManager>> {
         self.memory_manager.clone()
     }
 
