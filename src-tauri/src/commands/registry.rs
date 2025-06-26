@@ -86,6 +86,9 @@ macro_rules! generate_invoke_handler {
             get_window_list,
             get_window_info,
             focus_window,
+            resize_window,
+            move_window,
+            close_window,
 
             // Production shell operations
             bash_command,
@@ -298,7 +301,10 @@ pub mod categories {
         "get_window_list",
         "get_window_info",
         "focus_window",
-        "scroll_window"
+        "scroll_window",
+        "resize_window",
+        "move_window",
+        "close_window"
     ];
 
     /// All command categories
