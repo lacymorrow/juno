@@ -3,7 +3,7 @@ use tauri::{Manager, State};
 
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
-use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary, AdvancedMemoryManager};
+use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,30 +19,13 @@ pub async fn get_memory_status(state: State<'_, AppState>) -> Result<MemoryStatu
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    let messages = memory_guard.get_messages().await
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
-
-    // Calculate basic metrics
-    let total_messages = messages.len();
-    let estimated_tokens = messages.iter()
-        .map(|m| m.content.len() / 4) // Rough token estimate
-        .sum::<usize>();
-
-    // Calculate efficiency ratio (non-empty messages / total messages)
-    let useful_messages = messages.iter()
-        .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-        .count();
-
-    let memory_efficiency_ratio = if total_messages > 0 {
-        useful_messages as f64 / total_messages as f64
-    } else {
-        1.0
-    };
+    // Use proper metrics from memory manager instead of manual calculation
+    let metrics = memory_guard.get_memory_metrics().await;
 
     Ok(MemoryStatus {
-        total_messages,
-        estimated_tokens,
-        memory_efficiency_ratio,
+        total_messages: metrics.total_messages,
+        estimated_tokens: metrics.estimated_tokens,
+        memory_efficiency_ratio: metrics.memory_efficiency_ratio,
     })
 }
 
@@ -180,9 +163,6 @@ pub async fn get_memory_compression_stats(
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    let messages = memory_guard.get_messages().await
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
-
     let metrics = memory_guard.get_memory_metrics().await;
     let visual_summaries = memory_guard.get_visual_summaries().await;
 
@@ -237,24 +217,32 @@ pub async fn emergency_memory_recovery(
     let compressed_count = memory_guard.compress_all_screenshots().await
         .map_err(|e| format!("Failed to compress screenshots: {}", e))?;
 
-    // Check current token count
-    let messages = memory_guard.get_messages().await
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
+    // Use proper token estimation from memory manager metrics
+    let metrics = memory_guard.get_memory_metrics().await;
+    let total_tokens = metrics.estimated_tokens;
 
-    let total_tokens: usize = messages.iter()
-        .map(|m| m.content.len() / 4) // Rough token estimate
-        .sum();
+    // Get the configured max tokens threshold from memory config
+    let config = memory_guard.get_config().await;
+    let emergency_threshold = (config.max_tokens as f64 * 1.2) as usize; // 20% above max_tokens for emergency
+    let critical_threshold = config.max_tokens; // Use configured max_tokens as critical threshold
 
-    log::info!("Emergency recovery: Compressed {} screenshots, current tokens: ~{}", compressed_count, total_tokens);
+    log::info!("Emergency recovery: Compressed {} screenshots, current tokens: {} (thresholds: critical={}, emergency={})",
+               compressed_count, total_tokens, critical_threshold, emergency_threshold);
 
-    // If still too many tokens, clear memory
-    if total_tokens > 150000 {
-        log::warn!("Token count still too high ({}), clearing memory", total_tokens);
+    // If still above emergency threshold, clear memory
+    if total_tokens > emergency_threshold {
+        log::error!("Token count critically high ({}), clearing memory (emergency threshold: {})", total_tokens, emergency_threshold);
         memory_guard.clear_memory().await
             .map_err(|e| format!("Failed to clear memory: {}", e))?;
 
-        Ok(format!("Emergency recovery complete: Compressed {} screenshots and cleared memory due to high token count ({})", compressed_count, total_tokens))
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots and cleared memory due to critically high token count ({} > {})",
+                   compressed_count, total_tokens, emergency_threshold))
+    } else if total_tokens > critical_threshold {
+        log::warn!("Token count high ({}) but below emergency threshold ({}), memory compression completed", total_tokens, emergency_threshold);
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots, token count: {} (above critical threshold {} but below emergency threshold {})",
+                   compressed_count, total_tokens, critical_threshold, emergency_threshold))
     } else {
-        Ok(format!("Emergency recovery complete: Compressed {} screenshots, token count now: ~{}", compressed_count, total_tokens))
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots, token count now: {} (within safe limits)",
+                   compressed_count, total_tokens))
     }
 }
