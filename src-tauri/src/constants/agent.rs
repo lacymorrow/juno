@@ -97,6 +97,20 @@ pub mod tool_names {
     pub const SHELL_EXECUTE: &str = "shell_execute";
     pub const BASH_EXECUTE: &str = "bash_execute";
 
+    // Basic file and directory operations (standardized names)
+    pub const READ_FILE: &str = "read_file";
+    pub const WRITE_FILE: &str = "write_file";
+    pub const LIST_DIRECTORY: &str = "list_directory";
+    pub const CREATE_DIRECTORY: &str = "create_directory";
+    pub const DELETE_FILE: &str = "delete_file";
+    pub const TEXT_EDITOR_EDIT: &str = "text_editor_edit";
+    pub const EXECUTE_SHELL_COMMAND: &str = "execute_shell_command";
+
+    // Timer tools standardized names
+    pub const LIST_TIMERS: &str = "list_timers";
+    pub const CANCEL_TIMER: &str = "cancel_timer";
+    pub const TIMER_STATUS: &str = "timer_status";
+
     // Timer tools
     pub const TIMER_CREATE: &str = "timer_create";
     pub const TIMER_START: &str = "timer_start";
@@ -106,6 +120,7 @@ pub mod tool_names {
     pub const TIMER_GET_STATUS: &str = "timer_get_status";
     pub const TIMER_LIST: &str = "timer_list";
     pub const TIMER_DELETE: &str = "timer_delete";
+    pub const CREATE_TIMER: &str = "create_timer";
 
     // Computer use actions
     pub const ACTION_SCREENSHOT: &str = "screenshot";
@@ -124,6 +139,7 @@ pub mod tool_names {
     pub const ACTION_LEFT_CLICK_DRAG: &str = "left_click_drag";
     pub const ACTION_MOUSE_MOVE: &str = "mouse_move";
     pub const ACTION_HOLD_KEY: &str = "hold_key";
+    pub const WAIT: &str = "wait";
 }
 
 // Intent keywords for user request analysis
