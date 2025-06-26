@@ -55,8 +55,8 @@ const ScreenshotOperations: React.FC = () => {
       return;
     }
     const result = await invokeCommand<string | null>(
-      "get_element_screenshot",
-      { selector: selectorString.trim() },
+      "capture_element_screenshot_command",
+      {},
       "elementScreenshot"
     );
     if (result) {
@@ -65,30 +65,60 @@ const ScreenshotOperations: React.FC = () => {
   };
 
   const handleTestClickVisualization = async () => {
-    const result = await invokeCommand<ClickQAResult[]>(
-      "test_click_visualization",
-      {},
-      "testClickVisualization"
-    );
-    setClickQAResults(result);
+    try {
+      // Test click visualization at center of screen with red color
+      await invokeCommand<void>(
+        "test_click_visualization",
+        { x: 400, y: 300, color: "#FF0000" },
+        "testClickVisualization"
+      );
+      // Since this returns Result<(), String>, we show success
+      setClickQAResults([{
+        success: true,
+        operation: "click_visualization_test",
+        coordinates: [400, 300],
+        error: undefined,
+        visualization_success: true,
+        cursor_position_after: undefined,
+        latency_ms: 0
+      }]);
+    } catch (error) {
+      // Handle error case
+      setClickQAResults([{
+        success: false,
+        operation: "click_visualization_test",
+        coordinates: [400, 300],
+        error: String(error),
+        visualization_success: false,
+        cursor_position_after: undefined,
+        latency_ms: 0
+      }]);
+    }
   };
 
   const handleTestCoordinateTransformation = async () => {
-    const result = await invokeCommand<CoordinateTestResult[]>(
-      "test_coordinate_transformation",
-      {},
+    const result = await invokeCommand<any>(
+      "qa_test_coordinate_transformation",
+      { x: 400, y: 300 },
       "testCoordinateTransformation"
     );
-    setCoordinateResults(result);
+    setCoordinateResults([{
+      original: result.original_scaled,
+      transformed_to_screen: result.calculated_screen,
+      transformed_back: result.roundtrip_scaled,
+      error: result.roundtrip_error,
+      scaling_info: result.scaling_info,
+      is_accurate: result.is_accurate
+    }]);
   };
 
   const handleTestVisualization = async () => {
-    const result = await invokeCommand<VisualizationTestResult[]>(
-      "test_visualization",
+    const result = await invokeCommand<any>(
+      "qa_test_click_visualization",
       {},
       "testVisualization"
     );
-    setVisualizationResults(result);
+    setVisualizationResults([result]);
   };
 
   return (
