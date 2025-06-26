@@ -254,7 +254,7 @@ impl StopCoordinator {
     }
 
     fn emit_tts_stop_event(&self, app_handle: &AppHandle) {
-        if let Err(e) = app_handle.emit(events::tts::STOP_REQUESTED, ()) {
+        if let Err(e) = app_handle.emit(events::tts::TTS_AUDIO_STOP, ()) {
             warn!("[StopCoordinator] Failed to emit TTS stop event: {}", e);
         }
     }
