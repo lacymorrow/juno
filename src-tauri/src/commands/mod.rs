@@ -11,6 +11,7 @@ pub mod registry;
 pub mod safari_tools;
 pub mod app_url;
 pub mod autostart;
+pub mod computer;
 pub mod core;
 pub mod debug_utils;
 pub mod dev;
@@ -66,6 +67,7 @@ pub use self::safari_tools::{
     safari_execute_javascript, safari_clear_cache, execute_safari_tool
 };
 pub use self::autostart::*;
+pub use self::computer::*;
 pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;

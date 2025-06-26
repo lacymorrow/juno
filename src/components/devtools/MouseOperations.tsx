@@ -142,8 +142,8 @@ const MouseOperations: React.FC = () => {
       "computer",
       {
         action: "drag",
-        coordinate: [startX, startY],
-        end_coordinate: [endX, endY],
+        startCoordinate: [startX, startY],
+        endCoordinate: [endX, endY],
       },
       "mouseDrag"
     );
