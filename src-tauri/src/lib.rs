@@ -222,7 +222,7 @@ use commands::{
     safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
-    always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
+    always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_token_selection::*, window::*,
@@ -474,6 +474,8 @@ pub fn run() {
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
             capture_element_screenshot_command,
+            // Computer Use API - Official Anthropic Computer Use implementation
+            computer,
             // Production element functions with debug capabilities
             get_focused_element_info,
             click_focused_element,
