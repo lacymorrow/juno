@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { COMMANDS } from "@/lib/constants.generated";
 
 import { SettingsSectionProps } from "../types";
 
@@ -49,7 +50,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
       // Fix unquoted keys
       fixed = fixed.replace(
         /([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$-]*)\s*:/g,
-        '$1"$2":',
+        '$1"$2":'
       );
 
       // Fix single quotes to double quotes
@@ -167,7 +168,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
       // If not in standard format, show error
       toast.error(
-        "Invalid MCP server configuration format. Please use the standard format with server name as key.",
+        "Invalid MCP server configuration format. Please use the standard format with server name as key."
       );
     } catch (error) {
       console.error("Error adding MCP server:", error);
@@ -193,7 +194,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const handleToggleTool = async (
     serverId: string,
     toolName: string,
-    enabled: boolean,
+    enabled: boolean
   ) => {
     try {
       await invoke("toggle_mcp_tool", {
@@ -245,17 +246,26 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleStartCloudConnector = async () => {
-    setIsCloudTesting(true);
+  const handleGetCloudStatus = async () => {
     try {
-      await invoke("start_production_cloud_connector");
-      toast.success("Cloud connector started successfully");
-      setCloudTestStatus(
-        "✅ Cloud connector started - device should now be connected to cloud backend",
-      );
+      const status = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
+      setCloudTestStatus(JSON.stringify(status, null, 2));
+      toast.success("Cloud status retrieved");
+    } catch (error) {
+      console.error("Failed to get cloud status:", error);
+      toast.error("Failed to get cloud status");
+    }
+  };
+
+  const handleStartCloudConnector = async () => {
+    try {
+      setIsCloudTesting(true);
+      await invoke(COMMANDS.CLOUD_START_PRODUCTION_CLOUD_CONNECTOR);
+      setCloudTestStatus("✅ Cloud connector started successfully");
+      toast.success("Cloud connector started");
     } catch (error) {
       console.error("Failed to start cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to start cloud connector: ${error}`);
+      setCloudTestStatus(`❌ Failed to start: ${error}`);
       toast.error("Failed to start cloud connector");
     } finally {
       setIsCloudTesting(false);
@@ -263,16 +273,14 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   };
 
   const handleStopCloudConnector = async () => {
-    setIsCloudTesting(true);
     try {
-      await invoke("stop_production_cloud_connector");
+      setIsCloudTesting(true);
+      await invoke(COMMANDS.CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR);
+      setCloudTestStatus("🛑 Cloud connector stopped");
       toast.success("Cloud connector stopped");
-      setCloudTestStatus(
-        "🛑 Cloud connector stopped - device disconnected from cloud backend",
-      );
     } catch (error) {
       console.error("Failed to stop cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to stop cloud connector: ${error}`);
+      setCloudTestStatus(`❌ Failed to stop: ${error}`);
       toast.error("Failed to stop cloud connector");
     } finally {
       setIsCloudTesting(false);
@@ -281,7 +289,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleGetProductionCloudStatus = async () => {
     try {
-      const status = await invoke("get_production_cloud_status");
+      const status = await invoke(COMMANDS.CLOUD_GET_PRODUCTION_CLOUD_STATUS);
       setCloudTestStatus(JSON.stringify(status, null, 2));
       toast.success("Production cloud status retrieved");
     } catch (error) {
@@ -419,7 +427,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 };
                 const hasError = status.Error !== undefined;
                 const serverTools = settings.mcpTools.filter(
-                  (tool) => tool.server_id === server.id,
+                  (tool) => tool.server_id === server.id
                 );
 
                 return (
@@ -523,7 +531,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                       handleToggleTool(
                         tool.server_id,
                         tool.tool_definition.name,
-                        enabled,
+                        enabled
                       )
                     }
                   />

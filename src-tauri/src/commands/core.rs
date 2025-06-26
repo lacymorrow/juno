@@ -256,21 +256,16 @@ pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
     state.is_desktop_available()
 }
 
-#[tauri::command]
-pub(crate) async fn dev_get_clipboard(state: State<'_, AppState>) -> Result<String, String> {
-    info!("Executing dev_get_clipboard");
-    let desktop = state.get_desktop()?;
-    desktop.get_clipboard_content()
-        .map_err(|e| format!("Error getting clipboard content: {}", e))
-}
+// ============================================================================
+// CONSOLIDATED: dev_ functions removed - use production functions instead
+// ============================================================================
 
-#[tauri::command]
-pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState>) -> Result<(), String> {
-    info!("Executing dev_set_clipboard {}", content);
-    let desktop = state.get_desktop()?;
-    desktop.set_clipboard_content(&content)
-        .map_err(|e| format!("Error setting clipboard content: {}", e))
-}
+// CONSOLIDATED: dev_get_clipboard removed - use get_clipboard production function
+// Located in this same file with debug capabilities enabled via debug_mode parameter
+// CONSOLIDATED: dev_set_clipboard removed - use set_clipboard production function
+// Located in this same file with debug capabilities enabled via debug_mode parameter
+
+// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 /// Get a list of available AI providers
 #[tauri::command]
@@ -404,10 +399,6 @@ pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> 
 
     Ok(result)
 }
-
-// NOTE: reset_all_settings was removed and replaced with reset_centralized_settings
-// in src-tauri/src/commands/settings.rs to eliminate duplication and use proper
-// centralized settings management. The centralized version is the single source of truth.
 
 /// Cancel currently executing agent
 #[tauri::command]

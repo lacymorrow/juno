@@ -9,7 +9,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
-use crate::agent::providers::factory::model_ids;
+
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
@@ -184,8 +184,6 @@ struct MessageStopEvent {
 // --- AnthropicBrain Implementation --- //
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL: &str = model_ids::CLAUDE_3_7_SONNET;
-const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 #[derive(Clone)]
 pub struct AnthropicBrain {
@@ -206,11 +204,21 @@ impl AnthropicBrain {
         max_tokens: Option<u32>,
         system_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
-        let model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+        use crate::agent::providers::factory::Provider;
+
+        // Use centralized defaults from provider configuration
+        let model = model.unwrap_or_else(|| Provider::Anthropic.default_model().to_string());
+        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
+
+        // Create HTTP client with proper timeout configuration to prevent hanging
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS))
+            .connect_timeout(std::time::Duration::from_secs(crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS))
+            .build()
+            .map_err(|e| AgentError::LlmError(format!("Failed to create HTTP client: {}", e)))?;
 
         Ok(AnthropicBrain {
-            client: Client::new(),
+            client,
             api_key,
             model,
             max_tokens,
@@ -968,7 +976,7 @@ impl AgentBrain for AnthropicBrain {
             .client
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01") // Required header
+            .header("anthropic-version", "2024-06-01") // Updated to current API version
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()

@@ -223,7 +223,7 @@ use commands::{
     safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
-    always_listening::*, app_url::*, autostart::*, core::*, dictation::*, element::*,
+    always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_token_selection::*, window::*,
@@ -475,6 +475,8 @@ pub fn run() {
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
             capture_element_screenshot_command,
+            // Computer Use API - Official Anthropic Computer Use implementation
+            computer,
             // Production element functions with debug capabilities
             get_focused_element_info,
             click_focused_element,
@@ -493,6 +495,9 @@ pub fn run() {
             get_window_list,
             get_window_info,
             focus_window,
+            resize_window,
+            move_window,
+            close_window,
             // Production core functions with debug capabilities
             wait,
             get_clipboard,
@@ -505,7 +510,7 @@ pub fn run() {
             // right_click → computer tool with action: "right_click"
             // mouse_move → computer tool with action: "mouse_move"
             // This eliminates redundancy and ensures 100% compliance with the official specification.
-            dev_test_click_visualization, // Keep for QA testing
+            test_click_visualization, // Production function with debug capabilities
             // Production shell function with debug capabilities
             bash_command,
             // Production filesystem functions with debug capabilities

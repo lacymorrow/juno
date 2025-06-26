@@ -12,6 +12,7 @@ pub mod registry;
 pub mod safari_tools;
 pub mod app_url;
 pub mod autostart;
+pub mod computer;
 pub mod core;
 pub mod debug_utils;
 pub mod dev;
@@ -67,6 +68,7 @@ pub use self::safari_tools::{
     safari_execute_javascript, safari_clear_cache, execute_safari_tool
 };
 pub use self::autostart::*;
+pub use self::computer::*;
 pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
@@ -80,6 +82,12 @@ pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
 };
+// Exports from dev2 branch - preserving existing functionality
+pub use self::element::*;
+pub use self::keyboard::*;
+pub use self::text_editor::*;
+pub use self::window::*;
+// Exports from main branch - new features
 pub use self::enhanced_visual_reasoning_commands::*;
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
