@@ -94,9 +94,6 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("dev_text_editor_create", ToolCategory::Basic);
     map.insert("dev_text_editor_str_replace", ToolCategory::Basic);
     map.insert("system_exec", ToolCategory::Basic);
-    map.insert("system_list_files", ToolCategory::Basic);
-    map.insert("system_read_file", ToolCategory::Basic);
-    map.insert("system_write_file", ToolCategory::Basic);
     map.insert("file_read", ToolCategory::Basic);
     map.insert("file_write", ToolCategory::Basic);
     map.insert("file_create", ToolCategory::Basic);
