@@ -150,7 +150,10 @@ where
             return Ok(());
         }
 
-        log::info!("Executing {} tool call(s) as provided by agent", tool_calls.len());
+        log::info!(
+            "Executing {} tool call(s) as provided by agent",
+            tool_calls.len()
+        );
 
         // Initialize result cache for all tools
         let mut tool_results_cache = Vec::new();
@@ -159,11 +162,15 @@ where
         }
 
         // Execute the tools as provided - no special logic
-        match self.execute_tool_batch(&tool_calls, cancel_rx, 0, &mut tool_results_cache).await? {
-            true => {}, // Continue
+        match self
+            .execute_tool_batch(&tool_calls, cancel_rx, 0, &mut tool_results_cache)
+            .await?
+        {
+            true => {} // Continue
             false => {
                 // Cancellation occurred - handle incomplete tool execution
-                self.handle_batch_cancellation(&tool_calls, &tool_results_cache).await?;
+                self.handle_batch_cancellation(&tool_calls, &tool_results_cache)
+                    .await?;
                 return Err(AgentError::Terminated);
             }
         }
@@ -176,9 +183,15 @@ where
     async fn handle_batch_cancellation(
         &mut self,
         tool_calls: &[crate::agent::core::ToolCall],
-        tool_results_cache: &[(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)],
+        tool_results_cache: &[(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )],
     ) -> Result<(), AgentError> {
-        log::info!("Handling batch cancellation for {} tool calls", tool_calls.len());
+        log::info!(
+            "Handling batch cancellation for {} tool calls",
+            tool_calls.len()
+        );
 
         let mut cancelled_count = 0;
         let mut mem = self.memory.lock().await;
@@ -200,7 +213,8 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
-                }).await?;
+                })
+                .await?;
 
                 // Emit cancellation event to frontend
                 crate::agent::tool_logger::log_tool_call_result(
@@ -216,7 +230,10 @@ where
             }
         }
 
-        log::info!("Added cancellation messages for {} unexecuted tools", cancelled_count);
+        log::info!(
+            "Added cancellation messages for {} unexecuted tools",
+            cancelled_count
+        );
         Ok(())
     }
 
@@ -226,17 +243,23 @@ where
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )>,
     ) -> Result<bool, AgentError> {
         log::info!("Executing tool batch: {} tools", batch.len());
 
         // Check if all tools in batch can be executed as MCP batch
         if self.can_execute_as_mcp_batch(batch).await {
-            return self.execute_mcp_tool_batch(batch, cancel_rx, start_index, tool_results_cache).await;
+            return self
+                .execute_mcp_tool_batch(batch, cancel_rx, start_index, tool_results_cache)
+                .await;
         }
 
         // Fall back to optimized sequential execution (faster than normal due to reduced approval overhead)
-        self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
+        self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache)
+            .await
     }
 
     /// Check if a batch can be executed via MCP batching
@@ -262,7 +285,10 @@ where
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )>,
     ) -> Result<bool, AgentError> {
         // Check cancellation
         if *cancel_rx.borrow() {
@@ -286,42 +312,51 @@ where
 
                     // FIXED: Emit tool result event to frontend for chat display
                     // Extract screenshot if this is a screenshot tool
-                    let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
-                        // For screenshot tools, the result output should contain base64 data
-                        if let Some(screenshot_data) = result.output.get("data") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_str) = result.output.as_str() {
-                            Some(screenshot_str.to_string())
+                    let screenshot_base64 =
+                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                            // For screenshot tools, the result output should contain base64 data
+                            if let Some(screenshot_data) = result.output.get("data") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_str) = result.output.as_str() {
+                                Some(screenshot_str.to_string())
+                            } else {
+                                None
+                            }
                         } else {
                             None
-                        }
-                    } else {
-                        None
-                    };
+                        };
 
                     crate::agent::tool_logger::log_tool_call_result(
                         &self.app_handle,
                         &tool_call.name,
                         result.output.clone(),
                         true,
-                        Some(format!("MCP batched tool {} executed successfully", tool_call.name)),
+                        Some(format!(
+                            "MCP batched tool {} executed successfully",
+                            tool_call.name
+                        )),
                         screenshot_base64,
                     );
 
                     tool_results_cache[start_index + i].1 = Some(Ok(result.clone()));
-                    self.add_tool_result_to_memory(tool_call, Ok(result)).await?;
+                    self.add_tool_result_to_memory(tool_call, Ok(result))
+                        .await?;
                 }
                 Ok(true)
             }
             Err(e) => {
-                log::error!("MCP batch execution failed: {}. Falling back to sequential execution.", e);
+                log::error!(
+                    "MCP batch execution failed: {}. Falling back to sequential execution.",
+                    e
+                );
 
                 // FIXED: Don't add error results to cache/memory when falling back to sequential execution
                 // This prevents duplicate tool executions and conflicting results
                 // The sequential execution will handle the actual tool execution and results
 
                 // Fall back to sequential execution without polluting cache/memory
-                self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
+                self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache)
+                    .await
             }
         }
     }
@@ -332,24 +367,39 @@ where
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )>,
     ) -> Result<bool, AgentError> {
         // Batch approval for sequential operations
         if !self.check_batch_approval(batch, cancel_rx).await? {
             return Ok(true);
         }
 
-        log::info!("Executing sequential batch: {} tools (approval granted for batch)", batch.len());
+        log::info!(
+            "Executing sequential batch: {} tools (approval granted for batch)",
+            batch.len()
+        );
 
         for (i, tool_call) in batch.iter().enumerate() {
             // Check cancellation before each tool
             if *cancel_rx.borrow() {
-                log::info!("Cancellation detected during sequential batch execution at tool {} of {}", i, batch.len());
+                log::info!(
+                    "Cancellation detected during sequential batch execution at tool {} of {}",
+                    i,
+                    batch.len()
+                );
                 return Ok(false);
             }
 
             // Execute without individual approval (already approved for batch)
-            log::info!("Executing batched tool {}/{}: {}", i + 1, batch.len(), tool_call.name);
+            log::info!(
+                "Executing batched tool {}/{}: {}",
+                i + 1,
+                batch.len(),
+                tool_call.name
+            );
 
             crate::agent::tool_logger::log_tool_call_request(
                 &self.app_handle,
@@ -377,25 +427,29 @@ where
             match &tool_result {
                 Ok(result) => {
                     // Extract screenshot if this is a screenshot tool
-                    let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
-                        // For screenshot tools, the result output should contain base64 data
-                        if let Some(screenshot_data) = result.output.get("data") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_str) = result.output.as_str() {
-                            Some(screenshot_str.to_string())
+                    let screenshot_base64 =
+                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                            // For screenshot tools, the result output should contain base64 data
+                            if let Some(screenshot_data) = result.output.get("data") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_str) = result.output.as_str() {
+                                Some(screenshot_str.to_string())
+                            } else {
+                                None
+                            }
                         } else {
                             None
-                        }
-                    } else {
-                        None
-                    };
+                        };
 
                     crate::agent::tool_logger::log_tool_call_result(
                         &self.app_handle,
                         &tool_call.name,
                         result.output.clone(),
                         true,
-                        Some(format!("Batched tool {} executed successfully", tool_call.name)),
+                        Some(format!(
+                            "Batched tool {} executed successfully",
+                            tool_call.name
+                        )),
                         screenshot_base64,
                     );
                 }
@@ -412,7 +466,8 @@ where
             }
 
             tool_results_cache[start_index + i].1 = Some(tool_result.clone());
-            self.add_tool_result_to_memory(tool_call, tool_result).await?;
+            self.add_tool_result_to_memory(tool_call, tool_result)
+                .await?;
         }
 
         Ok(true)
@@ -434,7 +489,8 @@ where
         let batch_description = format!(
             "Execute batch of {} tools: {}",
             batch.len(),
-            batch.iter()
+            batch
+                .iter()
                 .take(3)
                 .map(|t| t.name.as_str())
                 .collect::<Vec<_>>()
@@ -454,7 +510,9 @@ where
         );
 
         // Add to pending approvals
-        app_state.add_pending_tool_approval(approval_request.clone()).await;
+        app_state
+            .add_pending_tool_approval(approval_request.clone())
+            .await;
 
         // Emit batch approval request event
         let approval_event = serde_json::json!({
@@ -467,12 +525,18 @@ where
             "batch_size": batch.len()
         });
 
-        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+        if let Err(e) = self
+            .app_handle
+            .emit("tool-approval-request", approval_event)
+        {
             log::error!("Failed to emit batch approval request: {}", e);
         }
 
         // Wait for batch approval
-        log::info!("Waiting for user approval for tool batch: {}", batch_description);
+        log::info!(
+            "Waiting for user approval for tool batch: {}",
+            batch_description
+        );
 
         let mut approval_timeout = 60;
         let mut approved = false;
@@ -504,7 +568,11 @@ where
         app_state.remove_tool_approval(&batch_id).await;
 
         if !approved {
-            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+            let reason = if approval_timeout <= 0 {
+                "timeout"
+            } else {
+                "user denied"
+            };
             log::warn!("Tool batch execution denied: {}", reason);
 
             // Add denial message for all tools in batch
@@ -516,7 +584,8 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
-                }).await?;
+                })
+                .await?;
             }
         }
 
@@ -538,7 +607,8 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
-                }).await?;
+                })
+                .await?;
             }
             Err(error) => {
                 mem.add_message(crate::agent::core::Message {
@@ -547,7 +617,8 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
-                }).await?;
+                })
+                .await?;
             }
         }
         Ok(())
@@ -559,11 +630,17 @@ where
         tool_call: &crate::agent::core::ToolCall,
         cancel_rx: &crate::state::CancelReceiver,
         tool_index: usize,
-        tool_results_cache: &mut Vec<(crate::agent::core::ToolCall, Option<Result<crate::agent::core::ToolResult, AgentError>>)>,
+        tool_results_cache: &mut Vec<(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )>,
     ) -> Result<bool, AgentError> {
         // Check cancellation
         if *cancel_rx.borrow() {
-            log::info!("Cancellation detected before tool execution: {}", tool_call.name);
+            log::info!(
+                "Cancellation detected before tool execution: {}",
+                tool_call.name
+            );
             return Ok(false);
         }
 
@@ -573,7 +650,11 @@ where
         }
 
         // Execute tool
-        log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
+        log::info!(
+            "Executing tool: {} with ID: {}",
+            tool_call.name,
+            tool_call.id
+        );
 
         // Emit tool call request event
         crate::agent::tool_logger::log_tool_call_request(
@@ -589,18 +670,19 @@ where
         match &tool_result {
             Ok(result) => {
                 // Extract screenshot if this is a screenshot tool
-                let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
-                    // For screenshot tools, the result output should contain base64 data
-                    if let Some(screenshot_data) = result.output.get("data") {
-                        screenshot_data.as_str().map(|s| s.to_string())
-                    } else if let Some(screenshot_str) = result.output.as_str() {
-                        Some(screenshot_str.to_string())
+                let screenshot_base64 =
+                    if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                        // For screenshot tools, the result output should contain base64 data
+                        if let Some(screenshot_data) = result.output.get("data") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_str) = result.output.as_str() {
+                            Some(screenshot_str.to_string())
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
                 crate::agent::tool_logger::log_tool_call_result(
                     &self.app_handle,
@@ -625,7 +707,8 @@ where
 
         // Cache result and add to memory
         tool_results_cache[tool_index].1 = Some(tool_result.clone());
-        self.add_tool_result_to_memory(tool_call, tool_result).await?;
+        self.add_tool_result_to_memory(tool_call, tool_result)
+            .await?;
 
         Ok(true)
     }
@@ -651,7 +734,9 @@ where
             format!("Agent wants to execute tool: {}", tool_call.name),
         );
 
-        app_state.add_pending_tool_approval(approval_request.clone()).await;
+        app_state
+            .add_pending_tool_approval(approval_request.clone())
+            .await;
 
         let approval_event = serde_json::json!({
             "tool_name": approval_request.tool_name,
@@ -661,7 +746,10 @@ where
             "timestamp": approval_request.timestamp
         });
 
-        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+        if let Err(e) = self
+            .app_handle
+            .emit("tool-approval-request", approval_event)
+        {
             log::error!("Failed to emit tool approval request: {}", e);
         }
 
@@ -697,7 +785,11 @@ where
         app_state.remove_tool_approval(&tool_call.id).await;
 
         if !approved {
-            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+            let reason = if approval_timeout <= 0 {
+                "timeout"
+            } else {
+                "user denied"
+            };
             log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
 
             let mut mem = self.memory.lock().await;
@@ -707,7 +799,8 @@ where
                 tool_calls: None,
                 tool_call_id: Some(tool_call.id.clone()),
                 name: Some(tool_call.name.clone()),
-            }).await?;
+            })
+            .await?;
         }
 
         Ok(approved)
@@ -825,8 +918,8 @@ where
                             );
 
                             // Update AppState with new max steps
-                            if let Ok(mut max_steps_guard) = app_state.agent_max_steps().lock() {
-                                *max_steps_guard = Some(self.max_steps);
+                            if let Ok(mut execution_state) = app_state.agent_execution.lock() {
+                                execution_state.max_steps = Some(self.max_steps);
                             }
 
                             // Continue execution - don't return error
@@ -1000,7 +1093,10 @@ where
 
                 // Execute tools with intelligent batching for performance optimization
                 // This replaces the sequential loop with batch-aware execution
-                if let Err(e) = self.execute_tools_with_batching(tool_calls.clone(), &cancel_rx).await {
+                if let Err(e) = self
+                    .execute_tools_with_batching(tool_calls.clone(), &cancel_rx)
+                    .await
+                {
                     log::error!("Tool batch execution failed: {}", e);
                     // The cancellation handling is already done in execute_tools_with_batching
                     // for AgentError::Terminated, but we should handle other error types too
