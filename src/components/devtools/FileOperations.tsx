@@ -24,7 +24,7 @@ const FileOperations: React.FC = () => {
     setFileListResult(null);
     const result = await invokeCommand<string | null>(
       "list_files",
-      { path_str: pathToList.trim() },
+      { path_str: pathToList.trim(), debug_mode: true },
       "listFiles"
     );
 
@@ -59,7 +59,7 @@ const FileOperations: React.FC = () => {
     setFileContentResult(null);
     const result = await invokeCommand<string | null>(
       "get_file_content",
-      { path_str: pathGetContent.trim() },
+      { path_str: pathGetContent.trim(), debug_mode: true },
       "getFileContent"
     );
     if (result !== null) {
@@ -76,7 +76,7 @@ const FileOperations: React.FC = () => {
     }
     await invokeCommand(
       "set_file_content",
-      { path_str: pathSetContent.trim(), content: fileContentToSet },
+      { path_str: pathSetContent.trim(), content: fileContentToSet, debug_mode: true },
       "setFileContent"
     );
   };
@@ -87,9 +87,9 @@ const FileOperations: React.FC = () => {
         <div className="flex items-start space-x-2">
           <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-blue-800">
-            <strong>Tool Consolidation:</strong> This component now uses
-            production file operation functions with built-in debug capabilities
-            instead of dev_* functions.
+            <strong>Fixed:</strong> File operations now use correct parameter
+            passing format with proper backend command signatures including
+            debug_mode parameter to prevent Tauri deserialization failures.
           </div>
         </div>
       </div>
