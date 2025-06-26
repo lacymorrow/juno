@@ -12,6 +12,7 @@ use tracing::{error, info, warn};
 use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
 use crate::constants::events;
+use crate::constants::errors::{templates, prefixes};
 
 /// Setup comprehensive application integration including plugins, event coordination, and component initialization
 pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -82,7 +83,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Rebroadcast the event as app-dictation-started for backward compatibility
         if let Err(e) = app_handle_for_listener.emit(events::dictation::STARTED, event.payload()) {
-            tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
+            tracing::error!("{} {}", prefixes::EVENT, format!(templates::FAILED_TO_EMIT, "dictation-started", e));
         }
     });
 
@@ -112,7 +113,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                         .as_millis() as u64
                                 });
                                 if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
-                                    error!("[Agent Mode] Failed to emit user-message-submitted event: {}", e);
+                                    error!("{} {}", prefixes::AGENT_MODE, format!(templates::FAILED_TO_EMIT, "user-message-submitted", e));
                                 }
 
                                 // Submit the query to the agent system
@@ -185,7 +186,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         if let Err(e) =
             app_handle_for_listener.emit(events::dictation::PARTIAL_RESULT, event.payload())
         {
-            tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
+            tracing::error!("{} {}", prefixes::EVENT, format!(templates::FAILED_TO_EMIT, "partial-result", e));
         }
     });
 
@@ -266,8 +267,9 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!(
-            "[Dictation Mode] Failed to emit dictation-active event: {}",
-            e
+            "{} {}",
+            prefixes::DICTATION_MODE,
+            format!(templates::FAILED_TO_EMIT, "dictation-active", e)
         );
     }
 }
@@ -316,7 +318,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
             // Emit event to UI to show wake word was detected
             if let Err(e) = app_handle_clone.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
-                error!("[AlwaysListening] Failed to emit wake-word-detected event: {}", e);
+                error!("{} {}", prefixes::ALWAYS_LISTENING, format!(templates::FAILED_TO_EMIT, "wake-word-detected", e));
             }
 
             info!("[AlwaysListening] Wake word activation handled - waiting for follow-up transcription");
@@ -458,8 +460,9 @@ async fn handle_always_listening_stop_request(app_handle: &AppHandle) {
             // Emit notification to UI
             if let Err(e) = app_handle.emit(events::always_listening::STOPPED_BY_COMMAND, ()) {
                 error!(
-                    "[AlwaysListening] Failed to emit stopped-by-command event: {}",
-                    e
+                    "{} {}",
+                    prefixes::ALWAYS_LISTENING,
+                    format!(templates::FAILED_TO_EMIT, "stopped-by-command", e)
                 );
             }
         }
@@ -481,8 +484,9 @@ async fn handle_always_listening_command_processed(app_handle: &AppHandle) {
     // Emit event to return to wake word mode
     if let Err(e) = app_handle.emit(events::always_listening::RETURN_TO_WAKE_WORD, ()) {
         error!(
-            "[AlwaysListening] Failed to emit return-to-wake-word event: {}",
-            e
+            "{} {}",
+            prefixes::ALWAYS_LISTENING,
+            format!(templates::FAILED_TO_EMIT, "return-to-wake-word", e)
         );
     }
 }
@@ -600,7 +604,7 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                     info!("[Agent Mode] Started agent transcription successfully");
 
                     if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, true) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                        tracing::error!("{} {}", prefixes::AGENT_MODE, format!(templates::FAILED_TO_EMIT, "agent-active", e));
                     }
                 }
                 Err(e) => {
@@ -870,8 +874,8 @@ pub mod utils {
         // Emit event if specified
         if let Some(event_name) = emit_event {
             if let Err(e) = app_handle.emit(event_name, new_state) {
-                error!("Failed to emit {} event: {}", event_name, e);
-                return Err(format!("Failed to emit event: {}", e));
+                error!("{}", format!(templates::FAILED_TO_EMIT, event_name, e));
+                return Err(format!(templates::FAILED_TO_EMIT, "event", e));
             }
         }
 

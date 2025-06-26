@@ -31,7 +31,7 @@ Since you're working on a new app when you create a feature, focus on the featur
 After substantial changes in the Rust code, please run this check to verify everything still builds. Please note this command takes a long time so use it wisely. But it is a requirement to all acceptance criteria.
 
 ```bash
-cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | tee cargo-check-results.log
 ```
 
 ### Hierarchical Agent Architecture (Enhanced)

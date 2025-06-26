@@ -8,6 +8,7 @@ use tracing::{info, error};
 use crate::constants;
 use crate::commands;
 use crate::constants::events;
+use crate::constants::errors::{templates, prefixes};
 
 /// Setup the application menu for the main window
 pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
@@ -212,13 +213,13 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::ABOUT => {
             info!("[Menu] About menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::ABOUT_REQUESTED, ()) {
-                error!("[Menu] Failed to emit about event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "about", e));
             }
         }
         constants::app_menu_ids::CHECK_FOR_UPDATES => {
             info!("[Menu] Check for Updates menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::UPDATE_CHECK_REQUESTED, ()) {
-                error!("[Menu] Failed to emit update check event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "update check", e));
             }
         }
         constants::app_menu_ids::SETTINGS => {
@@ -226,7 +227,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("[Menu] Failed to open settings window: {}", e);
+                    error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_PROCESS, "settings window open", e));
                 }
             });
         }
@@ -235,37 +236,37 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         "edit-undo" => {
             info!("[Menu] Undo menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_UNDO, ()) {
-                error!("[Menu] Failed to emit undo event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "undo", e));
             }
         }
         "edit-redo" => {
             info!("[Menu] Redo menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_REDO, ()) {
-                error!("[Menu] Failed to emit redo event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "redo", e));
             }
         }
         "edit-cut" => {
             info!("[Menu] Cut menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_CUT, ()) {
-                error!("[Menu] Failed to emit cut event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "cut", e));
             }
         }
         "edit-copy" => {
             info!("[Menu] Copy menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_COPY, ()) {
-                error!("[Menu] Failed to emit copy event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "copy", e));
             }
         }
         "edit-paste" => {
             info!("[Menu] Paste menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_PASTE, ()) {
-                error!("[Menu] Failed to emit paste event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "paste", e));
             }
         }
         "edit-select-all" => {
             info!("[Menu] Select All menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::EDIT_SELECT_ALL, ()) {
-                error!("[Menu] Failed to emit select all event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "select all", e));
             }
         }
 
@@ -273,19 +274,19 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::NEW_CHAT => {
             info!("[Menu] New Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::NEW_CHAT_REQUESTED, ()) {
-                error!("[Menu] Failed to emit new chat event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "new chat", e));
             }
         }
         constants::app_menu_ids::IMPORT_CHAT => {
             info!("[Menu] Import Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::IMPORT_CHAT_REQUESTED, ()) {
-                error!("[Menu] Failed to emit import chat event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "import chat", e));
             }
         }
         constants::app_menu_ids::EXPORT_CHAT => {
             info!("[Menu] Export Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::EXPORT_CHAT_REQUESTED, ()) {
-                error!("[Menu] Failed to emit export chat event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "export chat", e));
             }
         }
 
@@ -293,25 +294,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
             info!("[Menu] Toggle Floating Bar menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
-                error!("[Menu] Failed to emit toggle floating bar event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "toggle floating bar", e));
             }
         }
         constants::app_menu_ids::TOGGLE_DEV_PANEL => {
             info!("[Menu] Toggle Dev Panel menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_DEV_PANEL_REQUESTED, ()) {
-                error!("[Menu] Failed to emit toggle dev panel event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "toggle dev panel", e));
             }
         }
         constants::app_menu_ids::SHOW_DEVTOOLS => {
             info!("[Menu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::DEVTOOLS_REQUESTED, ()) {
-                error!("[Menu] Failed to emit devtools event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "devtools", e));
             }
         }
         constants::app_menu_ids::SHOW_PERMISSIONS => {
             info!("[Menu] Permissions menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::PERMISSIONS_REQUESTED, ()) {
-                error!("[Menu] Failed to emit permissions event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "permissions", e));
             }
         }
 
@@ -332,32 +333,32 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::HELP => {
             info!("[Menu] Help menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "general") {
-                error!("[Menu] Failed to emit help event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "help", e));
             }
         }
         constants::app_menu_ids::KEYBOARD_SHORTCUTS => {
             info!("[Menu] Keyboard Shortcuts menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "shortcuts") {
-                error!("[Menu] Failed to emit keyboard shortcuts event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "keyboard shortcuts", e));
             }
         }
         constants::app_menu_ids::SEND_FEEDBACK => {
             info!("[Menu] Send Feedback menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "feedback") {
-                error!("[Menu] Failed to emit feedback event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "feedback", e));
             }
         }
         constants::app_menu_ids::REPORT_ISSUE => {
             info!("[Menu] Report Issue menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "issue") {
-                error!("[Menu] Failed to emit report issue event: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_EMIT, "report issue", e));
             }
         }
         constants::app_menu_ids::VISIT_WEBSITE => {
             info!("[Menu] Visit Website menu item clicked");
             // Open website in default browser
             if let Err(e) = open::that("https://github.com/juno-ai") {
-                error!("[Menu] Failed to open website: {}", e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_PROCESS, "website open", e));
             }
         }
 
@@ -367,7 +368,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("[Menu] Failed to open settings window: {}", e);
+                    error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_PROCESS, "settings window open", e));
                 }
             });
         }
@@ -394,7 +395,7 @@ pub fn setup_menu_for_all_windows(app_handle: &AppHandle) -> Result<(), Box<dyn 
     for label in window_labels {
         if let Some(window) = app_handle.get_window(label) {
             if let Err(e) = window.set_menu(app_menu.clone()) {
-                error!("[Menu] Failed to set menu for window '{}': {}", label, e);
+                error!("{} {}", prefixes::MENU, format!(templates::FAILED_TO_CONFIGURE, format!("menu for window '{}'", label), e));
             } else {
                 info!("[Menu] ✅ Menu set for window '{}'", label);
             }

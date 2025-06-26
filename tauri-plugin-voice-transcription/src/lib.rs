@@ -9,6 +9,7 @@ pub mod config;
 pub mod utils;
 pub mod always_listening;
 pub mod shared_whisper;
+pub mod constants;
 
 pub use config::VoiceTranscriptionConfig;
 pub use error::{Error, Result};
