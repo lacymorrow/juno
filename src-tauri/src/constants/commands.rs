@@ -124,3 +124,29 @@ pub mod screenshots {
     pub const CAPTURE_WINDOW_SCREENSHOT: &str = "capture_window_screenshot_command";
     pub const CAPTURE_FOCUSED_WINDOW_SCREENSHOT: &str = "capture_focused_window_screenshot_command";
 }
+
+/// Cloud connectivity command names
+pub mod cloud {
+    // Production cloud connector commands
+    pub const START_PRODUCTION_CLOUD_CONNECTOR: &str = "start_production_cloud_connector";
+    pub const STOP_PRODUCTION_CLOUD_CONNECTOR: &str = "stop_production_cloud_connector";
+    pub const GET_PRODUCTION_CLOUD_STATUS: &str = "get_production_cloud_status";
+
+    // Cloud test commands
+    pub const GET_CLOUD_CONFIG_STATUS: &str = "get_cloud_config_status";
+    pub const TEST_CLOUD_BACKEND_CONNECTION: &str = "test_cloud_backend_connection";
+    pub const ENABLE_CLOUD_BACKEND: &str = "enable_cloud_backend";
+    pub const DISABLE_CLOUD_BACKEND: &str = "disable_cloud_backend";
+
+    // WebSocket testing commands
+    pub const TEST_WEBSOCKET_CONNECTION: &str = "test_websocket_connection";
+    pub const SEND_TEST_CLOUD_COMMAND: &str = "send_test_cloud_command";
+    pub const SIMULATE_CLOUD_COMMAND: &str = "simulate_cloud_command";
+    pub const GET_WEBSOCKET_DIAGNOSTICS: &str = "get_websocket_diagnostics";
+    pub const RUN_WEBSOCKET_TEST_SUITE: &str = "run_websocket_test_suite";
+
+    // Cloud message handling
+    pub const HANDLE_CLOUD_MESSAGE: &str = "handle_cloud_message";
+    pub const EXECUTE_REMOTE_COMMAND: &str = "execute_remote_command";
+    pub const GET_CLOUD_CONNECTION_DIAGNOSTICS: &str = "get_cloud_connection_diagnostics";
+}
