@@ -828,7 +828,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!(templates::FAILED_TO_PROCESS, "play cancellation sound", e));
+                        warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
                     }
                     (
                         "Cancelled".to_string(),
@@ -843,7 +843,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!(templates::FAILED_TO_PROCESS, "play error sound", e));
+                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
                     }
                     (
                         "Failed".to_string(),
@@ -861,7 +861,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!(templates::FAILED_TO_PROCESS, "play network error sound", e));
+                        warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
                     }
 
                     (
@@ -877,7 +877,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!(templates::FAILED_TO_PROCESS, "play error sound", e));
+                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 }
@@ -965,7 +965,7 @@ async fn execute_agent_internal(
                 "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit(events::agent::ERROR, event_data) {
-                warn!("{}", format!(templates::FAILED_TO_EMIT, "agent-error event", e));
+                warn!("{}", format!("{}: {}", "Failed to emit agent-error event", e));
             }
         });
     }
@@ -1008,7 +1008,7 @@ pub async fn handle_tts_completion(
     if let Err(e) =
         crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
     {
-        warn!("{}", format!(templates::FAILED_TO_PROCESS, "play success sound after TTS completion", e));
+        warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
     }
 
     Ok(())
