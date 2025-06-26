@@ -245,7 +245,7 @@ fn is_substantial_user_communication(content: &str) -> bool {
     let trimmed = content.trim();
 
     // Empty or very short content is not substantial
-    if trimmed.is_empty() || trimmed.len() < 20 {
+    if trimmed.is_empty() || trimmed.len() < crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH {
         return false;
     }
 
@@ -279,10 +279,10 @@ fn is_substantial_user_communication(content: &str) -> bool {
 
     // If the content is primarily a simple status message, it's not substantial user communication
     for pattern in &simple_status_patterns {
-        if lower_content.contains(pattern) && trimmed.len() < 100 {
+        if lower_content.contains(pattern) && trimmed.len() < crate::constants::text::limits::MAX_SHORT_STATUS_MESSAGE_LENGTH {
             // For short messages containing status patterns, check if it's ONLY a status message
             let words: Vec<&str> = trimmed.split_whitespace().collect();
-            if words.len() <= 10 {
+            if words.len() <= crate::constants::text::limits::MAX_SIMPLE_MESSAGE_WORDS {
                 return false;
             }
         }
@@ -296,12 +296,12 @@ fn is_substantial_user_communication(content: &str) -> bool {
     }
 
     // 2. Long single sentence with substantial content (over 80 characters)
-    if trimmed.len() > 80 && sentence_endings >= 1 {
+    if trimmed.len() > crate::constants::text::limits::MIN_DETAILED_CONTENT_LENGTH && sentence_endings >= 1 {
         return true;
     }
 
     // 3. Contains detailed information (multiple lines or complex structure)
-    if trimmed.lines().count() > 2 {
+    if trimmed.lines().count() > crate::constants::text::analysis::MAX_SIMPLE_CONTENT_LINES {
         return true;
     }
 
@@ -336,7 +336,7 @@ fn is_substantial_user_communication(content: &str) -> bool {
 
     // 5. Word count threshold for substantial content
     let word_count = trimmed.split_whitespace().count();
-    if word_count > 15 {
+    if word_count > crate::constants::text::limits::MIN_SUBSTANTIAL_CONTENT_WORDS {
         return true;
     }
 

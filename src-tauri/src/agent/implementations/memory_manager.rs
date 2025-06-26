@@ -5,6 +5,7 @@ use crate::agent::core::{
 };
 use crate::agent::traits::MemoryManager;
 use crate::constants::errors::templates;
+use crate::constants::memory::{limits, tokens, visual, summary, patterns, performance, COMMON_WORDS};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -37,12 +38,12 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 15,       // Further reduced from 20 to be more aggressive
-            max_tokens: 80000,      // Reduced from 100000 to stay well under 200K API limit
-            min_messages_to_keep: 2, // Reduced from 3 for emergency pruning
+            max_messages: limits::DEFAULT_MAX_MESSAGES,
+            max_tokens: limits::DEFAULT_MAX_TOKENS,
+            min_messages_to_keep: limits::DEFAULT_MIN_MESSAGES_TO_KEEP,
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 25, // Increased from 20 to summarize more aggressively
+            summarization_batch_size: limits::DEFAULT_SUMMARIZATION_BATCH_SIZE,
             enable_metrics: true,
             enable_summary_cache: true,
         }
@@ -68,9 +69,9 @@ impl Default for VisualContextConfig {
     fn default() -> Self {
         Self {
             enable_screenshot_compression: true,
-            screenshot_retention_seconds: 300, // 5 minutes
+            screenshot_retention_seconds: visual::DEFAULT_SCREENSHOT_RETENTION_SECONDS,
             immediate_compression: true,
-            max_base64_screenshots: 1, // Changed from 2 to 1 - compress all but 1 screenshot immediately
+            max_base64_screenshots: visual::DEFAULT_MAX_BASE64_SCREENSHOTS,
             fallback_to_generic_description: true,
         }
     }
@@ -169,35 +170,35 @@ impl AdvancedMemoryManager {
         let content = &message.content;
 
         // Check if content contains base64 images (common patterns)
-        if content.contains("data:image/") || content.contains("base64,") ||
-           (content.len() > 1000 && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
+        if content.contains(patterns::GENERIC_IMAGE_DATA_PREFIX) || content.contains(patterns::BASE64_IDENTIFIER) ||
+           (content.len() > visual::MIN_BASE64_CONTENT_LENGTH && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
             // This looks like base64 image data - use more accurate estimation
             // Base64 images typically use ~1 token per 15-20 characters (more aggressive estimate)
-            total_tokens += content.len() / 15; // More aggressive estimate for images that contribute heavily to token count
-            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / 15);
+            total_tokens += content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
 
             // If this single message has excessive tokens, mark it for immediate attention
-            if content.len() / 15 > 50000 {
-                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / 15);
+            if content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE > limits::CRITICAL_SINGLE_MESSAGE_TOKENS {
+                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
             }
         } else {
             // Regular text content - use standard 4 chars per token
-            total_tokens += content.len() / 4;
+            total_tokens += content.len() / tokens::CHARS_PER_TOKEN_TEXT;
         }
 
         // Add tool call tokens
         let tool_call_tokens = message.tool_calls.as_ref()
             .map(|calls| {
                 calls.iter().map(|call| {
-                    let base_tokens = call.name.len() / 4 + 50; // Basic structure
+                    let base_tokens = call.name.len() / tokens::CHARS_PER_TOKEN_TEXT + tokens::BASE_TOOL_CALL_TOKENS;
 
                     // Check if tool call input contains base64 images
                     let input_str = call.input.to_string();
-                    if input_str.contains("data:image/") || input_str.contains("base64,") {
+                    if input_str.contains(patterns::GENERIC_IMAGE_DATA_PREFIX) || input_str.contains(patterns::BASE64_IDENTIFIER) {
                         // Tool call with image - much higher token count
-                        base_tokens + (input_str.len() / 20)
+                        base_tokens + (input_str.len() / tokens::CHARS_PER_TOKEN_TOOL_INPUT_IMAGE)
                     } else {
-                        base_tokens + (input_str.len() / 4)
+                        base_tokens + (input_str.len() / tokens::CHARS_PER_TOKEN_TEXT)
                     }
                 }).sum()
             })
@@ -206,7 +207,7 @@ impl AdvancedMemoryManager {
         total_tokens += tool_call_tokens;
 
         // Log warning for very large messages
-        if total_tokens > 50000 {
+        if total_tokens > limits::LARGE_MESSAGE_WARNING_TOKENS {
             log::warn!("Large message detected: ~{} tokens (content length: {})", total_tokens, content.len());
         }
 
@@ -268,7 +269,7 @@ impl AdvancedMemoryManager {
         let estimated_tokens = self.estimate_total_tokens().await;
 
         // Emergency pruning if we're close to API limits
-        let emergency_threshold = 180000; // Leave buffer before 200K limit
+        let emergency_threshold = limits::EMERGENCY_TOKEN_THRESHOLD;
         let normal_threshold = config.max_tokens;
 
         let needs_emergency_pruning = estimated_tokens >= emergency_threshold;
@@ -278,7 +279,7 @@ impl AdvancedMemoryManager {
         if needs_emergency_pruning {
             log::error!("EMERGENCY: Token count ({}) approaching API limit (200K)! Aggressive pruning required.", estimated_tokens);
             // Keep only the most recent messages
-            let emergency_keep = std::cmp::max(config.min_messages_to_keep, 2);
+            let emergency_keep = std::cmp::max(config.min_messages_to_keep, limits::EMERGENCY_MIN_KEEP);
             drop(config);
             self.prune_memory(Some(emergency_keep)).await?;
             return Ok(true);
@@ -301,13 +302,13 @@ impl AdvancedMemoryManager {
         }
 
         // Simple summarization logic (in production, you'd use an LLM)
-        let summary = if messages.len() <= 3 {
+        let summary = if messages.len() <= summary::SHORT_CONVERSATION_MAX_MESSAGES {
             // For short conversations, just concatenate key points
             messages.iter()
                 .filter(|m| !m.content.is_empty())
                 .map(|m| {
-                    let content = if m.content.len() > 100 {
-                        format!("{}...", &m.content[..100])
+                    let content = if m.content.len() > summary::MAX_SHORT_CONTENT_LENGTH {
+                        format!("{}...", &m.content[..summary::MAX_SHORT_CONTENT_LENGTH])
                     } else {
                         m.content.clone()
                     };
@@ -336,7 +337,7 @@ impl AdvancedMemoryManager {
         let key_topics = self.extract_key_topics(&all_content);
 
         let time_range = (
-            SystemTime::now() - Duration::from_secs(3600), // Approximate start
+            SystemTime::now() - Duration::from_secs(summary::CONVERSATION_START_OFFSET_SECONDS),
             SystemTime::now()
         );
 
@@ -357,9 +358,8 @@ impl AdvancedMemoryManager {
     /// Extract key topics from text (simple implementation)
     fn extract_key_topics(&self, text: &str) -> Vec<String> {
         // Simple keyword extraction (in production, use NLP libraries)
-        let common_words = ["the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"];
         let words: Vec<&str> = text.split_whitespace()
-            .filter(|word| word.len() > 3 && !common_words.contains(&word.to_lowercase().as_str()))
+            .filter(|word| word.len() > summary::MIN_KEYWORD_LENGTH && !COMMON_WORDS.contains(&word.to_lowercase().as_str()))
             .collect();
 
         // Count word frequencies
@@ -373,7 +373,7 @@ impl AdvancedMemoryManager {
         sorted_words.sort_by(|a, b| b.1.cmp(&a.1));
 
         sorted_words.into_iter()
-            .take(5)
+            .take(summary::MAX_KEYWORDS_TO_EXTRACT)
             .map(|(word, _)| word)
             .collect()
     }
@@ -401,7 +401,7 @@ impl AdvancedMemoryManager {
                         summaries.push(summary);
 
                         // Keep only recent summaries to prevent unbounded growth
-                        if summaries.len() > 20 {
+                        if summaries.len() > limits::MAX_SUMMARIES_TO_KEEP {
                             summaries.remove(0);
                         }
                     }
@@ -467,7 +467,7 @@ impl AdvancedMemoryManager {
         // Clear summary cache if it's getting too large
         {
             let mut cache = self.summary_cache.write().await;
-            if cache.len() > 100 {
+            if cache.len() > performance::MAX_CACHE_SIZE {
                 cache.clear();
                 log::info!("Cleared summary cache to free memory");
             }
@@ -511,7 +511,7 @@ impl AdvancedMemoryManager {
         let config = self.config.read().await;
 
         // Hot context: last 5-10 messages for immediate relevance
-        let hot_context_size = std::cmp::min(10, config.min_messages_to_keep);
+        let hot_context_size = std::cmp::min(limits::HOT_CONTEXT_SIZE, config.min_messages_to_keep);
         let start_index = messages.len().saturating_sub(hot_context_size);
         let hot_messages = messages[start_index..].to_vec();
 
@@ -524,7 +524,7 @@ impl AdvancedMemoryManager {
         let config = self.config.read().await;
 
         // Cold context: everything before the hot context window
-        let hot_context_size = std::cmp::min(10, config.min_messages_to_keep);
+        let hot_context_size = std::cmp::min(limits::HOT_CONTEXT_SIZE, config.min_messages_to_keep);
         let cold_end_index = messages.len().saturating_sub(hot_context_size);
 
         if cold_end_index == 0 {
@@ -724,15 +724,15 @@ impl AdvancedMemoryManager {
     /// Detect if content contains a screenshot/base64 image
     fn is_screenshot_content(content: &str) -> bool {
         // Enhanced detection for screenshots specifically
-        if content.contains("data:image/png;base64,") ||
-           content.contains("data:image/jpeg;base64,") ||
-           content.contains("data:image/webp;base64,") {
+        if content.contains(patterns::PNG_DATA_URL_PREFIX) ||
+           content.contains(patterns::JPEG_DATA_URL_PREFIX) ||
+           content.contains(patterns::WEBP_DATA_URL_PREFIX) {
             return true;
         }
 
         // Check for large base64 content that's likely a screenshot
-        if content.len() > 10000 &&
-           content.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').count() > content.len() * 80 / 100 {
+        if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH &&
+           content.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').count() > content.len() * visual::BASE64_CHAR_THRESHOLD_PERCENT / 100 {
             return true;
         }
 
@@ -742,14 +742,14 @@ impl AdvancedMemoryManager {
     /// Compress a screenshot to text summary
     async fn compress_screenshot_to_text(&self, base64_content: &str) -> Result<VisualContextSummary, AgentError> {
         let start_time = Instant::now();
-        let original_tokens = base64_content.len() / 15; // Using our aggressive estimation
+        let original_tokens = base64_content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
 
         // Extract image format and basic info
-        let image_format = if base64_content.contains("data:image/png") {
+        let image_format = if base64_content.contains(patterns::PNG_DATA_URL_PREFIX) {
             "PNG"
-        } else if base64_content.contains("data:image/jpeg") {
+        } else if base64_content.contains(patterns::JPEG_DATA_URL_PREFIX) {
             "JPEG"
-        } else if base64_content.contains("data:image/webp") {
+        } else if base64_content.contains(patterns::WEBP_DATA_URL_PREFIX) {
             "WebP"
         } else {
             "Unknown"
@@ -782,7 +782,7 @@ impl AdvancedMemoryManager {
             )
         };
 
-        let compressed_tokens = summary.len() / 4; // Standard text token estimation
+        let compressed_tokens = summary.len() / tokens::CHARS_PER_TOKEN_TEXT; // Standard text token estimation
         let compression_ratio = original_tokens as f64 / compressed_tokens as f64;
 
         log::info!("Screenshot compression: {} tokens -> {} tokens ({}x reduction)",
@@ -849,7 +849,7 @@ impl AdvancedMemoryManager {
                     Err(e) => {
                         log::error!("CRITICAL: Failed to compress screenshot: {} - keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
                         // In case of compression failure, we should still try to truncate the content to prevent overflow
-                        if message.content.len() > 50000 {
+                        if message.content.len() > limits::LARGE_MESSAGE_WARNING_TOKENS {
                             log::warn!("Truncating oversized screenshot content to prevent API failure");
                             message.content = format!("[SCREENSHOT - TRUNCATED DUE TO COMPRESSION FAILURE] Original size: {} chars. Error: {}", message.content.len(), e);
                         }
