@@ -119,6 +119,9 @@ pub mod templates {
     pub const FAILED_TO_CONVERT: &str = "Failed to convert {}: {}";
     pub const FAILED_TO_DECODE: &str = "Failed to decode {}: {}";
     pub const FAILED_TO_ENCODE: &str = "Failed to encode {}: {}";
+    pub const FAILED_TO_COMPRESS: &str = "Failed to compress {}: {}";
+    pub const FAILED_TO_SET: &str = "Failed to set {}: {}";
+    pub const FAILED_TO_RESTORE: &str = "Failed to restore {}: {}";
 }
 
 /// Error categories for consistent classification

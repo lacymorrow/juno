@@ -406,7 +406,7 @@ impl AdvancedMemoryManager {
                         }
                     }
                     Err(e) => {
-                        log::warn!("{}", format!(templates::FAILED_TO_CREATE, "conversation summary", e));
+                        log::warn!("Failed to create conversation summary: {}", e);
                     }
                 }
             }
@@ -847,7 +847,7 @@ impl AdvancedMemoryManager {
                         log::info!("Successfully compressed screenshot to text summary");
                     }
                     Err(e) => {
-                        log::error!("CRITICAL: {} - keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", format!(templates::FAILED_TO_COMPRESS, "screenshot", e));
+                        log::error!("CRITICAL: Failed to compress screenshot: {} - keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
                         // In case of compression failure, we should still try to truncate the content to prevent overflow
                         if message.content.len() > 50000 {
                             log::warn!("Truncating oversized screenshot content to prevent API failure");
@@ -909,7 +909,7 @@ impl AdvancedMemoryManager {
                         compressed_count += 1;
                     }
                     Err(e) => {
-                        log::warn!("{}", format!(templates::FAILED_TO_COMPRESS, "screenshot", e));
+                        log::warn!(templates::FAILED_TO_COMPRESS, "screenshot", e);
                     }
                 }
             }
