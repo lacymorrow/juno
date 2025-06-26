@@ -24,7 +24,7 @@ const FileOperations: React.FC = () => {
     setFileListResult(null);
     const result = await invokeCommand<string | null>(
       "list_files",
-      { pathStr: pathToList.trim() },
+      { path_str: pathToList.trim() },
       "listFiles"
     );
 
@@ -59,7 +59,7 @@ const FileOperations: React.FC = () => {
     setFileContentResult(null);
     const result = await invokeCommand<string | null>(
       "get_file_content",
-      { pathStr: pathGetContent.trim() },
+      { path_str: pathGetContent.trim() },
       "getFileContent"
     );
     if (result !== null) {
@@ -76,7 +76,7 @@ const FileOperations: React.FC = () => {
     }
     await invokeCommand(
       "set_file_content",
-      { pathStr: pathSetContent.trim(), content: fileContentToSet },
+      { path_str: pathSetContent.trim(), content: fileContentToSet },
       "setFileContent"
     );
   };
