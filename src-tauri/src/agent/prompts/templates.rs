@@ -1112,8 +1112,15 @@ For complex desktop tasks, think through your approach:
 
 {}
 
+{}
+
+{}
+
 {}"#,
             PromptFragments::chain_of_thought_framework(),
+            PromptFragments::accessibility_first_strategy(),
+            PromptFragments::tool_batching_optimization(),
+            PromptFragments::official_computer_use_api(),
             PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
@@ -1121,11 +1128,11 @@ For complex desktop tasks, think through your approach:
         PromptTemplate {
             id: "desktop_expert".to_string(),
             name: "Desktop Expert Agent".to_string(),
-            description: "Enhanced desktop expert with chain of thought reasoning, accessibility-first automation, and TTS speech format".to_string(),
+            description: "Complete desktop expert with chain of thought reasoning, accessibility-first automation, tool batching optimization, official computer use API, and TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string()],
-            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "accessibility".to_string(), "tts-enabled".to_string(), "cot-enabled".to_string()],
-            version: "3.0.0".to_string(),
+            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "accessibility".to_string(), "computer-use".to_string(), "tool-batching".to_string(), "tts-enabled".to_string(), "cot-enabled".to_string()],
+            version: "3.1.0".to_string(),
             customizable: true,
         }
     }
