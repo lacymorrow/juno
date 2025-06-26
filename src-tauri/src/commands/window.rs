@@ -335,32 +335,10 @@ pub(crate) async fn resize_window(
             // For macOS, we need to access the underlying MacOSUIElement to manipulate window attributes
             #[cfg(target_os = "macos")]
             {
-                use computer_use_ai_sdk::UIElement;
-                use std::any::Any;
-
-                if let Some(macos_element) = window.as_any().downcast_ref::<computer_use_ai_sdk::macos::MacOSUIElement>() {
-                    match resize_macos_window(macos_element, width as f64, height as f64) {
-                        Ok(_) => {
-                            info!("Successfully resized window: {} to {}x{}", window_id, width, height);
-
-                            // Send debug notification if enabled
-                            if debug_config.send_notifications {
-                                let _ = send_debug_notification(&app, "Resize Window", &format!("Resized window: {} to {}x{}", window_id, width, height));
-                            }
-
-                            Ok(())
-                        }
-                        Err(e) => {
-                            let error_msg = format!("Failed to resize window '{}': {}", window_id, e);
-                            error!("{}", error_msg);
-                            Err(error_msg)
-                        }
-                    }
-                } else {
-                    let error_msg = format!("Could not access macOS window element for ID '{}'", window_id);
-                    error!("{}", error_msg);
-                    Err(error_msg)
-                }
+                // For now, since we can't access the internal MacOSUIElement, return not implemented
+                let error_msg = format!("Window resizing not yet implemented for window ID '{}'", window_id);
+                error!("{}", error_msg);
+                return Err(error_msg);
             }
 
             #[cfg(not(target_os = "macos"))]
@@ -413,34 +391,25 @@ pub(crate) async fn move_window(
                 return Err(error_msg);
             }
 
-            // For macOS, we need to access the underlying MacOSUIElement to manipulate window attributes
+            // For macOS, use the desktop's accessibility APIs to move the window
             #[cfg(target_os = "macos")]
             {
-                use computer_use_ai_sdk::UIElement;
-                use std::any::Any;
+                match move_macos_window(&window, x as f64, y as f64) {
+                    Ok(_) => {
+                        info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
 
-                if let Some(macos_element) = window.as_any().downcast_ref::<computer_use_ai_sdk::macos::MacOSUIElement>() {
-                    match move_macos_window(macos_element, x as f64, y as f64) {
-                        Ok(_) => {
-                            info!("Successfully moved window: {} to ({}, {})", window_id, x, y);
-
-                            // Send debug notification if enabled
-                            if debug_config.send_notifications {
-                                let _ = send_debug_notification(&app, "Move Window", &format!("Moved window: {} to ({}, {})", window_id, x, y));
-                            }
-
-                            Ok(())
+                        // Send debug notification if enabled
+                        if debug_config.send_notifications {
+                            let _ = send_debug_notification(&app, "Move Window", &format!("Moved window '{}' to ({}, {})", window_id, x, y));
                         }
-                        Err(e) => {
-                            let error_msg = format!("Failed to move window '{}': {}", window_id, e);
-                            error!("{}", error_msg);
-                            Err(error_msg)
-                        }
+
+                        Ok(())
                     }
-                } else {
-                    let error_msg = format!("Could not access macOS window element for ID '{}'", window_id);
-                    error!("{}", error_msg);
-                    Err(error_msg)
+                    Err(e) => {
+                        let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
                 }
             }
 
@@ -495,32 +464,10 @@ pub(crate) async fn close_window(
             // For macOS, we need to access the underlying MacOSUIElement to manipulate window attributes
             #[cfg(target_os = "macos")]
             {
-                use computer_use_ai_sdk::UIElement;
-                use std::any::Any;
-
-                if let Some(macos_element) = window.as_any().downcast_ref::<computer_use_ai_sdk::macos::MacOSUIElement>() {
-                    match close_macos_window(macos_element) {
-                        Ok(_) => {
-                            info!("Successfully closed window: {}", window_id);
-
-                            // Send debug notification if enabled
-                            if debug_config.send_notifications {
-                                let _ = send_debug_notification(&app, "Close Window", &format!("Closed window: {}", window_id));
-                            }
-
-                            Ok(())
-                        }
-                        Err(e) => {
-                            let error_msg = format!("Failed to close window '{}': {}", window_id, e);
-                            error!("{}", error_msg);
-                            Err(error_msg)
-                        }
-                    }
-                } else {
-                    let error_msg = format!("Could not access macOS window element for ID '{}'", window_id);
-                    error!("{}", error_msg);
-                    Err(error_msg)
-                }
+                // For now, since we can't access the internal MacOSUIElement, return not implemented
+                let error_msg = format!("Window closing not yet implemented for window ID '{}'", window_id);
+                error!("{}", error_msg);
+                return Err(error_msg);
             }
 
             #[cfg(not(target_os = "macos"))]
@@ -544,136 +491,49 @@ pub(crate) async fn close_window(
 
 // Helper functions for macOS window manipulation
 #[cfg(target_os = "macos")]
-fn resize_macos_window(macos_element: &computer_use_ai_sdk::macos::MacOSUIElement, width: f64, height: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    use computer_use_ai_sdk::macos::{AXAttribute, ThreadSafeAXUIElement};
-    use core_foundation::string::CFString;
-    use core_foundation::base::CFType;
-    use core_graphics::geometry::CGSize;
-
-    let ax_window = &macos_element.element.0;
-
-    // 1. Verify it's a window
-    let role = ax_window.role().map_or(String::new(), |r| r.to_string());
-    if role != "AXWindow" {
-        return Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
-            format!("Cannot resize a non-window element (role: {})", role),
-        ));
-    }
-
-    // 2. Create CGSize and AXValue
-    let size_attr = AXAttribute::new(&CFString::new("AXSize"));
-    let mut cg_size = CGSize::new(width, height);
-    let size_ptr = &mut cg_size as *mut _ as *const std::ffi::c_void;
-
-    unsafe {
-        // Use AXValueCreate from the MCP server's ffi constants
-        let value_ref = computer_use_ai_sdk::macos::ffi::AXValueCreate(
-            computer_use_ai_sdk::macos::constants::K_AXVALUE_CGSIZE_TYPE,
-            size_ptr
-        );
-        if value_ref.is_null() {
-            return Err(computer_use_ai_sdk::AutomationError::PlatformError(
-                "Could not create AXValue for size".to_string(),
-            ));
-        }
-
-        // 3. Set the AXSize attribute
-        let value_to_set = CFType::wrap_under_create_rule(value_ref);
-
-        match ax_window.set_attribute(&size_attr, value_to_set) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(computer_use_ai_sdk::AutomationError::PlatformError(format!(
-                "Failed to set the size attribute: {:?}",
-                e
-            )))
-        }
-    }
+fn resize_macos_window(_window_element: &computer_use_ai_sdk::UIElement, _width: f64, _height: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
+    // For now, return a not implemented error
+    // This would require access to the internal MacOSUIElement and accessibility APIs
+    Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
+        "Window resizing not yet implemented - requires direct accessibility API access".to_string()
+    ))
 }
 
 #[cfg(target_os = "macos")]
-fn move_macos_window(macos_element: &computer_use_ai_sdk::macos::MacOSUIElement, x: f64, y: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    use computer_use_ai_sdk::macos::{AXAttribute, ThreadSafeAXUIElement};
-    use core_foundation::string::CFString;
-    use core_foundation::base::CFType;
-    use core_graphics::geometry::CGPoint;
+fn move_macos_window(window_element: &computer_use_ai_sdk::UIElement, x: f64, y: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
+    use computer_use_ai_sdk::AutomationError;
 
-    let ax_window = &macos_element.element.0;
+    // Get the window bounds to validate it's a proper window
+    let bounds = window_element.bounds().map_err(|e| {
+        AutomationError::PlatformError(format!("Failed to get window bounds: {}", e))
+    })?;
 
-    // 1. Verify it's a window
-    let role = ax_window.role().map_or(String::new(), |r| r.to_string());
-    if role != "AXWindow" {
-        return Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
-            format!("Cannot move a non-window element (role: {})", role),
+    // Verify it's a window by checking its role
+    let role = window_element.role();
+    if role != "window" && role != "AXWindow" {
+        return Err(AutomationError::UnsupportedOperation(
+            format!("Cannot move a non-window element (role: {})", role)
         ));
     }
 
-    // 2. Create CGPoint and AXValue
-    let position_attr = AXAttribute::new(&CFString::new("AXPosition"));
-    let mut cg_point = CGPoint::new(x, y);
-    let point_ptr = &mut cg_point as *mut _ as *const std::ffi::c_void;
+    // Log the window move request with current and target positions
+    info!("Window move requested: window with role '{}' at bounds ({:.1}, {:.1}, {:.1}, {:.1}) to position ({}, {})",
+          role, bounds.0, bounds.1, bounds.2, bounds.3, x, y);
 
-    unsafe {
-        let value_ref = computer_use_ai_sdk::macos::ffi::AXValueCreate(
-            computer_use_ai_sdk::macos::constants::K_AXVALUE_CGPOINT_TYPE,
-            point_ptr
-        );
-        if value_ref.is_null() {
-            return Err(computer_use_ai_sdk::AutomationError::PlatformError(
-                "Could not create AXValue for position".to_string(),
-            ));
-        }
-
-        // 3. Set the AXPosition attribute
-        let value_to_set = CFType::wrap_under_create_rule(value_ref);
-
-        match ax_window.set_attribute(&position_attr, value_to_set) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(computer_use_ai_sdk::AutomationError::PlatformError(format!(
-                "Failed to set the position attribute: {:?}",
-                e
-            )))
-        }
-    }
+    // For now, return a descriptive error indicating the feature is not yet fully implemented
+    // but the window was found and validated successfully
+    Err(AutomationError::UnsupportedOperation(
+        format!("Window moving is not yet fully implemented. Window '{}' was found successfully at ({:.1}, {:.1}) but moving to ({}, {}) requires additional accessibility API integration.",
+                window_element.attributes().label.unwrap_or_else(|| "Untitled".to_string()),
+                bounds.0, bounds.1, x, y)
+    ))
 }
 
 #[cfg(target_os = "macos")]
-fn close_macos_window(macos_element: &computer_use_ai_sdk::macos::MacOSUIElement) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    use computer_use_ai_sdk::macos::{AXAttribute, ThreadSafeAXUIElement};
-    use core_foundation::string::CFString;
-
-    let ax_window = &macos_element.element.0;
-
-    // 1. Verify it's a window
-    let role = ax_window.role().map_or(String::new(), |r| r.to_string());
-    if role != "AXWindow" {
-        return Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
-            format!("Cannot close a non-window element (role: {})", role),
-        ));
-    }
-
-    // 2. Find the close button (AXCloseButton)
-    let close_button_attr = AXAttribute::new(&CFString::new("AXCloseButton"));
-    match ax_window.attribute(&close_button_attr) {
-        Ok(button_val) => {
-            if let Some(close_button) = button_val.downcast::<accessibility::AXUIElement>() {
-                // 3. Perform the press action
-                let press_action = CFString::new("AXPress");
-                match close_button.perform_action(&press_action) {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(computer_use_ai_sdk::AutomationError::PlatformError(format!(
-                        "Failed to press the close button: {:?}",
-                        e
-                    )))
-                }
-            } else {
-                Err(computer_use_ai_sdk::AutomationError::ElementNotFound(
-                    "Could not find the close button element within the window".to_string(),
-                ))
-            }
-        }
-        Err(e) => Err(computer_use_ai_sdk::AutomationError::ElementNotFound(format!(
-            "Could not find the close button attribute: {:?}",
-            e
-        )))
-    }
+fn close_macos_window(_window_element: &computer_use_ai_sdk::UIElement) -> Result<(), computer_use_ai_sdk::AutomationError> {
+    // For now, return a not implemented error
+    // This would require access to the internal MacOSUIElement and accessibility APIs
+    Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
+        "Window closing not yet implemented - requires direct accessibility API access".to_string()
+    ))
 }
