@@ -66,28 +66,31 @@ const ScreenshotOperations: React.FC = () => {
 
   const handleTestClickVisualization = async () => {
     try {
-      // Test click visualization at center of screen with red color
-      await invokeCommand<void>(
-        "test_click_visualization",
-        { x: 400, y: 300, color: "#FF0000" },
+      // Call the proper QA test command that returns structured data
+      const result = await invokeCommand<VisualizationTestResult>(
+        "qa_test_click_visualization",
+        {},
         "testClickVisualization"
       );
-      // Since this returns Result<(), String>, we show success
-      setClickQAResults([{
-        success: true,
+
+      // Convert VisualizationTestResult to ClickQAResult format for display
+      const clickQAResults: ClickQAResult[] = result.results.map((testResult) => ({
+        success: testResult.success,
         operation: "click_visualization_test",
-        coordinates: [400, 300],
-        error: undefined,
-        visualization_success: true,
-        cursor_position_after: undefined,
-        latency_ms: 0
-      }]);
+        coordinates: [testResult.position.x, testResult.position.y],
+        error: testResult.error,
+        visualization_success: testResult.success,
+        cursor_position_after: undefined, // Not available from visualization test
+        latency_ms: 0 // Not measured in visualization test
+      }));
+
+      setClickQAResults(clickQAResults);
     } catch (error) {
-      // Handle error case
+      // Create a single error result for display
       setClickQAResults([{
         success: false,
         operation: "click_visualization_test",
-        coordinates: [400, 300],
+        coordinates: [400, 300], // Default coordinates for error display
         error: String(error),
         visualization_success: false,
         cursor_position_after: undefined,
