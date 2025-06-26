@@ -9,7 +9,7 @@ pub mod limits {
     pub const DEFAULT_MAX_MESSAGES: usize = 15;
 
     /// Default maximum estimated tokens before pruning
-    pub const DEFAULT_MAX_TOKENS: usize = 150000;
+    pub const DEFAULT_MAX_TOKENS: usize = 100000;
 
     /// Minimum number of messages to keep during pruning
     pub const DEFAULT_MIN_MESSAGES_TO_KEEP: usize = 3;
