@@ -44,214 +44,14 @@ fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Opt
     }
 }
 
-#[tauri::command]
-pub(crate) async fn dev_scroll_window(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    direction: String,      // "up", "down", "left", "right"
-    scroll_amount: f64, // Number of units/clicks (changed back to f64 for SDK)
-    x: Option<f64>,     // Optional x coordinate
-    y: Option<f64>,     // Optional y coordinate
-) -> Result<(), String> {
-    // Validate direction
-    let valid_directions = ["up", "down", "left", "right"];
-    if !valid_directions.contains(&direction.as_str()) {
-        let err_msg = format!(
-            "Invalid scroll direction: '{}'. Must be one of: {:?}",
-            direction, valid_directions
-        );
-        println!("[DEV_TOOL] Error: {}", err_msg);
-        return Err(err_msg);
-    }
+// CONSOLIDATED: dev_scroll_window removed - use scroll_window production function
 
-    let result: Result<(), AutomationError>;
-    let action_desc: String; // Declare without initializing
-
-    #[cfg(target_os = "macos")]
-    {
-        match (x, y) {
-            (Some(px), Some(py)) => {
-                println!(
-                    "[DEV_TOOL] Attempting to scroll {} by {} units at position ({}, {})...",
-                    direction, scroll_amount, px, py
-                );
-                let desktop = &state.desktop;
-                result = desktop.scroll_at_position(px, py, &direction, scroll_amount).map_err(|e| AutomationError::Internal(e));
-                action_desc = format!( // Assign here
-                    "Scrolled {} by {} at ({}, {})",
-                    direction, scroll_amount, px, py
-                );
-            }
-            _ => {
-                println!(
-                    "[DEV_TOOL] Attempting to scroll {} by {} units at current position...",
-                    direction, scroll_amount
-                );
-                let desktop = &state.desktop;
-                result = desktop.scroll_at_current_position(&direction, scroll_amount).map_err(|e| AutomationError::Internal(e));
-                action_desc = format!( // Assign here
-                    "Scrolled {} by {} at current position",
-                    direction, scroll_amount
-                );
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        result = Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()));
-        action_desc = "Scroll (Unsupported Platform)".to_string(); // Assign here
-    }
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] {} succeeded.", action_desc); // Now action_desc is definitely assigned
-            send_dev_tool_notification(&app, "Scroll", &action_desc)?;
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to perform scroll action ({}): {}", action_desc, e); // Now action_desc is definitely assigned
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn dev_get_window_list(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    println!("[DEV_TOOL] Attempting to get window list...");
-
-    let desktop = &state.desktop;
-    match desktop.list_windows() {
-        Ok(windows) => {
-            println!("[DEV_TOOL] dev_get_window_list succeeded. Found {} windows.", windows.len());
-            // Use a for loop for clearer error handling
-            let mut window_infos: Vec<WindowInfo> = Vec::new();
-            for win in windows {
-                let attrs = win.attributes();
-                let title = attrs.label.unwrap_or_else(|| "Untitled Window".to_string());
-                // Handle the Option<String> returned by win.id()
-                match win.id() { // Match the Option<String>
-                    Some(id) => {
-                        window_infos.push(WindowInfo { id, title });
-                    }
-                    None => {
-                        println!("[DEV_TOOL] Window found with no ID (using placeholder). Title: {}", title);
-                        window_infos.push(WindowInfo { id: "<no_id>".to_string(), title });
-                        // If this case represents an error internally handled by the SDK,
-                        // we might want to log differently or skip, but for now, treat it as 'no ID'.
-                    }
-                }
-            }
-
-            match serde_json::to_string_pretty(&window_infos) {
-                Ok(json_string) => {
-                     send_dev_tool_notification(&app, "Window List", "Retrieved window list.")?;
-                    Ok(json_string)
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to serialize window list: {}", e);
-                    println!("[DEV_TOOL] Error: {}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call desktop.windows(): {}", e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
+// CONSOLIDATED: dev_get_window_list removed - use get_window_list production function
 
 
-#[tauri::command]
-pub(crate) async fn dev_get_window_info(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    window_id: String,
-) -> Result<String, String> {
-    println!("[DEV_TOOL] Getting info for window ID/index: {}", window_id);
+// CONSOLIDATED: dev_get_window_info removed - use get_window_info production function
 
-    match find_window_by_id(&state, &window_id) {
-        Ok(Some(window)) => {
-            println!("[DEV_TOOL] Found target window.");
-
-            // Attempt to get detailed attributes first
-            let attrs_result = window.get_all_attributes();
-            let attrs_to_serialize = match attrs_result {
-                Ok(all_attrs) => {
-                    println!("[DEV_TOOL] Using get_all_attributes result.");
-                    all_attrs
-                }
-                Err(e) => {
-                    println!("[DEV_TOOL] get_all_attributes failed ({}), falling back to basic attributes.", e);
-                    window.attributes()
-                }
-            };
-
-            match serde_json::to_string_pretty(&attrs_to_serialize) {
-                Ok(json_string) => {
-                    send_dev_tool_notification(&app, "Window Info", "Retrieved window info.")?;
-                    Ok(json_string)
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to serialize window attributes: {}", e);
-                    println!("[DEV_TOOL] Error: {}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        }
-        Ok(None) => {
-            let err_msg = format!("Window with ID or index '{}' not found.", window_id);
-            println!("[DEV_TOOL] Info: {}", err_msg);
-            Err(err_msg)
-        }
-        Err(e) => {
-            println!("[DEV_TOOL] Error while searching for window: {}", e);
-            Err(e)
-        }
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn dev_focus_window(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    window_id: String,
-) -> Result<(), String> {
-    println!("[DEV_TOOL] Focusing window ID: {}", window_id);
-
-    match find_window_by_id(&state, &window_id) {
-        Ok(Some(window)) => {
-            match window.focus() {
-                Ok(_) => {
-                    println!("[DEV_TOOL] Focus window succeeded.");
-                    send_dev_tool_notification(&app, "Focus Window", "Window focused.")?;
-                    Ok(())
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to focus window '{}': {}", window_id, e);
-                    println!("[DEV_TOOL] Error: {}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        }
-        Ok(None) => {
-            let err_msg = format!("Window with ID '{}' not found for focusing.", window_id);
-            println!("[DEV_TOOL] Info: {}", err_msg);
-            Err(err_msg)
-        }
-        Err(e) => {
-            // Error message already includes context from find_window_by_id
-            println!("[DEV_TOOL] Error finding window for focus: {}", e);
-            Err(e)
-        }
-    }
-}
+// CONSOLIDATED: dev_focus_window removed - use focus_window production function
 
 // --- PRODUCTION WINDOW FUNCTIONS WITH DEBUG CAPABILITIES ---
 // These functions replace the dev_ prefixed functions by incorporating debug features conditionally
@@ -490,6 +290,280 @@ pub(crate) async fn focus_window(window_id: String, app: AppHandle, state: State
         }
         Err(e) => {
             error!("Error finding window for focus: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn resize_window(
+    window_id: String,
+    width: i32,
+    height: i32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&window_id)?;
+        if width <= 0 {
+            return Err("Width must be greater than 0".to_string());
+        }
+        if height <= 0 {
+            return Err("Height must be greater than 0".to_string());
+        }
+    }
+
+    log_debug_operation("resize_window", &format!("Resizing window ID: {} to {}x{}", window_id, width, height), &debug_config);
+    info!("Executing resize_window for window: {} to size {}x{}", window_id, width, height);
+
+    match find_window_by_id(&state, &window_id) {
+        Ok(Some(window)) => {
+            // Check if this is a window element
+            let role = window.attributes().role;
+            if role != "window" && role != "AXWindow" {
+                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+
+            // For macOS, use the desktop's accessibility APIs to resize the window
+            #[cfg(target_os = "macos")]
+            {
+                // First focus the window, then resize it
+                match window.focus() {
+                    Ok(_) => {
+                        info!("Successfully focused window '{}'", window_id);
+
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                        // Now resize the focused window using the desktop's engine
+                        let desktop = state.get_desktop()?;
+
+                        match desktop.engine().resize_window(width as f64, height as f64) {
+                            Ok(_) => {
+                                info!("Successfully resized window '{}' to size {}x{}", window_id, width, height);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Resize Window", &format!("Resized window '{}' to {}x{}", window_id, width, height));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to resize window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to focus window '{}' before resizing: {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                let error_msg = "Window resizing is only supported on macOS".to_string();
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
+        }
+        Ok(None) => {
+            let error_msg = format!("Window with ID '{}' not found for resizing.", window_id);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+        Err(e) => {
+            error!("Error finding window for resize: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn move_window(
+    window_id: String,
+    x: i32,
+    y: i32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&window_id)?;
+    }
+
+    log_debug_operation("move_window", &format!("Moving window ID: {} to ({}, {})", window_id, x, y), &debug_config);
+    info!("Executing move_window for window: {} to position ({}, {})", window_id, x, y);
+
+    match find_window_by_id(&state, &window_id) {
+        Ok(Some(window)) => {
+            // Check if this is a window element
+            let role = window.attributes().role;
+            if role != "window" && role != "AXWindow" {
+                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+
+            // For macOS, use the desktop's accessibility APIs to move the window
+            #[cfg(target_os = "macos")]
+            {
+                // First focus the window, then move it
+                match window.focus() {
+                    Ok(_) => {
+                        info!("Successfully focused window '{}'", window_id);
+
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                        // Now move the focused window using the desktop's engine
+                        let desktop = state.get_desktop()?;
+
+                        match desktop.engine().move_window(x as f64, y as f64) {
+                            Ok(_) => {
+                                info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Move Window", &format!("Moved window '{}' to ({}, {})", window_id, x, y));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to focus window '{}' before moving: {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                let error_msg = "Window moving is only supported on macOS".to_string();
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
+        }
+        Ok(None) => {
+            let error_msg = format!("Window with ID '{}' not found for moving.", window_id);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+        Err(e) => {
+            error!("Error finding window for move: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn close_window(
+    window_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    // Debug validation
+    if debug_config.validate_inputs {
+        validators::non_empty_text(&window_id)?;
+    }
+
+    log_debug_operation("close_window", &format!("Closing window ID: {}", window_id), &debug_config);
+    info!("Executing close_window for window: {}", window_id);
+
+    match find_window_by_id(&state, &window_id) {
+        Ok(Some(window)) => {
+            // Check if this is a window element
+            let role = window.attributes().role;
+            if role != "window" && role != "AXWindow" {
+                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+
+            // For macOS, use the desktop's accessibility APIs to close the window
+            #[cfg(target_os = "macos")]
+            {
+                // First focus the window, then close it
+                match window.focus() {
+                    Ok(_) => {
+                        info!("Successfully focused window '{}'", window_id);
+
+                        // Small delay to ensure focus has taken effect - use async sleep
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                        // Now close the focused window using the desktop's engine
+                        let desktop = state.get_desktop()?;
+
+                        match desktop.engine().close_window() {
+                            Ok(_) => {
+                                info!("Successfully closed window '{}'", window_id);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Close Window", &format!("Closed window '{}'", window_id));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to close window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to focus window '{}' before closing: {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                let error_msg = "Window closing is only supported on macOS".to_string();
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
+        }
+        Ok(None) => {
+            let error_msg = format!("Window with ID '{}' not found for closing.", window_id);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+        Err(e) => {
+            error!("Error finding window for close: {}", e);
             Err(e)
         }
     }
