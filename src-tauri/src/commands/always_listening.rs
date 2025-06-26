@@ -39,6 +39,7 @@ pub async fn start_always_listening_mode(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
+    info!("[Command] Successfully updated app state: always_listening_active = true");
 
     // Call the plugin command
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
@@ -132,6 +133,7 @@ pub async fn stop_always_listening_mode(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
+    info!("[Command] Successfully updated app state: always_listening_active = false");
 
     // Call the plugin command
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
@@ -248,6 +250,7 @@ pub async fn set_always_listening_sensitivity(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
+    info!("[Command] Successfully updated app state: always_listening_sensitivity = {}", sensitivity);
 
     // Call the plugin command if controller is available
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
@@ -328,6 +331,7 @@ pub async fn set_always_listening_wake_words(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
+    info!("[Command] Successfully updated app state: always_listening_wake_words = {:?}", wake_words);
 
     // Call the plugin command if controller is available
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
