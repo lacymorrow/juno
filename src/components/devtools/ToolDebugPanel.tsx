@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 interface ToolDebugInfo {
   name: string;
@@ -27,7 +27,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke('debug_tool_configuration');
+      const result = await invoke("debug_tool_configuration");
       setDebugInfo(result as DebugInfo);
     } catch (err) {
       setError(`Failed to debug tool configuration: ${err}`);
@@ -40,7 +40,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke('debug_registered_tools');
+      const result = await invoke("debug_registered_tools");
       setRegisteredTools(result as string[]);
     } catch (err) {
       setError(`Failed to debug registered tools: ${err}`);
@@ -53,8 +53,8 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      await invoke('debug_reset_tool_config');
-      alert('Tool configuration reset successfully!');
+      await invoke("debug_reset_tool_config");
+      alert("Tool configuration reset successfully!");
       // Refresh the debug info
       await debugToolConfiguration();
     } catch (err) {
@@ -64,7 +64,9 @@ export function ToolDebugPanel() {
     }
   };
 
-  const computerTool = debugInfo?.tools.find(tool => tool.name === 'computer');
+  const computerTool = debugInfo?.tools.find(
+    (tool) => tool.name === "computer"
+  );
   const computerToolMissing = debugInfo && !computerTool;
 
   return (
@@ -97,7 +99,9 @@ export function ToolDebugPanel() {
         </div>
 
         {loading && <div className="text-yellow-400">Loading...</div>}
-        {error && <div className="text-red-400 bg-red-900/20 p-2 rounded">{error}</div>}
+        {error && (
+          <div className="text-red-400 bg-red-900/20 p-2 rounded">{error}</div>
+        )}
 
         {computerToolMissing && (
           <div className="text-red-400 bg-red-900/20 p-2 rounded font-bold">
@@ -106,10 +110,16 @@ export function ToolDebugPanel() {
         )}
 
         {computerTool && (
-          <div className={`p-2 rounded ${computerTool.enabled ? 'bg-green-900/20 text-green-400' : 'bg-red-900/20 text-red-400'}`}>
+          <div
+            className={`p-2 rounded ${
+              computerTool.enabled
+                ? "bg-green-900/20 text-green-400"
+                : "bg-red-900/20 text-red-400"
+            }`}
+          >
             <strong>Computer Tool Status:</strong>
-            <div>Enabled: {computerTool.enabled ? 'YES' : 'NO'}</div>
-            <div>Required: {computerTool.required ? 'YES' : 'NO'}</div>
+            <div>Enabled: {computerTool.enabled ? "YES" : "NO"}</div>
+            <div>Required: {computerTool.required ? "YES" : "NO"}</div>
             <div>Category: {computerTool.category}</div>
           </div>
         )}
@@ -122,20 +132,31 @@ export function ToolDebugPanel() {
             <div>Disabled: {debugInfo.disabled_tools}</div>
 
             <h5 className="font-bold mt-3 mb-1">Category States:</h5>
-            {Object.entries(debugInfo.category_states).map(([category, enabled]) => (
-              <div key={category} className={enabled ? 'text-green-400' : 'text-red-400'}>
-                {category}: {enabled ? 'ENABLED' : 'DISABLED'}
-              </div>
-            ))}
+            {Object.entries(debugInfo.category_states).map(
+              ([category, enabled]) => (
+                <div
+                  key={category}
+                  className={enabled ? "text-green-400" : "text-red-400"}
+                >
+                  {category}: {enabled ? "ENABLED" : "DISABLED"}
+                </div>
+              )
+            )}
 
             <h5 className="font-bold mt-3 mb-1">All Tools:</h5>
             <div className="max-h-40 overflow-y-auto">
-              {debugInfo.tools.map(tool => (
+              {debugInfo.tools.map((tool) => (
                 <div
                   key={tool.name}
-                  className={`text-sm ${tool.enabled ? 'text-green-400' : 'text-red-400'} ${tool.name === 'computer' ? 'font-bold bg-yellow-900/20' : ''}`}
+                  className={`text-sm ${
+                    tool.enabled ? "text-green-400" : "text-red-400"
+                  } ${
+                    tool.name === "computer" ? "font-bold bg-yellow-900/20" : ""
+                  }`}
                 >
-                  {tool.name} ({tool.category}) - {tool.enabled ? 'ENABLED' : 'DISABLED'} {tool.required ? '[REQUIRED]' : ''}
+                  {tool.name} ({tool.category}) -{" "}
+                  {tool.enabled ? "ENABLED" : "DISABLED"}{" "}
+                  {tool.required ? "[REQUIRED]" : ""}
                 </div>
               ))}
             </div>
@@ -144,19 +165,25 @@ export function ToolDebugPanel() {
 
         {registeredTools && (
           <div className="bg-gray-800 p-3 rounded">
-            <h4 className="font-bold mb-2">Registered Tools ({registeredTools.length})</h4>
+            <h4 className="font-bold mb-2">
+              Registered Tools ({registeredTools.length})
+            </h4>
             <div className="max-h-40 overflow-y-auto">
-              {registeredTools.map(tool => (
+              {registeredTools.map((tool) => (
                 <div
                   key={tool}
-                  className={`text-sm ${tool === 'computer' ? 'font-bold text-yellow-400 bg-yellow-900/20' : 'text-gray-300'}`}
+                  className={`text-sm ${
+                    tool === "computer"
+                      ? "font-bold text-yellow-400 bg-yellow-900/20"
+                      : "text-gray-300"
+                  }`}
                 >
                   {tool}
                 </div>
               ))}
             </div>
 
-            {!registeredTools.includes('computer') && (
+            {!registeredTools.includes("computer") && (
               <div className="text-red-400 bg-red-900/20 p-2 rounded mt-2 font-bold">
                 🚨 CRITICAL: Computer tool is NOT registered!
               </div>

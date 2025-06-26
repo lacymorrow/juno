@@ -378,6 +378,21 @@ export const COMMANDS = {
   SCREENSHOTS_CAPTURE_ELEMENT_SCREENSHOT: 'capture_element_screenshot_command',
   SCREENSHOTS_CAPTURE_WINDOW_SCREENSHOT: 'capture_window_screenshot_command',
   SCREENSHOTS_CAPTURE_FOCUSED_WINDOW_SCREENSHOT: 'capture_focused_window_screenshot_command',
+  CLOUD_START_PRODUCTION_CLOUD_CONNECTOR: 'start_production_cloud_connector',
+  CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR: 'stop_production_cloud_connector',
+  CLOUD_GET_PRODUCTION_CLOUD_STATUS: 'get_production_cloud_status',
+  CLOUD_GET_CLOUD_CONFIG_STATUS: 'get_cloud_config_status',
+  CLOUD_TEST_CLOUD_BACKEND_CONNECTION: 'test_cloud_backend_connection',
+  CLOUD_ENABLE_CLOUD_BACKEND: 'enable_cloud_backend',
+  CLOUD_DISABLE_CLOUD_BACKEND: 'disable_cloud_backend',
+  CLOUD_TEST_WEBSOCKET_CONNECTION: 'test_websocket_connection',
+  CLOUD_SEND_TEST_CLOUD_COMMAND: 'send_test_cloud_command',
+  CLOUD_SIMULATE_CLOUD_COMMAND: 'simulate_cloud_command',
+  CLOUD_GET_WEBSOCKET_DIAGNOSTICS: 'get_websocket_diagnostics',
+  CLOUD_RUN_WEBSOCKET_TEST_SUITE: 'run_websocket_test_suite',
+  CLOUD_HANDLE_CLOUD_MESSAGE: 'handle_cloud_message',
+  CLOUD_EXECUTE_REMOTE_COMMAND: 'execute_remote_command',
+  CLOUD_GET_CLOUD_CONNECTION_DIAGNOSTICS: 'get_cloud_connection_diagnostics',
 } as const;
 
 export const FILE_EXTENSIONS = {
