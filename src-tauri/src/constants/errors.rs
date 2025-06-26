@@ -95,33 +95,33 @@ pub mod recovery {
 
 /// Common error message templates
 pub mod templates {
-    pub const FAILED_TO_EMIT: &str = "Failed to emit {} event: {}";
-    pub const FAILED_TO_INITIALIZE: &str = "Failed to initialize {}: {}";
-    pub const FAILED_TO_REGISTER: &str = "Failed to register {}: {}";
-    pub const FAILED_TO_SUBMIT: &str = "Failed to submit {}: {}";
-    pub const FAILED_TO_PARSE: &str = "Failed to parse {}: {}";
-    pub const FAILED_TO_CREATE: &str = "Failed to create {}: {}";
-    pub const FAILED_TO_LOAD: &str = "Failed to load {}: {}";
-    pub const FAILED_TO_SAVE: &str = "Failed to save {}: {}";
-    pub const FAILED_TO_UPDATE: &str = "Failed to update {}: {}";
-    pub const FAILED_TO_DELETE: &str = "Failed to delete {}: {}";
-    pub const FAILED_TO_CONNECT: &str = "Failed to connect to {}: {}";
-    pub const FAILED_TO_EXECUTE: &str = "Failed to execute {}: {}";
-    pub const FAILED_TO_START: &str = "Failed to start {}: {}";
-    pub const FAILED_TO_STOP: &str = "Failed to stop {}: {}";
-    pub const FAILED_TO_CONFIGURE: &str = "Failed to configure {}: {}";
-    pub const FAILED_TO_PROCESS: &str = "Failed to process {}: {}";
-    pub const FAILED_TO_VALIDATE: &str = "Failed to validate {}: {}";
-    pub const FAILED_TO_ACCESS: &str = "Failed to access {}: {}";
-    pub const FAILED_TO_RETRIEVE: &str = "Failed to retrieve {}: {}";
-    pub const FAILED_TO_SEND: &str = "Failed to send {}: {}";
-    pub const FAILED_TO_RECEIVE: &str = "Failed to receive {}: {}";
-    pub const FAILED_TO_CONVERT: &str = "Failed to convert {}: {}";
-    pub const FAILED_TO_DECODE: &str = "Failed to decode {}: {}";
-    pub const FAILED_TO_ENCODE: &str = "Failed to encode {}: {}";
-    pub const FAILED_TO_COMPRESS: &str = "Failed to compress {}: {}";
-    pub const FAILED_TO_SET: &str = "Failed to set {}: {}";
-    pub const FAILED_TO_RESTORE: &str = "Failed to restore {}: {}";
+    pub const FAILED_TO_EMIT: &str = "Failed to emit {0}: {1}";
+    pub const FAILED_TO_INITIALIZE: &str = "Failed to initialize {0}: {1}";
+    pub const FAILED_TO_REGISTER: &str = "Failed to register {0}: {1}";
+    pub const FAILED_TO_SUBMIT: &str = "Failed to submit {0}: {1}";
+    pub const FAILED_TO_PARSE: &str = "Failed to parse {0}: {1}";
+    pub const FAILED_TO_CREATE: &str = "Failed to create {0}: {1}";
+    pub const FAILED_TO_LOAD: &str = "Failed to load {0}: {1}";
+    pub const FAILED_TO_SAVE: &str = "Failed to save {0}: {1}";
+    pub const FAILED_TO_UPDATE: &str = "Failed to update {0}: {1}";
+    pub const FAILED_TO_DELETE: &str = "Failed to delete {0}: {1}";
+    pub const FAILED_TO_CONNECT: &str = "Failed to connect to {0}: {1}";
+    pub const FAILED_TO_EXECUTE: &str = "Failed to execute {0}: {1}";
+    pub const FAILED_TO_START: &str = "Failed to start {0}: {1}";
+    pub const FAILED_TO_STOP: &str = "Failed to stop {0}: {1}";
+    pub const FAILED_TO_CONFIGURE: &str = "Failed to configure {0}: {1}";
+    pub const FAILED_TO_PROCESS: &str = "Failed to process {0}: {1}";
+    pub const FAILED_TO_VALIDATE: &str = "Failed to validate {0}: {1}";
+    pub const FAILED_TO_ACCESS: &str = "Failed to access {0}: {1}";
+    pub const FAILED_TO_RETRIEVE: &str = "Failed to retrieve {0}: {1}";
+    pub const FAILED_TO_SEND: &str = "Failed to send {0}: {1}";
+    pub const FAILED_TO_RECEIVE: &str = "Failed to receive {0}: {1}";
+    pub const FAILED_TO_CONVERT: &str = "Failed to convert {0}: {1}";
+    pub const FAILED_TO_DECODE: &str = "Failed to decode {0}: {1}";
+    pub const FAILED_TO_ENCODE: &str = "Failed to encode {0}: {1}";
+    pub const FAILED_TO_COMPRESS: &str = "Failed to compress {0}: {1}";
+    pub const FAILED_TO_SET: &str = "Failed to set {0}: {1}";
+    pub const FAILED_TO_RESTORE: &str = "Failed to restore {0}: {1}";
 }
 
 /// Error categories for consistent classification

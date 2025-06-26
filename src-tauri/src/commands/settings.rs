@@ -16,7 +16,9 @@ use crate::constants::errors::actions;
 
 /// Helper function to format error messages with our centralized templates
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replace("{}", context).replace("{}", &error.to_string())
+    template
+        .replace("{0}", context)
+        .replace("{1}", &error.to_string())
 }
 
 /// Get all application settings
