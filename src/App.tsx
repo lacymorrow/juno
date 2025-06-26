@@ -188,41 +188,16 @@ function App() {
     initializeApp();
   }, [appState.setAppVersion, appState.setKeyboardShortcuts]);
 
-  // Enhanced keyboard event handling
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (appState.activeModal) return;
-
-      // Option+D for Agent Mode trigger
-      if (event.altKey && event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        console.log("🎤 Agent mode triggered via Option+D");
-        invoke("trigger_agent_mode").catch(console.error);
-        return;
-      }
-
-      // Option+S for Settings
-      if (event.altKey && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        console.log("⚙️ Opening settings via Option+S");
-        invoke("open_settings_window").catch(console.error);
-        return;
-      }
-
-      // Escape key handling
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (appState.isProcessing) {
-          console.log("🛑 Escape pressed - stopping operations");
-          handleStop({ preventDefault: () => {} } as React.FormEvent);
-        }
-        return;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState.activeModal, appState.isProcessing, handleStop]);
+  // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
+  // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"
+  //
+  // The backend escape key system works correctly:
+  // 1. Escape pressed → Backend stop coordinator stops all operations
+  // 2. Backend emits events → Frontend receives and stops audio/UI
+  // 3. No frontend state checks needed - escape universally stops everything
+  //
+  // This design prevents the original bug where frontend state checks could fail,
+  // while providing reliable universal cancellation behavior.
 
   // Example prompt selection handler - automatically submits the prompt
   const handleExamplePromptSelect = useCallback(
