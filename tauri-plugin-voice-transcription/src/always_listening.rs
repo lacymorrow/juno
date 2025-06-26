@@ -78,8 +78,11 @@ pub struct AlwaysListeningController {
     wake_words: Vec<String>,
     last_activity: Arc<Mutex<Option<Instant>>>,
     // New fields for intelligent filtering
+    #[allow(dead_code)] // Reserved for future intelligent filtering
     agent_call_timestamps: Arc<Mutex<Vec<Instant>>>,
+    #[allow(dead_code)] // Reserved for future intelligent filtering
     last_meaningful_command: Arc<Mutex<Option<Instant>>>,
+    #[allow(dead_code)] // Reserved for future intelligent filtering
     command_processing_count: Arc<Mutex<u32>>,
 }
 
@@ -1219,7 +1222,7 @@ impl AlwaysListeningController {
         }
     }
 
-    pub fn force_threshold_test<R: Runtime>(&mut self, app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
+    pub fn force_threshold_test<R: Runtime>(&mut self, _app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
         info!("[AlwaysListeningController] Starting force threshold test...");
 
         if let Some((_, control_tx)) = &self.audio_thread {

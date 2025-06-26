@@ -293,7 +293,7 @@ impl VoiceController {
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
-        let model_path_for_thread = self.model_path.clone();
+        let _model_path_for_thread = self.model_path.clone();
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
