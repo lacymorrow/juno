@@ -204,7 +204,7 @@ impl FloatingBarManager {
             "agentState": self.agent_state,
         });
 
-        if let Err(e) = self.app_handle.emit("bar-state-update", state_data) {
+        if let Err(e) = self.app_handle.emit(events::bar::STATE_UPDATE, state_data) {
             error!("Failed to emit bar-state-update: {}", e);
         }
     }
@@ -420,7 +420,7 @@ impl FloatingBarManager {
                 safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     // Emit event to complete transition instead of direct manager access
-                    let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
+                    let _ = app_handle.emit(events::bar::COMPLETE_TRANSITION, transition_id_clone);
                 });
             }
             "Failed" | "Cancelled" | "Offline" => {
@@ -441,7 +441,7 @@ impl FloatingBarManager {
                 safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
                     // Emit event to clear error state instead of direct manager access
-                    let _ = app_handle.emit("floating-bar-clear-error", transition_id_clone);
+                    let _ = app_handle.emit(events::bar::CLEAR_ERROR, transition_id_clone);
                 });
             }
             _ => {
@@ -939,7 +939,7 @@ pub async fn set_floating_bar_config(
     config.save_to_centralized_settings(&app_handle).await?;
 
     // Emit event to notify frontend of config change (for backward compatibility)
-    if let Err(e) = app_handle.emit("floating-bar-config-changed", &config) {
+    if let Err(e) = app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
         warn!("Failed to emit config change event: {}", e);
     }
 

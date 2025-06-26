@@ -7,6 +7,7 @@ use tauri::{
 use tracing::{info, error};
 use crate::constants;
 use crate::commands;
+use crate::constants::events;
 
 /// Setup the application menu for the main window
 pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
@@ -210,7 +211,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // Juno Menu
         constants::app_menu_ids::ABOUT => {
             info!("[Menu] About menu item clicked");
-            if let Err(e) = app_handle.emit("about-requested", ()) {
+            if let Err(e) = app_handle.emit(events::menu::ABOUT_REQUESTED, ()) {
                 error!("[Menu] Failed to emit about event: {}", e);
             }
         }
@@ -233,37 +234,37 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // Edit Menu - Handle predefined menu items explicitly for web content
         "edit-undo" => {
             info!("[Menu] Undo menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-undo", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_UNDO, ()) {
                 error!("[Menu] Failed to emit undo event: {}", e);
             }
         }
         "edit-redo" => {
             info!("[Menu] Redo menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-redo", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_REDO, ()) {
                 error!("[Menu] Failed to emit redo event: {}", e);
             }
         }
         "edit-cut" => {
             info!("[Menu] Cut menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-cut", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_CUT, ()) {
                 error!("[Menu] Failed to emit cut event: {}", e);
             }
         }
         "edit-copy" => {
             info!("[Menu] Copy menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-copy", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_COPY, ()) {
                 error!("[Menu] Failed to emit copy event: {}", e);
             }
         }
         "edit-paste" => {
             info!("[Menu] Paste menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-paste", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_PASTE, ()) {
                 error!("[Menu] Failed to emit paste event: {}", e);
             }
         }
         "edit-select-all" => {
             info!("[Menu] Select All menu item clicked");
-            if let Err(e) = app_handle.emit("menu-edit-select-all", ()) {
+            if let Err(e) = app_handle.emit(events::menu::EDIT_SELECT_ALL, ()) {
                 error!("[Menu] Failed to emit select all event: {}", e);
             }
         }

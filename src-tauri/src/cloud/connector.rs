@@ -17,6 +17,7 @@ use super::types::{
     CloudCommand, CloudError, DeviceResponse, DeviceStatus, MessageType, WebSocketMessage,
 };
 use crate::constants::{api, permissions};
+use crate::constants::events;
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -731,7 +732,7 @@ impl ProductionCloudConnector {
                         serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data)
                     {
                         // Emit command to be handled by the app
-                        if let Err(e) = app_handle.emit("cloud-command-received", &command) {
+                        if let Err(e) = app_handle.emit(events::cloud::COMMAND_RECEIVED, &command) {
                             error!("Failed to emit cloud command: {}", e);
                         }
                     } else {
@@ -1279,7 +1280,7 @@ impl ProductionCloudConnector {
             ConnectorState::Reconnecting(_) => "reconnecting",
         };
 
-        if let Err(e) = self.app_handle.emit("cloud-connector-state", state_str) {
+        if let Err(e) = self.app_handle.emit(events::cloud::CONNECTOR_STATE, state_str) {
             error!("Failed to emit cloud connector state: {}", e);
         }
 

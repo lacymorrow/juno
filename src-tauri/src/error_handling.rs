@@ -7,6 +7,7 @@
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, warn, info};
 use std::fmt;
+use crate::constants::events;
 
 /// Application-wide error types for better error categorization
 #[derive(Debug, Clone)]
@@ -123,7 +124,7 @@ pub mod utils {
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
 
-            if let Err(e) = app_handle.emit("error-occurred", error_payload) {
+            if let Err(e) = app_handle.emit(events::system::ERROR_OCCURRED, error_payload) {
                 error!("Failed to emit error event: {}", e);
             }
         }
@@ -195,7 +196,7 @@ pub mod utils {
             ]
         });
 
-        if let Err(e) = app_handle.emit("permission-guidance-needed", guidance_payload) {
+        if let Err(e) = app_handle.emit(events::permissions::GUIDANCE_NEEDED, guidance_payload) {
             error!("Failed to emit permission guidance event: {}", e);
         }
     }

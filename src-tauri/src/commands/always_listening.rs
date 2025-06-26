@@ -3,6 +3,7 @@ use crate::state::AppState;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
+use crate::constants::events;
 
 /// Start always listening mode
 #[tauri::command]
@@ -52,7 +53,7 @@ pub async fn start_always_listening_mode(
                     info!("[Command] Always listening mode started successfully");
 
                     // Emit event to UI
-                    if let Err(e) = app.emit("always-listening-mode-changed", true) {
+                    if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, true) {
                         error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
 
@@ -146,7 +147,7 @@ pub async fn stop_always_listening_mode(
                     info!("[Command] Always listening mode stopped successfully");
 
                     // Emit event to UI
-                    if let Err(e) = app.emit("always-listening-mode-changed", false) {
+                    if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
                         error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
 

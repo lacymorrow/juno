@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 
 // Import sound commands for boot sound functionality
 use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
+use crate::constants::events;
 
 /// Initialize all application state components and background tasks
 pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), String> {
@@ -395,7 +396,7 @@ pub async fn handle_dictation_state_transition(
     }
 
     // Emit state change event for UI
-    if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, active) {
+    if let Err(e) = app_handle.emit(events::dictation::ACTIVE, active) {
         error!("Failed to emit dictation-active event: {}", e);
         return Err(format!("Failed to emit dictation state event: {}", e));
     }
@@ -426,7 +427,7 @@ pub async fn handle_agent_execution_state_transition(
     }
 
     // Emit state change event for UI
-    if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, active) {
+    if let Err(e) = app_handle.emit(events::agent::ACTIVE, active) {
         error!("Failed to emit agent-active event: {}", e);
         return Err(format!("Failed to emit agent state event: {}", e));
     }
@@ -496,10 +497,10 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     crate::dictation_monitor::force_reset_dictation_input_state().await;
 
     // Emit state updates
-    let _ = app_handle.emit("agent-active", false);
-    let _ = app_handle.emit("dictation-active", false);
-    let _ = app_handle.emit("always-listening-mode-changed", false);
-    let _ = app_handle.emit("tts-stop-requested", ());
+    let _ = app_handle.emit(events::agent::ACTIVE, false);
+    let _ = app_handle.emit(events::dictation::ACTIVE, false);
+    let _ = app_handle.emit(events::always_listening::MODE_CHANGED, false);
+    let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());
 
     // Update floating bar
     crate::commands::floating_bar::handle_backend_response(

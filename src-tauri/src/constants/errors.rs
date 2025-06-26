@@ -88,4 +88,153 @@ pub mod recovery {
     pub const MAX_BATCH_RETRY_ATTEMPTS: u32 = 2;
 }
 
+//! # Error Message Templates
+//!
+//! Centralized error message templates used throughout the application.
+//! These provide consistent error messaging and reduce code duplication.
+
+/// Common error message templates
+pub mod templates {
+    pub const FAILED_TO_EMIT: &str = "Failed to emit {} event: {}";
+    pub const FAILED_TO_INITIALIZE: &str = "Failed to initialize {}: {}";
+    pub const FAILED_TO_REGISTER: &str = "Failed to register {}: {}";
+    pub const FAILED_TO_SUBMIT: &str = "Failed to submit {}: {}";
+    pub const FAILED_TO_PARSE: &str = "Failed to parse {}: {}";
+    pub const FAILED_TO_CREATE: &str = "Failed to create {}: {}";
+    pub const FAILED_TO_LOAD: &str = "Failed to load {}: {}";
+    pub const FAILED_TO_SAVE: &str = "Failed to save {}: {}";
+    pub const FAILED_TO_UPDATE: &str = "Failed to update {}: {}";
+    pub const FAILED_TO_DELETE: &str = "Failed to delete {}: {}";
+    pub const FAILED_TO_CONNECT: &str = "Failed to connect to {}: {}";
+    pub const FAILED_TO_EXECUTE: &str = "Failed to execute {}: {}";
+    pub const FAILED_TO_START: &str = "Failed to start {}: {}";
+    pub const FAILED_TO_STOP: &str = "Failed to stop {}: {}";
+    pub const FAILED_TO_CONFIGURE: &str = "Failed to configure {}: {}";
+    pub const FAILED_TO_PROCESS: &str = "Failed to process {}: {}";
+    pub const FAILED_TO_VALIDATE: &str = "Failed to validate {}: {}";
+    pub const FAILED_TO_ACCESS: &str = "Failed to access {}: {}";
+    pub const FAILED_TO_RETRIEVE: &str = "Failed to retrieve {}: {}";
+    pub const FAILED_TO_SEND: &str = "Failed to send {}: {}";
+    pub const FAILED_TO_RECEIVE: &str = "Failed to receive {}: {}";
+    pub const FAILED_TO_CONVERT: &str = "Failed to convert {}: {}";
+    pub const FAILED_TO_DECODE: &str = "Failed to decode {}: {}";
+    pub const FAILED_TO_ENCODE: &str = "Failed to encode {}: {}";
+}
+
+/// Error categories for consistent classification
+pub mod categories {
+    pub const PERMISSION_ERROR: &str = "permission_error";
+    pub const NETWORK_ERROR: &str = "network_error";
+    pub const VALIDATION_ERROR: &str = "validation_error";
+    pub const INITIALIZATION_ERROR: &str = "initialization_error";
+    pub const CONFIGURATION_ERROR: &str = "configuration_error";
+    pub const AGENT_ERROR: &str = "agent_error";
+    pub const TOOL_ERROR: &str = "tool_error";
+    pub const VOICE_ERROR: &str = "voice_error";
+    pub const SYSTEM_ERROR: &str = "system_error";
+    pub const PARSING_ERROR: &str = "parsing_error";
+    pub const IO_ERROR: &str = "io_error";
+    pub const AUTHENTICATION_ERROR: &str = "authentication_error";
+    pub const TIMEOUT_ERROR: &str = "timeout_error";
+    pub const RESOURCE_ERROR: &str = "resource_error";
+    pub const COMPATIBILITY_ERROR: &str = "compatibility_error";
+}
+
+/// Context-specific error components
+pub mod components {
+    pub const EVENT: &str = "event";
+    pub const SETTINGS_MANAGER: &str = "settings manager";
+    pub const AGENT_BRAIN: &str = "agent brain";
+    pub const ORCHESTRATOR: &str = "orchestrator";
+    pub const MCP_MANAGER: &str = "MCP manager";
+    pub const BROWSER_CONTROLLER: &str = "browser controller";
+    pub const DESKTOP_ENGINE: &str = "desktop engine";
+    pub const WHISPER_CONTEXT: &str = "Whisper context";
+    pub const VOICE_CONTROLLER: &str = "voice controller";
+    pub const ALWAYS_LISTENING_CONTROLLER: &str = "always listening controller";
+    pub const ESCAPE_KEY: &str = "escape key";
+    pub const GLOBAL_SHORTCUTS: &str = "global shortcuts";
+    pub const COMPUTER_USE_TOOLS: &str = "Computer Use tools";
+    pub const TOOL_PROVIDER: &str = "tool provider";
+    pub const SELF_IMPROVEMENT_SYSTEM: &str = "self-improvement system";
+    pub const ACCESSIBILITY: &str = "desktop accessibility";
+    pub const CLIPBOARD: &str = "clipboard";
+    pub const PLAYWRIGHT_DRIVER: &str = "Playwright driver";
+    pub const AUTOMATION: &str = "automation";
+    pub const APPLICATION_STATE: &str = "application state";
+    pub const CLOUD_CLIENT: &str = "cloud client";
+    pub const MCP_SERVERS: &str = "MCP servers";
+    pub const ONBOARDING_SYSTEM: &str = "onboarding system";
+    pub const AUTOSTART_CONFIGURATION: &str = "autostart configuration";
+    pub const AI_PROVIDER_SETTINGS: &str = "AI provider settings";
+    pub const VOICE_TRANSCRIPTION_CONFIG: &str = "voice transcription config";
+    pub const DICTATION_INPUT_MONITORING: &str = "dictation input monitoring";
+}
+
+/// Action-specific error components
+pub mod actions {
+    pub const QUERY: &str = "query";
+    pub const EVENT_EMIT: &str = "event emission";
+    pub const TOOL_REGISTRATION: &str = "tool registration";
+    pub const SHORTCUT_REGISTRATION: &str = "shortcut registration";
+    pub const TOOL_EXECUTION: &str = "tool execution";
+    pub const COMMAND_EXECUTION: &str = "command execution";
+    pub const API_RESPONSE: &str = "API response";
+    pub const TOOL_ARGUMENTS: &str = "tool arguments";
+    pub const JSON_PARSING: &str = "JSON parsing";
+    pub const WEBSOCKET_MESSAGE: &str = "WebSocket message";
+    pub const CLOUD_COMMAND: &str = "cloud command";
+    pub const SETTINGS_JSON: &str = "settings JSON";
+    pub const PAYLOAD_PARSING: &str = "payload parsing";
+    pub const KEY_COMBINATION: &str = "key combination";
+    pub const TOOL_DEFINITION: &str = "tool definition";
+    pub const BATCH_RESPONSE: &str = "batch response";
+    pub const DOM_STRUCTURE: &str = "DOM structure";
+    pub const IMAGE_PROCESSING: &str = "image processing";
+    pub const SCROLL_INPUT: &str = "scroll input";
+    pub const WAIT_INPUT: &str = "wait input";
+    pub const RELEASE_KEY_INPUT: &str = "release_key input";
+    pub const SET_CLIPBOARD_INPUT: &str = "set_clipboard input";
+    pub const WINDOW_LIST_JSON: &str = "window list JSON";
+    pub const WINDOW_INFO_JSON: &str = "window info JSON";
+    pub const EXECUTE_COMMAND_INPUT: &str = "execute_command input";
+    pub const OPEN_FILE_AND_TYPE_INPUT: &str = "open_file_and_type input";
+    pub const COPY_AND_PASTE_INPUT: &str = "copy_and_paste input";
+}
+
+/// User-facing error messages for common scenarios
+pub mod user_messages {
+    pub const PERMISSION_GUIDANCE_NEEDED: &str = "Permission guidance needed";
+    pub const VOICE_UNAVAILABLE: &str = "Voice transcription is not available";
+    pub const SHORTCUT_PERMISSIONS_MISSING: &str = "This may be due to missing Input Monitoring permissions";
+    pub const ESCAPE_KEY_UNAVAILABLE: &str = "continuing without escape key cancellation";
+    pub const SHORTCUTS_UNAVAILABLE: &str = "continuing without shortcuts";
+    pub const TTS_ESCAPE_WARNING: &str = "TTS will still work but escape key may not stop it";
+    pub const RETRYING: &str = "Retrying...";
+    pub const USING_DEFAULTS: &str = "using defaults";
+    pub const CONTINUING_ANYWAY: &str = "continuing anyway";
+    pub const FEATURE_UNAVAILABLE: &str = "will be unavailable";
+    pub const INITIALIZATION_INCOMPLETE: &str = "Creating uninitialized controller";
+}
+
+/// Logging prefixes for consistent log formatting
+pub mod prefixes {
+    pub const AGENT_MODE: &str = "[Agent Mode]";
+    pub const DICTATION_MODE: &str = "[Dictation Mode]";
+    pub const ALWAYS_LISTENING: &str = "[AlwaysListening]";
+    pub const MENU: &str = "[Menu]";
+    pub const TRAY_MENU: &str = "[TrayMenu]";
+    pub const COMMAND: &str = "[Command]";
+    pub const STATE_MANAGER: &str = "[StateManager]";
+    pub const DICTATION_STATE_MANAGER: &str = "[DictationStateManager]";
+    pub const ESCAPE_KEY_COORDINATOR: &str = "[EscapeKeyCoordinator]";
+    pub const STOP_COORDINATOR: &str = "[StopCoordinator]";
+    pub const TIMER_EVENT: &str = "[Timer Event]";
+    pub const EVENT: &str = "[Event]";
+    pub const TTS: &str = "[TTS]";
+    pub const AGENT_MODE_SHORTCUT: &str = "[Agent Mode Shortcut]";
+    pub const DICTATION_INPUT_SHORTCUT: &str = "[Dictation Input Shortcut]";
+    pub const DICTATION_TAP_MODE: &str = "[Dictation Tap Mode]";
+}
+
 

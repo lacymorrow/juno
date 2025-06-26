@@ -7,6 +7,7 @@
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn, error};
 use crate::constants;
+use crate::constants::events;
 
 // macOS-specific imports - only available on macOS
 #[cfg(target_os = "macos")]
@@ -279,7 +280,7 @@ pub mod mouse_tracking {
 
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
-                    let _ = window.emit("mouse-entered-window", ()); // Emit specific event
+                    let _ = window.emit(events::system::MOUSE_ENTERED_WINDOW, ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
@@ -314,7 +315,7 @@ pub mod mouse_tracking {
 
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
-                    let _ = window.emit("mouse-left-window", ()); // Emit specific event
+                    let _ = window.emit(events::system::MOUSE_LEFT_WINDOW, ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);

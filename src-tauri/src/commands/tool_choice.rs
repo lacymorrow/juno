@@ -8,6 +8,7 @@ use crate::agent::intelligence::{
 };
 use crate::agent::providers::anthropic::ToolChoice;
 use crate::state::AppState;
+use crate::constants::events;
 
 /// Configuration for tool choice intelligence system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,7 +151,7 @@ pub async fn set_tool_choice_config(
     info!("Tool choice configuration updated successfully");
 
     // Emit configuration change event to frontend
-    if let Err(e) = app_handle.emit("tool-choice-config-changed", &config) {
+    if let Err(e) = app_handle.emit(events::tool_choice::CONFIG_CHANGED, &config) {
         warn!("Failed to emit tool choice config change event: {}", e);
     }
 
@@ -303,7 +304,7 @@ pub async fn reset_tool_choice_config(
     info!("Tool choice configuration reset successfully");
 
     // Emit reset event to frontend
-    if let Err(e) = app_handle.emit("tool-choice-config-reset", &default_config) {
+    if let Err(e) = app_handle.emit(events::tool_choice::CONFIG_RESET, &default_config) {
         warn!("Failed to emit tool choice config reset event: {}", e);
     }
 
@@ -322,7 +323,7 @@ pub async fn set_tool_choice_enabled(
     // TODO: Store enabled state in app state
 
     // Emit state change event to frontend
-    if let Err(e) = app_handle.emit("tool-choice-enabled-changed", enabled) {
+    if let Err(e) = app_handle.emit(events::tool_choice::ENABLED_CHANGED, enabled) {
         warn!("Failed to emit tool choice enabled change event: {}", e);
     }
 

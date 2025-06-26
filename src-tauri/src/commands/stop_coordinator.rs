@@ -6,6 +6,7 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::RwLock;
 use once_cell::sync::Lazy;
 use crate::state::AppState;
+use crate::constants::events;
 
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
@@ -148,7 +149,7 @@ impl StopCoordinator {
             crate::tts::stop_speech();
 
             // Emit TTS stop event once
-            if let Err(e) = app_handle.emit("tts-stop-requested", ()) {
+            if let Err(e) = app_handle.emit(events::tts::STOP_REQUESTED, ()) {
                 warn!("[StopCoordinator] Failed to emit TTS stop event: {}", e);
             }
             cleanup_results.push("TTS stopped".to_string());
