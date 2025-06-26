@@ -874,8 +874,8 @@ pub mod utils {
         // Emit event if specified
         if let Some(event_name) = emit_event {
             if let Err(e) = app_handle.emit(event_name, new_state) {
-                            error!("Failed to emit event_name: {}", e);
-            return Err(format!("Failed to emit event: {}", e));
+                error!("Failed to emit {}: {}", event_name, e);
+                return Err(format!("Failed to emit {}: {}", event_name, e));
             }
         }
 
