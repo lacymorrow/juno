@@ -332,13 +332,45 @@ pub(crate) async fn resize_window(
                 return Err(error_msg);
             }
 
-            // For macOS, we need to access the underlying MacOSUIElement to manipulate window attributes
+            // For macOS, use the desktop's accessibility APIs to resize the window
             #[cfg(target_os = "macos")]
             {
-                // For now, since we can't access the internal MacOSUIElement, return not implemented
-                let error_msg = format!("Window resizing not yet implemented for window ID '{}'", window_id);
-                error!("{}", error_msg);
-                return Err(error_msg);
+                // First focus the window, then resize it
+                match window.focus() {
+                    Ok(_) => {
+                        info!("Successfully focused window '{}'", window_id);
+
+                        // Small delay to ensure focus has taken effect
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+
+                        // Now resize the focused window using the engine
+                        let desktop = state.desktop.get_desktop()?;
+                        let engine = desktop.engine();
+
+                        match engine.resize_window(width as f64, height as f64) {
+                            Ok(_) => {
+                                info!("Successfully resized window '{}' to size {}x{}", window_id, width, height);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Resize Window", &format!("Resized window '{}' to {}x{}", window_id, width, height));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to resize window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to focus window '{}' before resizing: {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
             }
 
             #[cfg(not(target_os = "macos"))]
@@ -394,19 +426,38 @@ pub(crate) async fn move_window(
             // For macOS, use the desktop's accessibility APIs to move the window
             #[cfg(target_os = "macos")]
             {
-                match move_macos_window(&window, x as f64, y as f64) {
+                // First focus the window, then move it
+                match window.focus() {
                     Ok(_) => {
-                        info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
+                        info!("Successfully focused window '{}'", window_id);
 
-                        // Send debug notification if enabled
-                        if debug_config.send_notifications {
-                            let _ = send_debug_notification(&app, "Move Window", &format!("Moved window '{}' to ({}, {})", window_id, x, y));
+                        // Small delay to ensure focus has taken effect
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+
+                        // Now move the focused window using the engine
+                        let desktop = state.desktop.get_desktop()?;
+                        let engine = desktop.engine();
+
+                        match engine.move_window(x as f64, y as f64) {
+                            Ok(_) => {
+                                info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Move Window", &format!("Moved window '{}' to ({}, {})", window_id, x, y));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
                         }
-
-                        Ok(())
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                        let error_msg = format!("Failed to focus window '{}' before moving: {}", window_id, e);
                         error!("{}", error_msg);
                         Err(error_msg)
                     }
@@ -461,13 +512,45 @@ pub(crate) async fn close_window(
                 return Err(error_msg);
             }
 
-            // For macOS, we need to access the underlying MacOSUIElement to manipulate window attributes
+            // For macOS, use the desktop's accessibility APIs to close the window
             #[cfg(target_os = "macos")]
             {
-                // For now, since we can't access the internal MacOSUIElement, return not implemented
-                let error_msg = format!("Window closing not yet implemented for window ID '{}'", window_id);
-                error!("{}", error_msg);
-                return Err(error_msg);
+                // First focus the window, then close it
+                match window.focus() {
+                    Ok(_) => {
+                        info!("Successfully focused window '{}'", window_id);
+
+                        // Small delay to ensure focus has taken effect
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+
+                        // Now close the focused window using the engine
+                        let desktop = state.desktop.get_desktop()?;
+                        let engine = desktop.engine();
+
+                        match engine.close_window() {
+                            Ok(_) => {
+                                info!("Successfully closed window '{}'", window_id);
+
+                                // Send debug notification if enabled
+                                if debug_config.send_notifications {
+                                    let _ = send_debug_notification(&app, "Close Window", &format!("Closed window '{}'", window_id));
+                                }
+
+                                Ok(())
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to close window '{}': {}", window_id, e);
+                                error!("{}", error_msg);
+                                Err(error_msg)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to focus window '{}' before closing: {}", window_id, e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
             }
 
             #[cfg(not(target_os = "macos"))]
@@ -487,53 +570,4 @@ pub(crate) async fn close_window(
             Err(e)
         }
     }
-}
-
-// Helper functions for macOS window manipulation
-#[cfg(target_os = "macos")]
-fn resize_macos_window(_window_element: &computer_use_ai_sdk::UIElement, _width: f64, _height: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    // For now, return a not implemented error
-    // This would require access to the internal MacOSUIElement and accessibility APIs
-    Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
-        "Window resizing not yet implemented - requires direct accessibility API access".to_string()
-    ))
-}
-
-#[cfg(target_os = "macos")]
-fn move_macos_window(window_element: &computer_use_ai_sdk::UIElement, x: f64, y: f64) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    use computer_use_ai_sdk::AutomationError;
-
-    // Get the window bounds to validate it's a proper window
-    let bounds = window_element.bounds().map_err(|e| {
-        AutomationError::PlatformError(format!("Failed to get window bounds: {}", e))
-    })?;
-
-    // Verify it's a window by checking its role
-    let role = window_element.role();
-    if role != "window" && role != "AXWindow" {
-        return Err(AutomationError::UnsupportedOperation(
-            format!("Cannot move a non-window element (role: {})", role)
-        ));
-    }
-
-    // Log the window move request with current and target positions
-    info!("Window move requested: window with role '{}' at bounds ({:.1}, {:.1}, {:.1}, {:.1}) to position ({}, {})",
-          role, bounds.0, bounds.1, bounds.2, bounds.3, x, y);
-
-    // For now, return a descriptive error indicating the feature is not yet fully implemented
-    // but the window was found and validated successfully
-    Err(AutomationError::UnsupportedOperation(
-        format!("Window moving is not yet fully implemented. Window '{}' was found successfully at ({:.1}, {:.1}) but moving to ({}, {}) requires additional accessibility API integration.",
-                window_element.attributes().label.unwrap_or_else(|| "Untitled".to_string()),
-                bounds.0, bounds.1, x, y)
-    ))
-}
-
-#[cfg(target_os = "macos")]
-fn close_macos_window(_window_element: &computer_use_ai_sdk::UIElement) -> Result<(), computer_use_ai_sdk::AutomationError> {
-    // For now, return a not implemented error
-    // This would require access to the internal MacOSUIElement and accessibility APIs
-    Err(computer_use_ai_sdk::AutomationError::UnsupportedOperation(
-        "Window closing not yet implemented - requires direct accessibility API access".to_string()
-    ))
 }
