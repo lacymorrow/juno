@@ -1,6 +1,6 @@
+use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
-use crate::settings::{manager::SettingsManager, OnboardingSettings};
 
 /// Check if we're running in development mode
 fn is_development_mode() -> bool {
@@ -25,7 +25,10 @@ pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
     }
 
     let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
-    let onboarding_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
+    let onboarding_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(onboarding_settings.completed)
 }
@@ -43,7 +46,10 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         skip_count: 0,
     };
 
-    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
+    settings_manager
+        .set_onboarding_settings(&onboarding_settings)
+        .await
+        .map_err(|e| e.to_string())?;
 
     info!("Onboarding marked as completed at {}", now);
     Ok(())
@@ -56,7 +62,10 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
 
     // Get current settings to preserve skip count
-    let mut current_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
+    let mut current_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let onboarding_settings = OnboardingSettings {
         completed: true,
@@ -65,9 +74,15 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         skip_count: current_settings.skip_count + 1,
     };
 
-    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
+    settings_manager
+        .set_onboarding_settings(&onboarding_settings)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    info!("Onboarding skipped at {} (skip count: {})", now, onboarding_settings.skip_count);
+    info!(
+        "Onboarding skipped at {} (skip count: {})",
+        now, onboarding_settings.skip_count
+    );
     Ok(())
 }
 
@@ -83,44 +98,49 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
         skip_count: 0,
     };
 
-    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
+    settings_manager
+        .set_onboarding_settings(&onboarding_settings)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Reset permissions state so the permissions flow can be shown again during onboarding
     let app_state = app.state::<crate::state::AppState>();
 
     // Clear the permissions state in the app state
-    app_state.update_permissions_state(crate::commands::permissions::PermissionsState {
-        accessibility: crate::commands::permissions::PermissionStatus {
-            permission_type: "accessibility".to_string(),
-            granted: false,
-            required: true,
-            description: "Accessibility permission needs to be rechecked".to_string(),
-            instructions: "Grant accessibility permission during onboarding".to_string(),
-        },
-        screen_recording: crate::commands::permissions::PermissionStatus {
-            permission_type: "screen_recording".to_string(),
-            granted: false,
-            required: true,
-            description: "Screen recording permission needs to be rechecked".to_string(),
-            instructions: "Grant screen recording permission during onboarding".to_string(),
-        },
-        microphone: crate::commands::permissions::PermissionStatus {
-            permission_type: "microphone".to_string(),
-            granted: false,
-            required: false,
-            description: "Microphone permission needs to be rechecked".to_string(),
-            instructions: "Grant microphone permission if needed".to_string(),
-        },
-        input_monitoring: crate::commands::permissions::PermissionStatus {
-            permission_type: "input_monitoring".to_string(),
-            granted: false,
-            required: true,
-            description: "Input monitoring permission needs to be rechecked".to_string(),
-            instructions: "Grant input monitoring permission during onboarding".to_string(),
-        },
-        all_granted: false,
-        app_name: app.package_info().name.clone(),
-    }).await;
+    app_state
+        .update_permissions_state(crate::commands::permissions::PermissionsState {
+            accessibility: crate::commands::permissions::PermissionStatus {
+                permission_type: "accessibility".to_string(),
+                granted: false,
+                required: true,
+                description: "Accessibility permission needs to be rechecked".to_string(),
+                instructions: "Grant accessibility permission during onboarding".to_string(),
+            },
+            screen_recording: crate::commands::permissions::PermissionStatus {
+                permission_type: "screen_recording".to_string(),
+                granted: false,
+                required: true,
+                description: "Screen recording permission needs to be rechecked".to_string(),
+                instructions: "Grant screen recording permission during onboarding".to_string(),
+            },
+            microphone: crate::commands::permissions::PermissionStatus {
+                permission_type: "microphone".to_string(),
+                granted: false,
+                required: false,
+                description: "Microphone permission needs to be rechecked".to_string(),
+                instructions: "Grant microphone permission if needed".to_string(),
+            },
+            input_monitoring: crate::commands::permissions::PermissionStatus {
+                permission_type: "input_monitoring".to_string(),
+                granted: false,
+                required: true,
+                description: "Input monitoring permission needs to be rechecked".to_string(),
+                instructions: "Grant input monitoring permission during onboarding".to_string(),
+            },
+            all_granted: false,
+            app_name: app.package_info().name.clone(),
+        })
+        .await;
 
     // Mark permissions as not checked so they will be re-evaluated
     // Reset the permissions checked flag
@@ -154,13 +174,16 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, String> {
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
-    let onboarding_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
+    let onboarding_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Get current keyboard shortcuts for the onboarding display
     let app_state = app.state::<crate::state::AppState>();
-    let shortcuts = app_state.keyboard_shortcuts().lock()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
-        .clone();
+    let shortcuts = app_state
+        .get_keyboard_shortcuts()
+        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     Ok(serde_json::json!({
         "completed": onboarding_settings.completed,
@@ -180,8 +203,8 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
     // Check if we have Input Monitoring permissions first
     #[cfg(target_os = "macos")]
     {
-        let has_permissions = crate::commands::shortcuts::check_input_monitoring_permissions()
-            .unwrap_or(false);
+        let has_permissions =
+            crate::commands::shortcuts::check_input_monitoring_permissions().unwrap_or(false);
 
         if !has_permissions {
             info!("Input Monitoring permissions not granted - shortcuts won't work");
@@ -191,13 +214,15 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 
     // Check if global shortcuts are registered
     let app_state = app.state::<crate::state::AppState>();
-    let shortcuts = app_state.keyboard_shortcuts().lock()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
-        .clone();
+    let shortcuts = app_state
+        .get_keyboard_shortcuts()
+        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Attempt to parse the shortcuts to see if they're valid
-    let agent_shortcut_valid = crate::events::shortcuts::parse_shortcut_string(&shortcuts.agent_mode_toggle).is_some();
-    let dictation_shortcut_valid = crate::events::shortcuts::parse_shortcut_string(&shortcuts.dictation_input).is_some();
+    let agent_shortcut_valid =
+        crate::events::shortcuts::parse_shortcut_string(&shortcuts.agent_mode_toggle).is_some();
+    let dictation_shortcut_valid =
+        crate::events::shortcuts::parse_shortcut_string(&shortcuts.dictation_input).is_some();
 
     Ok(agent_shortcut_valid && dictation_shortcut_valid)
 }
@@ -210,8 +235,15 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
     let onboarding_completed = check_onboarding_status(app_handle.clone()).await?;
 
     if !onboarding_completed {
-        let mode = if is_development_mode() { "development" } else { "production" };
-        info!("Onboarding not completed in {} mode, opening onboarding window", mode);
+        let mode = if is_development_mode() {
+            "development"
+        } else {
+            "production"
+        };
+        info!(
+            "Onboarding not completed in {} mode, opening onboarding window",
+            mode
+        );
 
         // Open the onboarding window
         if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {

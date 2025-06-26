@@ -1,8 +1,8 @@
+use crate::constants::{events, monitor_sessions};
+use crate::state::{AgentTriggerMode, AppState};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{info, error, debug, warn};
-use crate::state::{AppState, AgentTriggerMode};
-use crate::constants::{monitor_sessions, events};
+use tracing::{debug, error, info, warn};
 
 // Configuration constants
 // const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
@@ -62,7 +62,8 @@ impl AgentInputMonitorState {
     pub fn end_hold(&mut self) -> (bool, bool, Duration) {
         let agent_was_started = self.agent_started;
         let threshold_was_reached = self.hold_threshold_reached;
-        let duration = self.hold_start_time
+        let duration = self
+            .hold_start_time
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
 
@@ -96,7 +97,10 @@ impl AgentInputMonitorState {
             if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.agent_started = true;
                 self.agent_start_time = Some(Instant::now());
-                info!("[AgentMonitor] Agent input held for {}ms - starting immediate agent mode", duration.as_millis());
+                info!(
+                    "[AgentMonitor] Agent input held for {}ms - starting immediate agent mode",
+                    duration.as_millis()
+                );
                 return true;
             }
         }
@@ -124,7 +128,10 @@ impl AgentInputMonitorState {
         if let Some(start_time) = self.agent_start_time {
             let duration = start_time.elapsed();
             if duration.as_millis() >= monitor_sessions::MAX_AGENT_DURATION_MS as u128 {
-                warn!("[AgentMonitor] Agent has been running for {}ms - forcing cleanup", duration.as_millis());
+                warn!(
+                    "[AgentMonitor] Agent has been running for {}ms - forcing cleanup",
+                    duration.as_millis()
+                );
                 return true;
             }
         }
@@ -139,7 +146,10 @@ impl AgentInputMonitorState {
                 let duration = start_time.elapsed();
                 if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
                     self.force_cleanup_scheduled = true;
-                    warn!("[AgentMonitor] Scheduling force cleanup - agent stuck for {}ms", duration.as_millis());
+                    warn!(
+                        "[AgentMonitor] Scheduling force cleanup - agent stuck for {}ms",
+                        duration.as_millis()
+                    );
                     return true;
                 }
             }
@@ -177,7 +187,9 @@ pub async fn on_agent_input_pressed() {
     if started {
         info!("[AgentMonitor] Agent input pressed down - starting immediate tracking");
     } else {
-        info!("[AgentMonitor] Agent input pressed down - ignored (agent active or cooldown period)");
+        info!(
+            "[AgentMonitor] Agent input pressed down - ignored (agent active or cooldown period)"
+        );
     }
 }
 
@@ -194,7 +206,10 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         // gets processed by the voice-transcription:final-result handler, which will
         // send the transcribed text to the agent for processing
         if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_STOP, ()) {
-            error!("[AgentMonitor] Failed to emit agent-transcription-stop: {}", e);
+            error!(
+                "[AgentMonitor] Failed to emit agent-transcription-stop: {}",
+                e
+            );
         }
     } else if agent_started {
         info!(
@@ -236,7 +251,10 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
                 // Emit event to start agent
                 if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
+                    error!(
+                        "[AgentMonitor] Failed to emit agent-transcription-start: {}",
+                        e
+                    );
                 } else {
                     info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
                 }
@@ -271,15 +289,15 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
 pub async fn should_handle_agent_key(app_handle: &AppHandle, key_state: &str) -> bool {
     let app_state = app_handle.state::<AppState>();
 
-    let trigger_mode = app_state.agent_trigger_mode().lock()
-        .map(|mode| mode.clone())
+    let trigger_mode = app_state
+        .get_agent_trigger_mode()
         .unwrap_or(AgentTriggerMode::Tap);
 
     match trigger_mode {
         AgentTriggerMode::Tap => {
             // Only handle key release (press+release = tap)
             key_state == "released"
-        },
+        }
         AgentTriggerMode::Hold => {
             // Handle both press and release for hold behavior
             true

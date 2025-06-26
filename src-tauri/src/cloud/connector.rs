@@ -1,22 +1,22 @@
+use crate::cloud::auth::DeviceAuth;
+use crate::cloud::commands::CloudCommandProcessor;
+use crate::cloud::config::CloudConfig;
+use crate::cloud::security::CloudSecurity;
+use crate::cloud::types::*;
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH, Instant};
-use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot};
-use tracing::{info, warn, error, debug};
-use tauri::{AppHandle, Manager, Emitter};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::{mpsc, oneshot, Mutex as TokioMutex};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use futures_util::{SinkExt, StreamExt};
-use crate::cloud::types::*;
-use crate::cloud::config::CloudConfig;
-use crate::cloud::auth::DeviceAuth;
-use crate::cloud::security::CloudSecurity;
-use crate::cloud::commands::CloudCommandProcessor;
 
 use super::types::{
-    CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
+    CloudCommand, CloudError, DeviceResponse, DeviceStatus, MessageType, WebSocketMessage,
 };
-use crate::constants::{permissions, api};
+use crate::constants::{api, permissions};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -32,7 +32,18 @@ pub struct ProductionCloudConnector {
     connection_state: Arc<TokioMutex<ConnectorState>>,
 
     // WebSocket sender for outgoing messages
-    ws_sender: Arc<TokioMutex<Option<futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>,
+    ws_sender: Arc<
+        TokioMutex<
+            Option<
+                futures_util::stream::SplitSink<
+                    tokio_tungstenite::WebSocketStream<
+                        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                    >,
+                    tokio_tungstenite::tungstenite::Message,
+                >,
+            >,
+        >,
+    >,
 
     // Command tracking
     pending_commands: Arc<TokioMutex<HashMap<String, oneshot::Sender<DeviceResponse>>>>,
@@ -124,14 +135,11 @@ impl HardwareMonitor {
         {
             use std::process::Command;
 
-            match Command::new("top")
-                .args(&["-l", "1", "-n", "0"])
-                .output()
-            {
+            match Command::new("top").args(&["-l", "1", "-n", "0"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
                     Self::parse_cpu_usage(&output_str)
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get CPU usage: {}", e);
                     None
@@ -153,7 +161,8 @@ impl HardwareMonitor {
         use regex::Regex;
 
         // Example: "CPU usage: 15.38% user, 8.46% sys, 76.15% idle"
-        let cpu_regex = Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
+        let cpu_regex =
+            Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
 
         for line in output.lines() {
             if let Some(captures) = cpu_regex.captures(line) {
@@ -161,7 +170,12 @@ impl HardwareMonitor {
                 let sys_cpu = captures.get(2)?.as_str().parse::<f32>().ok()?;
 
                 let total_cpu = user_cpu + sys_cpu;
-                log::debug!("Parsed CPU usage: {}% user + {}% sys = {}% total", user_cpu, sys_cpu, total_cpu);
+                log::debug!(
+                    "Parsed CPU usage: {}% user + {}% sys = {}% total",
+                    user_cpu,
+                    sys_cpu,
+                    total_cpu
+                );
 
                 return Some(total_cpu);
             }
@@ -216,7 +230,10 @@ impl HardwareMonitor {
                                 if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
                                     speculative_pages = parsed;
                                 } else {
-                                    tracing::warn!("Failed to parse speculative pages: {}", num_str);
+                                    tracing::warn!(
+                                        "Failed to parse speculative pages: {}",
+                                        num_str
+                                    );
                                 }
                             }
                         } else if line.contains("Pages wired down:") {
@@ -230,7 +247,11 @@ impl HardwareMonitor {
                         }
                     }
 
-                    let total_pages = free_pages + active_pages + inactive_pages + speculative_pages + wired_pages;
+                    let total_pages = free_pages
+                        + active_pages
+                        + inactive_pages
+                        + speculative_pages
+                        + wired_pages;
                     let used_pages = total_pages - free_pages;
 
                     if total_pages > 0 {
@@ -239,7 +260,7 @@ impl HardwareMonitor {
                     } else {
                         None
                     }
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get memory usage: {}", e);
                     None
@@ -260,13 +281,11 @@ impl HardwareMonitor {
         {
             use std::process::Command;
 
-            match Command::new("df")
-                .args(&["-h", "/"])
-                .output()
-            {
+            match Command::new("df").args(&["-h", "/"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    for line in output_str.lines().skip(1) { // Skip header
+                    for line in output_str.lines().skip(1) {
+                        // Skip header
                         let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 5 {
                             // Format: Filesystem Size Used Avail Capacity Mounted
@@ -281,7 +300,7 @@ impl HardwareMonitor {
                         break; // Only process first (root) filesystem
                     }
                     None
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get disk usage: {}", e);
                     None
@@ -316,7 +335,7 @@ impl HardwareMonitor {
                         }
                     }
                     None
-                },
+                }
                 Err(e) => {
                     log::warn!("Failed to get screen resolution: {}", e);
                     None
@@ -344,7 +363,10 @@ impl HardwareMonitor {
 
         log::debug!(
             "📊 Hardware metrics - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%, Screen: {:?}",
-            cpu_usage, memory_usage, disk_usage, screen_resolution
+            cpu_usage,
+            memory_usage,
+            disk_usage,
+            screen_resolution
         );
 
         HardwareInfo {
@@ -454,29 +476,43 @@ impl ProductionCloudConnector {
                         // Run connection until it fails
                         if let Err(e) = self.run_connection().await {
                             error!("Connection failed: {}", e);
-                            self.set_connection_state(ConnectorState::Error(e.to_string())).await;
+                            self.set_connection_state(ConnectorState::Error(e.to_string()))
+                                .await;
                         }
-                    },
+                    }
                     Err(e) => {
                         retry_count += 1;
-                        error!("Failed to establish connection (attempt {}): {}", retry_count, e);
+                        error!(
+                            "Failed to establish connection (attempt {}): {}",
+                            retry_count, e
+                        );
 
                         if retry_count >= max_retries {
-                            self.set_connection_state(ConnectorState::Error(format!("Max retries exceeded: {}", e))).await;
+                            self.set_connection_state(ConnectorState::Error(format!(
+                                "Max retries exceeded: {}",
+                                e
+                            )))
+                            .await;
                             break;
                         }
 
-                        self.set_connection_state(ConnectorState::Reconnecting(retry_count)).await;
+                        self.set_connection_state(ConnectorState::Reconnecting(retry_count))
+                            .await;
 
                         // Exponential backoff
-                        let delay = base_delay * api::cloud_networking::BACKOFF_MULTIPLIER.pow(retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT));
+                        let delay = base_delay
+                            * api::cloud_networking::BACKOFF_MULTIPLIER
+                                .pow(retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT));
                         info!("Retrying connection in {:?}", delay);
                         tokio::time::sleep(delay).await;
                     }
                 }
             } else {
                 // Wait before checking again
-                tokio::time::sleep(Duration::from_millis(api::cloud_networking::CONNECTION_CHECK_INTERVAL_MS)).await;
+                tokio::time::sleep(Duration::from_millis(
+                    api::cloud_networking::CONNECTION_CHECK_INTERVAL_MS,
+                ))
+                .await;
             }
         }
     }
@@ -484,12 +520,18 @@ impl ProductionCloudConnector {
     /// Check if we should attempt to connect
     async fn should_connect(&self) -> bool {
         let state = self.connection_state.lock().await;
-        matches!(*state, ConnectorState::Disconnected | ConnectorState::Reconnecting(_))
+        matches!(
+            *state,
+            ConnectorState::Disconnected | ConnectorState::Reconnecting(_)
+        )
     }
 
     /// Establish WebSocket connection using native Rust WebSocket
     async fn establish_connection(&self) -> Result<(), CloudError> {
-        info!("Establishing WebSocket connection to: {}", self.config.server_url);
+        info!(
+            "Establishing WebSocket connection to: {}",
+            self.config.server_url
+        );
 
         // Record connection start time
         *self.connection_start_time.lock().await = Some(Instant::now());
@@ -502,8 +544,9 @@ impl ProductionCloudConnector {
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
         let url = self.config.server_url.clone();
-        let (ws_stream, _) = connect_async(&url).await
-            .map_err(|e| CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e)))?;
+        let (ws_stream, _) = connect_async(&url).await.map_err(|e| {
+            CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e))
+        })?;
 
         info!("✅ WebSocket connected successfully to {}", url);
         self.set_connection_state(ConnectorState::Connected).await;
@@ -531,10 +574,13 @@ impl ProductionCloudConnector {
         {
             let mut sender_guard = self.ws_sender.lock().await;
             if let Some(ref mut sender) = sender_guard.as_mut() {
-                sender.send(Message::Text(auth_json)).await
-                    .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
+                sender.send(Message::Text(auth_json)).await.map_err(|e| {
+                    CloudError::NetworkError(format!("Failed to send auth message: {}", e))
+                })?;
             } else {
-                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+                return Err(CloudError::NetworkError(
+                    "WebSocket sender not available".to_string(),
+                ));
             }
         }
 
@@ -556,8 +602,10 @@ impl ProductionCloudConnector {
                 &mut ws_receiver,
                 &auth_clone,
                 &app_handle,
-                &connection_state
-            ).await {
+                &connection_state,
+            )
+            .await
+            {
                 Ok((auth_success, message_buffer)) => {
                     if auth_success {
                         info!("✅ Authentication successful, starting message handling");
@@ -570,13 +618,17 @@ impl ProductionCloudConnector {
 
                         // Process any buffered messages from authentication
                         if !message_buffer.is_empty() {
-                            info!("📦 Processing {} buffered messages from authentication phase", message_buffer.len());
+                            info!(
+                                "📦 Processing {} buffered messages from authentication phase",
+                                message_buffer.len()
+                            );
                             for buffered_text in message_buffer {
                                 Self::process_websocket_message(
                                     buffered_text,
                                     &app_handle,
-                                    &connection_state
-                                ).await;
+                                    &connection_state,
+                                )
+                                .await;
                             }
                             info!("✅ Finished processing buffered messages");
                         }
@@ -586,12 +638,18 @@ impl ProductionCloudConnector {
                         true
                     } else {
                         error!("❌ Authentication failed");
-                        let _ = auth_tx.send(Err(CloudError::AuthenticationFailed("Authentication failed".to_string())));
+                        let _ = auth_tx.send(Err(CloudError::AuthenticationFailed(
+                            "Authentication failed".to_string(),
+                        )));
                         false
                     }
-                },
+                }
                 Err((auth_error, recovered_buffer)) => {
-                    error!("🔥 Authentication failed but recovered {} buffered messages: {}", recovered_buffer.len(), auth_error);
+                    error!(
+                        "🔥 Authentication failed but recovered {} buffered messages: {}",
+                        recovered_buffer.len(),
+                        auth_error
+                    );
 
                     if !recovered_buffer.is_empty() {
                         warn!("📦 Buffered messages from failed authentication will be lost:");
@@ -611,24 +669,21 @@ impl ProductionCloudConnector {
                 while let Some(msg) = ws_receiver.next().await {
                     match msg {
                         Ok(Message::Text(text)) => {
-                            Self::process_websocket_message(
-                                text,
-                                &app_handle,
-                                &connection_state
-                            ).await;
-                        },
+                            Self::process_websocket_message(text, &app_handle, &connection_state)
+                                .await;
+                        }
                         Ok(Message::Close(_)) => {
                             info!("🔌 WebSocket closed by server");
                             let mut state = connection_state.lock().await;
                             *state = ConnectorState::Disconnected;
                             break;
-                        },
+                        }
                         Err(e) => {
                             error!("❌ WebSocket error: {}", e);
                             let mut state = connection_state.lock().await;
                             *state = ConnectorState::Error(e.to_string());
                             break;
-                        },
+                        }
                         _ => {}
                     }
                 }
@@ -648,9 +703,11 @@ impl ProductionCloudConnector {
                 self.set_connection_state(ConnectorState::Ready).await;
                 info!("✅ Enhanced cloud connector established with hardware monitoring");
                 Ok(())
-            },
+            }
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(CloudError::AuthenticationFailed("Authentication channel closed".to_string()))
+            Err(_) => Err(CloudError::AuthenticationFailed(
+                "Authentication channel closed".to_string(),
+            )),
         }
     }
 
@@ -658,7 +715,7 @@ impl ProductionCloudConnector {
     async fn process_websocket_message(
         text: String,
         app_handle: &AppHandle,
-        connection_state: &Arc<TokioMutex<ConnectorState>>
+        connection_state: &Arc<TokioMutex<ConnectorState>>,
     ) {
         debug!("📨 Received cloud message: {}", text);
 
@@ -668,9 +725,11 @@ impl ProductionCloudConnector {
                 MessageType::Auth => {
                     // Post-authentication auth messages (likely additional auth events)
                     debug!("📨 Additional auth message received post-authentication");
-                },
+                }
                 MessageType::Command => {
-                    if let Ok(command) = serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data) {
+                    if let Ok(command) =
+                        serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data)
+                    {
                         // Emit command to be handled by the app
                         if let Err(e) = app_handle.emit("cloud-command-received", &command) {
                             error!("Failed to emit cloud command: {}", e);
@@ -678,10 +737,10 @@ impl ProductionCloudConnector {
                     } else {
                         warn!("⚠️ Failed to parse cloud command from message");
                     }
-                },
+                }
                 MessageType::Heartbeat => {
                     debug!("💓 Heartbeat received");
-                },
+                }
                 _ => {
                     debug!("📨 Other message type: {:?}", ws_message.message_type);
                 }
@@ -694,10 +753,14 @@ impl ProductionCloudConnector {
     /// Handle authentication response within the spawned task with robust error handling
     /// Returns (auth_success, buffered_messages) - buffered messages are preserved even on auth failure
     async fn handle_authentication_response_in_task(
-        ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+        ws_receiver: &mut futures_util::stream::SplitStream<
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+        >,
         auth: &DeviceAuth,
         _app_handle: &AppHandle,
-        _connection_state: &Arc<TokioMutex<ConnectorState>>
+        _connection_state: &Arc<TokioMutex<ConnectorState>>,
     ) -> Result<(bool, Vec<String>), (CloudError, Vec<String>)> {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -788,31 +851,38 @@ impl ProductionCloudConnector {
                     Some(true) => {
                         info!("✅ Authentication successful");
                         Ok(true)
-                    },
+                    }
                     Some(false) => {
                         // Authentication explicitly failed
-                        let error_msg = data.get("error")
+                        let error_msg = data
+                            .get("error")
                             .and_then(|e| e.as_str())
                             .unwrap_or("Authentication rejected by server");
                         error!("❌ Authentication failed: {}", error_msg);
                         Err(CloudError::AuthenticationFailed(error_msg.to_string()))
-                    },
+                    }
                     None => {
                         // Success field is not a boolean
                         let success_str = success_value.to_string();
-                        error!("❌ Authentication response 'success' field is not boolean: {}", success_str);
+                        error!(
+                            "❌ Authentication response 'success' field is not boolean: {}",
+                            success_str
+                        );
                         Err(CloudError::AuthenticationFailed(format!(
                             "Invalid success field type: expected boolean, got {}",
                             success_str
                         )))
                     }
                 }
-            },
+            }
             None => {
                 // Missing success field
-                error!("❌ Authentication response missing 'success' field: {}", data);
+                error!(
+                    "❌ Authentication response missing 'success' field: {}",
+                    data
+                );
                 Err(CloudError::AuthenticationFailed(
-                    "Authentication response missing required 'success' field".to_string()
+                    "Authentication response missing required 'success' field".to_string(),
                 ))
             }
         }
@@ -877,7 +947,11 @@ impl ProductionCloudConnector {
         let start_time = Instant::now();
         let command_id = command.id.clone();
 
-        log::info!("🚀 Executing tracked command: {} ({:?})", command_id, command.command_type);
+        log::info!(
+            "🚀 Executing tracked command: {} ({:?})",
+            command_id,
+            command.command_type
+        );
 
         // Create WebSocket message
         let ws_message = WebSocketMessage {
@@ -899,26 +973,38 @@ impl ProductionCloudConnector {
                 match sender.send(Message::Text(message_json)).await {
                     Ok(()) => {
                         log::debug!("📤 Command {} sent successfully", command_id);
-                    },
+                    }
                     Err(e) => {
                         log::error!("❌ Failed to send command {}: {}", command_id, e);
                         let execution_time = start_time.elapsed();
                         self.track_command_execution(false, execution_time).await;
-                        return Err(CloudError::NetworkError(format!("Failed to send command: {}", e)));
+                        return Err(CloudError::NetworkError(format!(
+                            "Failed to send command: {}",
+                            e
+                        )));
                     }
                 }
             } else {
-                log::error!("❌ WebSocket sender not available for command {}", command_id);
+                log::error!(
+                    "❌ WebSocket sender not available for command {}",
+                    command_id
+                );
                 let execution_time = start_time.elapsed();
                 self.track_command_execution(false, execution_time).await;
-                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+                return Err(CloudError::NetworkError(
+                    "WebSocket sender not available".to_string(),
+                ));
             }
         }
 
         let execution_time = start_time.elapsed();
         self.track_command_execution(true, execution_time).await;
 
-        log::info!("✅ Command {} completed in {:?}", command_id, execution_time);
+        log::info!(
+            "✅ Command {} completed in {:?}",
+            command_id,
+            execution_time
+        );
         Ok(())
     }
 
@@ -930,7 +1016,10 @@ impl ProductionCloudConnector {
                 warn!("Failed to deliver command response - receiver dropped");
             }
         } else {
-            warn!("Received response for unknown command: {}", response.command_id);
+            warn!(
+                "Received response for unknown command: {}",
+                response.command_id
+            );
         }
     }
 
@@ -961,15 +1050,20 @@ impl ProductionCloudConnector {
                 match sender.send(Message::Text(message_json)).await {
                     Ok(()) => {
                         debug!("✅ Status update sent successfully");
-                    },
+                    }
                     Err(e) => {
                         warn!("⚠️ Failed to send status update: {}", e);
-                        return Err(CloudError::NetworkError(format!("Failed to send status update: {}", e)));
+                        return Err(CloudError::NetworkError(format!(
+                            "Failed to send status update: {}",
+                            e
+                        )));
                     }
                 }
             } else {
                 warn!("⚠️ WebSocket sender not available for status update");
-                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+                return Err(CloudError::NetworkError(
+                    "WebSocket sender not available".to_string(),
+                ));
             }
         }
 
@@ -985,13 +1079,17 @@ impl ProductionCloudConnector {
 
     /// Heartbeat loop to maintain connection
     async fn run_heartbeat_loop(&self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(self.config.heartbeat_interval));
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(self.config.heartbeat_interval));
 
         loop {
             interval.tick().await;
 
             let state = self.connection_state.lock().await;
-            if matches!(*state, ConnectorState::Ready | ConnectorState::Authenticated) {
+            if matches!(
+                *state,
+                ConnectorState::Ready | ConnectorState::Authenticated
+            ) {
                 drop(state);
 
                 // Update last heartbeat time
@@ -1025,10 +1123,16 @@ impl ProductionCloudConnector {
             let mut sender_guard = self.ws_sender.lock().await;
             if let Some(ref mut sender) = sender_guard.as_mut() {
                 use tokio_tungstenite::tungstenite::Message;
-                sender.send(Message::Text(message_json)).await
-                    .map_err(|e| CloudError::NetworkError(format!("Failed to send heartbeat: {}", e)))?;
+                sender
+                    .send(Message::Text(message_json))
+                    .await
+                    .map_err(|e| {
+                        CloudError::NetworkError(format!("Failed to send heartbeat: {}", e))
+                    })?;
             } else {
-                return Err(CloudError::NetworkError("WebSocket sender not available".to_string()));
+                return Err(CloudError::NetworkError(
+                    "WebSocket sender not available".to_string(),
+                ));
             }
         }
 
@@ -1057,7 +1161,9 @@ impl ProductionCloudConnector {
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
         let _app_state = self.app_handle.state::<crate::state::AppState>();
 
-        let device_id = self.auth.get_credentials()
+        let device_id = self
+            .auth
+            .get_credentials()
             .map(|c| c.device_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -1071,12 +1177,18 @@ impl ProductionCloudConnector {
             system_info: crate::cloud::types::SystemInfo {
                 platform: std::env::consts::OS.to_string(),
                 permissions: self.get_permission_status().await,
-                agent_mode: format!("{:?}", crate::agent::providers::factory::BrainFactory::get_agent_mode()),
+                agent_mode: format!(
+                    "{:?}",
+                    crate::agent::providers::factory::BrainFactory::get_agent_mode()
+                ),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         Ok(status)
@@ -1091,9 +1203,7 @@ impl ProductionCloudConnector {
         // Check if any agent is currently active
         if app_state.is_agent_executing() {
             Some("Agent interaction in progress".to_string())
-        } else if app_state.dictation_active().lock()
-            .map(|guard| *guard)
-            .unwrap_or(false) {
+        } else if app_state.is_dictation_active() {
             Some("Voice dictation active".to_string())
         } else {
             None
@@ -1110,9 +1220,7 @@ impl ProductionCloudConnector {
             permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
-        let voice_enabled = app_state.always_listening_active().lock()
-            .map(|guard| *guard)
-            .unwrap_or(false);
+        let voice_enabled = app_state.get_always_listening_active().unwrap_or(false);
 
         if voice_enabled {
             permissions.push(permissions::types::MICROPHONE.to_string());
@@ -1184,8 +1292,14 @@ impl ProductionCloudConnector {
     }
 
     /// Execute remote command (for use by cloud server)
-    pub async fn execute_remote_command(&self, command: CloudCommand) -> Result<DeviceResponse, CloudError> {
-        info!("Executing remote command: {} ({:?})", command.id, command.command_type);
+    pub async fn execute_remote_command(
+        &self,
+        command: CloudCommand,
+    ) -> Result<DeviceResponse, CloudError> {
+        info!(
+            "Executing remote command: {} ({:?})",
+            command.id, command.command_type
+        );
 
         // Use the existing command processor
         self.command_processor.process_command(command).await
@@ -1214,7 +1328,8 @@ impl ProductionCloudConnector {
 
         // Clear connection state
         *self.connection_id.lock().await = None;
-        self.set_connection_state(ConnectorState::Disconnected).await;
+        self.set_connection_state(ConnectorState::Disconnected)
+            .await;
 
         Ok(())
     }
@@ -1226,17 +1341,18 @@ impl ProductionCloudConnector {
         let last_heartbeat = self.last_heartbeat.lock().await;
         let reconnect_count = self.reconnection_count.lock().await;
 
-        let connected_at = connection_start.as_ref().map(|start| {
-            start.elapsed().as_secs()
-        });
+        let connected_at = connection_start
+            .as_ref()
+            .map(|start| start.elapsed().as_secs());
 
-        let last_heartbeat_timestamp = last_heartbeat.as_ref().map(|hb| {
-            hb.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
-        });
+        let last_heartbeat_timestamp = last_heartbeat
+            .as_ref()
+            .map(|hb| hb.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs());
 
         // Calculate average latency from command execution times
         let avg_latency = if !stats.command_execution_times.is_empty() {
-            let total_ms: u64 = stats.command_execution_times
+            let total_ms: u64 = stats
+                .command_execution_times
                 .iter()
                 .map(|d| d.as_millis() as u64)
                 .sum();
@@ -1379,16 +1495,15 @@ PhysMem: 8192M used (1234M wired), 567M unused.
 
             // Test the parsing logic that our methods use
             match failure_data.get("success") {
-                Some(success_value) => {
-                    match success_value.as_bool() {
-                        Some(false) => {
-                            let error_msg = failure_data.get("error")
-                                .and_then(|e| e.as_str())
-                                .unwrap_or("Authentication rejected by server");
-                            assert_eq!(error_msg, "Invalid credentials");
-                        },
-                        _ => panic!("Should have matched false case"),
+                Some(success_value) => match success_value.as_bool() {
+                    Some(false) => {
+                        let error_msg = failure_data
+                            .get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Authentication rejected by server");
+                        assert_eq!(error_msg, "Invalid credentials");
                     }
+                    _ => panic!("Should have matched false case"),
                 },
                 None => panic!("Should have success field"),
             }
@@ -1415,7 +1530,7 @@ PhysMem: 8192M used (1234M wired), 567M unused.
                 Some(success_value) => {
                     assert!(success_value.as_bool().is_none());
                     assert_eq!(success_value.as_str(), Some("true"));
-                },
+                }
                 None => panic!("Should have success field"),
             }
         }
@@ -1433,10 +1548,10 @@ PhysMem: 8192M used (1234M wired), 567M unused.
                         Some(true) => {
                             // This is the expected path
                             assert!(true);
-                        },
+                        }
                         _ => panic!("Should have matched true case"),
                     }
-                },
+                }
                 None => panic!("Should have success field"),
             }
         }
@@ -1454,7 +1569,8 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             // Simulate receiving various message types during authentication
             let command_message = r#"{"type": "command", "data": {"id": "test", "command_type": "screenshot"}, "timestamp": 1234567890}"#;
             let heartbeat_message = r#"{"type": "heartbeat", "data": {"timestamp": 1234567890}, "timestamp": 1234567890}"#;
-            let auth_success_message = r#"{"type": "auth", "data": {"success": true}, "timestamp": 1234567890}"#;
+            let auth_success_message =
+                r#"{"type": "auth", "data": {"success": true}, "timestamp": 1234567890}"#;
 
             // Messages received before auth response should be buffered
             message_buffer.push(command_message.to_string());
@@ -1471,7 +1587,11 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             // Verify we can parse the buffered messages correctly
             for buffered_msg in &message_buffer {
                 let parsed: Result<serde_json::Value, _> = serde_json::from_str(buffered_msg);
-                assert!(parsed.is_ok(), "Buffered message should be valid JSON: {}", buffered_msg);
+                assert!(
+                    parsed.is_ok(),
+                    "Buffered message should be valid JSON: {}",
+                    buffered_msg
+                );
             }
         }
 
@@ -1488,7 +1608,7 @@ PhysMem: 8192M used (1234M wired), 567M unused.
                         Some(true) => assert!(true), // Expected path
                         _ => panic!("Should have matched true case"),
                     }
-                },
+                }
                 None => panic!("Should have success field"),
             }
 
@@ -1499,16 +1619,15 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             });
 
             match failure_data.get("success") {
-                Some(success_value) => {
-                    match success_value.as_bool() {
-                        Some(false) => {
-                            let error_msg = failure_data.get("error")
-                                .and_then(|e| e.as_str())
-                                .unwrap_or("Authentication rejected by server");
-                            assert_eq!(error_msg, "Invalid credentials");
-                        },
-                        _ => panic!("Should have matched false case"),
+                Some(success_value) => match success_value.as_bool() {
+                    Some(false) => {
+                        let error_msg = failure_data
+                            .get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Authentication rejected by server");
+                        assert_eq!(error_msg, "Invalid credentials");
                     }
+                    _ => panic!("Should have matched false case"),
                 },
                 None => panic!("Should have success field"),
             }
@@ -1529,7 +1648,7 @@ PhysMem: 8192M used (1234M wired), 567M unused.
                 Some(success_value) => {
                     assert!(success_value.as_bool().is_none());
                     assert_eq!(success_value.as_str(), Some("true"));
-                },
+                }
                 None => panic!("Should have success field"),
             }
         }
@@ -1577,14 +1696,17 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             assert_eq!(message_buffer.len(), 3);
 
             // Verify that at least the valid message can be parsed
-            let parsed_valid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[0]);
+            let parsed_valid: Result<serde_json::Value, _> =
+                serde_json::from_str(&message_buffer[0]);
             assert!(parsed_valid.is_ok());
 
             // Invalid messages should fail parsing but still be buffered
-            let parsed_invalid: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[1]);
+            let parsed_invalid: Result<serde_json::Value, _> =
+                serde_json::from_str(&message_buffer[1]);
             assert!(parsed_invalid.is_err());
 
-            let parsed_malformed: Result<serde_json::Value, _> = serde_json::from_str(&message_buffer[2]);
+            let parsed_malformed: Result<serde_json::Value, _> =
+                serde_json::from_str(&message_buffer[2]);
             assert!(parsed_malformed.is_err());
         }
     }

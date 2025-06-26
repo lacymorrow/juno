@@ -5,12 +5,12 @@
 //! and cross-module communication patterns.
 
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Listener, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
-use crate::{constants, state, commands};
 use crate::utils::async_runtime::safe_spawn_async_task;
+use crate::{commands, constants, state};
 
 /// Setup comprehensive application integration including plugins, event coordination, and component initialization
 pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -68,12 +68,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         safe_spawn_async_task(move || async move {
             // Check if Dictation Mode is active
             let app_state = app_handle_clone.state::<state::AppState>();
-            let is_dictation_mode = app_state.dictation_active().lock()
-                .map(|active| *active)
-                .unwrap_or_else(|e| {
-                    warn!("[Voice] Failed to read dictation state: {}", e);
-                    false
-                });
+            let is_dictation_mode = app_state.is_dictation_active();
 
             // If it's dictation mode, set the flag in floating bar manager first
             if is_dictation_mode {
@@ -162,7 +157,10 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     // Listen for partial result events from the plugin
     let app_handle_for_listener = app_handle.clone();
     app_handle.listen("voice-transcription:partial-result", move |event| {
-        info!("[Event] Received voice-transcription:partial-result event: {:?}", event.payload());
+        info!(
+            "[Event] Received voice-transcription:partial-result event: {:?}",
+            event.payload()
+        );
 
         // Extract partial text and update floating bar manager
         let payload_str = event.payload();
@@ -172,14 +170,20 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                     let app_handle_clone = app_handle_for_listener.clone();
                     let partial_text = text.to_string();
                     safe_spawn_async_task(move || async move {
-                        commands::floating_bar::handle_dictation_partial(&app_handle_clone, partial_text).await;
+                        commands::floating_bar::handle_dictation_partial(
+                            &app_handle_clone,
+                            partial_text,
+                        )
+                        .await;
                     });
                 }
             }
         }
 
         // Rebroadcast the event as app-dictation-partial-result for backward compatibility
-        if let Err(e) = app_handle_for_listener.emit("app-dictation-partial-result", event.payload()) {
+        if let Err(e) =
+            app_handle_for_listener.emit("app-dictation-partial-result", event.payload())
+        {
             tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
         }
     });
@@ -193,7 +197,9 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
     // Listen for force stop events (timeout/stuck transcription)
     let app_handle_for_force_stop = app_handle.clone();
     app_handle.listen("dictation-transcription-force-stop", move |_event| {
-        warn!("[Event] Received dictation-transcription-force-stop event - force stopping dictation");
+        warn!(
+            "[Event] Received dictation-transcription-force-stop event - force stopping dictation"
+        );
 
         let app_handle_clone = app_handle_for_force_stop.clone();
         safe_spawn_async_task(move || async move {
@@ -204,7 +210,9 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
     // Listen for force cleanup events (stuck state recovery)
     let app_handle_for_force_cleanup = app_handle.clone();
     app_handle.listen("dictation-transcription-force-cleanup", move |_event| {
-        warn!("[Event] Received dictation-transcription-force-cleanup event - recovering stuck state");
+        warn!(
+            "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
+        );
 
         let app_handle_clone = app_handle_for_force_cleanup.clone();
         safe_spawn_async_task(move || async move {
@@ -222,8 +230,8 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
                 std::time::Duration::from_secs(2),
                 tauri_plugin_voice_transcription::commands::stop_dictation(
                     app_handle.clone(),
-                    controller_state
-                )
+                    controller_state,
+                ),
             );
 
             match stop_with_timeout.await {
@@ -245,8 +253,8 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
 
     // Force clean up state
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = false;
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Update floating bar manager
@@ -256,7 +264,10 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
     });
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+        error!(
+            "[Dictation Mode] Failed to emit dictation-active event: {}",
+            e
+        );
     }
 }
 
@@ -267,8 +278,8 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
 
     // Force clean up app state
     let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active().lock() {
-        *dictation_active = false;
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Update floating bar manager
@@ -279,7 +290,10 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
 
     // Emit cleanup complete event
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+        error!(
+            "[Dictation Mode] Failed to emit dictation-active event: {}",
+            e
+        );
     }
 
     info!("[Dictation Mode] Force cleanup completed");
@@ -311,7 +325,10 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
     // Listen for always listening transcription results (after wake word)
     let app_handle_for_always_listening = app_handle.clone();
     app_handle.listen("always-listening:transcription", move |event| {
-        info!("[AlwaysListening] Received transcription after wake word: {:?}", event.payload());
+        info!(
+            "[AlwaysListening] Received transcription after wake word: {:?}",
+            event.payload()
+        );
 
         let app_handle_clone = app_handle_for_always_listening.clone();
         safe_spawn_async_task(move || async move {
@@ -328,12 +345,7 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
     let app_state = app_handle.state::<state::AppState>();
 
     // Check if Dictation Mode is active - skip if so
-    let is_dictation_active = app_state.dictation_active().lock()
-        .map(|active| *active)
-        .unwrap_or_else(|e| {
-            warn!("[AlwaysListening] Failed to read dictation state: {}", e);
-            false
-        });
+    let is_dictation_active = app_state.is_dictation_active();
 
     if is_dictation_active {
         info!("[AlwaysListening] Dictation Mode is active - skipping agent activation");
@@ -346,7 +358,10 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
             if let Some(text_value) = payload_json.get("text") {
                 if let Some(text) = text_value.as_str() {
                     let trimmed_text = text.trim();
-                    info!("[AlwaysListening] Activating agent with query: '{}'", trimmed_text);
+                    info!(
+                        "[AlwaysListening] Activating agent with query: '{}'",
+                        trimmed_text
+                    );
 
                     // Only activate agent if we have meaningful content
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
@@ -354,13 +369,21 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                         match crate::anthropic::submit_query(
                             trimmed_text.to_string(),
                             app_state,
-                            app_handle.clone()
-                        ).await {
+                            app_handle.clone(),
+                        )
+                        .await
+                        {
                             Ok(_) => {
                                 info!("[AlwaysListening] Agent query submitted successfully");
                             }
                             Err(e) => {
-                                crate::error_handling::utils::log_and_emit_error(app_handle, "AlwaysListening", "agent_query_submission", &e.to_string(), true);
+                                crate::error_handling::utils::log_and_emit_error(
+                                    app_handle,
+                                    "AlwaysListening",
+                                    "agent_query_submission",
+                                    &e.to_string(),
+                                    true,
+                                );
                             }
                         }
                     } else {
@@ -374,7 +397,10 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
             }
         }
         Err(e) => {
-            error!("[AlwaysListening] Failed to parse transcription payload: {}", e);
+            error!(
+                "[AlwaysListening] Failed to parse transcription payload: {}",
+                e
+            );
         }
     }
 }
@@ -384,7 +410,10 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
     // Listen for always listening stop requests (from stop words)
     let app_handle_for_stop_request = app_handle.clone();
     app_handle.listen("always-listening:stop-requested", move |event| {
-        info!("[AlwaysListening] Received stop request: {:?}", event.payload());
+        info!(
+            "[AlwaysListening] Received stop request: {:?}",
+            event.payload()
+        );
 
         let app_handle_clone = app_handle_for_stop_request.clone();
         safe_spawn_async_task(move || async move {
@@ -419,13 +448,18 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
 async fn handle_always_listening_stop_request(app_handle: &AppHandle) {
     // Stop always listening mode
     let app_state = app_handle.state::<state::AppState>();
-    match commands::always_listening::stop_always_listening_mode(app_handle.clone(), app_state).await {
+    match commands::always_listening::stop_always_listening_mode(app_handle.clone(), app_state)
+        .await
+    {
         Ok(_) => {
             info!("[AlwaysListening] Always listening stopped due to stop word");
 
             // Emit notification to UI
             if let Err(e) = app_handle.emit("always-listening:stopped-by-command", ()) {
-                error!("[AlwaysListening] Failed to emit stopped-by-command event: {}", e);
+                error!(
+                    "[AlwaysListening] Failed to emit stopped-by-command event: {}",
+                    e
+                );
             }
         }
         Err(e) => {
@@ -445,7 +479,10 @@ async fn handle_always_listening_command_processed(app_handle: &AppHandle) {
 
     // Emit event to return to wake word mode
     if let Err(e) = app_handle.emit("always-listening:return-to-wake-word", ()) {
-        error!("[AlwaysListening] Failed to emit return-to-wake-word event: {}", e);
+        error!(
+            "[AlwaysListening] Failed to emit return-to-wake-word event: {}",
+            e
+        );
     }
 }
 
@@ -554,8 +591,10 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
         Some(controller_state) => {
             match tauri_plugin_voice_transcription::commands::start_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await {
+                controller_state,
+            )
+            .await
+            {
                 Ok(()) => {
                     info!("[Agent Mode] Started agent transcription successfully");
 
@@ -565,7 +604,11 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 }
                 Err(e) => {
                     // Use centralized error handling for agent transcription errors
-                    crate::error_handling::utils::handle_agent_error(app_handle, &format!("Failed to start agent transcription: {}", e)).await;
+                    crate::error_handling::utils::handle_agent_error(
+                        app_handle,
+                        &format!("Failed to start agent transcription: {}", e),
+                    )
+                    .await;
 
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
@@ -594,8 +637,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
         Some(controller_state) => {
             match tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await {
+                controller_state,
+            )
+            .await
+            {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
                     // Note: We don't emit agent-active false here because the agent will continue
@@ -634,8 +679,10 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
         Some(controller_state) => {
             match tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await {
+                controller_state,
+            )
+            .await
+            {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped agent transcription successfully");
 
@@ -675,8 +722,10 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
         Some(controller_state) => {
             match tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await {
+                controller_state,
+            )
+            .await
+            {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
@@ -697,7 +746,9 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             }
         }
         None => {
-            warn!("[Agent Mode] Voice controller not available - cannot cancel agent transcription");
+            warn!(
+                "[Agent Mode] Voice controller not available - cannot cancel agent transcription"
+            );
 
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
@@ -717,8 +768,9 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
             // Force stop voice transcription
             let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await;
+                controller_state,
+            )
+            .await;
         }
         None => {
             warn!("[Agent Mode] Voice controller not available during force stop");
@@ -787,9 +839,12 @@ pub mod utils {
         app_handle: &AppHandle,
         component: &str,
         new_state: bool,
-        emit_event: Option<&str>
+        emit_event: Option<&str>,
     ) -> Result<(), String> {
-        info!("🔄 Coordinating state change for {}: {}", component, new_state);
+        info!(
+            "🔄 Coordinating state change for {}: {}",
+            component, new_state
+        );
 
         // Update floating bar manager if applicable
         match component {
@@ -823,7 +878,9 @@ pub mod utils {
     }
 
     /// Validate component integration health
-    pub fn validate_integration_health(app_handle: &AppHandle) -> Result<serde_json::Value, String> {
+    pub fn validate_integration_health(
+        app_handle: &AppHandle,
+    ) -> Result<serde_json::Value, String> {
         info!("🔍 Validating integration health...");
 
         let mut health_report = serde_json::Map::new();
@@ -832,16 +889,23 @@ pub mod utils {
         let voice_controller_available = app_handle
             .try_state::<Arc<Mutex<VoiceController>>>()
             .is_some();
-        health_report.insert("voice_controller".to_string(), serde_json::Value::Bool(voice_controller_available));
+        health_report.insert(
+            "voice_controller".to_string(),
+            serde_json::Value::Bool(voice_controller_available),
+        );
 
         // Check app state availability
-        let app_state_available = app_handle
-            .try_state::<crate::state::AppState>()
-            .is_some();
-        health_report.insert("app_state".to_string(), serde_json::Value::Bool(app_state_available));
+        let app_state_available = app_handle.try_state::<crate::state::AppState>().is_some();
+        health_report.insert(
+            "app_state".to_string(),
+            serde_json::Value::Bool(app_state_available),
+        );
 
         // Check if main components are responsive
-        health_report.insert("integration_status".to_string(), serde_json::Value::String("healthy".to_string()));
+        health_report.insert(
+            "integration_status".to_string(),
+            serde_json::Value::String("healthy".to_string()),
+        );
 
         Ok(serde_json::Value::Object(health_report))
     }

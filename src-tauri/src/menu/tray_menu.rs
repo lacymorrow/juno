@@ -12,17 +12,17 @@
 //! - Error: Red-tinted icon when there's an error
 //! - Processing: Animated or pulsing icon during processing
 
-use tauri::{
-    AppHandle, Manager, Emitter, Listener,
-    tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIcon},
-    menu::{MenuBuilder, MenuItemBuilder},
-    image::Image as TauriImage
-};
-use tracing::{info, error, warn, debug};
-use crate::constants::{menus::tray_menu_ids, events};
+use crate::constants::{events, menus::tray_menu_ids};
 use crate::state::AppState;
 use std::sync::Arc;
+use tauri::{
+    image::Image as TauriImage,
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder},
+    AppHandle, Emitter, Listener, Manager,
+};
 use tokio::sync::Mutex as TokioMutex;
+use tracing::{debug, error, info, warn};
 
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DEFAULT: &[u8] = include_bytes!("../../icons/tray/32x32.png");
@@ -92,13 +92,19 @@ impl TrayIconManager {
     }
 
     /// Update the tray icon to reflect the current state
-    pub async fn update_icon_state(&mut self, new_state: TrayIconState) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn update_icon_state(
+        &mut self,
+        new_state: TrayIconState,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if self.current_state == new_state {
             debug!("Tray icon state unchanged: {:?}", new_state);
             return Ok(());
         }
 
-        info!("🔄 Updating tray icon state: {:?} -> {:?}", self.current_state, new_state);
+        info!(
+            "🔄 Updating tray icon state: {:?} -> {:?}",
+            self.current_state, new_state
+        );
 
         if let Some(tray_icon) = &self.tray_icon {
             let icon_data = new_state.get_icon_data();
@@ -128,7 +134,8 @@ impl TrayIconManager {
 }
 
 /// Global tray icon manager
-static TRAY_ICON_MANAGER: TokioMutex<Option<Arc<TokioMutex<TrayIconManager>>>> = TokioMutex::const_new(None);
+static TRAY_ICON_MANAGER: TokioMutex<Option<Arc<TokioMutex<TrayIconManager>>>> =
+    TokioMutex::const_new(None);
 
 /// Get or create the tray icon manager
 async fn get_tray_icon_manager() -> Arc<TokioMutex<TrayIconManager>> {
@@ -154,13 +161,19 @@ fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage, Box<dyn std:
 }
 
 /// Get keyboard shortcuts from app state
-fn get_keyboard_shortcuts(app: &AppHandle) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
+fn get_keyboard_shortcuts(
+    app: &AppHandle,
+) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
     let app_state = app.state::<AppState>();
-    app_state.get_keyboard_shortcuts().map_err(|e| format!("Failed to get keyboard shortcuts: {}", e).into())
+    app_state
+        .get_keyboard_shortcuts()
+        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e).into())
 }
 
 /// Create a state-aware tray menu with keyboard shortcuts
-pub fn create_state_aware_tray_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+pub fn create_state_aware_tray_menu(
+    app: &AppHandle,
+) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     info!("🍽️ Creating state-aware tray menu...");
 
     // Get keyboard shortcuts from app state
@@ -409,9 +422,10 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
                     if let Some(state) = payload.get("barState").and_then(|s| s.as_str()) {
                         let icon_state = match state {
-                            "loading" | "transcribing" | "agent_thinking" | "dictation_processing" => {
-                                Some(TrayIconState::Processing)
-                            },
+                            "loading"
+                            | "transcribing"
+                            | "agent_thinking"
+                            | "dictation_processing" => Some(TrayIconState::Processing),
                             "error" => Some(TrayIconState::Error),
                             _ => None,
                         };
@@ -425,7 +439,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         }
     });
 
-        // Listen for voice system errors
+    // Listen for voice system errors
     let _ = app_handle.listen("voice-error", {
         let app_handle = app_handle_clone.clone();
         move |_event| {
@@ -474,10 +488,8 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     }
 
     // Check always listening state
-    if let Ok(always_listening) = app_state.always_listening_active().lock() {
-        if *always_listening {
-            return TrayIconState::AlwaysListening;
-        }
+    if app_state.get_always_listening_active().unwrap_or(false) {
+        return TrayIconState::AlwaysListening;
     }
 
     TrayIconState::Default
@@ -621,16 +633,31 @@ mod tests {
     #[test]
     fn test_tray_icon_data_embedded() {
         // Test that tray icon data is properly embedded
-        assert!(!TRAY_ICON_DEFAULT.is_empty(), "Default tray icon data should not be empty");
-        assert!(TRAY_ICON_DEFAULT.len() > 100, "Default tray icon data should be reasonable size");
+        assert!(
+            !TRAY_ICON_DEFAULT.is_empty(),
+            "Default tray icon data should not be empty"
+        );
+        assert!(
+            TRAY_ICON_DEFAULT.len() > 100,
+            "Default tray icon data should be reasonable size"
+        );
     }
 
     #[test]
     fn test_tray_icon_state_descriptions() {
         assert_eq!(TrayIconState::Default.description(), "Juno - Ready");
-        assert_eq!(TrayIconState::AgentActive.description(), "Juno - Agent Active");
-        assert_eq!(TrayIconState::DictationActive.description(), "Juno - Dictation Active");
-        assert_eq!(TrayIconState::AlwaysListening.description(), "Juno - Always Listening");
+        assert_eq!(
+            TrayIconState::AgentActive.description(),
+            "Juno - Agent Active"
+        );
+        assert_eq!(
+            TrayIconState::DictationActive.description(),
+            "Juno - Dictation Active"
+        );
+        assert_eq!(
+            TrayIconState::AlwaysListening.description(),
+            "Juno - Always Listening"
+        );
         assert_eq!(TrayIconState::Processing.description(), "Juno - Processing");
         assert_eq!(TrayIconState::Error.description(), "Juno - Error");
     }
@@ -639,7 +666,10 @@ mod tests {
     async fn test_get_window_states_no_panic() {
         // This is a placeholder test since we can't easily mock AppHandle
         // In a real test environment, we would mock the AppHandle and windows
-        assert!(true, "get_window_states should handle missing windows gracefully");
+        assert!(
+            true,
+            "get_window_states should handle missing windows gracefully"
+        );
     }
 
     #[test]
