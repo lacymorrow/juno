@@ -56,7 +56,7 @@ const ScreenshotOperations: React.FC = () => {
     }
     const result = await invokeCommand<string | null>(
       "capture_element_screenshot_command",
-      {},
+      { selector: selectorString },
       "elementScreenshot"
     );
     if (result) {
