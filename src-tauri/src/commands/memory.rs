@@ -3,7 +3,7 @@ use tauri::{Manager, State};
 
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
-use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary, AdvancedMemoryManager};
+use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,30 +19,13 @@ pub async fn get_memory_status(state: State<'_, AppState>) -> Result<MemoryStatu
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    let messages = memory_guard.get_messages().await
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
-
-    // Calculate basic metrics
-    let total_messages = messages.len();
-    let estimated_tokens = messages.iter()
-        .map(|m| m.content.len() / 4) // Rough token estimate
-        .sum::<usize>();
-
-    // Calculate efficiency ratio (non-empty messages / total messages)
-    let useful_messages = messages.iter()
-        .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-        .count();
-
-    let memory_efficiency_ratio = if total_messages > 0 {
-        useful_messages as f64 / total_messages as f64
-    } else {
-        1.0
-    };
+    // Use proper metrics from memory manager instead of manual calculation
+    let metrics = memory_guard.get_memory_metrics().await;
 
     Ok(MemoryStatus {
-        total_messages,
-        estimated_tokens,
-        memory_efficiency_ratio,
+        total_messages: metrics.total_messages,
+        estimated_tokens: metrics.estimated_tokens,
+        memory_efficiency_ratio: metrics.memory_efficiency_ratio,
     })
 }
 
@@ -106,10 +89,10 @@ pub async fn get_visual_summaries(
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<VisualContextSummary>, String> {
     let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
 
-    // For now, return empty vector since visual summaries are only available with AdvancedMemoryManager
-    // and the current memory manager is SimpleMemoryManager
-    Ok(vec![])
+    Ok(memory_guard.get_visual_summaries().await)
 }
 
 /// Update visual context configuration
@@ -119,10 +102,11 @@ pub async fn update_visual_config(
     config: VisualContextConfig,
 ) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
 
-    // For now, return error since visual config is only available with AdvancedMemoryManager
-    // and the current memory manager is SimpleMemoryManager
-    Err("Visual config only available with AdvancedMemoryManager".to_string())
+    memory_guard.update_visual_config(config).await
+        .map_err(|e| format!("Failed to update visual config: {}", e))
 }
 
 /// Get current visual context configuration
@@ -131,10 +115,10 @@ pub async fn get_visual_config(
     app_handle: tauri::AppHandle,
 ) -> Result<VisualContextConfig, String> {
     let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
 
-    // For now, return default config since visual config is only available with AdvancedMemoryManager
-    // and the current memory manager is SimpleMemoryManager
-    Ok(VisualContextConfig::default())
+    Ok(memory_guard.get_visual_config().await)
 }
 
 /// Force compression of all screenshots in current conversation
@@ -143,10 +127,11 @@ pub async fn compress_all_screenshots(
     app_handle: tauri::AppHandle,
 ) -> Result<usize, String> {
     let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let mut memory_guard = memory_manager.lock().await;
 
-    // For now, return 0 since screenshot compression is only available with AdvancedMemoryManager
-    // and the current memory manager is SimpleMemoryManager
-    Ok(0)
+    memory_guard.compress_all_screenshots().await
+        .map_err(|e| format!("Failed to compress screenshots: {}", e))
 }
 
 /// Enable/disable screenshot compression with specific settings
@@ -175,34 +160,89 @@ pub async fn get_memory_compression_stats(
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let state = app_handle.state::<AppState>();
-
-    // For now, return basic stats since memory compression is only available with AdvancedMemoryManager
-    // and the current memory manager is SimpleMemoryManager
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    let messages = memory_guard.get_messages().await
-        .map_err(|e| format!("Failed to get messages: {}", e))?;
+    let metrics = memory_guard.get_memory_metrics().await;
+    let visual_summaries = memory_guard.get_visual_summaries().await;
 
-    // Calculate basic metrics
-    let total_messages = messages.len();
-    let estimated_tokens = messages.iter()
-        .map(|m| m.content.len() / 4) // Rough token estimate
-        .sum::<usize>();
+    // Calculate visual compression stats
+    let total_screenshots_compressed = visual_summaries.len();
+    let total_original_tokens: usize = visual_summaries.iter()
+        .map(|s| s.estimated_original_tokens)
+        .sum();
+    let total_compressed_tokens: usize = visual_summaries.iter()
+        .map(|s| s.compressed_tokens)
+        .sum();
+    let tokens_saved = total_original_tokens.saturating_sub(total_compressed_tokens);
+    let average_compression_ratio = if total_screenshots_compressed > 0 {
+        visual_summaries.iter()
+            .map(|s| s.compression_ratio)
+            .sum::<f64>() / total_screenshots_compressed as f64
+    } else {
+        0.0
+    };
 
     Ok(serde_json::json!({
         "memory_metrics": {
-            "total_messages": total_messages,
-            "estimated_tokens": estimated_tokens,
-            "memory_efficiency_ratio": 1.0
+            "total_messages": metrics.total_messages,
+            "estimated_tokens": metrics.estimated_tokens,
+            "memory_efficiency_ratio": metrics.memory_efficiency_ratio,
+            "pruning_events": metrics.pruning_events,
+            "summarization_events": metrics.summarization_events,
+            "orphaned_tool_calls_cleaned": metrics.orphaned_tool_calls_cleaned,
+            "average_response_time_ms": metrics.average_response_time_ms
         },
         "visual_compression": {
-            "total_screenshots_compressed": 0,
-            "total_original_tokens": 0,
-            "total_compressed_tokens": 0,
-            "tokens_saved": 0,
-            "average_compression_ratio": 0.0,
-            "latest_summaries": []
+            "total_screenshots_compressed": total_screenshots_compressed,
+            "total_original_tokens": total_original_tokens,
+            "total_compressed_tokens": total_compressed_tokens,
+            "tokens_saved": tokens_saved,
+            "average_compression_ratio": average_compression_ratio,
+            "latest_summaries": visual_summaries.into_iter().take(5).collect::<Vec<_>>()
         }
     }))
+}
+
+/// Emergency function to recover from token overflow by compressing all screenshots and clearing memory if needed
+#[tauri::command]
+pub async fn emergency_memory_recovery(
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let mut memory_guard = memory_manager.lock().await;
+
+    // First, try to compress all existing screenshots
+    let compressed_count = memory_guard.compress_all_screenshots().await
+        .map_err(|e| format!("Failed to compress screenshots: {}", e))?;
+
+    // Use proper token estimation from memory manager metrics
+    let metrics = memory_guard.get_memory_metrics().await;
+    let total_tokens = metrics.estimated_tokens;
+
+    // Get the configured max tokens threshold from memory config
+    let config = memory_guard.get_config().await;
+    let emergency_threshold = (config.max_tokens as f64 * 1.2) as usize; // 20% above max_tokens for emergency
+    let critical_threshold = config.max_tokens; // Use configured max_tokens as critical threshold
+
+    log::info!("Emergency recovery: Compressed {} screenshots, current tokens: {} (thresholds: critical={}, emergency={})",
+               compressed_count, total_tokens, critical_threshold, emergency_threshold);
+
+    // If still above emergency threshold, clear memory
+    if total_tokens > emergency_threshold {
+        log::error!("Token count critically high ({}), clearing memory (emergency threshold: {})", total_tokens, emergency_threshold);
+        memory_guard.clear_memory().await
+            .map_err(|e| format!("Failed to clear memory: {}", e))?;
+
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots and cleared memory due to critically high token count ({} > {})",
+                   compressed_count, total_tokens, emergency_threshold))
+    } else if total_tokens > critical_threshold {
+        log::warn!("Token count high ({}) but below emergency threshold ({}), memory compression completed", total_tokens, emergency_threshold);
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots, token count: {} (above critical threshold {} but below emergency threshold {})",
+                   compressed_count, total_tokens, critical_threshold, emergency_threshold))
+    } else {
+        Ok(format!("Emergency recovery complete: Compressed {} screenshots, token count now: {} (within safe limits)",
+                   compressed_count, total_tokens))
+    }
 }
