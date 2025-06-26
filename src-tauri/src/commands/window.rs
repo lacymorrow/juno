@@ -325,7 +325,7 @@ pub(crate) async fn resize_window(
     match find_window_by_id(&state, &window_id) {
         Ok(Some(window)) => {
             // Check if this is a window element
-            let role = window.role();
+            let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
                 let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
                 error!("{}", error_msg);
@@ -343,11 +343,10 @@ pub(crate) async fn resize_window(
                         // Small delay to ensure focus has taken effect - use async sleep
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                        // Now resize the focused window using the engine
+                        // Now resize the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
-                        let engine = desktop.engine();
 
-                        match engine.resize_window(width as f64, height as f64) {
+                        match desktop.engine().resize_window(width as f64, height as f64) {
                             Ok(_) => {
                                 info!("Successfully resized window '{}' to size {}x{}", window_id, width, height);
 
@@ -416,7 +415,7 @@ pub(crate) async fn move_window(
     match find_window_by_id(&state, &window_id) {
         Ok(Some(window)) => {
             // Check if this is a window element
-            let role = window.role();
+            let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
                 let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
                 error!("{}", error_msg);
@@ -434,11 +433,10 @@ pub(crate) async fn move_window(
                         // Small delay to ensure focus has taken effect - use async sleep
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                        // Now move the focused window using the engine
+                        // Now move the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
-                        let engine = desktop.engine();
 
-                        match engine.move_window(x as f64, y as f64) {
+                        match desktop.engine().move_window(x as f64, y as f64) {
                             Ok(_) => {
                                 info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
 
@@ -505,7 +503,7 @@ pub(crate) async fn close_window(
     match find_window_by_id(&state, &window_id) {
         Ok(Some(window)) => {
             // Check if this is a window element
-            let role = window.role();
+            let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
                 let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
                 error!("{}", error_msg);
@@ -523,11 +521,10 @@ pub(crate) async fn close_window(
                         // Small delay to ensure focus has taken effect - use async sleep
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                        // Now close the focused window using the engine
+                        // Now close the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
-                        let engine = desktop.engine();
 
-                        match engine.close_window() {
+                        match desktop.engine().close_window() {
                             Ok(_) => {
                                 info!("Successfully closed window '{}'", window_id);
 
