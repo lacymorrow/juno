@@ -190,6 +190,14 @@ function App() {
 
   // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
   // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"
+  //
+  // The backend escape key system works correctly:
+  // 1. Escape pressed → Backend stop coordinator stops all operations
+  // 2. Backend emits events → Frontend receives and stops audio/UI
+  // 3. No frontend state checks needed - escape universally stops everything
+  //
+  // This design prevents the original bug where frontend state checks could fail,
+  // while providing reliable universal cancellation behavior.
 
   // Example prompt selection handler - automatically submits the prompt
   const handleExamplePromptSelect = useCallback(
