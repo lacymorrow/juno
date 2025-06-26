@@ -484,27 +484,36 @@ impl BrainFactory {
     /// Get current agent mode from configuration
     /// Get current agent mode from centralized settings with app handle
     pub async fn get_agent_mode_with_app_handle(app_handle: &tauri::AppHandle) -> AgentMode {
-        // Try to read from centralized settings first
-        let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
-            Ok(manager) => manager,
-            Err(e) => {
-                warn!("Failed to create settings manager for agent mode: {}. Using environment fallback.", e);
-                return Self::get_agent_mode_fallback();
-            }
-        };
+        // Use direct store access to avoid deadlocks during agent execution
+        use tauri_plugin_store::StoreExt;
 
-        match settings_manager.get_all_settings().await {
-            Ok(app_settings) => {
-                let mode = AgentMode::from_str(&app_settings.agent.execution_mode)
-                    .unwrap_or_else(|| {
-                        warn!("Invalid agent execution mode in settings: '{}'. Using default.", app_settings.agent.execution_mode);
+        const SETTINGS_STORE_FILE: &str = "app_settings.json";
+
+        match app_handle.store(SETTINGS_STORE_FILE) {
+            Ok(store) => {
+                match store.get("agent.execution_mode") {
+                    Some(mode_value) => {
+                        if let Some(mode_str) = mode_value.as_str() {
+                            let mode = AgentMode::from_str(mode_str)
+                                .unwrap_or_else(|| {
+                                    warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
+                                    AgentMode::Multi
+                                });
+                            info!("Loaded agent mode from centralized settings: {:?}", mode);
+                            mode
+                        } else {
+                            warn!("Agent execution mode is not a string in settings. Using default.");
+                            AgentMode::Multi
+                        }
+                    }
+                    None => {
+                        info!("Agent execution mode not found in settings. Using default.");
                         AgentMode::Multi
-                    });
-                info!("Loaded agent mode from centralized settings: {:?}", mode);
-                mode
+                    }
+                }
             }
             Err(e) => {
-                warn!("Failed to load agent settings: {}. Using environment fallback.", e);
+                warn!("Failed to access settings store for agent mode: {}. Using environment fallback.", e);
                 Self::get_agent_mode_fallback()
             }
         }
