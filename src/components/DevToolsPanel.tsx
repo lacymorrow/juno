@@ -161,13 +161,15 @@ const DevToolsPanel: React.FC = () => {
   };
 
   const handleWait = async () => {
-    const duration = parseInt(waitDuration, 10);
-    if (isNaN(duration) || duration <= 0) {
+    const durationMs = parseInt(waitDuration, 10);
+    if (isNaN(durationMs) || durationMs <= 0) {
       toast.error("Please enter a valid duration in milliseconds.");
       return;
     }
+    // Convert milliseconds to seconds for backend
+    const duration_sec = durationMs / 1000.0;
     // Use production function instead of dev_wait
-    await invokeCommand("wait", { duration }, "wait");
+    await invokeCommand("wait", { duration_sec }, "wait");
   };
 
   return (
