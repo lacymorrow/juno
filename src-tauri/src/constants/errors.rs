@@ -88,10 +88,10 @@ pub mod recovery {
     pub const MAX_BATCH_RETRY_ATTEMPTS: u32 = 2;
 }
 
-//! # Error Message Templates
-//!
-//! Centralized error message templates used throughout the application.
-//! These provide consistent error messaging and reduce code duplication.
+// # Error Message Templates
+//
+// Centralized error message templates used throughout the application.
+// These provide consistent error messaging and reduce code duplication.
 
 /// Common error message templates
 pub mod templates {

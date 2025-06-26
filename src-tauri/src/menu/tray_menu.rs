@@ -12,7 +12,7 @@
 //! - Error: Red-tinted icon when there's an error
 //! - Processing: Animated or pulsing icon during processing
 
-use crate::constants::{events, menus::tray_menu_ids};
+use crate::constants::{events, menus::tray_menu_ids, errors::{templates, prefixes}};
 use crate::state::AppState;
 use std::sync::Arc;
 use tauri::{
@@ -167,7 +167,7 @@ fn get_keyboard_shortcuts(
     let app_state = app.state::<AppState>();
     app_state
         .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e).into())
+        .map_err(|e| format!(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e).into())
 }
 
 /// Create a state-aware tray menu with keyboard shortcuts
@@ -180,7 +180,7 @@ pub fn create_state_aware_tray_menu(
     let _shortcuts = match get_keyboard_shortcuts(app) {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("[TrayMenu] Failed to get keyboard shortcuts: {}", e);
+            error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             // Use defaults if we can't get from state
             crate::state::KeyboardShortcuts {
                 agent_mode_toggle: "Option+D".to_string(),
@@ -501,7 +501,7 @@ pub async fn update_tray_icon_state(new_state: TrayIconState) {
     let mut manager_guard = manager.lock().await;
 
     if let Err(e) = manager_guard.update_icon_state(new_state).await {
-        error!("Failed to update tray icon state: {}", e);
+        error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "tray state updated", e));
     }
 }
 
@@ -549,31 +549,31 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[TrayMenu] Show/Hide menu item clicked");
             // For now, just trigger settings until we have the proper event
             if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
-                error!("[TrayMenu] Failed to emit settings event: {}", e);
+                error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "settings", e));
             }
         }
         tray_menu_ids::NEW_CHAT => {
             info!("[TrayMenu] New Chat menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::NEW_CHAT_REQUESTED, ()) {
-                error!("[TrayMenu] Failed to emit new chat event: {}", e);
+                error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "new chat", e));
             }
         }
         tray_menu_ids::SHOW_HIDE_FLOATING_BAR => {
             info!("[TrayMenu] Show/Hide Floating Bar menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
-                error!("[TrayMenu] Failed to emit toggle floating bar event: {}", e);
+                error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "toggle floating bar", e));
             }
         }
         tray_menu_ids::DEVELOPER_TOOLS => {
             info!("[TrayMenu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::DEVTOOLS_REQUESTED, ()) {
-                error!("[TrayMenu] Failed to emit devtools event: {}", e);
+                error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "devtools", e));
             }
         }
         tray_menu_ids::SETTINGS => {
             info!("[TrayMenu] Settings menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
-                error!("[TrayMenu] Failed to emit settings event: {}", e);
+                error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_EMIT, "settings", e));
             }
         }
         tray_menu_ids::QUIT => {
@@ -621,7 +621,7 @@ pub fn refresh_tray_menu(app_handle: &AppHandle) {
             // Note: Tauri v2 will handle menu updates automatically through the state
         }
         Err(e) => {
-            error!("[TrayMenu] Failed to refresh tray menu: {}", e);
+            error!("{} {}", prefixes::TRAY_MENU, format!(templates::FAILED_TO_LOAD, "tray menu refresh", e));
         }
     }
 }
