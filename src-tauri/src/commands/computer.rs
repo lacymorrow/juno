@@ -44,17 +44,17 @@ pub async fn computer(
 
     let result = match input.action.as_str() {
         "screenshot" => handle_screenshot(&app_handle).await,
-        "click" => handle_click(&input, &app_handle, &state).await,
-        "right_click" => handle_right_click(&input, &app_handle, &state).await,
-        "middle_click" => handle_middle_click(&input, &app_handle, &state).await,
-        "double_click" => handle_double_click(&input, &app_handle, &state).await,
-        "triple_click" => handle_triple_click(&input, &app_handle, &state).await,
-        "drag" => handle_drag(&input, &app_handle, &state).await,
-        "move" => handle_move(&input, &app_handle, &state).await,
-        "scroll" => handle_scroll(&input, &app_handle, &state).await,
-        "type" => handle_type(&input, &app_handle, &state).await,
-        "key" => handle_key(&input, &app_handle, &state).await,
-        "hold_key" => handle_hold_key(&input, &app_handle, &state).await,
+        "click" => handle_click(&input, &app_handle, state).await,
+        "right_click" => handle_right_click(&input, &app_handle, state).await,
+        "middle_click" => handle_middle_click(&input, &app_handle, state).await,
+        "double_click" => handle_double_click(&input, &app_handle, state).await,
+        "triple_click" => handle_triple_click(&input, &app_handle, state).await,
+        "drag" => handle_drag(&input, &app_handle, state).await,
+        "move" => handle_move(&input, &app_handle, state).await,
+        "scroll" => handle_scroll(&input, &app_handle, state).await,
+        "type" => handle_type(&input, &app_handle, state).await,
+        "key" => handle_key(&input, &app_handle, state).await,
+        "hold_key" => handle_hold_key(&input, &app_handle, state).await,
         "wait" => handle_wait(&input).await,
         _ => {
             let error_msg = format!("Unknown computer action: {}", input.action);
@@ -102,7 +102,7 @@ async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, Str
 async fn handle_click(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Click action requires coordinate parameter")?;
@@ -114,7 +114,7 @@ async fn handle_click(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::left_click(app_handle.clone(), state.clone(), x, y, None)
+    crate::commands::mouse::left_click(app_handle.clone(), state, x, y, None)
         .await
         .map_err(|e| format!("Click failed: {}", e))?;
 
@@ -130,7 +130,7 @@ async fn handle_click(
 async fn handle_right_click(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Right click action requires coordinate parameter")?;
@@ -142,7 +142,7 @@ async fn handle_right_click(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::right_click(app_handle.clone(), state.clone(), x, y, None)
+    crate::commands::mouse::right_click(app_handle.clone(), state, x, y, None)
         .await
         .map_err(|e| format!("Right click failed: {}", e))?;
 
@@ -158,7 +158,7 @@ async fn handle_right_click(
 async fn handle_middle_click(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Middle click action requires coordinate parameter")?;
@@ -170,7 +170,7 @@ async fn handle_middle_click(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::middle_click(app_handle.clone(), state.clone(), x, y, None)
+    crate::commands::mouse::middle_click(app_handle.clone(), state, x, y, None)
         .await
         .map_err(|e| format!("Middle click failed: {}", e))?;
 
@@ -186,7 +186,7 @@ async fn handle_middle_click(
 async fn handle_double_click(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Double click action requires coordinate parameter")?;
@@ -198,7 +198,7 @@ async fn handle_double_click(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::double_click(app_handle.clone(), state.clone(), x, y, None)
+    crate::commands::mouse::double_click(app_handle.clone(), state, x, y, None)
         .await
         .map_err(|e| format!("Double click failed: {}", e))?;
 
@@ -214,7 +214,7 @@ async fn handle_double_click(
 async fn handle_triple_click(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Triple click action requires coordinate parameter")?;
@@ -226,7 +226,7 @@ async fn handle_triple_click(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::triple_click(app_handle.clone(), state.clone(), x, y, None)
+    crate::commands::mouse::triple_click(app_handle.clone(), state, x, y, None)
         .await
         .map_err(|e| format!("Triple click failed: {}", e))?;
 
@@ -242,7 +242,7 @@ async fn handle_triple_click(
 async fn handle_drag(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let start_coords = input.start_coordinate.as_ref()
         .or(input.coordinate.as_ref())
@@ -262,7 +262,7 @@ async fn handle_drag(
 
     crate::commands::mouse::left_click_drag(
         app_handle.clone(),
-        state.clone(),
+        state,
         start_x,
         start_y,
         end_x,
@@ -283,7 +283,7 @@ async fn handle_drag(
 async fn handle_move(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Move action requires coordinate parameter")?;
@@ -295,7 +295,7 @@ async fn handle_move(
     let x = coordinates[0];
     let y = coordinates[1];
 
-    crate::commands::mouse::mouse_move(app_handle.clone(), state.clone(), x, y)
+    crate::commands::mouse::mouse_move(app_handle.clone(), state, x, y)
         .await
         .map_err(|e| format!("Mouse move failed: {}", e))?;
 
@@ -311,7 +311,7 @@ async fn handle_move(
 async fn handle_scroll(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let coordinates = input.coordinate.as_ref()
         .ok_or("Scroll action requires coordinate parameter")?;
@@ -325,14 +325,8 @@ async fn handle_scroll(
     let scroll_count = input.scroll_count.unwrap_or(3);
     let direction = input.scroll_direction.as_deref().unwrap_or("down");
 
-    // Convert direction to scroll amount (negative for up/left, positive for down/right)
-    let scroll_amount = match direction {
-        "up" => scroll_count as f64,
-        "down" => scroll_count as f64,
-        "left" => scroll_count as f64,
-        "right" => scroll_count as f64,
-        _ => return Err(format!("Invalid scroll direction: {}", direction)),
-    };
+    // Scroll amount is always positive - direction is handled by the scroll_window function
+    let scroll_amount = scroll_count as f64;
 
     // Use the scroll function from window.rs with correct signature
     crate::commands::window::scroll_window(
@@ -341,7 +335,7 @@ async fn handle_scroll(
         Some(x),
         Some(y),
         app_handle.clone(),
-        state.clone(),
+        state,
     )
     .await
     .map_err(|e| format!("Scroll failed: {}", e))?;
@@ -358,12 +352,12 @@ async fn handle_scroll(
 async fn handle_type(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let text = input.text.as_ref()
         .ok_or("Type action requires text parameter")?;
 
-    crate::commands::keyboard::global_type_text(text.clone(), app_handle.clone(), state.clone())
+    crate::commands::keyboard::global_type_text(text.clone(), app_handle.clone(), state)
         .await
         .map_err(|e| format!("Type failed: {}", e))?;
 
@@ -379,12 +373,12 @@ async fn handle_type(
 async fn handle_key(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let key = input.text.as_ref()
         .ok_or("Key action requires text parameter")?;
 
-    crate::commands::keyboard::press_key(key.clone(), None, app_handle.clone(), state.clone())
+    crate::commands::keyboard::press_key(key.clone(), None, app_handle.clone(), state)
         .await
         .map_err(|e| format!("Key press failed: {}", e))?;
 
@@ -400,14 +394,14 @@ async fn handle_key(
 async fn handle_hold_key(
     input: &ComputerInput,
     app_handle: &AppHandle,
-    state: &State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
     let key = input.text.as_ref()
         .ok_or("Hold key action requires text parameter")?;
 
     let duration = input.duration.unwrap_or(1000);
 
-    crate::commands::keyboard::hold_key(key.clone(), Some(duration), app_handle.clone(), state.clone())
+    crate::commands::keyboard::hold_key(key.clone(), Some(duration), app_handle.clone(), state)
         .await
         .map_err(|e| format!("Hold key failed: {}", e))?;
 
