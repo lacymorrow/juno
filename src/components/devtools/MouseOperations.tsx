@@ -17,11 +17,13 @@ const MouseOperations: React.FC = () => {
   const showConsolidationInfo = () => {
     toast.info(
       "🔧 Mouse Tools Consolidated! Now using Computer Tool:\n" +
+        '• Move: computer tool with action: "move"\n' +
         '• Click: computer tool with action: "click"\n' +
         '• Right-click: computer tool with action: "right_click"\n' +
+        '• Middle-click: computer tool with action: "middle_click"\n' +
         '• Double-click: computer tool with action: "double_click"\n' +
         '• Drag: computer tool with action: "drag"',
-      { duration: 8000 }
+      { duration: 10000 }
     );
   };
 
@@ -45,7 +47,7 @@ const MouseOperations: React.FC = () => {
     );
   };
 
-  const handleMouseDown = async () => {
+  const handleRightClick = async () => {
     const x = parseInt(mouseX, 10);
     const y = parseInt(mouseY, 10);
 
@@ -60,12 +62,12 @@ const MouseOperations: React.FC = () => {
 
     await invokeCommand(
       "computer",
-      { action: "left_mouse_down", coordinate: [x, y] },
-      "mouseDown"
+      { action: "right_click", coordinate: [x, y] },
+      "rightClick"
     );
   };
 
-  const handleMouseUp = async () => {
+  const handleMiddleClick = async () => {
     const x = parseInt(mouseX, 10);
     const y = parseInt(mouseY, 10);
 
@@ -80,8 +82,8 @@ const MouseOperations: React.FC = () => {
 
     await invokeCommand(
       "computer",
-      { action: "left_mouse_up", coordinate: [x, y] },
-      "mouseUp"
+      { action: "middle_click", coordinate: [x, y] },
+      "middleClick"
     );
   };
 
@@ -180,9 +182,9 @@ const MouseOperations: React.FC = () => {
         </div>
         <div className="flex space-x-2">
           <Button onClick={handleMouseMove}>Move</Button>
-          <Button onClick={handleMouseDown}>Mouse Down</Button>
-          <Button onClick={handleMouseUp}>Mouse Up</Button>
           <Button onClick={handleMouseClick}>Click</Button>
+          <Button onClick={handleRightClick}>Right Click</Button>
+          <Button onClick={handleMiddleClick}>Middle Click</Button>
           <Button onClick={handleMouseDoubleClick}>Double Click</Button>
         </div>
       </div>
