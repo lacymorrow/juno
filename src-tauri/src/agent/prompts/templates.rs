@@ -1248,7 +1248,7 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
@@ -1279,7 +1279,7 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
@@ -1469,6 +1469,8 @@ For complex desktop tasks, think through your approach:
 3. **Execute Systematically**: Use accessibility tools, fall back to computer tool if needed
 4. **Verify Results**: Confirm the task was completed successfully
 </approach>
+
+{}
 
 {}
 
