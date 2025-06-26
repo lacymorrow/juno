@@ -38,7 +38,7 @@ pub(crate) async fn type_text(text: String, app_handle: AppHandle, state: State<
 
             // Emit key press visualization for typing (show the text being typed)
             if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
-                "key": format!("Type: {}", text.chars().take(crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH).collect::<String>()),
+                "key": format!("Type: {}", text.chars().take(crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH).collect::<String>()),
                 "modifier": null
             })) {
                 error!("Failed to emit key press visualization for type_text: {}", e);
@@ -135,7 +135,7 @@ pub(crate) async fn global_type_text(text: String, app_handle: AppHandle, state:
 
             // Emit key press visualization for global typing
             if let Err(e) = app_handle.emit(events::ui::KEY_PRESS_VISUALIZATION, json!({
-                "key": format!("Global: {}", text.chars().take(crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH).collect::<String>()),
+                "key": format!("Global: {}", text.chars().take(crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH).collect::<String>()),
                 "modifier": null
             })) {
                 error!("Failed to emit key press visualization for global_type_text: {}", e);
