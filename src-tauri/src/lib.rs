@@ -491,6 +491,9 @@ pub fn run() {
             get_window_list,
             get_window_info,
             focus_window,
+            resize_window,
+            move_window,
+            close_window,
             // Production core functions with debug capabilities
             wait,
             get_clipboard,
