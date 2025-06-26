@@ -298,7 +298,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit dictation mode start event
-            if let Err(e) = app_handle.emit(events::dictation::STARTED, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::ACTIVE, true) {
                 error!(
                     "[Dictation Tap Mode] Failed to emit dictation-active event: {}",
                     e
