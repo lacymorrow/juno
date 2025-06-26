@@ -1,26 +1,26 @@
-import React, { useState } from 'react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { MousePointer, Hand } from 'lucide-react';
-import { invokeCommand } from '@/lib/utils';
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { MousePointer, Hand } from "lucide-react";
+import { invokeCommand } from "@/lib/utils";
 
 const MouseOperations: React.FC = () => {
-  const [mouseX, setMouseX] = useState<string>('');
-  const [mouseY, setMouseY] = useState<string>('');
-  const [dragStartX, setDragStartX] = useState<string>('');
-  const [dragStartY, setDragStartY] = useState<string>('');
-  const [dragEndX, setDragEndX] = useState<string>('');
-  const [dragEndY, setDragEndY] = useState<string>('');
+  const [mouseX, setMouseX] = useState<string>("");
+  const [mouseY, setMouseY] = useState<string>("");
+  const [dragStartX, setDragStartX] = useState<string>("");
+  const [dragStartY, setDragStartY] = useState<string>("");
+  const [dragEndX, setDragEndX] = useState<string>("");
+  const [dragEndY, setDragEndY] = useState<string>("");
 
   // Show consolidation info
   const showConsolidationInfo = () => {
     toast.info(
-      '🔧 Mouse Tools Consolidated! Use the Computer Tool instead:\n' +
-      '• Click: computer tool with action: "click"\n' +
-      '• Right-click: computer tool with action: "right_click"\n' +
-      '• Double-click: computer tool with action: "double_click"\n' +
-      '• Drag: computer tool with action: "drag"',
+      "🔧 Mouse Tools Consolidated! Now using Computer Tool:\n" +
+        '• Click: computer tool with action: "click"\n' +
+        '• Right-click: computer tool with action: "right_click"\n' +
+        '• Double-click: computer tool with action: "double_click"\n' +
+        '• Drag: computer tool with action: "drag"',
       { duration: 8000 }
     );
   };
@@ -30,18 +30,18 @@ const MouseOperations: React.FC = () => {
     const y = parseInt(mouseY, 10);
 
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_move',
-      { x, y },
-      'mouseMove'
+      "computer",
+      { action: "move", coordinate: [x, y] },
+      "mouseMove"
     );
   };
 
@@ -50,18 +50,18 @@ const MouseOperations: React.FC = () => {
     const y = parseInt(mouseY, 10);
 
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_down',
-      { x, y },
-      'mouseDown'
+      "computer",
+      { action: "left_mouse_down", coordinate: [x, y] },
+      "mouseDown"
     );
   };
 
@@ -70,18 +70,18 @@ const MouseOperations: React.FC = () => {
     const y = parseInt(mouseY, 10);
 
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_up',
-      { x, y },
-      'mouseUp'
+      "computer",
+      { action: "left_mouse_up", coordinate: [x, y] },
+      "mouseUp"
     );
   };
 
@@ -90,18 +90,18 @@ const MouseOperations: React.FC = () => {
     const y = parseInt(mouseY, 10);
 
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_click',
-      { x, y },
-      'mouseClick'
+      "computer",
+      { action: "click", coordinate: [x, y] },
+      "mouseClick"
     );
   };
 
@@ -110,18 +110,18 @@ const MouseOperations: React.FC = () => {
     const y = parseInt(mouseY, 10);
 
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_double_click',
-      { x, y },
-      'mouseDoubleClick'
+      "computer",
+      { action: "double_click", coordinate: [x, y] },
+      "mouseDoubleClick"
     );
   };
 
@@ -132,41 +132,35 @@ const MouseOperations: React.FC = () => {
     const endY = parseInt(dragEndY, 10);
 
     if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY)) {
-      toast.error('Invalid coordinates. Please enter numbers for all fields.');
+      toast.error("Invalid coordinates. Please enter numbers for all fields.");
       return;
     }
 
     await invokeCommand(
-      'dev_mouse_drag',
-      { startX, startY, endX, endY },
-      'mouseDrag'
+      "computer",
+      {
+        action: "drag",
+        startCoordinate: [startX, startY],
+        endCoordinate: [endX, endY],
+      },
+      "mouseDrag"
     );
   };
 
   return (
     <div className="space-y-4">
-      {/* Consolidation Notice */}
-      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-        <div className="flex items-center space-x-2 mb-2">
-          <MousePointer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          <h3 className="font-semibold text-blue-800 dark:text-blue-200">Mouse Tools Consolidated</h3>
-        </div>
-        <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
-          Mouse operations have been consolidated into the official <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">computer</code> tool for 100% Anthropic API compliance.
+      <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+        <p className="text-sm text-blue-700 dark:text-blue-300 flex items-center gap-2">
+          <Hand className="h-4 w-4" />
+          Now using consolidated Computer Tool! Click info for details.
         </p>
-        <div className="space-y-1 text-xs text-blue-600 dark:text-blue-400">
-          <div>• <strong>Click:</strong> <code>computer</code> with <code>action: "click"</code></div>
-          <div>• <strong>Right-click:</strong> <code>computer</code> with <code>action: "right_click"</code></div>
-          <div>• <strong>Double-click:</strong> <code>computer</code> with <code>action: "double_click"</code></div>
-          <div>• <strong>Drag:</strong> <code>computer</code> with <code>action: "drag"</code></div>
-        </div>
         <Button
-          onClick={showConsolidationInfo}
           variant="outline"
           size="sm"
-          className="mt-3 text-blue-700 border-blue-300 hover:bg-blue-100 dark:text-blue-300 dark:border-blue-700 dark:hover:bg-blue-900"
+          onClick={showConsolidationInfo}
+          className="mt-2"
         >
-          Show Examples
+          Show Consolidation Info
         </Button>
       </div>
 
@@ -186,8 +180,8 @@ const MouseOperations: React.FC = () => {
         </div>
         <div className="flex space-x-2">
           <Button onClick={handleMouseMove}>Move</Button>
-          <Button onClick={handleMouseDown}>Down</Button>
-          <Button onClick={handleMouseUp}>Up</Button>
+          <Button onClick={handleMouseDown}>Mouse Down</Button>
+          <Button onClick={handleMouseUp}>Mouse Up</Button>
           <Button onClick={handleMouseClick}>Click</Button>
           <Button onClick={handleMouseDoubleClick}>Double Click</Button>
         </div>
@@ -196,30 +190,31 @@ const MouseOperations: React.FC = () => {
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Hand className="h-4 w-4" />
-          <div className="grid grid-cols-2 gap-2">
-            <Input
-              placeholder="Start X"
-              value={dragStartX}
-              onChange={(e) => setDragStartX(e.target.value)}
-            />
-            <Input
-              placeholder="Start Y"
-              value={dragStartY}
-              onChange={(e) => setDragStartY(e.target.value)}
-            />
-            <Input
-              placeholder="End X"
-              value={dragEndX}
-              onChange={(e) => setDragEndX(e.target.value)}
-            />
-            <Input
-              placeholder="End Y"
-              value={dragEndY}
-              onChange={(e) => setDragEndY(e.target.value)}
-            />
-          </div>
-          <Button onClick={handleMouseDrag}>Drag</Button>
+          <span className="text-sm">Drag coordinates:</span>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            placeholder="Start X"
+            value={dragStartX}
+            onChange={(e) => setDragStartX(e.target.value)}
+          />
+          <Input
+            placeholder="Start Y"
+            value={dragStartY}
+            onChange={(e) => setDragStartY(e.target.value)}
+          />
+          <Input
+            placeholder="End X"
+            value={dragEndX}
+            onChange={(e) => setDragEndX(e.target.value)}
+          />
+          <Input
+            placeholder="End Y"
+            value={dragEndY}
+            onChange={(e) => setDragEndY(e.target.value)}
+          />
+        </div>
+        <Button onClick={handleMouseDrag}>Drag</Button>
       </div>
     </div>
   );

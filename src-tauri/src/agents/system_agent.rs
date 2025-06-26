@@ -47,7 +47,7 @@ impl SystemAgent {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
-            "bash_command" | "dev_bash_command" | "system_exec" => {
+            "bash_command" | "system_exec" => {
                 let command = tool_call
                     .input
                     .get("command")
@@ -83,7 +83,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "list_files" | "dev_list_files" | "system_list_files" => {
+            "list_files" | "system_list_files" => {
                 let path = tool_call
                     .input
                     .get("path")
@@ -110,7 +110,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "get_file_content" | "dev_get_file_content" | "system_read_file" => {
+            "get_file_content" | "system_read_file" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -141,7 +141,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "set_file_content" | "dev_set_file_content" | "system_write_file" => {
+            "set_file_content" | "system_write_file" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -180,7 +180,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_text_editor_view" => {
+            "text_editor_view" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -207,7 +207,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_text_editor_create" => {
+            "text_editor_create" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -243,7 +243,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            "dev_text_editor_str_replace" => {
+            "text_editor_str_replace" => {
                 let file_path = tool_call
                     .input
                     .get("file_path")
@@ -309,7 +309,6 @@ impl SpecializedAgent for SystemAgent {
                     "bash".to_string(),
                     "command".to_string(),
                     "exec".to_string(),
-                    "dev_bash".to_string(),
                 ],
                 confidence: 0.95,
             },
@@ -318,7 +317,6 @@ impl SpecializedAgent for SystemAgent {
                 description: "Read, write, create, and manage files and directories".to_string(),
                 tool_patterns: vec![
                     "file".to_string(),
-                    "dev_file".to_string(),
                     "read".to_string(),
                     "write".to_string(),
                 ],
@@ -331,7 +329,6 @@ impl SpecializedAgent for SystemAgent {
                 tool_patterns: vec![
                     "list".to_string(),
                     "directory".to_string(),
-                    "dev_list".to_string(),
                 ],
                 confidence: 0.85,
             },
@@ -353,7 +350,6 @@ impl SpecializedAgent for SystemAgent {
                 tool_patterns: vec![
                     "editor".to_string(),
                     "text".to_string(),
-                    "dev_text_editor".to_string(),
                 ],
                 confidence: 0.85,
             },

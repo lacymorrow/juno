@@ -1,35 +1,49 @@
-import React, { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Focus, PlayCircle } from 'lucide-react';
-import { invokeCommand } from '@/lib/utils';
-import type { ClickQAResult, CoordinateTestResult, VisualizationTestResult } from '@/types/devtools';
+import React, { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Focus, PlayCircle, Info } from "lucide-react";
+import { invokeCommand } from "@/lib/utils";
+import type {
+  ClickQAResult,
+  CoordinateTestResult,
+  VisualizationTestResult,
+} from "@/types/devtools";
 
 const ScreenshotOperations: React.FC = () => {
   const [screenshotSrc, setScreenshotSrc] = useState<string | null>(null);
-  const [focusedElementInfo, setFocusedElementInfo] = useState<string | null>(null);
-  const [elementScreenshotSrc, setElementScreenshotSrc] = useState<string | null>(null);
-  const [selectorString, setSelectorString] = useState<string>('button:OK');
-  const [clickQAResults, setClickQAResults] = useState<ClickQAResult[] | null>(null);
-  const [coordinateResults, setCoordinateResults] = useState<CoordinateTestResult[] | null>(null);
-  const [visualizationResults, setVisualizationResults] = useState<VisualizationTestResult[] | null>(null);
+  const [focusedElementInfo, setFocusedElementInfo] = useState<string | null>(
+    null
+  );
+  const [elementScreenshotSrc, setElementScreenshotSrc] = useState<
+    string | null
+  >(null);
+  const [selectorString, setSelectorString] = useState<string>("button:OK");
+  const [clickQAResults, setClickQAResults] = useState<ClickQAResult[] | null>(
+    null
+  );
+  const [coordinateResults, setCoordinateResults] = useState<
+    CoordinateTestResult[] | null
+  >(null);
+  const [visualizationResults, setVisualizationResults] = useState<
+    VisualizationTestResult[] | null
+  >(null);
 
   const handleTakeScreenshot = async () => {
-    const result = await invokeCommand<string | null>(
-      'dev_take_screenshot',
-      {},
-      'screenshot'
+    const result = await invokeCommand<any>(
+      "computer",
+      { action: "screenshot" },
+      "screenshot"
     );
-    if (result) {
-      setScreenshotSrc(result);
+    if (result && result.base64_image) {
+      setScreenshotSrc(`data:image/png;base64,${result.base64_image}`);
     }
   };
 
   const handleGetFocusedInfo = async () => {
     const result = await invokeCommand<string | null>(
-      'dev_get_focused_info',
+      "get_focused_element_info",
       {},
-      'focusInfo'
+      "focusInfo"
     );
     if (result) {
       setFocusedElementInfo(result);
@@ -41,9 +55,9 @@ const ScreenshotOperations: React.FC = () => {
       return;
     }
     const result = await invokeCommand<string | null>(
-      'dev_get_element_screenshot',
+      "get_element_screenshot",
       { selector: selectorString.trim() },
-      'elementScreenshot'
+      "elementScreenshot"
     );
     if (result) {
       setElementScreenshotSrc(result);
@@ -52,33 +66,44 @@ const ScreenshotOperations: React.FC = () => {
 
   const handleTestClickVisualization = async () => {
     const result = await invokeCommand<ClickQAResult[]>(
-      'dev_test_click_visualization',
+      "test_click_visualization",
       {},
-      'testClickVisualization'
+      "testClickVisualization"
     );
     setClickQAResults(result);
   };
 
   const handleTestCoordinateTransformation = async () => {
     const result = await invokeCommand<CoordinateTestResult[]>(
-      'dev_test_coordinate_transformation',
+      "test_coordinate_transformation",
       {},
-      'testCoordinateTransformation'
+      "testCoordinateTransformation"
     );
     setCoordinateResults(result);
   };
 
   const handleTestVisualization = async () => {
     const result = await invokeCommand<VisualizationTestResult[]>(
-      'dev_test_visualization',
+      "test_visualization",
       {},
-      'testVisualization'
+      "testVisualization"
     );
     setVisualizationResults(result);
   };
 
   return (
     <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+        <div className="flex items-start space-x-2">
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800">
+            <strong>Tool Consolidation:</strong> This component now uses the
+            official Anthropic Computer Use API for screenshots and production
+            functions for element operations instead of dev_* functions.
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Button onClick={handleTakeScreenshot}>Take Screenshot</Button>
@@ -95,7 +120,9 @@ const ScreenshotOperations: React.FC = () => {
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Focus className="h-4 w-4" />
-          <Button onClick={handleGetFocusedInfo}>Get Focused Element Info</Button>
+          <Button onClick={handleGetFocusedInfo}>
+            Get Focused Element Info
+          </Button>
         </div>
         {focusedElementInfo && (
           <pre className="mt-2 whitespace-pre-wrap break-all text-sm">
@@ -128,7 +155,7 @@ const ScreenshotOperations: React.FC = () => {
         <div className="flex items-center space-x-2">
           <PlayCircle className="h-4 w-4" />
           <Button onClick={handleTestClickVisualization}>
-            Test Click Visualization
+            Test Click Visualization (QA)
           </Button>
         </div>
         {clickQAResults && (

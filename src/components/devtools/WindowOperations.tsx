@@ -1,80 +1,82 @@
-import React, { useState } from 'react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { AppWindow, Maximize2, Move, X, Info, Focus } from 'lucide-react';
-import { invokeCommand } from '@/lib/utils';
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { AppWindow, Maximize2, Move, X, Info, Focus } from "lucide-react";
+import { invokeCommand } from "@/lib/utils";
 
 const WindowOperations: React.FC = () => {
   const [windowListResult, setWindowListResult] = useState<string | null>(null);
-  const [windowIdInfo, setWindowIdInfo] = useState<string>('');
+  const [windowIdInfo, setWindowIdInfo] = useState<string>("");
   const [windowInfoResult, setWindowInfoResult] = useState<string | null>(null);
-  const [windowIdFocus, setWindowIdFocus] = useState<string>('');
-  const [windowIdResize, setWindowIdResize] = useState<string>('');
-  const [windowWidth, setWindowWidth] = useState<string>('');
-  const [windowHeight, setWindowHeight] = useState<string>('');
-  const [windowIdMove, setWindowIdMove] = useState<string>('');
-  const [windowX, setWindowX] = useState<string>('');
-  const [windowY, setWindowY] = useState<string>('');
-  const [windowIdClose, setWindowIdClose] = useState<string>('');
+  const [windowIdFocus, setWindowIdFocus] = useState<string>("");
+  const [windowIdResize, setWindowIdResize] = useState<string>("");
+  const [windowWidth, setWindowWidth] = useState<string>("");
+  const [windowHeight, setWindowHeight] = useState<string>("");
+  const [windowIdMove, setWindowIdMove] = useState<string>("");
+  const [windowX, setWindowX] = useState<string>("");
+  const [windowY, setWindowY] = useState<string>("");
+  const [windowIdClose, setWindowIdClose] = useState<string>("");
 
   const handleGetWindowList = async () => {
     setWindowListResult(null);
     const result = await invokeCommand<string | null>(
-      'dev_get_window_list',
+      "get_window_list",
       {},
-      'getWindowList'
+      "getWindowList"
     );
-    if (result !== null && typeof result === 'string') {
+    if (result !== null && typeof result === "string") {
       try {
         const parsedList = JSON.parse(result);
         setWindowListResult(JSON.stringify(parsedList, null, 2));
       } catch (parseError) {
-        console.error('Failed to parse window list JSON:', parseError);
+        console.error("Failed to parse window list JSON:", parseError);
         setWindowListResult(result);
-        toast.error('Received window list, but failed to parse as JSON.');
+        toast.error("Received window list, but failed to parse as JSON.");
       }
     } else if (result !== null) {
       setWindowListResult(String(result));
-      toast.error('Received unexpected non-string result for window list.');
+      toast.error("Received unexpected non-string result for window list.");
     }
   };
 
   const handleGetWindowInfo = async () => {
     if (!windowIdInfo.trim()) {
-      toast.error('Please enter a Window ID.');
+      toast.error("Please enter a Window ID.");
       return;
     }
     setWindowInfoResult(null);
+    // Use production function instead of dev_get_window_info
     const result = await invokeCommand<string | null>(
-      'dev_get_window_info',
+      "get_window_info",
       { windowId: windowIdInfo.trim() },
-      'getWindowInfo'
+      "getWindowInfo"
     );
-    if (result !== null && typeof result === 'string') {
+    if (result !== null && typeof result === "string") {
       try {
         const parsedInfo = JSON.parse(result);
         setWindowInfoResult(JSON.stringify(parsedInfo, null, 2));
       } catch (parseError) {
-        console.error('Failed to parse window info JSON:', parseError);
+        console.error("Failed to parse window info JSON:", parseError);
         setWindowInfoResult(result);
-        toast.error('Received window info, but failed to parse as JSON.');
+        toast.error("Received window info, but failed to parse as JSON.");
       }
     } else if (result !== null) {
       setWindowInfoResult(String(result));
-      toast.error('Received unexpected non-string result for window info.');
+      toast.error("Received unexpected non-string result for window info.");
     }
   };
 
   const handleFocusWindow = async () => {
     if (!windowIdFocus.trim()) {
-      toast.error('Please enter a Window ID to focus.');
+      toast.error("Please enter a Window ID to focus.");
       return;
     }
+    // Use production function instead of dev_focus_window
     await invokeCommand(
-      'dev_focus_window',
+      "focus_window",
       { windowId: windowIdFocus.trim() },
-      'focusWindow'
+      "focusWindow"
     );
   };
 
@@ -83,22 +85,23 @@ const WindowOperations: React.FC = () => {
     const height = parseInt(windowHeight, 10);
 
     if (!windowIdResize.trim()) {
-      toast.error('Please enter a Window ID to resize.');
+      toast.error("Please enter a Window ID to resize.");
       return;
     }
     if (isNaN(width) || width <= 0) {
-      toast.error('Invalid width. Please enter a positive number.');
+      toast.error("Invalid width. Please enter a positive number.");
       return;
     }
     if (isNaN(height) || height <= 0) {
-      toast.error('Invalid height. Please enter a positive number.');
+      toast.error("Invalid height. Please enter a positive number.");
       return;
     }
 
+    // Use production function instead of dev_resize_window
     await invokeCommand(
-      'dev_resize_window',
+      "resize_window",
       { windowId: windowIdResize.trim(), width, height },
-      'resizeWindow'
+      "resizeWindow"
     );
   };
 
@@ -107,39 +110,53 @@ const WindowOperations: React.FC = () => {
     const y = parseInt(windowY, 10);
 
     if (!windowIdMove.trim()) {
-      toast.error('Please enter a Window ID to move.');
+      toast.error("Please enter a Window ID to move.");
       return;
     }
     if (isNaN(x)) {
-      toast.error('Invalid X coordinate. Please enter a number.');
+      toast.error("Invalid X coordinate. Please enter a number.");
       return;
     }
     if (isNaN(y)) {
-      toast.error('Invalid Y coordinate. Please enter a number.');
+      toast.error("Invalid Y coordinate. Please enter a number.");
       return;
     }
 
+    // Use production function instead of dev_move_window
     await invokeCommand(
-      'dev_move_window',
+      "move_window",
       { windowId: windowIdMove.trim(), x, y },
-      'moveWindow'
+      "moveWindow"
     );
   };
 
   const handleCloseWindow = async () => {
     if (!windowIdClose.trim()) {
-      toast.error('Please enter a Window ID to close.');
+      toast.error("Please enter a Window ID to close.");
       return;
     }
+    // Use production function instead of dev_close_window
     await invokeCommand(
-      'dev_close_window',
+      "close_window",
       { windowId: windowIdClose.trim() },
-      'closeWindow'
+      "closeWindow"
     );
   };
 
   return (
     <div className="space-y-4">
+      {/* Consolidation Notice */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+        <div className="flex items-start space-x-2">
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800">
+            <strong>Tool Consolidation:</strong> This component now uses
+            production window management functions with built-in debug
+            capabilities instead of dev_* functions.
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <AppWindow className="h-4 w-4" />

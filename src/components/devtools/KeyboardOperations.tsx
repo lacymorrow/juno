@@ -1,66 +1,54 @@
-import React, { useState } from 'react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Keyboard, ClipboardPaste, TextSelect } from 'lucide-react';
-import { invokeCommand } from '@/lib/utils';
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Keyboard, Clipboard, Type } from "lucide-react";
+import { invokeCommand } from "@/lib/utils";
 
 const KeyboardOperations: React.FC = () => {
-  const [textToType, setTextToType] = useState<string>('Hello from DevTools!');
-  const [globalTextToType, setGlobalTextToType] = useState<string>('Global text');
-  // REMOVED: keyToPress state - consolidated into computer tool
-  const [modifierKey, setModifierKey] = useState<string>('shift');
-  const [clipboardContent, setClipboardContent] = useState<string>('');
+  const [textToType, setTextToType] = useState<string>("");
+  const [globalTextToType, setGlobalTextToType] = useState<string>("");
+  const [keyToRelease, setKeyToRelease] = useState<string>("");
+  const [clipboardContent, setClipboardContent] = useState<string>("");
   const [clipboardResult, setClipboardResult] = useState<string | null>(null);
-  const [selectedTextResult, setSelectedTextResult] = useState<string | null>(null);
+  const [selectedTextResult, setSelectedTextResult] = useState<string | null>(
+    null
+  );
 
   const handleTypeText = async () => {
     if (!textToType.trim()) {
-      toast.error('Please enter text to type.');
+      toast.error("Please enter text to type.");
       return;
     }
-    await invokeCommand(
-      'dev_type_text',
-      { text: textToType },
-      'typeText'
-    );
+    await invokeCommand("type_text", { text: textToType }, "typeText");
   };
 
   const handleGlobalTypeText = async () => {
     if (!globalTextToType.trim()) {
-      toast.error('Please enter text to type globally.');
+      toast.error("Please enter text to type globally.");
       return;
     }
     await invokeCommand(
-      'dev_global_type_text',
+      "global_type_text",
       { text: globalTextToType },
-      'globalTypeText'
+      "globalTypeText"
     );
   };
 
-  // REMOVED: handlePressKey and handleHoldKey functions
-  // These have been consolidated into the official Anthropic Computer Use API
-  // Use the 'computer' tool with actions: "key" and "hold_key" instead
-  // This eliminates redundancy and ensures API compliance
-
   const handleReleaseKey = async () => {
-    if (!modifierKey.trim()) {
-      toast.error('Please enter a modifier key to release.');
+    if (!keyToRelease.trim()) {
+      toast.error("Please enter a key to release.");
       return;
     }
-    await invokeCommand(
-      'dev_release_key',
-      { key: modifierKey.trim() },
-      'releaseKey'
-    );
+    await invokeCommand("release_key", { key: keyToRelease }, "releaseKey");
   };
 
   const handleGetClipboard = async () => {
     setClipboardResult(null);
     const result = await invokeCommand<string | null>(
-      'dev_get_clipboard',
+      "get_clipboard",
       {},
-      'getClipboard'
+      "getClipboard"
     );
     if (result !== null) {
       setClipboardResult(result);
@@ -69,22 +57,22 @@ const KeyboardOperations: React.FC = () => {
 
   const handleSetClipboard = async () => {
     if (!clipboardContent.trim()) {
-      toast.error('Please enter content to set to clipboard.');
+      toast.error("Please enter content to set to clipboard.");
       return;
     }
     await invokeCommand(
-      'dev_set_clipboard',
+      "set_clipboard",
       { content: clipboardContent },
-      'setClipboard'
+      "setClipboard"
     );
   };
 
   const handleGetSelectedText = async () => {
     setSelectedTextResult(null);
     const result = await invokeCommand<string | null>(
-      'dev_get_selected_text',
+      "get_selected_text",
       {},
-      'getSelectedText'
+      "getSelectedText"
     );
     if (result !== null) {
       setSelectedTextResult(result);
@@ -93,6 +81,13 @@ const KeyboardOperations: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
+        <p className="text-sm text-green-700 dark:text-green-300 flex items-center gap-2">
+          <Type className="h-4 w-4" />
+          Using production keyboard functions with debug capabilities!
+        </p>
+      </div>
+
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
           <Keyboard className="h-4 w-4" />
@@ -107,21 +102,13 @@ const KeyboardOperations: React.FC = () => {
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
-          <Keyboard className="h-4 w-4" />
+          <Type className="h-4 w-4" />
           <Input
-            placeholder="Global text to type"
+            placeholder="Text to type globally"
             value={globalTextToType}
             onChange={(e) => setGlobalTextToType(e.target.value)}
           />
-          <Button onClick={handleGlobalTypeText}>Type Globally</Button>
-        </div>
-      </div>
-
-      {/* REMOVED: Press Key and Hold Key sections - consolidated into computer tool */}
-      <div className="space-y-2">
-        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-          <Keyboard className="h-4 w-4" />
-          <span>Press Key & Hold Key: Use 'computer' tool with actions "key" and "hold_key" instead</span>
+          <Button onClick={handleGlobalTypeText}>Global Type</Button>
         </div>
       </div>
 
@@ -129,27 +116,25 @@ const KeyboardOperations: React.FC = () => {
         <div className="flex items-center space-x-2">
           <Keyboard className="h-4 w-4" />
           <Input
-            placeholder="Modifier key (e.g., shift, ctrl)"
-            value={modifierKey}
-            onChange={(e) => setModifierKey(e.target.value)}
+            placeholder="Key to release (e.g., shift, cmd)"
+            value={keyToRelease}
+            onChange={(e) => setKeyToRelease(e.target.value)}
           />
           <Button onClick={handleReleaseKey}>Release Key</Button>
         </div>
+        <p className="text-xs text-gray-500">
+          Note: Release key provides unique functionality not available in
+          computer tool
+        </p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
-          <ClipboardPaste className="h-4 w-4" />
-          <Input
-            placeholder="Content for clipboard"
-            value={clipboardContent}
-            onChange={(e) => setClipboardContent(e.target.value)}
-          />
-          <Button onClick={handleSetClipboard}>Set Clipboard</Button>
+          <Clipboard className="h-4 w-4" />
           <Button onClick={handleGetClipboard}>Get Clipboard</Button>
         </div>
         {clipboardResult && (
-          <pre className="mt-2 whitespace-pre-wrap break-all text-sm">
+          <pre className="mt-2 whitespace-pre-wrap break-all text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded">
             {clipboardResult}
           </pre>
         )}
@@ -157,11 +142,23 @@ const KeyboardOperations: React.FC = () => {
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
-          <TextSelect className="h-4 w-4" />
+          <Clipboard className="h-4 w-4" />
+          <Input
+            placeholder="Content to set to clipboard"
+            value={clipboardContent}
+            onChange={(e) => setClipboardContent(e.target.value)}
+          />
+          <Button onClick={handleSetClipboard}>Set Clipboard</Button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center space-x-2">
+          <Type className="h-4 w-4" />
           <Button onClick={handleGetSelectedText}>Get Selected Text</Button>
         </div>
         {selectedTextResult && (
-          <pre className="mt-2 whitespace-pre-wrap break-all text-sm">
+          <pre className="mt-2 whitespace-pre-wrap break-all text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded">
             {selectedTextResult}
           </pre>
         )}

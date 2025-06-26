@@ -143,8 +143,9 @@ const DevToolsPanel: React.FC = () => {
       toast.error("Please enter an app name.");
       return;
     }
+    // Use production function instead of dev_open_app
     await invokeCommand(
-      "dev_open_app",
+      "open_application",
       { appName: appToOpen.trim() },
       "openApp"
     );
@@ -155,7 +156,8 @@ const DevToolsPanel: React.FC = () => {
       toast.error("Please enter a URL.");
       return;
     }
-    await invokeCommand("dev_open_url", { url: urlToOpen.trim() }, "openUrl");
+    // Use production function instead of dev_open_url
+    await invokeCommand("open_url", { url: urlToOpen.trim() }, "openUrl");
   };
 
   const handleWait = async () => {
@@ -164,7 +166,8 @@ const DevToolsPanel: React.FC = () => {
       toast.error("Please enter a valid duration in milliseconds.");
       return;
     }
-    await invokeCommand("dev_wait", { duration }, "wait");
+    // Use production function instead of dev_wait
+    await invokeCommand("wait", { duration }, "wait");
   };
 
   return (
