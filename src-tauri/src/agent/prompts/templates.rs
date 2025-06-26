@@ -289,11 +289,10 @@ Response:
 Task: "Move mouse in a square pattern"
 Response:
 [
-  {"name": "computer", "input": {"action": "click", "coordinate": [500, 300]}},
-  {"name": "computer", "input": {"action": "click", "coordinate": [700, 300]}},
-  {"name": "computer", "input": {"action": "click", "coordinate": [700, 500]}},
-  {"name": "computer", "input": {"action": "click", "coordinate": [500, 500]}},
-  {"name": "computer", "input": {"action": "click", "coordinate": [500, 300]}}
+  {"name": "computer", "input": {"action": "drag", "startCoordinate": [500, 300], "endCoordinate": [700, 300]}},
+  {"name": "computer", "input": {"action": "drag", "startCoordinate": [700, 300], "endCoordinate": [700, 500]}},
+  {"name": "computer", "input": {"action": "drag", "startCoordinate": [700, 500], "endCoordinate": [500, 500]}},
+  {"name": "computer", "input": {"action": "drag", "startCoordinate": [500, 500], "endCoordinate": [500, 300]}}
 ]
 
 Task: "Fill login form"
