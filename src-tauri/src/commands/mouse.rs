@@ -8,12 +8,9 @@ use crate::utils::coordinates;
 use crate::constants::{timeouts, events};
 use super::send_dev_tool_notification;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
+use crate::constants::mouse::{movement, testing, visual, delays};
 
-// Smooth mouse movement configuration
-const SMOOTH_MOVEMENT_FPS: u64 = 60; // 60 FPS for smooth movement
-const SMOOTH_MOVEMENT_FRAME_TIME_MS: u64 = 1000 / SMOOTH_MOVEMENT_FPS; // ~16.67ms per frame
-const DEFAULT_MOVEMENT_DURATION_MS: u64 = 300; // Default movement duration
-const MIN_MOVEMENT_DISTANCE: f64 = 5.0; // Minimum distance to trigger smooth movement
+// Import constants to replace magic numbers
 
 // Helper function to perform smooth mouse movement with cursor highlighting
 async fn smooth_mouse_move(
@@ -23,7 +20,7 @@ async fn smooth_mouse_move(
     target_y: f64,
     duration_ms: Option<u64>,
 ) -> Result<(), String> {
-    let duration = duration_ms.unwrap_or(DEFAULT_MOVEMENT_DURATION_MS);
+    let duration = duration_ms.unwrap_or(movement::DEFAULT_MOVEMENT_DURATION_MS);
 
     // Get current cursor position
     let current_pos = match state.desktop.cursor_position() {
@@ -45,7 +42,7 @@ async fn smooth_mouse_move(
     let distance = ((target_x - start_x).powi(2) + (target_y - start_y).powi(2)).sqrt();
 
     // If distance is too small, just move directly
-    if distance < MIN_MOVEMENT_DISTANCE {
+    if distance < movement::MIN_MOVEMENT_DISTANCE {
         return match state.desktop.mouse_move(target_x, target_y) {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("Failed to move mouse: {}", e)),
@@ -58,7 +55,7 @@ async fn smooth_mouse_move(
     }
 
     // Calculate number of frames needed
-    let total_frames = (duration / SMOOTH_MOVEMENT_FRAME_TIME_MS).max(1);
+    let total_frames = (duration / movement::SMOOTH_MOVEMENT_FRAME_TIME_MS).max(1);
 
     // Perform smooth movement with ease-out curve
     for frame in 0..=total_frames {
@@ -83,7 +80,7 @@ async fn smooth_mouse_move(
 
         // Wait for next frame (except on last frame)
         if frame < total_frames {
-            tokio::time::sleep(tokio::time::Duration::from_millis(SMOOTH_MOVEMENT_FRAME_TIME_MS)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(movement::SMOOTH_MOVEMENT_FRAME_TIME_MS)).await;
         }
     }
 
@@ -130,7 +127,7 @@ pub(crate) async fn test_click_visualization(
     let debug_enabled = should_enable_debug(false, &state);
     let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
 
-    let color_to_use = color.unwrap_or_else(|| "#FF0000".to_string()); // Default to red
+    let color_to_use = color.unwrap_or_else(|| visual::DEFAULT_CLICK_COLOR.to_string()); // Default to red
 
     log_debug_operation("test_click_visualization", &format!("Testing click visualization at ({}, {}) with color {}", x, y, color_to_use), &debug_config);
     info!("Testing click visualization at ({}, {}) with color {}", x, y, color_to_use);
@@ -180,7 +177,7 @@ pub(crate) async fn qa_test_click(
         _ => Err(format!("Unknown click type: {}", click_type)),
     };
     let duration = start_time.elapsed();
-    let latency_ms = duration.as_secs_f64() * 1000.0;
+    let latency_ms = duration.as_secs_f64() * crate::constants::text::ratios::MILLISECONDS_PER_SECOND;
     let cursor_position_result = get_cursor_position(app.clone(), state.clone()).await;
     let cursor_position = cursor_position_result.ok();
     let qa_result = ClickQAResult {
@@ -328,9 +325,9 @@ pub(crate) async fn qa_test_click_visualization(
 ) -> Result<serde_json::Value, String> {
     info!("[QA_TOOL] Testing click visualization system");
     let test_colors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF"];
-    let center_x = 500.0;
-    let center_y = 300.0;
-    let radius = 100.0;
+    let center_x = testing::TEST_CIRCLE_CENTER_X;
+    let center_y = testing::TEST_CIRCLE_CENTER_Y;
+    let radius = testing::TEST_CIRCLE_RADIUS;
     let mut results = Vec::new();
     for (i, color) in test_colors.iter().enumerate() {
         let angle = 2.0 * std::f64::consts::PI * (i as f64) / (test_colors.len() as f64);

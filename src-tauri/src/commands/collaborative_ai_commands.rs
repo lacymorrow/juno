@@ -96,7 +96,7 @@ pub async fn design_collaborative_ai_system(
     match designer.design_collaborative_system(&requirements).await {
         Ok(result) => {
             tracing::info!("Collaborative AI system designed successfully with {:.1}% estimated success rate",
-                          result.success_rate * 100.0);
+                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER);
             Ok(result)
         }
         Err(e) => {
@@ -119,7 +119,7 @@ pub async fn execute_collaborative_workflow(
     match designer.execute_workflow(&workflow).await {
         Ok(result) => {
             tracing::info!("Workflow execution completed with {:.1}% success rate",
-                          result.success_rate * 100.0);
+                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER);
             Ok(result)
         }
         Err(e) => {
@@ -198,14 +198,14 @@ pub async fn validate_collaborative_ai_request(
     // Validate description
     if request.description.trim().is_empty() {
         errors.push("Description cannot be empty".to_string());
-    } else if request.description.len() < 10 {
+    } else if request.description.len() < crate::constants::text::validation::MIN_REQUEST_DESCRIPTION_LENGTH {
         warnings.push("Description is very short, consider adding more details".to_string());
     }
 
     // Validate goals
     if request.goals.is_empty() {
         errors.push("At least one goal must be specified".to_string());
-    } else if request.goals.len() > 10 {
+    } else if request.goals.len() > crate::constants::text::validation::MAX_COLLABORATIVE_AI_GOALS {
         warnings.push("Large number of goals may increase complexity".to_string());
     }
 
@@ -221,9 +221,11 @@ pub async fn validate_collaborative_ai_request(
         errors.push("Max response time must be greater than 0".to_string());
     }
 
-    if request.performance_requirements.availability_percent < 0.0 ||
-       request.performance_requirements.availability_percent > 100.0 {
-        errors.push("Availability percent must be between 0 and 100".to_string());
+    if request.performance_requirements.availability_percent < crate::constants::text::ratios::MIN_PERCENTAGE ||
+       request.performance_requirements.availability_percent > crate::constants::text::ratios::MAX_PERCENTAGE {
+        errors.push(format!("Availability percent must be between {} and {}",
+                           crate::constants::text::ratios::MIN_PERCENTAGE,
+                           crate::constants::text::ratios::MAX_PERCENTAGE));
     }
 
     // Validate complexity level
@@ -283,7 +285,7 @@ fn estimate_request_complexity(request: &CollaborativeAIRequest) -> f32 {
         _ => complexity *= 1.0,
     }
 
-    complexity.min(10.0) // Cap at 10.0
+    complexity.min(crate::constants::text::validation::MAX_COLLABORATIVE_AI_GOALS as f32) // Cap at 10.0
 }
 
 fn estimate_design_time(request: &CollaborativeAIRequest) -> f32 {
