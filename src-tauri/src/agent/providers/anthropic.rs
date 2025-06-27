@@ -41,6 +41,7 @@ impl Default for ToolChoice {
 struct AnthropicRequest {
     model: String,
     messages: Vec<ApiMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ApiTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
