@@ -125,7 +125,7 @@ pub async fn create_checkpoint(
             })
         }
         Err(e) => {
-            error!("{}", format_error(templates::FAILED_TO_CREATE, "checkpoint", e));
+            error!("{}", format_error(templates::FAILED_TO_CREATE, "checkpoint", &e));
             Ok(CheckpointResult {
                 success: false,
                 checkpoint_id: None,

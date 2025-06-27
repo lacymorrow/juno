@@ -33,6 +33,11 @@ use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::{app, audio, events, errors::templates};
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
@@ -1240,7 +1245,7 @@ impl AppState {
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
                     Ok(Err(e)) => {
-                        warn!("❌ {}", format!(templates::FAILED_TO_START, format!("MCP server '{}'", config.name), e));
+                        warn!("❌ {}", format_error(templates::FAILED_TO_START, &format!("MCP server '{}'", config.name), &e));
                         failed_servers.push(format!("{}: {}", config.name, e));
                     }
                     Err(_) => {
