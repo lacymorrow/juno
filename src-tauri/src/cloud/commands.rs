@@ -17,6 +17,11 @@ use crate::state::AppState;
 use crate::constants::permissions;
 use crate::constants::errors::templates;
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Remote command that can be executed on the device
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteCommand {
@@ -250,7 +255,7 @@ impl CloudCommandProcessor {
         // Note: We assume the audio data is already in WAV format
         // In production, you might want to add format detection and conversion
         std::fs::write(&temp_audio_path, &audio_data)
-            .map_err(|e| CloudError::ExecutionFailed(format!("Failed to write temp audio file: {}", e)))?;
+            .map_err(|e| CloudError::ExecutionFailed(format_error(templates::FAILED_TO_WRITE, "temp audio file", e)))?;
 
         let temp_audio_path_str = temp_audio_path.to_string_lossy().to_string();
         info!("Created temporary audio file: {}", temp_audio_path_str);
@@ -271,7 +276,7 @@ impl CloudCommandProcessor {
 
         // Clean up temporary file
         if let Err(e) = std::fs::remove_file(&temp_audio_path) {
-            warn!("Failed to cleanup temporary audio file: {}", e);
+            warn!("{}", format_error(templates::FAILED_TO_CLEANUP, "temporary audio file", e));
         }
 
         // If transcription is empty or just whitespace, return an error
@@ -420,7 +425,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                error!("Failed to execute click command: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "click command", &e));
                 Err(CloudError::ExecutionFailed(format!("Click failed: {}", e)))
             }
         }
@@ -449,7 +454,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                error!("Failed to execute type command: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "type command", &e));
                 Err(CloudError::ExecutionFailed(format!("Type failed: {}", e)))
             }
         }
@@ -477,7 +482,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                error!("Failed to execute key press command: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "key press command", &e));
                 Err(CloudError::ExecutionFailed(format!("Key press failed: {}", e)))
             }
         }
@@ -506,7 +511,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                error!("Failed to execute shell command: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "shell command", &e));
                 Err(CloudError::ExecutionFailed(format!("Shell command failed: {}", e)))
             }
         }
@@ -540,7 +545,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                error!("Failed to capture screenshot: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_CAPTURE, "screenshot", &e));
                 Err(CloudError::ExecutionFailed(format!("Screenshot failed: {}", e)))
             }
         }
@@ -639,7 +644,7 @@ impl CloudCommandProcessor {
                     query.chars().take(50).collect::<String>(), source))
             },
             Err(e) => {
-                error!("Failed to submit query to orchestrator: {}", e);
+                error!("{}", format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", &e));
                 Err(CloudError::ExecutionFailed(format!("Query submission failed: {}", e)))
             }
         }

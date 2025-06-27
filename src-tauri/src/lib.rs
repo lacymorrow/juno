@@ -10,6 +10,11 @@ use tracing::{error, info, warn};
 use crate::settings::manager::SettingsManager;
 use crate::constants::errors::templates;
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
 
@@ -318,7 +323,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
                         ))
                     }
                     Err(e) => {
-                        let error_msg = format!(templates::FAILED_TO_LOAD, "bundled .env file", e);
+                        let error_msg = format_error(templates::FAILED_TO_LOAD, "bundled .env file", e);
                         error!("{}", error_msg);
                         Err(error_msg)
                     }
@@ -330,7 +335,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
             }
         }
         Err(e) => {
-            let error_msg = format!(templates::FAILED_TO_RETRIEVE, "resource directory", e);
+            let error_msg = format_error(templates::FAILED_TO_RETRIEVE, "resource directory", e);
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -885,7 +890,7 @@ pub fn run() {
             let settings_manager = match SettingsManager::new(app_handle.clone()) {
                 Ok(manager) => manager,
                 Err(e) => {
-                    tracing::error!("{}", format!(templates::FAILED_TO_START, "SettingsManager", e));
+                    tracing::error!("{}", format_error(templates::FAILED_TO_START, "SettingsManager", &e));
                     return Err(e.into());
                 }
             };
@@ -899,7 +904,7 @@ pub fn run() {
                 if let Err(e) =
                     state_management::initialize_application_state(&state_app_handle).await
                 {
-                    tracing::error!("{}", format!(templates::FAILED_TO_START, "application state", e));
+                    tracing::error!("{}", format_error(templates::FAILED_TO_START, "application state", &e));
                 } else {
                     tracing::info!("Application state management initialized successfully");
                 }
@@ -928,7 +933,7 @@ pub fn run() {
 
             // Setup comprehensive application integration (specialized listeners, component coordination, etc.)
             if let Err(e) = integration::setup_application_integration(app) {
-                tracing::error!("{}", format!(templates::FAILED_TO_CONFIGURE, "application integration", e));
+                tracing::error!("{}", format_error(templates::FAILED_TO_CONFIGURE, "application integration", &e));
             } else {
                 tracing::info!("Application integration setup completed successfully");
             }

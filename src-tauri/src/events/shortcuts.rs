@@ -12,6 +12,11 @@ use tracing::{error, info, warn};
 use crate::{constants, state};
 use crate::constants::{events, errors::templates};
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     crate::parse_shortcut_string(shortcut_str)
@@ -31,7 +36,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{}", format!(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!("{}", format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -348,7 +353,7 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(format!(templates::FAILED_TO_EMIT, "test event", e));
+        return Err(format_error(templates::FAILED_TO_EMIT, "test event", e));
     }
 
     Ok(())

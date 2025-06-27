@@ -14,6 +14,11 @@ use tauri::{command, State};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+/// Format error message with template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Global error recovery manager instance
 static ERROR_RECOVERY_MANAGER: std::sync::OnceLock<Arc<Mutex<ErrorRecoveryManager>>> =
     std::sync::OnceLock::new();
@@ -120,7 +125,7 @@ pub async fn create_checkpoint(
             })
         }
         Err(e) => {
-            error!("Failed to create checkpoint: {}", e);
+            error!("{}", format_error(templates::FAILED_TO_CREATE, "checkpoint", &e));
             Ok(CheckpointResult {
                 success: false,
                 checkpoint_id: None,

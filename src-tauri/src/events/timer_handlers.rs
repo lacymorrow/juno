@@ -20,6 +20,11 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use crate::constants::{events, errors::templates};
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Agent system states for determining restart eligibility
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentSystemState {
@@ -421,7 +426,7 @@ impl TimerEventHandler {
         )
         .await
         {
-            return Err(TimerEventError::AgentUnavailable(format!(
+            return Err(TimerEventError::AgentUnavailable(format_error(
                 templates::FAILED_TO_START,
                 "agent restart",
                 e
@@ -445,7 +450,7 @@ impl TimerEventHandler {
 
         // Emit event to notify about queued timer
         if let Err(e) = self.app_handle.emit(events::timer::QUEUED, &timer_data) {
-            warn!("{}", format!(templates::FAILED_TO_EMIT, "timer-queued event", e));
+            warn!("{}", format_error(templates::FAILED_TO_EMIT, "timer-queued event", e));
         }
 
         Ok(())
@@ -513,7 +518,7 @@ impl TimerEventHandler {
 
             // Process the timer
             if let Err(e) = self.process_timer_internal(timer.clone()).await {
-                error!("{}", format!(templates::FAILED_TO_PROCESS, format!("queued timer {}", timer.id), e));
+                error!("{}", format_error(templates::FAILED_TO_PROCESS, &format!("queued timer {}", timer.id), e));
                 continue;
             }
 
