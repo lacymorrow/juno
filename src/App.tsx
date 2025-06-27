@@ -321,7 +321,7 @@ function App() {
           {appState.isDevPanelOpen && (
             <>
               <ResizableHandle />
-              <ResizablePanel defaultSize={30} minSize={25} maxSize={50}>
+              <ResizablePanel defaultSize={42} minSize={25} maxSize={70}>
                 <DevToolsPanel />
               </ResizablePanel>
             </>
