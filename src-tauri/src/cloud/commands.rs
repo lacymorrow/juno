@@ -425,7 +425,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "click command", e));
+                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "click command", &e));
             Err(CloudError::ExecutionFailed(format!("Click failed: {}", e)))
             }
         }
@@ -454,7 +454,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "type command", e));
+                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "type command", &e));
             Err(CloudError::ExecutionFailed(format!("Type failed: {}", e)))
             }
         }
@@ -482,7 +482,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "key press command", e));
+                            error!("{}", format_error(templates::FAILED_TO_EXECUTE, "key press command", &e));
             Err(CloudError::ExecutionFailed(format!("Key press failed: {}", e)))
             }
         }
@@ -511,7 +511,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                        error!("{}", format_error(templates::FAILED_TO_EXECUTE, "shell command", e));
+                        error!("{}", format_error(templates::FAILED_TO_EXECUTE, "shell command", &e));
         Err(CloudError::ExecutionFailed(format!("Shell command failed: {}", e)))
             }
         }
@@ -545,7 +545,7 @@ impl CloudCommandProcessor {
                 })
             },
             Err(e) => {
-                        error!("{}", format_error(templates::FAILED_TO_CAPTURE, "screenshot", e));
+                        error!("{}", format_error(templates::FAILED_TO_CAPTURE, "screenshot", &e));
         Err(CloudError::ExecutionFailed(format!("Screenshot failed: {}", e)))
             }
         }
@@ -644,7 +644,7 @@ impl CloudCommandProcessor {
                     query.chars().take(50).collect::<String>(), source))
             },
             Err(e) => {
-                        error!("{}", format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", e));
+                        error!("{}", format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", &e));
         Err(CloudError::ExecutionFailed(format!("Query submission failed: {}", e)))
             }
         }

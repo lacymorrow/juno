@@ -260,13 +260,13 @@ impl StopCoordinator {
 
     fn emit_tts_stop_event(&self, app_handle: &AppHandle) {
         if let Err(e) = app_handle.emit(events::tts::STOP_REQUESTED, ()) {
-            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, "TTS stop", e));
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format_error(FAILED_TO_EMIT, "TTS stop", e));
         }
     }
 
     fn emit_event(&self, app_handle: &AppHandle, event_name: &str) {
         if let Err(e) = app_handle.emit(event_name, ()) {
-            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, event_name, e));
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format_error(FAILED_TO_EMIT, event_name, e));
         }
     }
 

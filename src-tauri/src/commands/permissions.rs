@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use crate::constants::events;
-use crate::constants::errors::templates::{FAILED_TO_EMIT, templates};
+use crate::constants::errors::templates::FAILED_TO_EMIT;
 
 /// Helper function to format error messages with proper template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {

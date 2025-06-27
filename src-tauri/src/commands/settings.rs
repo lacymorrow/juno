@@ -242,7 +242,7 @@ pub async fn set_autostart_enabled(
     let mut settings = settings_manager.get_all_settings().await
         .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::SETTINGS, e))?;
 
-    settings.cli.autostart_enabled = enabled;
+    settings.autostart_enabled = enabled;
 
     settings_manager.save_all_settings(&settings).await
         .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))?;
