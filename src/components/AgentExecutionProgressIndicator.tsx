@@ -8,7 +8,7 @@ import {
   Play,
   Square,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface AgentExecutionProgress {
   is_executing: boolean;
@@ -33,14 +33,13 @@ export function AgentExecutionProgressIndicator({
   const [progress, setProgress] = useState<AgentExecutionProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
-    let isInitialLoad = true;
-
     const fetchProgress = async () => {
       try {
         // Only show loading state on initial load, not during polling
-        if (isInitialLoad) {
+        if (isInitialLoadRef.current) {
           setLoading(true);
         }
 
@@ -50,14 +49,15 @@ export function AgentExecutionProgressIndicator({
         setProgress(result);
         setError(null);
 
-        if (isInitialLoad) {
-          isInitialLoad = false;
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
           setLoading(false);
         }
       } catch (err) {
         setError(err as string);
         console.error("Failed to fetch agent execution progress:", err);
-        if (isInitialLoad) {
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
           setLoading(false);
         }
       }
