@@ -53,17 +53,6 @@ fn handle_menu_event(app_handle: AppHandle, event_id: &str) {
     else if is_tray_menu_event(event_id) {
         tray_menu::handle_tray_menu_events(app_handle, event_id);
     }
-    // Handle special cases
-    else if event_id == constants::tray_menu_ids::SETTINGS {
-        // Handle case where app menu receives tray menu settings ID
-        info!("[Menu] Received tray menu settings ID, redirecting to settings");
-        let app_handle_clone = app_handle.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                error!("[Menu] Failed to open settings window: {}", e);
-            }
-        });
-    }
     else {
         info!("[Menu] Unhandled menu event: {}", event_id);
     }
@@ -107,7 +96,7 @@ fn is_edit_menu_event(event_id: &str) -> bool {
 }
 
 /// Check if an event ID belongs to the tray menu
-fn is_tray_menu_event(event_id: &str) -> bool {
+pub fn is_tray_menu_event(event_id: &str) -> bool {
     matches!(event_id,
         constants::tray_menu_ids::SHOW_HIDE |
         constants::tray_menu_ids::NEW_CHAT |
