@@ -540,7 +540,7 @@ pub async fn set_default() {
 pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
     // Only handle events that are actually tray menu events
     // Ignore app menu and edit menu events that are handled by the global menu handler
-    if !is_tray_menu_event(event_id) {
+    if !crate::menu::is_tray_menu_event(event_id) {
         // Silently ignore non-tray events - they're handled by the global menu handler
         return;
     }
@@ -586,25 +586,6 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             warn!("[TrayMenu] Unexpected tray menu event: {}", event_id);
         }
     }
-}
-
-/// Check if an event ID belongs to the tray menu
-fn is_tray_menu_event(event_id: &str) -> bool {
-    use crate::constants::menus::tray_menu_ids;
-    matches!(event_id,
-        tray_menu_ids::SHOW_HIDE |
-        tray_menu_ids::NEW_CHAT |
-        tray_menu_ids::SHOW_HIDE_FLOATING_BAR |
-        tray_menu_ids::DEVELOPER_TOOLS |
-        tray_menu_ids::SETTINGS |
-        tray_menu_ids::QUIT |
-        tray_menu_ids::SHOW_MAIN_WINDOW |
-        tray_menu_ids::HIDE_MAIN_WINDOW |
-        tray_menu_ids::SHOW_DEVTOOLS |
-        tray_menu_ids::SHOW_FLOATING_BAR |
-        tray_menu_ids::HIDE_FLOATING_BAR |
-        tray_menu_ids::TOGGLE_FLOATING_BAR
-    )
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
@@ -696,8 +677,6 @@ mod tests {
     #[test]
     fn test_tray_menu_constants() {
         // Test that required tray menu constants exist
-        use crate::constants::menus::tray_menu_ids;
-
         assert!(!tray_menu_ids::QUIT.is_empty());
         assert!(!tray_menu_ids::SETTINGS.is_empty());
         assert!(!tray_menu_ids::SHOW_FLOATING_BAR.is_empty());
