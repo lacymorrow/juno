@@ -4,7 +4,6 @@ use crate::agent::providers::config::{ProviderConfig, AgentMode};
 use crate::agent::providers::factory::{ProviderInfo, BrainFactory};
 use crate::settings::manager::SettingsManager;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
-use tauri::State;
 use tracing::info;
 use crate::constants::errors::{templates, components, actions};
 
