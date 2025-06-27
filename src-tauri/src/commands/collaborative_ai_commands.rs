@@ -96,7 +96,7 @@ pub async fn design_collaborative_ai_system(
     match designer.design_collaborative_system(&requirements).await {
         Ok(result) => {
             tracing::info!("Collaborative AI system designed successfully with {:.1}% estimated success rate",
-                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER);
+                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32);
             Ok(result)
         }
         Err(e) => {
@@ -119,7 +119,7 @@ pub async fn execute_collaborative_workflow(
     match designer.execute_workflow(&workflow).await {
         Ok(result) => {
             tracing::info!("Workflow execution completed with {:.1}% success rate",
-                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER);
+                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32);
             Ok(result)
         }
         Err(e) => {
@@ -221,8 +221,8 @@ pub async fn validate_collaborative_ai_request(
         errors.push("Max response time must be greater than 0".to_string());
     }
 
-    if request.performance_requirements.availability_percent < crate::constants::text::ratios::MIN_PERCENTAGE ||
-       request.performance_requirements.availability_percent > crate::constants::text::ratios::MAX_PERCENTAGE {
+    if request.performance_requirements.availability_percent < crate::constants::text::ratios::MIN_PERCENTAGE as f32 ||
+       request.performance_requirements.availability_percent > crate::constants::text::ratios::MAX_PERCENTAGE as f32 {
         errors.push(format!("Availability percent must be between {} and {}",
                            crate::constants::text::ratios::MIN_PERCENTAGE,
                            crate::constants::text::ratios::MAX_PERCENTAGE));

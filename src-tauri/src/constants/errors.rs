@@ -122,6 +122,9 @@ pub mod templates {
     pub const FAILED_TO_COMPRESS: &str = "Failed to compress {}: {}";
     pub const FAILED_TO_SET: &str = "Failed to set {}: {}";
     pub const FAILED_TO_RESTORE: &str = "Failed to restore {}: {}";
+    pub const FAILED_TO_WRITE: &str = "Failed to write {}: {}";
+    pub const FAILED_TO_CLEANUP: &str = "Failed to cleanup {}: {}";
+    pub const FAILED_TO_CAPTURE: &str = "Failed to capture {}: {}";
 }
 
 /// Error categories for consistent classification
@@ -198,6 +201,17 @@ pub mod actions {
     pub const WAIT_INPUT: &str = "wait input";
     pub const RELEASE_KEY_INPUT: &str = "release_key input";
     pub const SET_CLIPBOARD_INPUT: &str = "set_clipboard input";
+    // Settings-specific actions
+    pub const SETTINGS: &str = "settings";
+    pub const KEYBOARD_SHORTCUTS: &str = "keyboard shortcuts";
+    pub const FLOATING_BAR_SETTINGS: &str = "floating bar settings";
+    pub const AGENT_SETTINGS: &str = "agent settings";
+    pub const PROVIDER_SETTINGS: &str = "provider settings";
+    pub const CLOUD_SETTINGS: &str = "cloud settings";
+    pub const AUDIO_SETTINGS: &str = "audio settings";
+    pub const TOOL_SETTINGS: &str = "tool settings";
+    pub const ONBOARDING_SETTINGS: &str = "onboarding settings";
+    pub const AUTOSTART_SETTING: &str = "autostart setting";
     pub const WINDOW_LIST_JSON: &str = "window list JSON";
     pub const WINDOW_INFO_JSON: &str = "window info JSON";
     pub const EXECUTE_COMMAND_INPUT: &str = "execute_command input";

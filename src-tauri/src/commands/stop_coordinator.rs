@@ -10,6 +10,11 @@ use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
 use crate::constants::errors::prefixes::STOP_COORDINATOR as STOP_COORDINATOR_PREFIX;
 
+/// Helper function to format error messages with proper template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
     /// Track active operations to prevent redundant stops
@@ -254,14 +259,14 @@ impl StopCoordinator {
     }
 
     fn emit_tts_stop_event(&self, app_handle: &AppHandle) {
-        if let Err(e) = app_handle.emit(events::tts::TTS_AUDIO_STOP, ()) {
-            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, "TTS stop", e));
+        if let Err(e) = app_handle.emit(events::tts::STOP_REQUESTED, ()) {
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format_error(FAILED_TO_EMIT, "TTS stop", e));
         }
     }
 
     fn emit_event(&self, app_handle: &AppHandle, event_name: &str) {
         if let Err(e) = app_handle.emit(event_name, ()) {
-            warn!("{} {}", STOP_COORDINATOR_PREFIX, format!(FAILED_TO_EMIT, event_name, e));
+            warn!("{} {}", STOP_COORDINATOR_PREFIX, format_error(FAILED_TO_EMIT, event_name, e));
         }
     }
 
