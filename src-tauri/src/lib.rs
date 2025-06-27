@@ -8,7 +8,6 @@ use tracing::{error, info, warn};
 
 // Settings manager import
 use crate::settings::manager::SettingsManager;
-use crate::constants::errors::templates;
 
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
