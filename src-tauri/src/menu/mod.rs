@@ -51,19 +51,7 @@ fn handle_menu_event(app_handle: AppHandle, event_id: &str) {
     }
     // Check if it's a tray menu event
     else if is_tray_menu_event(event_id) {
-        // Tray menu events are handled internally by tray_menu module
-        info!("[Menu] Tray menu event handled internally: {}", event_id);
-    }
-    // Handle special cases
-    else if event_id == constants::tray_menu_ids::SETTINGS {
-        // Handle case where app menu receives tray menu settings ID
-        info!("[Menu] Received tray menu settings ID, redirecting to settings");
-        let app_handle_clone = app_handle.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                error!("[Menu] Failed to open settings window: {}", e);
-            }
-        });
+        tray_menu::handle_tray_menu_events(app_handle, event_id);
     }
     else {
         info!("[Menu] Unhandled menu event: {}", event_id);
@@ -108,10 +96,19 @@ fn is_edit_menu_event(event_id: &str) -> bool {
 }
 
 /// Check if an event ID belongs to the tray menu
-fn is_tray_menu_event(event_id: &str) -> bool {
+pub fn is_tray_menu_event(event_id: &str) -> bool {
     matches!(event_id,
-        constants::tray_menu_ids::SHOW_MAIN_WINDOW |
+        constants::tray_menu_ids::SHOW_HIDE |
+        constants::tray_menu_ids::NEW_CHAT |
+        constants::tray_menu_ids::SHOW_HIDE_FLOATING_BAR |
+        constants::tray_menu_ids::DEVELOPER_TOOLS |
         constants::tray_menu_ids::SETTINGS |
-        constants::tray_menu_ids::QUIT
+        constants::tray_menu_ids::QUIT |
+        constants::tray_menu_ids::SHOW_MAIN_WINDOW |
+        constants::tray_menu_ids::HIDE_MAIN_WINDOW |
+        constants::tray_menu_ids::SHOW_DEVTOOLS |
+        constants::tray_menu_ids::SHOW_FLOATING_BAR |
+        constants::tray_menu_ids::HIDE_FLOATING_BAR |
+        constants::tray_menu_ids::TOGGLE_FLOATING_BAR
     )
 }
