@@ -8,11 +8,9 @@ use tauri::State;
 use tracing::info;
 use crate::constants::errors::{templates, components, actions};
 
-// Helper function for error formatting
+// Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template
-        .replace("{0}", context)
-        .replace("{1}", &error.to_string())
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
 }
 
 /// Get the list of available providers

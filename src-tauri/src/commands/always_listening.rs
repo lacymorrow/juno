@@ -7,6 +7,11 @@ use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
 use crate::constants::errors::prefixes::COMMAND;
 
+// Helper function for error formatting - properly handles template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Start always listening mode
 #[tauri::command]
 pub async fn start_always_listening_mode(
@@ -56,7 +61,7 @@ pub async fn start_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, true) {
-                        error!("{} {}", COMMAND, format!(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
 
                     // Update floating bar
@@ -150,7 +155,7 @@ pub async fn stop_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
-                        error!("{} {}", COMMAND, format!(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
 
                     // Update floating bar

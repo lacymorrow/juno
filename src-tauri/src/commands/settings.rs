@@ -14,11 +14,9 @@ use crate::constants::errors::templates;
 use crate::constants::errors::components;
 use crate::constants::errors::actions;
 
-/// Helper function to format error messages with our centralized templates
+// Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template
-        .replace("{0}", context)
-        .replace("{1}", &error.to_string())
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
 }
 
 /// Get all application settings
@@ -240,8 +238,16 @@ pub async fn set_autostart_enabled(
     let settings_manager = SettingsManager::new(app_handle)
         .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
 
-    settings_manager.set_autostart_enabled(enabled).await
-        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))
+    // Toggle autostart
+    let mut settings = settings_manager.get_all_settings().await
+        .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::SETTINGS, e))?;
+
+    settings.cli.autostart_enabled = enabled;
+
+    settings_manager.save_all_settings(&settings).await
+        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))?;
+
+    Ok(())
 }
 
 /// Reset all settings to defaults
@@ -252,9 +258,12 @@ pub async fn reset_centralized_settings(
     let settings_manager = SettingsManager::new(app_handle)
         .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
 
-    let defaults = AppSettings::default();
-    settings_manager.save_all_settings(&defaults).await
-        .map_err(|e| format_error(templates::FAILED_TO_RESTORE, actions::SETTINGS, e))
+    // Reset to defaults
+    let default_settings = AppSettings::default();
+    settings_manager.save_all_settings(&default_settings).await
+        .map_err(|e| format_error(templates::FAILED_TO_RESTORE, actions::SETTINGS, e))?;
+
+    Ok(())
 }
 
 /// Export all settings as JSON string
@@ -269,7 +278,7 @@ pub async fn export_settings(
         .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::SETTINGS, e))?;
 
     serde_json::to_string_pretty(&settings)
-        .map_err(|e| format_error(templates::FAILED_TO_ENCODE, actions::SETTINGS, e))
+        .map_err(|e| format_error(templates::FAILED_TO_ENCODE, actions::SETTINGS_JSON, e))
 }
 
 /// Import settings from JSON string
@@ -278,12 +287,14 @@ pub async fn import_settings(
     app_handle: AppHandle,
     settings_json: String,
 ) -> Result<(), String> {
-    let settings: AppSettings = serde_json::from_str(&settings_json)
-        .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
-
     let settings_manager = SettingsManager::new(app_handle)
         .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
 
+    let settings: AppSettings = serde_json::from_str(&settings_json)
+        .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
+
     settings_manager.save_all_settings(&settings).await
-        .map_err(|e| format_error(templates::FAILED_TO_SAVE, actions::SETTINGS, e))
+        .map_err(|e| format_error(templates::FAILED_TO_SAVE, actions::SETTINGS, e))?;
+
+    Ok(())
 }
