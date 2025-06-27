@@ -238,16 +238,8 @@ pub async fn set_autostart_enabled(
     let settings_manager = SettingsManager::new(app_handle)
         .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
 
-    // Toggle autostart
-    let mut settings = settings_manager.get_all_settings().await
-        .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::SETTINGS, e))?;
-
-    settings.autostart_enabled = enabled;
-
-    settings_manager.save_all_settings(&settings).await
-        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))?;
-
-    Ok(())
+    settings_manager.set_autostart_enabled(enabled).await
+        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))
 }
 
 /// Reset all settings to defaults
