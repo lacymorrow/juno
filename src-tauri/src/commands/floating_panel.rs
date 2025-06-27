@@ -46,13 +46,7 @@ pub fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> 
                     }
                 }
                 Err(e) => {
-<<<<<<< HEAD
                     let error_msg = format_error(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
-||||||| b8852cb3
-                    let error_msg = format!(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
-=======
-                    let error_msg = format!("Failed to retrieve NSWindow for floating panel: {}", e);
->>>>>>> origin/main
                     warn!("{}", error_msg);
                     return Err(error_msg);
                 }
@@ -164,13 +158,7 @@ pub fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String
                     }
                 }
                 Err(e) => {
-<<<<<<< HEAD
                     let error_msg = format_error(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
-||||||| b8852cb3
-                    let error_msg = format!(templates::FAILED_TO_RETRIEVE, "NSWindow for floating panel", e);
-=======
-                    let error_msg = format!("Failed to retrieve NSWindow for floating panel: {}", e);
->>>>>>> origin/main
                     warn!("{}", error_msg);
                     return Err(error_msg);
                 }
