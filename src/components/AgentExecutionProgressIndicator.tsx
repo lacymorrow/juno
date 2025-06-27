@@ -8,7 +8,7 @@ import {
   Play,
   Square,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface AgentExecutionProgress {
   is_executing: boolean;
@@ -33,21 +33,33 @@ export function AgentExecutionProgressIndicator({
   const [progress, setProgress] = useState<AgentExecutionProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
     const fetchProgress = async () => {
       try {
-        setLoading(true);
+        // Only show loading state on initial load, not during polling
+        if (isInitialLoadRef.current) {
+          setLoading(true);
+        }
+
         const result = await invoke<AgentExecutionProgress>(
           "get_agent_execution_progress"
         );
         setProgress(result);
         setError(null);
+
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          setLoading(false);
+        }
       } catch (err) {
         setError(err as string);
         console.error("Failed to fetch agent execution progress:", err);
-      } finally {
-        setLoading(false);
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          setLoading(false);
+        }
       }
     };
 
@@ -56,7 +68,10 @@ export function AgentExecutionProgressIndicator({
 
     // Set up polling every 1 second when executing, every 5 seconds when not
     const pollInterval = progress?.is_executing ? 1000 : 5000;
-    const interval = setInterval(fetchProgress, pollInterval);
+    const interval = setInterval(() => {
+      // Don't change loading state during polling - this prevents flashing
+      fetchProgress();
+    }, pollInterval);
 
     return () => clearInterval(interval);
   }, [progress?.is_executing]);
