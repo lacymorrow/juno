@@ -274,12 +274,6 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .show_menu_on_left_click(false)
         .icon(default_icon)
         .tooltip("Juno - Ready")
-        .on_menu_event({
-            let app_handle = app.clone();
-            move |app, event| {
-                handle_tray_menu_events(app_handle.clone(), event.id().as_ref());
-            }
-        })
         .on_tray_icon_event(|_tray, event| {
             handle_tray_icon_event(event);
         })
@@ -544,6 +538,13 @@ pub async fn set_default() {
 
 /// Handle tray menu events
 pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
+    // Only handle events that are actually tray menu events
+    // Ignore app menu and edit menu events that are handled by the global menu handler
+    if !is_tray_menu_event(event_id) {
+        // Silently ignore non-tray events - they're handled by the global menu handler
+        return;
+    }
+
     match event_id {
         tray_menu_ids::SHOW_HIDE => {
             info!("[TrayMenu] Show/Hide menu item clicked");
@@ -581,9 +582,29 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             app_handle.exit(0);
         }
         _ => {
-            info!("[TrayMenu] Unknown menu item clicked: {}", event_id);
+            // This should never happen since we filter for tray events above
+            warn!("[TrayMenu] Unexpected tray menu event: {}", event_id);
         }
     }
+}
+
+/// Check if an event ID belongs to the tray menu
+fn is_tray_menu_event(event_id: &str) -> bool {
+    use crate::constants::menus::tray_menu_ids;
+    matches!(event_id,
+        tray_menu_ids::SHOW_HIDE |
+        tray_menu_ids::NEW_CHAT |
+        tray_menu_ids::SHOW_HIDE_FLOATING_BAR |
+        tray_menu_ids::DEVELOPER_TOOLS |
+        tray_menu_ids::SETTINGS |
+        tray_menu_ids::QUIT |
+        tray_menu_ids::SHOW_MAIN_WINDOW |
+        tray_menu_ids::HIDE_MAIN_WINDOW |
+        tray_menu_ids::SHOW_DEVTOOLS |
+        tray_menu_ids::SHOW_FLOATING_BAR |
+        tray_menu_ids::HIDE_FLOATING_BAR |
+        tray_menu_ids::TOGGLE_FLOATING_BAR
+    )
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
