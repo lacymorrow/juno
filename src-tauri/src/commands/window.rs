@@ -341,7 +341,7 @@ pub(crate) async fn resize_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
 
                         // Now resize the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
@@ -431,7 +431,7 @@ pub(crate) async fn move_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
 
                         // Now move the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
@@ -519,7 +519,7 @@ pub(crate) async fn close_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
 
                         // Now close the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;

@@ -4,6 +4,7 @@ use tauri::{Manager, State};
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
 use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
+use crate::constants::memory::{tokens, performance};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]
@@ -199,7 +200,7 @@ pub async fn get_memory_compression_stats(
             "total_compressed_tokens": total_compressed_tokens,
             "tokens_saved": tokens_saved,
             "average_compression_ratio": average_compression_ratio,
-            "latest_summaries": visual_summaries.into_iter().take(5).collect::<Vec<_>>()
+            "latest_summaries": visual_summaries.into_iter().take(performance::MAX_LATEST_SUMMARIES_RETURNED).collect::<Vec<_>>()
         }
     }))
 }
@@ -223,7 +224,7 @@ pub async fn emergency_memory_recovery(
 
     // Get the configured max tokens threshold from memory config
     let config = memory_guard.get_config().await;
-    let emergency_threshold = (config.max_tokens as f64 * 1.2) as usize; // 20% above max_tokens for emergency
+    let emergency_threshold = (config.max_tokens as f64 * tokens::EMERGENCY_THRESHOLD_MULTIPLIER) as usize; // 20% above max_tokens for emergency
     let critical_threshold = config.max_tokens; // Use configured max_tokens as critical threshold
 
     log::info!("Emergency recovery: Compressed {} screenshots, current tokens: {} (thresholds: critical={}, emergency={})",

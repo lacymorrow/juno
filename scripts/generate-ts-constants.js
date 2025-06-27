@@ -28,6 +28,7 @@ function parseRustConstants() {
         permissions: {},
         errors: {},
         commands: {},
+        memory: {},
     };
 
     // Parse each constants module
@@ -75,6 +76,10 @@ function parseRustConstants() {
         // Parse commands module
         const commandsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'commands.rs'), 'utf8');
         constants.commands = parseModuleConstants(commandsFile);
+
+        // Parse memory module
+        const memoryFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'memory.rs'), 'utf8');
+        constants.memory = parseModuleConstants(memoryFile);
 
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
@@ -276,6 +281,12 @@ ${Object.entries(constants.audio)
 
 export const COMMANDS = {
 ${Object.entries(constants.commands)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const MEMORY = {
+${Object.entries(constants.memory)
     .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
