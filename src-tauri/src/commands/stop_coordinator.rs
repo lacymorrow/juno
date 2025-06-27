@@ -10,6 +10,11 @@ use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
 use crate::constants::errors::prefixes::STOP_COORDINATOR as STOP_COORDINATOR_PREFIX;
 
+/// Helper function to format error messages with proper template substitution
+fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
+    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
     /// Track active operations to prevent redundant stops
