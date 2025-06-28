@@ -14,6 +14,7 @@ import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
 import SelfImprovementPanel from "./devtools/SelfImprovementPanel";
+import SystemContextDebug from "./devtools/SystemContextDebug";
 import { ToolDebugPanel } from "./devtools/ToolDebugPanel";
 import VisualizationSettings from "./devtools/VisualizationSettings";
 import WakeWordTesting from "./devtools/WakeWordTesting";
@@ -179,6 +180,15 @@ const DevToolsPanel: React.FC = () => {
           <h2 className="text-lg font-semibold">🔧 Tool Configuration Debug</h2>
           <Separator className="my-2" />
           <ToolDebugPanel />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">🧠 System Context Debug</h2>
+          <Separator className="my-2" />
+          <SystemContextDebug
+            loadingStates={loadingStates}
+            setLoadingStates={setLoadingStates}
+          />
         </div>
 
         <div>
