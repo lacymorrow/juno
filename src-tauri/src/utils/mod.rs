@@ -2,6 +2,7 @@
 pub mod async_runtime;
 pub mod command_macros;
 pub mod coordinates;
+pub mod coordinate_validation;
 pub mod key_parsing;
 pub mod network;
 
