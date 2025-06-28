@@ -7,6 +7,12 @@ use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
 use crate::commands::mouse::smooth_mouse_move;
+// Import mouse commands to restore proper functionality
+use crate::commands::mouse::{
+    left_click, right_click, middle_click, double_click, triple_click,
+    left_click_drag, mouse_move as mouse_move_command,
+    left_mouse_down, left_mouse_up
+};
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::{info, warn, error};
@@ -352,8 +358,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual click using the desktop interface
-                    state_manager.desktop.left_click(screen_x, screen_y, None)
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Left click failed: {}", e))?;
 
                     Ok(json!({
@@ -375,8 +381,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual click using the desktop interface
-                    state_manager.desktop.right_click(screen_x, screen_y, None)
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Right click failed: {}", e))?;
 
                     Ok(json!({
@@ -398,8 +404,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual click using the desktop interface
-                    state_manager.desktop.middle_click(screen_x, screen_y, None)
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Middle click failed: {}", e))?;
 
                     Ok(json!({
@@ -421,8 +427,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual click using the desktop interface
-                    state_manager.desktop.double_click(screen_x, screen_y, None)
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Double click failed: {}", e))?;
 
                     Ok(json!({
@@ -444,8 +450,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual click using the desktop interface
-                    state_manager.desktop.triple_click(screen_x, screen_y, None)
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Triple click failed: {}", e))?;
 
                     Ok(json!({
@@ -511,8 +517,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_start_x, screen_start_y, None).await
                         .map_err(|e| format!("Smooth mouse move to start position failed: {}", e))?;
 
-                    // Perform the actual drag using the desktop interface
-                    state_manager.desktop.left_click_drag(screen_start_x, screen_start_y, screen_end_x, screen_end_y)
+                    // Use proper mouse command which includes debug logging and validation
+                    left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
                         .map_err(|e| format!("Left click drag failed: {}", e))?;
 
                     Ok(json!({
@@ -530,9 +536,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use smooth mouse movement directly for mouse_move action
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
+                    // Use proper mouse command which includes debug logging and validation
+                    mouse_move_command(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Mouse move failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -553,8 +559,8 @@ pub async fn execute_computer_tool(
                     smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
-                    // Perform the actual mouse down using the desktop interface
-                    state_manager.desktop.left_mouse_down(screen_x, screen_y)
+                    // Use proper mouse command which includes debug logging and validation
+                    left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
                         .map_err(|e| format!("Left mouse down failed: {}", e))?;
 
                     Ok(json!({
@@ -572,12 +578,8 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Perform smooth mouse movement to target before mouse up
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
-
-                    // Perform the actual mouse up using the desktop interface
-                    state_manager.desktop.left_mouse_up(screen_x, screen_y)
+                    // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
+                    left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
                         .map_err(|e| format!("Left mouse up failed: {}", e))?;
 
                     Ok(json!({

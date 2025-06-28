@@ -9,17 +9,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
   MousePointer,
   Target,
   TrendingUp,
-  Palette,
   AlertCircle,
   CheckCircle,
 } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMPUTER_ACTIONS } from "@/lib/constants.generated";
 
 // Simple result interface for production testing
 interface ProductionTestResult {
@@ -56,14 +55,16 @@ const ClickQATestPanel: React.FC = () => {
   // Individual click test state
   const [clickX, setClickX] = useState<string>("400");
   const [clickY, setClickY] = useState<string>("300");
-  const [clickType, setClickType] = useState<string>("click");
+  const [clickType, setClickType] = useState<string>(
+    COMPUTER_ACTIONS.LEFT_CLICK
+  );
   const [clickResult, setClickResult] = useState<ProductionTestResult | null>(
     null
   );
 
   // Click series test state
   const [seriesPositions, setSeriesPositions] = useState<string>(
-    '[[100,100,"click"],[200,200,"right_click"],[300,300,"double_click"]]'
+    `[[100,100,"${COMPUTER_ACTIONS.LEFT_CLICK}"],[200,200,"${COMPUTER_ACTIONS.RIGHT_CLICK}"],[300,300,"${COMPUTER_ACTIONS.DOUBLE_CLICK}"]]`
   );
   const [seriesResults, setSeriesResults] = useState<
     ProductionTestResult[] | null
@@ -233,7 +234,7 @@ const ClickQATestPanel: React.FC = () => {
 
       // Move mouse to target position using official Computer Use API
       const computerInput: ComputerInput = {
-        action: "move",
+        action: COMPUTER_ACTIONS.MOUSE_MOVE,
         coordinate: [x, y],
       };
 
@@ -249,7 +250,7 @@ const ClickQATestPanel: React.FC = () => {
       // Get actual cursor position using computer tool
       const cursorResult = await invokeCommand<ComputerResult>(
         "computer",
-        { action: "cursor_position" },
+        { action: COMPUTER_ACTIONS.CURSOR_POSITION },
         "computer"
       );
 
@@ -353,11 +354,17 @@ const ClickQATestPanel: React.FC = () => {
               onChange={(e) => setClickType(e.target.value)}
               className="px-3 py-1 border rounded-md"
             >
-              <option value="click">Left Click</option>
-              <option value="right_click">Right Click</option>
-              <option value="middle_click">Middle Click</option>
-              <option value="double_click">Double Click</option>
-              <option value="triple_click">Triple Click</option>
+              <option value={COMPUTER_ACTIONS.LEFT_CLICK}>Left Click</option>
+              <option value={COMPUTER_ACTIONS.RIGHT_CLICK}>Right Click</option>
+              <option value={COMPUTER_ACTIONS.MIDDLE_CLICK}>
+                Middle Click
+              </option>
+              <option value={COMPUTER_ACTIONS.DOUBLE_CLICK}>
+                Double Click
+              </option>
+              <option value={COMPUTER_ACTIONS.TRIPLE_CLICK}>
+                Triple Click
+              </option>
             </select>
           </div>
 
@@ -410,7 +417,7 @@ const ClickQATestPanel: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <Input
-            placeholder='[[100,100,"click"],[200,200,"right_click"],[300,300,"double_click"]]'
+            placeholder={`[[100,100,"${COMPUTER_ACTIONS.LEFT_CLICK}"],[200,200,"${COMPUTER_ACTIONS.RIGHT_CLICK}"],[300,300,"${COMPUTER_ACTIONS.DOUBLE_CLICK}"]]`}
             value={seriesPositions}
             onChange={(e) => setSeriesPositions(e.target.value)}
           />
