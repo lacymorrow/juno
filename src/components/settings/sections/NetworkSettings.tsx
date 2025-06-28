@@ -246,6 +246,17 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   };
 
+  const handleGetCloudStatus = async () => {
+    try {
+      const status = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
+      setCloudTestStatus(JSON.stringify(status, null, 2));
+      toast.success("Cloud status retrieved");
+    } catch (error) {
+      console.error("Failed to get cloud status:", error);
+      toast.error("Failed to get cloud status");
+    }
+  };
+
   const handleStartCloudConnector = async () => {
     try {
       setIsCloudTesting(true);
