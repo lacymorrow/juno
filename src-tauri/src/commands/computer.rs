@@ -2,6 +2,7 @@
 // This provides a unified interface for all mouse, keyboard, and screen operations
 
 use crate::state::AppState;
+use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
@@ -11,10 +12,8 @@ use tracing::{error, info};
 pub struct ComputerInput {
     pub action: String,
     pub coordinate: Option<Vec<f64>>,
-    #[serde(rename = "startCoordinate")]
-    pub start_coordinate: Option<Vec<f64>>,
-    #[serde(rename = "endCoordinate")]
-    pub end_coordinate: Option<Vec<f64>>,
+    // Note: Following official Anthropic Computer Use specification
+    // Drag operations start from current cursor position and end at 'coordinate'
     pub text: Option<String>,
     #[serde(rename = "scrollCount")]
     pub scroll_count: Option<i32>,
@@ -31,6 +30,7 @@ pub struct ComputerResult {
     pub message: Option<String>,
     pub base64_image: Option<String>,
     pub error: Option<String>,
+    pub coordinate: Option<Vec<f64>>,
 }
 
 /// Main computer command - implements the official Anthropic Computer Use API
@@ -49,13 +49,14 @@ pub async fn computer(
         "middle_click" => handle_middle_click(&input, &app_handle, state).await,
         "double_click" => handle_double_click(&input, &app_handle, state).await,
         "triple_click" => handle_triple_click(&input, &app_handle, state).await,
-        "drag" => handle_drag(&input, &app_handle, state).await,
+        "left_click_drag" => handle_drag(&input, &app_handle, state).await,
         "move" => handle_move(&input, &app_handle, state).await,
         "scroll" => handle_scroll(&input, &app_handle, state).await,
         "type" => handle_type(&input, &app_handle, state).await,
         "key" => handle_key(&input, &app_handle, state).await,
         "hold_key" => handle_hold_key(&input, &app_handle, state).await,
         "wait" => handle_wait(&input).await,
+        "cursor_position" => handle_cursor_position(&app_handle, state).await,
         _ => {
             let error_msg = format!("Unknown computer action: {}", input.action);
             error!("{}", error_msg);
@@ -78,6 +79,7 @@ pub async fn computer(
                 message: None,
                 base64_image: None,
                 error: Some(e),
+                coordinate: None,
             })
         }
     }
@@ -96,6 +98,7 @@ async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, Str
         message: Some("Screenshot captured successfully".to_string()),
         base64_image: Some(screenshot_base64),
         error: None,
+        coordinate: None,
     })
 }
 
@@ -124,6 +127,7 @@ async fn handle_click(
         message: Some(format!("Clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -152,6 +156,7 @@ async fn handle_right_click(
         message: Some(format!("Right clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -180,6 +185,7 @@ async fn handle_middle_click(
         message: Some(format!("Middle clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -208,6 +214,7 @@ async fn handle_double_click(
         message: Some(format!("Double clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -236,6 +243,7 @@ async fn handle_triple_click(
         message: Some(format!("Triple clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -244,39 +252,44 @@ async fn handle_drag(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let start_coords = input.start_coordinate.as_ref()
-        .or(input.coordinate.as_ref())
-        .ok_or("Drag action requires startCoordinate parameter")?;
+    // Following official Anthropic Computer Use specification:
+    // Drag starts from current cursor position and ends at 'coordinate'
+    let end_coords = input.coordinate.as_ref()
+        .ok_or("Drag action requires coordinate parameter (end position)")?;
 
-    let end_coords = input.end_coordinate.as_ref()
-        .ok_or("Drag action requires endCoordinate parameter")?;
-
-    if start_coords.len() != 2 || end_coords.len() != 2 {
-        return Err("Coordinates must be arrays of [x, y]".to_string());
+    if end_coords.len() != 2 {
+        return Err("Coordinate must be an array of [x, y]".to_string());
     }
 
-    let start_x = start_coords[0];
-    let start_y = start_coords[1];
+    // Get current cursor position as start point (returns screen coordinates)
+    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
+        .await
+        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+
     let end_x = end_coords[0];
     let end_y = end_coords[1];
 
+    // Transform end coordinates from screenshot space to screen space to match start coordinates
+    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
     crate::commands::mouse::left_click_drag(
         app_handle.clone(),
-        state,
+        state.clone(),
         start_x,
         start_y,
-        end_x,
-        end_y,
+        screen_end_x,
+        screen_end_y,
     )
     .await
     .map_err(|e| format!("Drag failed: {}", e))?;
 
     Ok(ComputerResult {
         success: true,
-        action: "drag".to_string(),
-        message: Some(format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)),
+        action: "left_click_drag".to_string(),
+        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -305,6 +318,7 @@ async fn handle_move(
         message: Some(format!("Moved mouse to ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -346,6 +360,7 @@ async fn handle_scroll(
         message: Some(format!("Scrolled {} {} times at ({}, {})", direction, scroll_count, x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -367,6 +382,7 @@ async fn handle_type(
         message: Some(format!("Typed text: {}", text)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -388,6 +404,7 @@ async fn handle_key(
         message: Some(format!("Pressed key: {}", key)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -411,6 +428,7 @@ async fn handle_hold_key(
         message: Some(format!("Held key {} for {}ms", key, duration)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -425,5 +443,24 @@ async fn handle_wait(input: &ComputerInput) -> Result<ComputerResult, String> {
         message: Some(format!("Waited for {}ms", duration)),
         base64_image: None,
         error: None,
+        coordinate: None,
+    })
+}
+
+async fn handle_cursor_position(
+    app_handle: &AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    let (x, y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state)
+        .await
+        .map_err(|e| format!("Get cursor position failed: {}", e))?;
+
+    Ok(ComputerResult {
+        success: true,
+        action: "cursor_position".to_string(),
+        message: Some(format!("Cursor position: ({}, {})", x, y)),
+        base64_image: None,
+        error: None,
+        coordinate: Some(vec![x, y]),
     })
 }
