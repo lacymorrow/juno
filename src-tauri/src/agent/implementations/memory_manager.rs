@@ -667,7 +667,7 @@ impl AdvancedMemoryManager {
                 metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
 
                 // RE-ENABLED: Calculate memory efficiency ratio after cleanup
-                let messages = self.messages.read().await;
+                // Use the existing messages variable instead of acquiring a new lock
                 let useful_messages = messages.iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
