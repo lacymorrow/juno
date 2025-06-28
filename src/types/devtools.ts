@@ -33,7 +33,6 @@ export type LoadingStates = {
   mouseClick: boolean;
   mouseDoubleClick: boolean;
   mouseDrag: boolean;
-  testClickVisualization: boolean;
   setDeveloperPlayback: boolean;
   playbackAudio: boolean;
   setTtsProvider: boolean;
@@ -63,33 +62,4 @@ export type ToolUsageEntry = {
   formatted_time?: string;
 };
 
-export type ClickQAResult = {
-  success: boolean;
-  operation: string;
-  coordinates: [number, number];
-  original_coordinates?: [number, number];
-  error?: string;
-  visualization_success: boolean;
-  cursor_position_after?: [number, number];
-  latency_ms: number;
-};
 
-export type CoordinateTestResult = {
-  original: { x: number; y: number };
-  transformed_to_screen: { x: number; y: number };
-  transformed_back: { x: number; y: number };
-  error: { x: number; y: number };
-  scaling_info?: any;
-  is_accurate: boolean;
-};
-
-export type VisualizationTestResult = {
-  test: string;
-  results: Array<{
-    position: { x: number; y: number };
-    color: string;
-    success: boolean;
-    error?: string;
-  }>;
-  success_rate: number;
-};

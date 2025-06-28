@@ -523,7 +523,7 @@ pub fn run() {
             // right_click → computer tool with action: "right_click"
             // mouse_move → computer tool with action: "mouse_move"
             // This eliminates redundancy and ensures 100% compliance with the official specification.
-            test_click_visualization, // Production function with debug capabilities
+
             // Production shell function with debug capabilities
             bash_command,
             // Production filesystem functions with debug capabilities
@@ -581,12 +581,7 @@ pub fn run() {
             check_restart_needed_after_permissions,
             handle_restart_after_permissions,
             // QA Test Commands from mouse.rs
-            qa_test_click,
-            qa_test_click_series,
-            qa_test_coordinate_transformation,
-            qa_test_click_visualization,
-            qa_test_select_text,
-            qa_test_scroll,
+
             // Sound Commands
             play_sound_by_type,
             play_sound_file,
