@@ -13,6 +13,12 @@ use tauri::Manager;
 use tracing::{info, warn, error};
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::agent::core::AgentError;
+use crate::utils::coordinate_validation::{
+    validate_coordinate_parameter,
+    validate_coordinate_pair,
+    CoordinateValidationError
+};
 
 // --- Security and Validation Helpers ---
 
@@ -282,6 +288,12 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
     }
 }
 
+impl From<CoordinateValidationError> for String {
+    fn from(error: CoordinateValidationError) -> String {
+        error.to_string()
+    }
+}
+
 // --- Main computer tool execution function ---
 
 /// Execute computer tool
@@ -339,12 +351,9 @@ pub async fn execute_computer_tool(
 
             match action {
                 "left_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -362,12 +371,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "right_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -385,12 +391,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "middle_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -408,12 +411,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "double_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -431,12 +431,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "triple_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -454,39 +451,20 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_click_drag" => {
-                    // Support both old and new parameter formats for backward compatibility
-                    let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
-                        // Old format: start_coordinate + coordinate (end)
-                        let coordinate = input["coordinate"].as_array()
-                            .ok_or_else(|| "Missing 'coordinate' (end) parameter for drag operation".to_string())?;
-
-                        let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
-                        let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
-                        let end_x = coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
-                        let end_y = coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
-
-                        (start_x, start_y, end_x, end_y)
-                    } else if let Some(coordinate) = input["coordinate"].as_array() {
-                        // New format: coordinate (start) + end_coordinate
-                        let end_coordinate = input["end_coordinate"].as_array()
-                            .ok_or_else(|| "Missing 'end_coordinate' parameter for drag operation".to_string())?;
-
-                        let start_x = coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
-                        let start_y = coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
-                        let end_x = end_coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
-                        let end_y = end_coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
-
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    // Support both parameter formats with strict validation
+                    let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
+                        // Format: start_coordinate + coordinate (end)
+                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "start_coordinate", "coordinate")?;
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
                         (start_x, start_y, end_x, end_y)
                     } else {
-                        return Err("Missing coordinate parameters for drag operation. Use either 'start_coordinate' + 'coordinate' or 'coordinate' + 'end_coordinate'".to_string());
+                        // Format: coordinate (start) + end_coordinate
+                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "coordinate", "end_coordinate")?;
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
                     };
 
                     // Transform coordinates from scaled screenshot to screen coordinates
@@ -507,12 +485,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "mouse_move" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -529,12 +504,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_down" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                                // Strict coordinate validation per Anthropic Computer Use API specification
+            let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+            let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -551,12 +523,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_up" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -648,12 +617,9 @@ pub async fn execute_computer_tool(
                 "computer (scroll)"
             ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+            // Strict coordinate validation per Anthropic Computer Use API specification
+            let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+            let (x, y) = coordinate.to_f64();
 
             let scroll_direction = input["scroll_direction"].as_str()
                 .ok_or_else(|| "Missing 'scroll_direction' parameter".to_string())?;
