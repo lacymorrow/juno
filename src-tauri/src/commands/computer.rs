@@ -31,6 +31,7 @@ pub struct ComputerResult {
     pub message: Option<String>,
     pub base64_image: Option<String>,
     pub error: Option<String>,
+    pub coordinate: Option<Vec<f64>>,
 }
 
 /// Main computer command - implements the official Anthropic Computer Use API
@@ -56,6 +57,7 @@ pub async fn computer(
         "key" => handle_key(&input, &app_handle, state).await,
         "hold_key" => handle_hold_key(&input, &app_handle, state).await,
         "wait" => handle_wait(&input).await,
+        "cursor_position" => handle_cursor_position(&app_handle, state).await,
         _ => {
             let error_msg = format!("Unknown computer action: {}", input.action);
             error!("{}", error_msg);
@@ -78,6 +80,7 @@ pub async fn computer(
                 message: None,
                 base64_image: None,
                 error: Some(e),
+                coordinate: None,
             })
         }
     }
@@ -96,6 +99,7 @@ async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, Str
         message: Some("Screenshot captured successfully".to_string()),
         base64_image: Some(screenshot_base64),
         error: None,
+        coordinate: None,
     })
 }
 
@@ -124,6 +128,7 @@ async fn handle_click(
         message: Some(format!("Clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -152,6 +157,7 @@ async fn handle_right_click(
         message: Some(format!("Right clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -180,6 +186,7 @@ async fn handle_middle_click(
         message: Some(format!("Middle clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -208,6 +215,7 @@ async fn handle_double_click(
         message: Some(format!("Double clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -236,6 +244,7 @@ async fn handle_triple_click(
         message: Some(format!("Triple clicked at ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -277,6 +286,7 @@ async fn handle_drag(
         message: Some(format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -305,6 +315,7 @@ async fn handle_move(
         message: Some(format!("Moved mouse to ({}, {})", x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -346,6 +357,7 @@ async fn handle_scroll(
         message: Some(format!("Scrolled {} {} times at ({}, {})", direction, scroll_count, x, y)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -367,6 +379,7 @@ async fn handle_type(
         message: Some(format!("Typed text: {}", text)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -388,6 +401,7 @@ async fn handle_key(
         message: Some(format!("Pressed key: {}", key)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -411,6 +425,7 @@ async fn handle_hold_key(
         message: Some(format!("Held key {} for {}ms", key, duration)),
         base64_image: None,
         error: None,
+        coordinate: None,
     })
 }
 
@@ -425,5 +440,24 @@ async fn handle_wait(input: &ComputerInput) -> Result<ComputerResult, String> {
         message: Some(format!("Waited for {}ms", duration)),
         base64_image: None,
         error: None,
+        coordinate: None,
+    })
+}
+
+async fn handle_cursor_position(
+    app_handle: &AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    let (x, y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state)
+        .await
+        .map_err(|e| format!("Get cursor position failed: {}", e))?;
+
+    Ok(ComputerResult {
+        success: true,
+        action: "cursor_position".to_string(),
+        message: Some(format!("Cursor position: ({}, {})", x, y)),
+        base64_image: None,
+        error: None,
+        coordinate: Some(vec![x, y]),
     })
 }
