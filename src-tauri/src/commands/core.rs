@@ -9,6 +9,7 @@ use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
 use crate::settings::{manager::SettingsManager, AgentSettings, AudioSettings};
+use crate::utils::coordinates;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -19,70 +20,115 @@ use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consist
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
-    use crate::utils::coordinates;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
+    use image::{ImageReader, DynamicImage, ImageFormat};
+    use std::io::Cursor;
     use base64::Engine;
-    use image::ImageFormat;
 
-    match macos_utils::capture_and_encode_screenshot() {
+    match capture_and_encode_screenshot() {
         Ok(base64_string) => {
             // Parse the screenshot to get its dimensions
             let engine = base64::engine::general_purpose::STANDARD;
             if let Ok(image_data) = engine.decode(&base64_string) {
-                if let Ok(img) = image::load_from_memory(&image_data) {
-                    let screenshot_width = img.width();
-                    let screenshot_height = img.height();
+                if let Ok(img) = ImageReader::new(Cursor::new(&image_data))
+                    .with_guessed_format()
+                    .map_err(|e| format!("Failed to read image format: {}", e))?
+                    .decode()
+                    .map_err(|e| format!("Failed to decode image: {}", e)) {
+
+                    let original_width = img.width();
+                    let original_height = img.height();
 
                     // Get display information to calculate proper scaling
                     match get_display_dimensions() {
                         Ok((display_width, display_height)) => {
-                            // Calculate scaling factors for both dimensions
-                            let scale_x = if display_width > 0 {
-                                screenshot_width as f32 / display_width as f32
+                            // Select the best standard resolution for this display
+                            let (standard_width, standard_height) =
+                                crate::constants::ui::standard_resolutions::select_best_resolution(display_width, display_height);
+
+                            // Determine if we need to scale the screenshot to match standard resolution
+                            let needs_scaling = original_width != standard_width || original_height != standard_height;
+
+                            let final_base64 = if needs_scaling {
+                                info!("Scaling screenshot from {}x{} to standard resolution {}x{} for Anthropic Computer Use API compliance",
+                                    original_width, original_height, standard_width, standard_height);
+
+                                // Scale the image to the standard resolution
+                                let scaled_img = img.resize_exact(
+                                    standard_width,
+                                    standard_height,
+                                    image::imageops::FilterType::Lanczos3,
+                                );
+
+                                // Encode the scaled image back to base64
+                                let mut scaled_buffer = Cursor::new(Vec::new());
+                                scaled_img.write_to(&mut scaled_buffer, ImageFormat::Png)
+                                    .map_err(|e| format!("Failed to encode scaled image: {}", e))?;
+
+                                engine.encode(scaled_buffer.into_inner())
                             } else {
-                                1.0
-                            };
-                            let scale_y = if display_height > 0 {
-                                screenshot_height as f32 / display_height as f32
-                            } else {
-                                1.0
+                                info!("Screenshot already at standard resolution {}x{}, no scaling needed",
+                                    original_width, original_height);
+                                base64_string
                             };
 
-                            // Use separate scale factors for proper non-uniform scaling support
-                            // Update scaling information with separate X and Y scale factors
-                            coordinates::update_scaling_info_with_separate_factors(
+                            // Update scaling information with standard resolution data
+                            coordinates::update_standard_resolution_scaling(
                                 display_width,
                                 display_height,
-                                screenshot_width,
-                                screenshot_height,
-                                scale_x,
-                                scale_y,
+                                standard_width,  // The screenshot is now at standard resolution
+                                standard_height,
                             );
 
-                            info!("Screenshot scaling updated: display {}x{} → screenshot {}x{}, scale_x: {:.3}, scale_y: {:.3}",
-                                display_width, display_height, screenshot_width, screenshot_height, scale_x, scale_y);
+                            info!("Screenshot scaling updated: display {}x{} → standard resolution {}x{} (Anthropic Computer Use API compliant)",
+                                display_width, display_height, standard_width, standard_height);
+
+                            // Send notification on success
+                            send_dev_tool_notification(&app, "Screenshot", &format!(
+                                "Screenshot captured at standard resolution {}x{} (scaled from display {}x{})",
+                                standard_width, standard_height, display_width, display_height
+                            ))?;
+
+                            Ok(final_base64)
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to get display dimensions for scaling: {}", e);
-                            // Fallback: assume no scaling needed
-                            coordinates::update_scaling_info(
-                                screenshot_width,
-                                screenshot_height,
-                                screenshot_width,
-                                screenshot_height,
-                                1.0,
+                            tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
+
+                            // Fallback: assume the screenshot is already properly sized
+                            // This maintains some level of functionality even if display detection fails
+                            let (fallback_standard_width, fallback_standard_height) =
+                                crate::constants::ui::standard_resolutions::XGA; // Default to XGA
+
+                            coordinates::update_standard_resolution_scaling(
+                                original_width,  // Use screenshot dimensions as display dimensions
+                                original_height,
+                                original_width,  // Assume screenshot is at correct size
+                                original_height,
                             );
+
+                            tracing::warn!("Using fallback scaling with screenshot dimensions {}x{}",
+                                original_width, original_height);
+
+                            send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
+                            Ok(base64_string)
                         }
                     }
                 } else {
-                    tracing::warn!("Failed to decode screenshot image for scaling calculation");
+                    let error_msg = "Failed to decode screenshot image for standard resolution scaling";
+                    tracing::warn!("{}", error_msg);
+
+                    // Still return the screenshot but without proper scaling
+                    send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                    Ok(base64_string)
                 }
             } else {
-                tracing::warn!("Failed to decode base64 screenshot for scaling calculation");
-            }
+                let error_msg = "Failed to decode base64 screenshot for standard resolution scaling";
+                tracing::warn!("{}", error_msg);
 
-            // Send notification on success
-            send_dev_tool_notification(&app, "Screenshot", "Screenshot captured successfully.")?;
-            Ok(base64_string)
+                // Still return the screenshot but without proper scaling
+                send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                Ok(base64_string)
+            }
         }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
     }

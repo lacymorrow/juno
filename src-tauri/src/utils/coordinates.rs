@@ -2,35 +2,71 @@ use std::sync::RwLock;
 use once_cell::sync::Lazy;
 use tracing::info;
 use serde::Serialize;
+use crate::constants::ui::standard_resolutions;
 
 // Global state to store the current screenshot scaling information
 pub static SCREENSHOT_SCALE: Lazy<RwLock<ScalingInfo>> = Lazy::new(|| {
     RwLock::new(ScalingInfo {
+        display_width: 0,
+        display_height: 0,
+        standard_width: 0,
+        standard_height: 0,
+        screenshot_width: 0,
+        screenshot_height: 0,
+        display_to_standard_scale_x: 1.0,
+        display_to_standard_scale_y: 1.0,
+        screenshot_to_standard_scale_x: 1.0,
+        screenshot_to_standard_scale_y: 1.0,
+        // Legacy fields for backward compatibility
         original_width: 0,
         original_height: 0,
         scaled_width: 0,
         scaled_height: 0,
-        scale_factor_x: 1.0,  // Separate X scale factor
-        scale_factor_y: 1.0,  // Separate Y scale factor
-        scale_factor: 1.0,    // Kept for backward compatibility
+        scale_factor_x: 1.0,
+        scale_factor_y: 1.0,
+        scale_factor: 1.0,
     })
 });
 
-/// Represents scaling information between original screen and scaled screenshot
+/// Represents scaling information for Anthropic Computer Use API compliance
+/// All coordinates are relative to standard resolutions (XGA, WXGA, FWXGA)
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct ScalingInfo {
+    // New standard resolution fields
+    pub display_width: u32,
+    pub display_height: u32,
+    pub standard_width: u32,
+    pub standard_height: u32,
+    pub screenshot_width: u32,
+    pub screenshot_height: u32,
+    pub display_to_standard_scale_x: f32,
+    pub display_to_standard_scale_y: f32,
+    pub screenshot_to_standard_scale_x: f32,
+    pub screenshot_to_standard_scale_y: f32,
+
+    // Legacy fields for backward compatibility
     pub original_width: u32,
     pub original_height: u32,
     pub scaled_width: u32,
     pub scaled_height: u32,
-    pub scale_factor_x: f32,  // X-axis scale factor
-    pub scale_factor_y: f32,  // Y-axis scale factor
-    pub scale_factor: f32,    // Legacy unified scale factor for backward compatibility
+    pub scale_factor_x: f32,
+    pub scale_factor_y: f32,
+    pub scale_factor: f32,
 }
 
 impl Default for ScalingInfo {
     fn default() -> Self {
         Self {
+            display_width: 0,
+            display_height: 0,
+            standard_width: 0,
+            standard_height: 0,
+            screenshot_width: 0,
+            screenshot_height: 0,
+            display_to_standard_scale_x: 1.0,
+            display_to_standard_scale_y: 1.0,
+            screenshot_to_standard_scale_x: 1.0,
+            screenshot_to_standard_scale_y: 1.0,
             original_width: 0,
             original_height: 0,
             scaled_width: 0,
@@ -42,7 +78,120 @@ impl Default for ScalingInfo {
     }
 }
 
-/// Updates the scaling information with separate X and Y scale factors
+/// Updates the scaling information with standard resolution scaling
+/// This is the new primary function for Anthropic Computer Use API compliance
+pub fn update_standard_resolution_scaling(
+    display_width: u32,
+    display_height: u32,
+    screenshot_width: u32,
+    screenshot_height: u32,
+) {
+    // Select the best standard resolution based on display aspect ratio
+    let (standard_width, standard_height) = standard_resolutions::select_best_resolution(display_width, display_height);
+
+    // Calculate scaling factors from display to standard resolution
+    let display_to_standard_scale_x = if display_width > 0 {
+        standard_width as f32 / display_width as f32
+    } else {
+        1.0
+    };
+
+    let display_to_standard_scale_y = if display_height > 0 {
+        standard_height as f32 / display_height as f32
+    } else {
+        1.0
+    };
+
+    // Calculate scaling factors from screenshot to standard resolution
+    let screenshot_to_standard_scale_x = if screenshot_width > 0 {
+        standard_width as f32 / screenshot_width as f32
+    } else {
+        1.0
+    };
+
+    let screenshot_to_standard_scale_y = if screenshot_height > 0 {
+        standard_height as f32 / screenshot_height as f32
+    } else {
+        1.0
+    };
+
+    // Validate scale factors
+    let safe_display_scale_x = if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
+        display_to_standard_scale_x
+    } else {
+        tracing::warn!("Invalid display to standard X scale factor: {}, using 1.0", display_to_standard_scale_x);
+        1.0
+    };
+
+    let safe_display_scale_y = if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
+        display_to_standard_scale_y
+    } else {
+        tracing::warn!("Invalid display to standard Y scale factor: {}, using 1.0", display_to_standard_scale_y);
+        1.0
+    };
+
+    let safe_screenshot_scale_x = if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
+        screenshot_to_standard_scale_x
+    } else {
+        tracing::warn!("Invalid screenshot to standard X scale factor: {}, using 1.0", screenshot_to_standard_scale_x);
+        1.0
+    };
+
+    let safe_screenshot_scale_y = if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
+        screenshot_to_standard_scale_y
+    } else {
+        tracing::warn!("Invalid screenshot to standard Y scale factor: {}, using 1.0", screenshot_to_standard_scale_y);
+        1.0
+    };
+
+    // Calculate legacy scale factors for backward compatibility
+    let legacy_scale_x = if display_width > 0 {
+        screenshot_width as f32 / display_width as f32
+    } else {
+        1.0
+    };
+
+    let legacy_scale_y = if display_height > 0 {
+        screenshot_height as f32 / display_height as f32
+    } else {
+        1.0
+    };
+
+    let legacy_scale_factor = (legacy_scale_x * legacy_scale_y).sqrt();
+
+    if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
+        *scaling = ScalingInfo {
+            display_width,
+            display_height,
+            standard_width,
+            standard_height,
+            screenshot_width,
+            screenshot_height,
+            display_to_standard_scale_x: safe_display_scale_x,
+            display_to_standard_scale_y: safe_display_scale_y,
+            screenshot_to_standard_scale_x: safe_screenshot_scale_x,
+            screenshot_to_standard_scale_y: safe_screenshot_scale_y,
+            // Legacy fields for backward compatibility
+            original_width: display_width,
+            original_height: display_height,
+            scaled_width: standard_width,
+            scaled_height: standard_height,
+            scale_factor_x: safe_display_scale_x,
+            scale_factor_y: safe_display_scale_y,
+            scale_factor: legacy_scale_factor,
+        };
+
+        info!("Updated standard resolution scaling: display {}x{} → standard {}x{} → screenshot {}x{}",
+            display_width, display_height, standard_width, standard_height, screenshot_width, screenshot_height);
+        info!("Scale factors - display→standard: x={:.3}, y={:.3} | screenshot→standard: x={:.3}, y={:.3}",
+            safe_display_scale_x, safe_display_scale_y, safe_screenshot_scale_x, safe_screenshot_scale_y);
+    } else {
+        tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE");
+    }
+}
+
+/// Updates the scaling information with separate X and Y scale factors (LEGACY)
+/// Maintained for backward compatibility
 pub fn update_scaling_info_with_separate_factors(
     original_width: u32,
     original_height: u32,
@@ -51,45 +200,18 @@ pub fn update_scaling_info_with_separate_factors(
     scale_factor_x: f32,
     scale_factor_y: f32,
 ) {
-    // Validate scale factors to prevent division by zero and infinite values
-    let safe_scale_x = if scale_factor_x.is_finite() && scale_factor_x > 0.0 {
-        scale_factor_x
-    } else {
-        tracing::warn!("Invalid X scale factor: {}, using 1.0", scale_factor_x);
-        1.0
-    };
-
-    let safe_scale_y = if scale_factor_y.is_finite() && scale_factor_y > 0.0 {
-        scale_factor_y
-    } else {
-        tracing::warn!("Invalid Y scale factor: {}, using 1.0", scale_factor_y);
-        1.0
-    };
-
-    // Calculate legacy unified scale factor (use geometric mean for better accuracy)
-    let legacy_scale_factor = (safe_scale_x * safe_scale_y).sqrt();
-
-    if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
-        *scaling = ScalingInfo {
-            original_width,
-            original_height,
-            scaled_width,
-            scaled_height,
-            scale_factor_x: safe_scale_x,
-            scale_factor_y: safe_scale_y,
-            scale_factor: legacy_scale_factor,
-        };
-        info!("Updated screenshot scaling info: original: {}x{}, scaled: {}x{}, scale_x: {:.3}, scale_y: {:.3}",
-            original_width, original_height, scaled_width, scaled_height, safe_scale_x, safe_scale_y);
-    } else {
-        tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE");
-    }
+    // For legacy compatibility, treat this as display->screenshot scaling
+    // and derive standard resolution scaling from it
+    update_standard_resolution_scaling(
+        original_width,
+        original_height,
+        scaled_width,
+        scaled_height,
+    );
 }
 
-/// Updates the scaling information when a screenshot is processed (legacy function)
-/// IMPORTANT: This function uses the provided scale_factor parameter as-is for both X and Y axes.
-/// It does NOT calculate scale factors from the provided dimensions.
-/// If you need scale factors calculated from dimensions, use update_scaling_info_with_separate_factors directly.
+/// Updates the scaling information when a screenshot is processed (LEGACY)
+/// Maintained for backward compatibility
 pub fn update_scaling_info(
     original_width: u32,
     original_height: u32,
@@ -97,72 +219,81 @@ pub fn update_scaling_info(
     scaled_height: u32,
     scale_factor: f32
 ) {
-    // Validate scale factor to prevent division by zero and infinite values
-    let safe_scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
-        scale_factor
-    } else {
-        tracing::warn!("Invalid scale factor: {}, using 1.0", scale_factor);
-        1.0
-    };
-
-    // Use the provided scale_factor for both X and Y axes (uniform scaling)
-    // The dimensions are stored for reference but scale factors come from the parameter
-    update_scaling_info_with_separate_factors(
+    // For legacy compatibility, treat this as display->screenshot scaling
+    update_standard_resolution_scaling(
         original_width,
         original_height,
         scaled_width,
         scaled_height,
-        safe_scale_factor,
-        safe_scale_factor,
     );
-
-    info!("Legacy scaling update: using provided scale_factor {:.3} for both axes (dimensions: {}x{} → {}x{})",
-        safe_scale_factor, original_width, original_height, scaled_width, scaled_height);
 }
 
-/// Transforms coordinates from scaled screenshot space to original screen space
+/// Transforms coordinates from standard resolution space to actual screen coordinates
+/// This is the primary coordinate transformation for the Anthropic Computer Use API
+pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64) -> (f64, f64) {
+    if let Ok(scaling) = SCREENSHOT_SCALE.read() {
+        // Skip transformation if no scaling was applied or dimensions are invalid
+        if scaling.display_width == 0 || scaling.display_height == 0 ||
+           scaling.standard_width == 0 || scaling.standard_height == 0 ||
+           scaling.display_to_standard_scale_x <= 0.0 || scaling.display_to_standard_scale_y <= 0.0 {
+            return (standard_x, standard_y);
+        }
+
+        // Transform from standard resolution coordinates to actual screen coordinates
+        let screen_x = standard_x / scaling.display_to_standard_scale_x as f64;
+        let screen_y = standard_y / scaling.display_to_standard_scale_y as f64;
+
+        info!("Transformed coordinates: standard ({}, {}) → screen ({}, {}) using display scale x={:.3}, y={:.3}",
+            standard_x, standard_y, screen_x, screen_y, scaling.display_to_standard_scale_x, scaling.display_to_standard_scale_y);
+
+        (screen_x, screen_y)
+    } else {
+        tracing::error!("Failed to acquire read lock on SCREENSHOT_SCALE");
+        (standard_x, standard_y) // Return untransformed coordinates as fallback
+    }
+}
+
+/// Transforms coordinates from actual screen space to standard resolution coordinates
+/// Used for converting screen coordinates to API-compatible standard resolution coordinates
+pub fn transform_screen_to_standard_coordinates(screen_x: f64, screen_y: f64) -> (f64, f64) {
+    if let Ok(scaling) = SCREENSHOT_SCALE.read() {
+        // Skip transformation if no scaling was applied or dimensions are invalid
+        if scaling.display_width == 0 || scaling.display_height == 0 ||
+           scaling.standard_width == 0 || scaling.standard_height == 0 ||
+           scaling.display_to_standard_scale_x <= 0.0 || scaling.display_to_standard_scale_y <= 0.0 {
+            return (screen_x, screen_y);
+        }
+
+        // Transform from screen coordinates to standard resolution coordinates
+        let standard_x = screen_x * scaling.display_to_standard_scale_x as f64;
+        let standard_y = screen_y * scaling.display_to_standard_scale_y as f64;
+
+        (standard_x, standard_y)
+    } else {
+        tracing::error!("Failed to acquire read lock on SCREENSHOT_SCALE");
+        (screen_x, screen_y) // Return untransformed coordinates as fallback
+    }
+}
+
+/// Get the current standard resolution being used
+pub fn get_current_standard_resolution() -> Result<(u32, u32), String> {
+    SCREENSHOT_SCALE.read()
+        .map(|scaling| (scaling.standard_width, scaling.standard_height))
+        .map_err(|_| "Failed to acquire read lock on SCREENSHOT_SCALE".to_string())
+}
+
+/// Transforms coordinates from scaled screenshot space to original screen space (LEGACY)
+/// Maintained for backward compatibility - now uses standard resolution scaling
 pub fn transform_to_screen_coordinates(scaled_x: f64, scaled_y: f64) -> (f64, f64) {
-    if let Ok(scaling) = SCREENSHOT_SCALE.read() {
-        // Skip transformation if no scaling was applied or dimensions are invalid
-        if scaling.original_width == 0 || scaling.original_height == 0 ||
-           scaling.scaled_width == 0 || scaling.scaled_height == 0 ||
-           scaling.scale_factor_x <= 0.0 || scaling.scale_factor_y <= 0.0 {
-            return (scaled_x, scaled_y);
-        }
-
-        // Transform coordinates using separate X and Y scale factors
-        let original_x = scaled_x / scaling.scale_factor_x as f64;
-        let original_y = scaled_y / scaling.scale_factor_y as f64;
-
-        info!("Transformed coordinates: scaled ({}, {}) → original ({}, {}) using scale_x: {:.3}, scale_y: {:.3}",
-            scaled_x, scaled_y, original_x, original_y, scaling.scale_factor_x, scaling.scale_factor_y);
-
-        (original_x, original_y)
-    } else {
-        tracing::error!("Failed to acquire read lock on SCREENSHOT_SCALE");
-        (scaled_x, scaled_y) // Return untransformed coordinates as fallback
-    }
+    // For backward compatibility, treat input as standard resolution coordinates
+    transform_standard_to_screen_coordinates(scaled_x, scaled_y)
 }
 
-/// Transforms coordinates from original screen space to scaled screenshot space
+/// Transforms coordinates from original screen space to scaled screenshot space (LEGACY)
+/// Maintained for backward compatibility - now uses standard resolution scaling
 pub fn transform_to_scaled_coordinates(original_x: f64, original_y: f64) -> (f64, f64) {
-    if let Ok(scaling) = SCREENSHOT_SCALE.read() {
-        // Skip transformation if no scaling was applied or dimensions are invalid
-        if scaling.original_width == 0 || scaling.original_height == 0 ||
-           scaling.scaled_width == 0 || scaling.scaled_height == 0 ||
-           scaling.scale_factor_x <= 0.0 || scaling.scale_factor_y <= 0.0 {
-            return (original_x, original_y);
-        }
-
-        // Transform coordinates using separate X and Y scale factors
-        let scaled_x = original_x * scaling.scale_factor_x as f64;
-        let scaled_y = original_y * scaling.scale_factor_y as f64;
-
-        (scaled_x, scaled_y)
-    } else {
-        tracing::error!("Failed to acquire read lock on SCREENSHOT_SCALE");
-        (original_x, original_y) // Return untransformed coordinates as fallback
-    }
+    // For backward compatibility, return standard resolution coordinates
+    transform_screen_to_standard_coordinates(original_x, original_y)
 }
 
 /// Get current scaling information (for debugging/testing)
@@ -175,15 +306,7 @@ pub fn get_scaling_info() -> Result<ScalingInfo, String> {
 /// Reset scaling information to default values
 pub fn reset_scaling_info() {
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
-        *scaling = ScalingInfo {
-            original_width: 0,
-            original_height: 0,
-            scaled_width: 0,
-            scaled_height: 0,
-            scale_factor_x: 1.0,
-            scale_factor_y: 1.0,
-            scale_factor: 1.0,
-        };
+        *scaling = ScalingInfo::default();
         info!("Reset screenshot scaling info to default values");
     } else {
         tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for reset");
