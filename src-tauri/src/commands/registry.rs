@@ -62,8 +62,23 @@ macro_rules! generate_invoke_handler {
             get_memory_status,
             clear_conversation_memory,
             clean_orphaned_tool_calls,
+            clean_orphaned_tool_results,
             get_conversation_messages,
             get_last_n_messages,
+            get_visual_summaries,
+            update_visual_config,
+            get_visual_config,
+            compress_all_screenshots,
+            configure_screenshot_compression,
+            get_memory_compression_stats,
+            emergency_memory_recovery,
+            get_conversation_summaries,
+            optimize_memory,
+            get_memory_config,
+            update_memory_config,
+            get_advanced_memory_metrics,
+            force_memory_prune,
+            get_tiered_memory_context,
 
             // === PRODUCTION SYSTEM COMMANDS ===
             // Core screenshot and system operations
@@ -268,8 +283,23 @@ pub mod categories {
         "get_memory_status",
         "clear_conversation_memory",
         "clean_orphaned_tool_calls",
+        "clean_orphaned_tool_results",
         "get_conversation_messages",
-        "get_last_n_messages"
+        "get_last_n_messages",
+        "get_visual_summaries",
+        "update_visual_config",
+        "get_visual_config",
+        "compress_all_screenshots",
+        "configure_screenshot_compression",
+        "get_memory_compression_stats",
+        "emergency_memory_recovery",
+        "get_conversation_summaries",
+        "optimize_memory",
+        "get_memory_config",
+        "update_memory_config",
+        "get_advanced_memory_metrics",
+        "force_memory_prune",
+        "get_tiered_memory_context"
     ];
 
     /// Mouse interaction commands (minimal set - most operations use computer tool)
