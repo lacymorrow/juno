@@ -6,6 +6,8 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
+use crate::constants::api::{computer_use_api_types, beta_flags};
+use super::tool_versioning::{ToolVersionManager, ToolVersionConfig, ApiVersion};
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::{info, warn, error};
@@ -935,13 +937,20 @@ pub async fn execute_str_replace_tool(
 }
 
 /// Register all Anthropic Computer Use tools with the provider
-pub async fn register_anthropic_computer_use_tools(
-    provider: &mut LocalToolProvider,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    info!("Registering official Anthropic Computer Use tools...");
+/// Create versioned Anthropic Computer Use tools based on API version
+///
+/// This function creates tools with proper API types and versioning to ensure
+/// compliance with the official Anthropic Computer Use specification
+pub fn create_versioned_tools(version_config: Option<ToolVersionConfig>) -> Vec<ToolDefinition> {
+    let manager = if let Some(config) = version_config {
+        ToolVersionManager::with_config(config)
+    } else {
+        ToolVersionManager::new()
+    };
 
-    // Computer tool - main screen interaction tool
+    let mut tools = Vec::new();
+
+    // Computer tool - main screen interaction tool (Official Anthropic Computer Use API)
     let computer_tool = ToolDefinition {
         name: "computer".to_string(),
         description: "Use a computer to complete tasks. This tool gives you access to interact with any desktop application using the mouse and keyboard, take screenshots, and perform various system operations.
@@ -965,6 +974,8 @@ The computer tool accepts these actions:
 - wait: Wait for specified number of seconds
 
 Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1021,7 +1032,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
         }),
     };
 
-    // Bash tool - command execution
+    // Bash tool - command execution (Official Anthropic Computer Use API)
     let bash_tool = ToolDefinition {
         name: "bash".to_string(),
         description: "Execute bash commands on the system. Use this tool to run shell commands, scripts, and interact with the command line.
@@ -1033,6 +1044,8 @@ Example usage:
 - List files: {\"command\": \"ls -la\"}
 - Check system info: {\"command\": \"uname -a\"}
 - Run scripts: {\"command\": \"./script.sh\"}".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1045,7 +1058,7 @@ Example usage:
         }),
     };
 
-    // String replacement based edit tool
+    // String replacement based edit tool (Official Anthropic Computer Use API)
     let str_replace_tool = ToolDefinition {
         name: "str_replace_based_edit_tool".to_string(),
         description: "Edit files using string replacement operations. This tool provides safe file editing capabilities with security validation.
@@ -1066,6 +1079,8 @@ Example usage:
 - View range: {\"command\": \"view\", \"path\": \"file.txt\", \"view_range\": [1, 10]}
 - Replace text: {\"command\": \"str_replace\", \"path\": \"file.txt\", \"old_str\": \"old text\", \"new_str\": \"new text\"}
 - Create file: {\"command\": \"create\", \"path\": \"new_file.txt\", \"file_text\": \"content\"}".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1100,38 +1115,80 @@ Example usage:
         }),
     };
 
-    // Register all tools with the provider using the correct method
-    provider.register_async_tool(computer_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_computer_tool(&handle, input).await
+    // Apply versioning to all tools
+    tools.push(manager.apply_versioning(computer_tool));
+    tools.push(manager.apply_versioning(bash_tool));
+    tools.push(manager.apply_versioning(str_replace_tool));
+
+    tools
+}
+
+pub async fn register_anthropic_computer_use_tools(
+    provider: &mut LocalToolProvider,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    register_anthropic_computer_use_tools_with_version(provider, app_handle, None).await
+}
+
+/// Register Anthropic Computer Use tools with specific API version
+pub async fn register_anthropic_computer_use_tools_with_version(
+    provider: &mut LocalToolProvider,
+    app_handle: tauri::AppHandle,
+    version_config: Option<ToolVersionConfig>,
+) -> Result<(), String> {
+    let version_info = version_config
+        .as_ref()
+        .map(|c| format!("{:?}", c.current_version))
+        .unwrap_or_else(|| "latest".to_string());
+
+    info!("Registering official Anthropic Computer Use tools (API version: {})...", version_info);
+
+    // Create versioned tools
+    let versioned_tools = create_versioned_tools(version_config);
+    let tool_count = versioned_tools.len();
+
+    for tool in versioned_tools {
+        match tool.name.as_str() {
+            "computer" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_computer_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            "bash" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_bash_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            "str_replace_based_edit_tool" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_str_replace_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            _ => {
+                warn!("Unknown tool name in versioned tools: {}", tool.name);
             }
         }
-    }).await;
+    }
 
-    provider.register_async_tool(bash_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_bash_tool(&handle, input).await
-            }
-        }
-    }).await;
-
-    provider.register_async_tool(str_replace_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_str_replace_tool(&handle, input).await
-            }
-        }
-    }).await;
-
-    info!("Successfully registered 3 official Anthropic Computer Use tools");
+    info!("Successfully registered {} official Anthropic Computer Use tools", tool_count);
     Ok(())
 }
 

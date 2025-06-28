@@ -34,12 +34,13 @@ pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 pub mod mcp_integration;
-pub mod safari_tools; // Safari-specific DOM extraction and interaction tools
+pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
 pub mod self_improvement; // Research-backed self-improving code generation system (debug mode only)
 pub mod timer_tools; // Add timer tools for agent scheduling
-pub mod tool_config; // Add tool configuration management
+pub mod tool_config; // Configuration and category management for all tools
 pub mod tool_mapping; // Add tool mapping service
+pub mod tool_versioning; // API versioning and compatibility management
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research // Enhanced Visual Reasoning System from CVPR 2025 research
 
