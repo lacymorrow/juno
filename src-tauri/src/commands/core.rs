@@ -30,11 +30,11 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
             // Parse the screenshot to get its dimensions
             let engine = base64::engine::general_purpose::STANDARD;
             if let Ok(image_data) = engine.decode(&base64_string) {
-                if let Ok(img) = ImageReader::new(Cursor::new(&image_data))
+                if let Ok(reader) = ImageReader::new(Cursor::new(&image_data))
                     .with_guessed_format()
-                    .map_err(|e| format!("Failed to read image format: {}", e))?
-                    .decode()
-                    .map_err(|e| format!("Failed to decode image: {}", e)) {
+                    .map_err(|e| format!("Failed to read image format: {}", e)) {
+                    if let Ok(img) = reader.decode()
+                        .map_err(|e| format!("Failed to decode image: {}", e)) {
 
                     let original_width = img.width();
                     let original_height = img.height();
@@ -113,12 +113,20 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
                             Ok(base64_string)
                         }
                     }
+                    } else {
+                        let error_msg = "Failed to decode screenshot image for standard resolution scaling";
+                        tracing::warn!("{}", error_msg);
+
+                        // Still return the screenshot but without proper scaling
+                        send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                        Ok(base64_string)
+                    }
                 } else {
-                    let error_msg = "Failed to decode screenshot image for standard resolution scaling";
+                    let error_msg = "Failed to read image format for standard resolution scaling";
                     tracing::warn!("{}", error_msg);
 
                     // Still return the screenshot but without proper scaling
-                    send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                    send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (format reading unavailable)")?;
                     Ok(base64_string)
                 }
             } else {
