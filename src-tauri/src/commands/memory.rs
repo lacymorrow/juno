@@ -308,3 +308,140 @@ pub async fn update_memory_config(
     memory_guard.update_config(config).await
         .map_err(|e| format!("Failed to update memory config: {}", e))
 }
+
+/// Get advanced memory metrics with comprehensive analysis - NEW ADVANCED FEATURE
+#[tauri::command]
+pub async fn get_advanced_memory_metrics(
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
+
+    let metrics = memory_guard.get_memory_metrics().await;
+    let config = memory_guard.get_config().await;
+    let messages = memory_guard.get_messages().await
+        .map_err(|e| format!("Failed to get messages: {}", e))?;
+    let visual_summaries = memory_guard.get_visual_summaries().await;
+
+    // Calculate utilization ratios
+    let message_utilization = (metrics.total_messages as f64 / config.max_messages as f64) * 100.0;
+    let token_utilization = (metrics.estimated_tokens as f64 / config.max_tokens as f64) * 100.0;
+
+    // Analyze message types
+    let mut tool_calls = 0;
+    let mut tool_results = 0;
+    let mut user_messages = 0;
+    let mut assistant_messages = 0;
+
+    for message in &messages {
+        match message.role {
+            crate::agent::core::Role::User => user_messages += 1,
+            crate::agent::core::Role::Assistant => {
+                assistant_messages += 1;
+                if message.tool_calls.is_some() {
+                    tool_calls += 1;
+                }
+            },
+            crate::agent::core::Role::Tool => tool_results += 1,
+            _ => {}
+        }
+    }
+
+    // Visual compression analytics
+    let total_visual_compression_ratio = if !visual_summaries.is_empty() {
+        visual_summaries.iter().map(|s| s.compression_ratio).sum::<f64>() / visual_summaries.len() as f64
+    } else {
+        0.0
+    };
+
+    Ok(serde_json::json!({
+        "utilization": {
+            "message_utilization_percent": message_utilization,
+            "token_utilization_percent": token_utilization,
+            "memory_efficiency_ratio": metrics.memory_efficiency_ratio,
+            "visual_compression_ratio": total_visual_compression_ratio
+        },
+        "composition": {
+            "user_messages": user_messages,
+            "assistant_messages": assistant_messages,
+            "tool_calls": tool_calls,
+            "tool_results": tool_results,
+            "visual_summaries": visual_summaries.len()
+        },
+        "performance": {
+            "pruning_events": metrics.pruning_events,
+            "summarization_events": metrics.summarization_events,
+            "orphaned_calls_cleaned": metrics.orphaned_tool_calls_cleaned,
+            "average_response_time_ms": metrics.average_response_time_ms
+        },
+        "limits": {
+            "max_messages": config.max_messages,
+            "max_tokens": config.max_tokens,
+            "min_messages_to_keep": config.min_messages_to_keep,
+            "summarization_batch_size": config.summarization_batch_size
+        }
+    }))
+}
+
+/// Force memory prune with custom parameters - NEW ADVANCED FEATURE
+#[tauri::command]
+pub async fn force_memory_prune(
+    app_handle: tauri::AppHandle,
+    target_messages: Option<usize>,
+) -> Result<String, String> {
+    let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let mut memory_guard = memory_manager.lock().await;
+
+    let before_metrics = memory_guard.get_memory_metrics().await;
+
+    let pruned_count = memory_guard.prune_memory(target_messages).await
+        .map_err(|e| format!("Failed to force prune memory: {}", e))?;
+
+    let after_metrics = memory_guard.get_memory_metrics().await;
+
+    Ok(format!(
+        "Force pruning complete: {} messages removed, {} messages remaining, tokens reduced from {} to {}",
+        pruned_count,
+        after_metrics.total_messages,
+        before_metrics.estimated_tokens,
+        after_metrics.estimated_tokens
+    ))
+}
+
+/// Get tiered memory context for advanced workflows - NEW ADVANCED FEATURE
+#[tauri::command]
+pub async fn get_tiered_memory_context(
+    app_handle: tauri::AppHandle,
+    max_immediate_tokens: usize,
+) -> Result<serde_json::Value, String> {
+    let state = app_handle.state::<AppState>();
+    let memory_manager = state.get_memory_manager().await;
+    let memory_guard = memory_manager.lock().await;
+
+    let (immediate_context, background_context) = memory_guard.get_tiered_context(max_immediate_tokens).await
+        .map_err(|e| format!("Failed to get tiered context: {}", e))?;
+
+    let immediate_tokens: usize = immediate_context.iter()
+        .map(|m| crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens(m))
+        .sum();
+
+    let background_tokens: usize = background_context.iter()
+        .map(|m| crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens(m))
+        .sum();
+
+    Ok(serde_json::json!({
+        "immediate_context": {
+            "messages": immediate_context,
+            "message_count": immediate_context.len(),
+            "estimated_tokens": immediate_tokens
+        },
+        "background_context": {
+            "messages": background_context,
+            "message_count": background_context.len(),
+            "estimated_tokens": background_tokens
+        },
+        "total_tokens": immediate_tokens + background_tokens
+    }))
+}
