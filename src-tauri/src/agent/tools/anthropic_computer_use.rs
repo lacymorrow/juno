@@ -441,7 +441,7 @@ pub async fn execute_computer_tool(
                     // Support multiple parameter formats for backward compatibility
                     let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
                         // Check if using start_coordinate + end_coordinate format (most common)
-                        if let Some(end_coordinate) = input["coordinate"].as_array() {
+                        if let Some(end_coordinate) = input["end_coordinate"].as_array() {
                             // Format: start_coordinate + end_coordinate
                             let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
                                 .ok_or_else(|| "Invalid start x coordinate".to_string())?;
@@ -453,11 +453,8 @@ pub async fn execute_computer_tool(
                                 .ok_or_else(|| "Invalid end y coordinate".to_string())?;
 
                             (start_x, start_y, end_x, end_y)
-                        } else {
+                        } else if let Some(coordinate) = input["coordinate"].as_array() {
                             // Legacy format: start_coordinate + coordinate (end)
-                            let coordinate = input["coordinate"].as_array()
-                                .ok_or_else(|| "Missing 'coordinate' (end) parameter for drag operation".to_string())?;
-
                             let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
                                 .ok_or_else(|| "Invalid start x coordinate".to_string())?;
                             let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
@@ -468,6 +465,8 @@ pub async fn execute_computer_tool(
                                 .ok_or_else(|| "Invalid end y coordinate".to_string())?;
 
                             (start_x, start_y, end_x, end_y)
+                        } else {
+                            return Err("Missing end coordinate parameter for drag operation. Use 'end_coordinate' or 'coordinate' with 'start_coordinate'".to_string());
                         }
                     } else if let Some(coordinate) = input["coordinate"].as_array() {
                         // Format: coordinate (start) + end_coordinate
