@@ -285,6 +285,7 @@ pub mod computer_actions {
     pub const DRAG: &str = "drag";
     pub const TYPE: &str = "type";
     pub const KEY: &str = "key";
+    pub const CURSOR_POSITION: &str = "cursor_position";
 }
 
 // Agent confidence score constants
