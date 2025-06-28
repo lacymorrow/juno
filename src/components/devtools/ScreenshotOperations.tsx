@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PlayCircle, Focus, Info } from "lucide-react";
+import {  Focus, Info } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
 
 const ScreenshotOperations: React.FC = () => {
