@@ -37,7 +37,7 @@ impl std::fmt::Display for CoordinateValidationError {
                 write!(f, "coordinate[{}] must be an integer, got '{}'", index, value)
             }
             CoordinateValidationError::OutOfBounds(index, value) => {
-                write!(f, "coordinate[{}] value {} is out of reasonable bounds (0-7680)", index, value)
+                write!(f, "coordinate[{}] value {} is out of reasonable bounds (-1000-7680)", index, value)
             }
         }
     }
