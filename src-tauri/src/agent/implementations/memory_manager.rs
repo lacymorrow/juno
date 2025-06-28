@@ -161,6 +161,11 @@ impl AdvancedMemoryManager {
         }
     }
 
+    pub fn with_visual_config(mut self, visual_config: VisualContextConfig) -> Self {
+        self.visual_config = Arc::new(RwLock::new(visual_config));
+        self
+    }
+
     /// Estimate token count for a message with proper base64 image handling
     fn estimate_message_tokens(message: &Message) -> usize {
         // Enhanced token estimation that properly handles base64 images
@@ -645,16 +650,18 @@ impl AdvancedMemoryManager {
         // Clean up pending tool calls
         pending.retain(|id| !orphaned_tool_call_ids.contains(id));
 
-        // Update metrics
+        // RE-ENABLED: Metrics update with safer error handling
         if !orphaned_tool_call_ids.is_empty() {
-            let mut metrics = self.metrics.write().await;
-            metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
+            // Update metrics safely
+            if let Ok(mut metrics) = self.metrics.try_write() {
+                metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
+            } else {
+                log::warn!("Could not acquire metrics lock for orphaned tool calls update");
+            }
 
             log::info!("Cleaned up {} orphaned tool calls: {:?}",
                        orphaned_tool_call_ids.len(), orphaned_tool_call_ids);
         }
-
-        self.update_metrics(start_time).await?;
         Ok(())
     }
 
@@ -710,14 +717,15 @@ impl AdvancedMemoryManager {
         });
 
         if orphaned_count > 0 {
+            // RE-ENABLED: Metrics update with safer error handling
+            if let Ok(mut metrics) = self.metrics.try_write() {
+                metrics.orphaned_tool_calls_cleaned += orphaned_count;
+            } else {
+                log::warn!("Could not acquire metrics lock for orphaned tool results update");
+            }
+
             log::info!("Cleaned up {} orphaned tool results: {:?}", orphaned_count, orphaned_ids);
-
-            // Update metrics
-            let mut metrics = self.metrics.write().await;
-            metrics.orphaned_tool_calls_cleaned += orphaned_count;
         }
-
-        self.update_metrics(start_time).await?;
         Ok(orphaned_count)
     }
 
@@ -963,9 +971,14 @@ impl MemoryManager for AdvancedMemoryManager {
 
         log::debug!("Memory: Added message. Role={:?}", message.role);
 
-        // Check if pruning is needed
+                // RE-ENABLED: Auto-pruning and metrics with safer implementation
         self.prune_memory_if_needed().await?;
-        self.update_metrics(start_time).await?;
+
+        // RE-ENABLED: Metrics update with safer timing (non-critical path)
+        if let Err(e) = self.update_metrics(start_time).await {
+            log::warn!("Failed to update metrics after adding message: {}", e);
+            // Continue execution - metrics failure shouldn't block message addition
+        }
 
         Ok(())
     }
@@ -982,7 +995,12 @@ impl MemoryManager for AdvancedMemoryManager {
         drop(messages);
         drop(pending);
 
-        self.update_metrics(start_time).await?;
+        // RE-ENABLED: Metrics update with error handling
+        if let Err(e) = self.update_metrics(start_time).await {
+            log::warn!("Failed to update metrics after getting messages: {}", e);
+            // Continue execution - metrics failure shouldn't block message retrieval
+        }
+
         Ok(result)
     }
 
@@ -993,7 +1011,12 @@ impl MemoryManager for AdvancedMemoryManager {
         let result = messages[start_index..].to_vec();
         drop(messages);
 
-        self.update_metrics(start_time).await?;
+        // RE-ENABLED: Metrics update with error handling
+        if let Err(e) = self.update_metrics(start_time).await {
+            log::warn!("Failed to update metrics after getting last N messages: {}", e);
+            // Continue execution - metrics failure shouldn't block message retrieval
+        }
+
         Ok(result)
     }
 
@@ -1012,13 +1035,12 @@ impl MemoryManager for AdvancedMemoryManager {
 
         log::info!("Memory: Cleared all messages, pending tool calls, summaries, and cache");
 
-        // Reset metrics
+        // RE-ENABLED: Reset metrics with safer implementation
         {
             let mut metrics = self.metrics.write().await;
             *metrics = MemoryMetrics::default();
         }
 
-        self.update_metrics(start_time).await?;
         Ok(())
     }
 
