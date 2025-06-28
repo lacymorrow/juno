@@ -472,18 +472,29 @@ pub async fn execute_computer_tool(
                         let end_coord = validate_coordinate_parameter(&input, "coordinate")?;
                         let (end_x, end_y) = end_coord.to_f64();
 
-                        // Get current cursor position as start point
+                        // Get current cursor position as start point (already in screen coordinates)
                         let (start_x, start_y) = crate::commands::mouse::get_cursor_position(
                             app_handle.clone(),
                             state_manager.clone(),
                         ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e))?;
 
-                        (start_x, start_y, end_x, end_y)
+                        // Transform only the end coordinates since start coordinates are already screen coordinates
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
+                        // Return start coordinates as-is (already screen coordinates) and transformed end coordinates
+                        (start_x, start_y, screen_end_x, screen_end_y)
                     };
 
-                    // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
-                    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                    // Transform coordinates from scaled screenshot to screen coordinates (only for explicit coordinate cases)
+                    let (screen_start_x, screen_start_y, screen_end_x, screen_end_y) = if input.get("start_coordinate").is_some() || input.get("end_coordinate").is_some() {
+                        // Both coordinates need transformation for explicit coordinate cases
+                        let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        (screen_start_x, screen_start_y, screen_end_x, screen_end_y)
+                    } else {
+                        // For cursor position case, coordinates are already handled above
+                        (start_x, start_y, end_x, end_y)
+                    };
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
