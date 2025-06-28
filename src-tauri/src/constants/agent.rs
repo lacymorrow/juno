@@ -318,7 +318,7 @@ pub mod tool_descriptive_names {
     pub const COMPUTER_LEFT_MOUSE_UP: &str = "computer/left_mouse_up";
     pub const COMPUTER_WAIT: &str = "computer/wait";
 
-    // Parametrized descriptive names (format strings)
+    // Format strings for parametrized tool names
     pub const COMPUTER_MOVE_TO_FORMAT: &str = "computer/move_to({}, {})";
     pub const COMPUTER_CLICK_FORMAT: &str = "computer/click({}, {})";
     pub const COMPUTER_RIGHT_CLICK_FORMAT: &str = "computer/right_click({}, {})";
@@ -332,6 +332,18 @@ pub mod tool_descriptive_names {
     pub const COMPUTER_HOLD_KEY_FORMAT: &str = "computer/hold_key(\"{}\")";
     pub const COMPUTER_RELEASE_KEY_FORMAT: &str = "computer/release_key(\"{}\")";
     pub const COMPUTER_WAIT_FORMAT: &str = "computer/wait({})";
+
+    pub const COMPUTER_MOUSE_DOWN_FORMAT: &str = "computer/mouse_down({}, {})";
+    pub const COMPUTER_MOUSE_UP_FORMAT: &str = "computer/mouse_up({}, {})";
+
+    pub const COMPUTER_SCROLL_DIRECTION_FORMAT: &str = "computer/scroll_{}({},{} × {})";
+    pub const COMPUTER_SCROLL_SIMPLE_FORMAT: &str = "computer/scroll_{} × {}";
+    pub const COMPUTER_ACTION_FORMAT: &str = "computer/{}";
+
+    // Additional format strings for tool execution
+    pub const COMPUTER_USE_EXECUTION_FORMAT: &str = "🖥️ Computer Use: {} → {}";
+    pub const COMPUTER_ACTION_EXECUTION_LOG_FORMAT: &str = "Executing computer action: {}";
+    pub const GET_CURSOR_POSITION_FAILED_FORMAT: &str = "Get cursor position failed: {}";
 }
 
 // Agent confidence score constants

@@ -303,20 +303,9 @@ impl Desktop {
                                 description: "Array of [x, y] coordinates for click, mouse actions, and end position of drag actions. Required for mouse actions.".to_string(),
                             },
                         );
-                        props.insert(
-                            "start_coordinate".to_string(),
-                            ToolParameter {
-                                type_: "array".to_string(),
-                                description: "Array of [x, y] start coordinates for drag actions.".to_string(),
-                            },
-                        );
-                        props.insert(
-                            "end_coordinate".to_string(),
-                            ToolParameter {
-                                type_: "array".to_string(),
-                                description: "Array of [x, y] end coordinates for drag actions. DEPRECATED: Use 'coordinate' for end position instead.".to_string(),
-                            },
-                        );
+                        // Note: Removed legacy start_coordinate and end_coordinate parameters
+                        // Following official Anthropic Computer Use specification:
+                        // Drag operations use only 'coordinate' (end position) - start is current cursor position
                         props.insert(
                             "text".to_string(),
                             ToolParameter {
@@ -1028,13 +1017,7 @@ impl Desktop {
                 self.triple_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
-            "leftClickDrag" => {
-                #[derive(Deserialize)]
-                struct DragArgs { start_x: f64, start_y: f64, end_x: f64, end_y: f64 }
-                let args: DragArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftClickDrag args: {}", e)))?;
-                self.left_click_drag(args.start_x, args.start_y, args.end_x, args.end_y)?;
-                Ok(json!(null))
-            }
+
             // --- Text Editor Handlers ---
             "text_editor_view" => {
                 #[derive(Deserialize)]
@@ -1158,9 +1141,8 @@ impl Desktop {
                 struct ComputerArgs {
                     action: String,
                     coordinate: Option<Vec<f64>>,
-                    start_coordinate: Option<Vec<f64>>,
-                    #[allow(dead_code)] // Used in legacy drag action support
-                    end_coordinate: Option<Vec<f64>>,
+                    // Note: For drag operations, coordinate represents the end position
+                    // Drag starts from current cursor position as per Anthropic Computer Use specification
                     text: Option<String>,
                     scroll_direction: Option<String>,
                     scroll_amount: Option<f64>,
@@ -1226,17 +1208,25 @@ impl Desktop {
                         Ok(json!({"status": "success"}))
                     }
                     "left_click_drag" => {
-                        let start_coords = parsed_args.start_coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("start_coordinate required for left_click_drag action".to_string())
-                        })?;
+                        // Get current cursor position as start point (following Anthropic Computer Use specification)
+                        let (start_x, start_y) = self.cursor_position()?;
+
+                        // Get end coordinates from coordinate parameter
                         let end_coords = parsed_args.coordinate.ok_or_else(|| {
                             AutomationError::InvalidArgument("coordinate required for left_click_drag action".to_string())
                         })?;
-                        if start_coords.len() != 2 || end_coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("start_coordinate and coordinate must be [x, y] arrays".to_string()));
+
+                        if end_coords.len() != 2 {
+                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
                         }
-                        self.left_click_drag(start_coords[0], start_coords[1], end_coords[0], end_coords[1])?;
-                        Ok(json!({"status": "success"}))
+
+                        // Perform drag operation from current cursor position to specified coordinate
+                        self.left_click_drag(start_x, start_y, end_coords[0], end_coords[1])?;
+                        Ok(json!({
+                            "status": "success",
+                            "start": [start_x, start_y],
+                            "end": end_coords
+                        }))
                     }
                     "mouse_move" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {

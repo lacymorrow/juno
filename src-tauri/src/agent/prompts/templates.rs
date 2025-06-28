@@ -641,10 +641,10 @@ Response:
 Task: "Move mouse in a square pattern"
 Response:
 [
-  {"name": "computer", "input": {"action": "drag", "startCoordinate": [500, 300], "endCoordinate": [700, 300]}},
-  {"name": "computer", "input": {"action": "drag", "startCoordinate": [700, 300], "endCoordinate": [700, 500]}},
-  {"name": "computer", "input": {"action": "drag", "startCoordinate": [700, 500], "endCoordinate": [500, 500]}},
-  {"name": "computer", "input": {"action": "drag", "startCoordinate": [500, 500], "endCoordinate": [500, 300]}}
+  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [700, 300]}},
+{"name": "computer", "input": {"action": "left_click_drag", "coordinate": [700, 500]}},
+{"name": "computer", "input": {"action": "left_click_drag", "coordinate": [500, 500]}},
+{"name": "computer", "input": {"action": "left_click_drag", "coordinate": [500, 300]}}
 ]
 
 Task: "Fill login form"
@@ -788,9 +788,9 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
    - Use for: Selecting entire lines of text
    - Example: `{"action": "triple_click", "coordinate": [300, 150]}`
 
-5. **`{"action": "drag", "startCoordinate": [x1, y1], "endCoordinate": [x2, y2]}`** - Drag operation
-   - Use for: Moving items, selecting regions, drag-and-drop
-   - Example: `{"action": "drag", "startCoordinate": [100, 100], "endCoordinate": [200, 200]}`
+5. **`{"action": "left_click_drag", "coordinate": [x, y]}`** - Drag operation
+   - Drags from current cursor position to specified coordinate
+   - Example: `{"action": "left_click_drag", "coordinate": [200, 200]}`
 
 6. **`{"action": "scroll", "coordinate": [x, y], "scrollCount": 3}`** - Scroll at position
    - Use for: Scrolling pages, lists, content areas
@@ -890,7 +890,7 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 **Drag and drop operation**:
 ```json
 [
-  {"name": "computer", "input": {"action": "drag", "startCoordinate": [100, 100], "endCoordinate": [200, 200]}},
+  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [200, 200]}},
   {"name": "computer", "input": {"action": "screenshot"}}
 ]
 ```
