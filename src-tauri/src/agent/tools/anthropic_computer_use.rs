@@ -6,7 +6,6 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
-use crate::commands::mouse::smooth_mouse_move;
 // Import mouse commands to restore proper functionality
 use crate::commands::mouse::{
     left_click, right_click, middle_click, double_click, triple_click,
@@ -354,10 +353,6 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Perform smooth mouse movement to target before clicking
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
-
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Left click failed: {}", e))?;
@@ -376,10 +371,6 @@ pub async fn execute_computer_tool(
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-                    // Perform smooth mouse movement to target before clicking
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -400,10 +391,6 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Perform smooth mouse movement to target before clicking
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
-
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Middle click failed: {}", e))?;
@@ -422,10 +409,6 @@ pub async fn execute_computer_tool(
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-                    // Perform smooth mouse movement to target before clicking
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -446,10 +429,6 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Perform smooth mouse movement to target before clicking
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
-
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
                         .map_err(|e| format!("Triple click failed: {}", e))?;
@@ -462,7 +441,7 @@ pub async fn execute_computer_tool(
                     // Support multiple parameter formats for backward compatibility
                     let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
                         // Check if using start_coordinate + end_coordinate format (most common)
-                        if let Some(end_coordinate) = input["end_coordinate"].as_array() {
+                        if let Some(end_coordinate) = input["coordinate"].as_array() {
                             // Format: start_coordinate + end_coordinate
                             let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
                                 .ok_or_else(|| "Invalid start x coordinate".to_string())?;
@@ -513,11 +492,7 @@ pub async fn execute_computer_tool(
                     let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
                     let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
 
-                    // Perform smooth mouse movement to start position before dragging
-                    smooth_mouse_move(app_handle, &state_manager, screen_start_x, screen_start_y, None).await
-                        .map_err(|e| format!("Smooth mouse move to start position failed: {}", e))?;
-
-                    // Use proper mouse command which includes debug logging and validation
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
                         .map_err(|e| format!("Left click drag failed: {}", e))?;
 
@@ -554,10 +529,6 @@ pub async fn execute_computer_tool(
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
-
-                    // Perform smooth mouse movement to target before mouse down
-                    smooth_mouse_move(app_handle, &state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Smooth mouse move failed: {}", e))?;
 
                     // Use proper mouse command which includes debug logging and validation
                     left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
