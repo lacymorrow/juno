@@ -30,18 +30,39 @@ interface ProductionTestResult {
   latency_ms: number;
 }
 
+// Computer command input interface matching the Anthropic Computer Use API
+interface ComputerInput {
+  action: string;
+  coordinate?: [number, number];
+  startCoordinate?: [number, number];
+  endCoordinate?: [number, number];
+  text?: string;
+  scrollCount?: number;
+  scrollDirection?: string;
+  duration?: number;
+}
+
+// Computer command result interface
+interface ComputerResult {
+  success: boolean;
+  action: string;
+  message?: string;
+  base64_image?: string;
+  error?: string;
+}
+
 const ClickQATestPanel: React.FC = () => {
   // Individual click test state
   const [clickX, setClickX] = useState<string>("400");
   const [clickY, setClickY] = useState<string>("300");
-  const [clickType, setClickType] = useState<string>("left");
+  const [clickType, setClickType] = useState<string>("click");
   const [clickResult, setClickResult] = useState<ProductionTestResult | null>(
     null
   );
 
   // Click series test state
   const [seriesPositions, setSeriesPositions] = useState<string>(
-    '[[100,100,"left"],[200,200,"right"],[300,300,"double"]]'
+    '[[100,100,"click"],[200,200,"right_click"],[300,300,"double_click"]]'
   );
   const [seriesResults, setSeriesResults] = useState<
     ProductionTestResult[] | null
@@ -59,7 +80,7 @@ const ClickQATestPanel: React.FC = () => {
     coordinate: false,
   });
 
-  // Production Function Test: Individual Click using actual production functions
+  // Production Function Test: Individual Click using official Computer Use API
   const handleClickTest = async () => {
     const x = parseFloat(clickX);
     const y = parseFloat(clickY);
@@ -73,65 +94,35 @@ const ClickQATestPanel: React.FC = () => {
 
     const startTime = Date.now();
     try {
-      // Use the actual production mouse functions directly
-      let functionName = "";
-      switch (clickType) {
-        case "left":
-          functionName = "left_click";
-          await invokeCommand(
-            "left_click",
-            { x, y, modifier: null },
-            "left_click"
-          );
-          break;
-        case "right":
-          functionName = "right_click";
-          await invokeCommand(
-            "right_click",
-            { x, y, modifier: null },
-            "right_click"
-          );
-          break;
-        case "middle":
-          functionName = "middle_click";
-          await invokeCommand(
-            "middle_click",
-            { x, y, modifier: null },
-            "middle_click"
-          );
-          break;
-        case "double":
-          functionName = "double_click";
-          await invokeCommand(
-            "double_click",
-            { x, y, modifier: null },
-            "double_click"
-          );
-          break;
-        case "triple":
-          functionName = "triple_click";
-          await invokeCommand(
-            "triple_click",
-            { x, y, modifier: null },
-            "triple_click"
-          );
-          break;
-        default:
-          throw new Error(`Unknown click type: ${clickType}`);
-      }
-
-      const latency_ms = Date.now() - startTime;
-      const result: ProductionTestResult = {
-        success: true,
-        operation: `${clickType} click`,
-        coordinates: [x, y],
-        latency_ms,
+      // Use the official Anthropic Computer Use API via the computer command
+      const computerInput: ComputerInput = {
+        action: clickType,
+        coordinate: [x, y],
       };
 
-      setClickResult(result);
-      toast.success(
-        `✅ ${clickType} click successful - Latency: ${latency_ms}ms`
+      const result = await invokeCommand<ComputerResult>(
+        "computer",
+        computerInput,
+        "computer"
       );
+
+      const latency_ms = Date.now() - startTime;
+
+      if (result.success) {
+        const testResult: ProductionTestResult = {
+          success: true,
+          operation: `${clickType} click`,
+          coordinates: [x, y],
+          latency_ms,
+        };
+
+        setClickResult(testResult);
+        toast.success(
+          `✅ ${clickType} click successful - Latency: ${latency_ms}ms`
+        );
+      } else {
+        throw new Error(result.error || "Computer command failed");
+      }
     } catch (error) {
       const latency_ms = Date.now() - startTime;
       const result: ProductionTestResult = {
@@ -149,7 +140,7 @@ const ClickQATestPanel: React.FC = () => {
     }
   };
 
-  // Production Function Test: Click Series using actual production functions
+  // Production Function Test: Click Series using official Computer Use API
   const handleClickSeriesTest = async () => {
     try {
       const positions = JSON.parse(seriesPositions) as [
@@ -162,7 +153,7 @@ const ClickQATestPanel: React.FC = () => {
       const results: ProductionTestResult[] = [];
 
       for (let i = 0; i < positions.length; i++) {
-        const [x, y, clickType] = positions[i];
+        const [x, y, action] = positions[i];
         const startTime = Date.now();
 
         try {
@@ -171,59 +162,35 @@ const ClickQATestPanel: React.FC = () => {
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
 
-          // Use actual production functions
-          switch (clickType) {
-            case "left":
-              await invokeCommand(
-                "left_click",
-                { x, y, modifier: null },
-                "left_click"
-              );
-              break;
-            case "right":
-              await invokeCommand(
-                "right_click",
-                { x, y, modifier: null },
-                "right_click"
-              );
-              break;
-            case "middle":
-              await invokeCommand(
-                "middle_click",
-                { x, y, modifier: null },
-                "middle_click"
-              );
-              break;
-            case "double":
-              await invokeCommand(
-                "double_click",
-                { x, y, modifier: null },
-                "double_click"
-              );
-              break;
-            case "triple":
-              await invokeCommand(
-                "triple_click",
-                { x, y, modifier: null },
-                "triple_click"
-              );
-              break;
-            default:
-              throw new Error(`Unknown click type: ${clickType}`);
-          }
+          // Use the official Anthropic Computer Use API
+          const computerInput: ComputerInput = {
+            action: action,
+            coordinate: [x, y],
+          };
+
+          const result = await invokeCommand<ComputerResult>(
+            "computer",
+            computerInput,
+            "computer"
+          );
 
           const latency_ms = Date.now() - startTime;
-          results.push({
-            success: true,
-            operation: `${clickType} click`,
-            coordinates: [x, y],
-            latency_ms,
-          });
+
+          if (result.success) {
+            results.push({
+              success: true,
+              operation: `${action} click`,
+              coordinates: [x, y],
+              latency_ms,
+            });
+          } else {
+            throw new Error(result.error || "Computer command failed");
+          }
         } catch (error) {
           const latency_ms = Date.now() - startTime;
           results.push({
             success: false,
-            operation: `${clickType} click`,
+            operation: `${action} click`,
             coordinates: [x, y],
             error: String(error),
             latency_ms,
@@ -263,13 +230,22 @@ const ClickQATestPanel: React.FC = () => {
     try {
       const startTime = Date.now();
 
-      // Move mouse to target position using production function
-      await invokeCommand("mouse_move", { x, y }, "mouse_move");
+      // Move mouse to target position using official Computer Use API
+      const computerInput: ComputerInput = {
+        action: "move",
+        coordinate: [x, y],
+      };
+
+      await invokeCommand<ComputerResult>(
+        "computer",
+        computerInput,
+        "computer"
+      );
 
       // Small delay to ensure movement completes
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Get actual cursor position using production function
+      // Get actual cursor position using existing command
       const actualPos = await invokeCommand<[number, number]>(
         "get_cursor_position",
         {},
@@ -333,9 +309,9 @@ const ClickQATestPanel: React.FC = () => {
       <div className="flex items-center space-x-2">
         <Target className="h-5 w-5" />
         <h3 className="text-lg font-semibold">
-          Production Mouse Function Testing
+          Anthropic Computer Use API Testing
         </h3>
-        <Badge variant="outline">Using Production Functions</Badge>
+        <Badge variant="outline">Official Computer Use API</Badge>
       </div>
 
       {/* Individual Click Test */}
@@ -346,7 +322,8 @@ const ClickQATestPanel: React.FC = () => {
             <span>Individual Click Test</span>
           </CardTitle>
           <CardDescription>
-            Test individual mouse clicks using production functions
+            Test individual mouse clicks using the official Anthropic Computer
+            Use API
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -368,11 +345,11 @@ const ClickQATestPanel: React.FC = () => {
               onChange={(e) => setClickType(e.target.value)}
               className="px-3 py-1 border rounded-md"
             >
-              <option value="left">Left Click</option>
-              <option value="right">Right Click</option>
-              <option value="middle">Middle Click</option>
-              <option value="double">Double Click</option>
-              <option value="triple">Triple Click</option>
+              <option value="click">Left Click</option>
+              <option value="right_click">Right Click</option>
+              <option value="middle_click">Middle Click</option>
+              <option value="double_click">Double Click</option>
+              <option value="triple_click">Triple Click</option>
             </select>
           </div>
 
@@ -381,7 +358,9 @@ const ClickQATestPanel: React.FC = () => {
             disabled={loading.click}
             className="w-full"
           >
-            {loading.click ? "Testing..." : `Test ${clickType} Click`}
+            {loading.click
+              ? "Testing..."
+              : `Test ${clickType.replace("_", " ")} Click`}
           </Button>
 
           {clickResult && (
@@ -417,12 +396,13 @@ const ClickQATestPanel: React.FC = () => {
             <span>Click Series Test</span>
           </CardTitle>
           <CardDescription>
-            Test multiple clicks in sequence using production functions
+            Test multiple clicks in sequence using the official Anthropic
+            Computer Use API
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Input
-            placeholder='[[100,100,"left"],[200,200,"right"],[300,300,"double"]]'
+            placeholder='[[100,100,"click"],[200,200,"right_click"],[300,300,"double_click"]]'
             value={seriesPositions}
             onChange={(e) => setSeriesPositions(e.target.value)}
           />
@@ -470,7 +450,8 @@ const ClickQATestPanel: React.FC = () => {
             <span>Mouse Movement Accuracy Test</span>
           </CardTitle>
           <CardDescription>
-            Test mouse movement accuracy using production functions
+            Test mouse movement accuracy using the official Anthropic Computer
+            Use API
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
