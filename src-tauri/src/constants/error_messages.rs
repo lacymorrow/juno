@@ -122,3 +122,108 @@ pub mod recovery_suggestions {
     pub const AGENT_TIMEOUT: &str =
         "The operation may be complex - try breaking it into smaller steps";
 }
+
+// Tool-specific error messages
+pub mod tool_errors {
+    // Computer tool errors
+    pub const MISSING_ACTION_PARAMETER: &str = "Missing 'action' parameter";
+    pub const MISSING_COORDINATE_PARAMETER: &str = "Missing 'coordinate' parameter";
+    pub const INVALID_X_COORDINATE: &str = "Invalid x coordinate";
+    pub const INVALID_Y_COORDINATE: &str = "Invalid y coordinate";
+    pub const INVALID_START_X_COORDINATE: &str = "Invalid start x coordinate";
+    pub const INVALID_START_Y_COORDINATE: &str = "Invalid start y coordinate";
+    pub const INVALID_END_X_COORDINATE: &str = "Invalid end x coordinate";
+    pub const INVALID_END_Y_COORDINATE: &str = "Invalid end y coordinate";
+    pub const MISSING_KEY_PARAMETER: &str = "Missing 'key' or 'text' parameter";
+    pub const MISSING_TEXT_PARAMETER: &str = "Missing 'text' parameter";
+    pub const MISSING_DURATION_PARAMETER: &str = "Missing 'duration_ms' or 'duration' parameter";
+    pub const MISSING_SCROLL_DIRECTION_PARAMETER: &str = "Missing 'scroll_direction' parameter";
+    pub const MISSING_SECONDS_PARAMETER: &str = "Missing 'seconds' or 'duration' parameter";
+    pub const MISSING_START_COORDINATE_PARAMETER: &str = "Missing 'start_coordinate' parameter for drag operation";
+    pub const MISSING_END_COORDINATE_PARAMETER: &str = "Missing 'end_coordinate' parameter for drag operation";
+    pub const MISSING_COORDINATE_PARAMETERS_FOR_DRAG: &str = "Missing coordinate parameters for drag operation. Use 'start_coordinate' + 'end_coordinate', 'start_coordinate' + 'coordinate', or 'coordinate' + 'end_coordinate'";
+
+    // Bash tool errors
+    pub const MISSING_COMMAND_PARAMETER: &str = "Missing 'command' parameter";
+
+    // str_replace_tool errors
+    pub const MISSING_PATH_PARAMETER: &str = "Missing 'path' parameter";
+    pub const MISSING_OLD_STR_PARAMETER: &str = "Missing 'old_str' parameter";
+    pub const MISSING_NEW_STR_PARAMETER: &str = "Missing 'new_str' parameter";
+    pub const MISSING_FILE_TEXT_PARAMETER: &str = "Missing 'file_text' parameter";
+
+    // Security validation errors
+    pub const PATH_TRAVERSAL_NOT_ALLOWED: &str = "Path traversal not allowed";
+    pub const HOME_DIRECTORY_ACCESS_NOT_ALLOWED: &str = "Home directory access not allowed";
+    pub const LINE_NUMBERS_ARE_ONE_INDEXED_START: &str = "Line numbers are 1-indexed, start_line cannot be 0";
+    pub const LINE_NUMBERS_ARE_ONE_INDEXED_END: &str = "Line numbers are 1-indexed, end_line cannot be 0";
+    pub const START_LINE_MUST_BE_LESS_THAN_END: &str = "Start line must be less than end line";
+
+    // File operation errors
+    pub const FILE_ALREADY_EXISTS: &str = "File already exists";
+    pub const STRING_NOT_FOUND_IN_FILE: &str = "String not found in file";
+}
+
+// Tool-specific success messages
+pub mod tool_success {
+    pub const SCREENSHOT_SUCCESS: &str = "✅ Screenshot captured successfully";
+    pub const CLICK_SUCCESS: &str = "✅ Click operation completed successfully";
+    pub const TYPE_SUCCESS: &str = "✅ Text typing completed successfully";
+    pub const KEY_PRESS_SUCCESS: &str = "✅ Key press completed successfully";
+    pub const SCROLL_SUCCESS: &str = "✅ Scroll operation completed successfully";
+    pub const MOUSE_MOVE_SUCCESS: &str = "✅ Mouse movement completed successfully";
+    pub const DRAG_SUCCESS: &str = "✅ Drag operation completed successfully";
+    pub const WAIT_SUCCESS: &str = "✅ Wait operation completed successfully";
+    pub const BASH_COMMAND_SUCCESS: &str = "✅ Bash command executed successfully";
+    pub const FILE_CREATED_SUCCESSFULLY: &str = "Successfully created file";
+    pub const TEXT_REPLACED_SUCCESSFULLY: &str = "Successfully replaced text in";
+}
+
+// Format string constants for dynamic error messages
+pub mod format_strings {
+    // File operation format strings
+    pub const FILE_EXTENSION_NOT_ALLOWED: &str = "File extension '{}' not allowed";
+    pub const FILE_SIZE_EXCEEDS_LIMIT: &str = "File size {} bytes exceeds limit of {} bytes";
+    pub const START_LINE_EXCEEDS_FILE_LENGTH: &str = "Start line {} exceeds file length of {} lines";
+    pub const END_LINE_EXCEEDS_FILE_LENGTH: &str = "End line {} exceeds file length of {} lines";
+    pub const FAILED_TO_READ_FILE: &str = "Failed to read file '{}': {}";
+    pub const FAILED_TO_WRITE_FILE: &str = "Failed to write file '{}': {}";
+    pub const FAILED_TO_CREATE_FILE: &str = "Failed to create file '{}': {}";
+    pub const FAILED_TO_CREATE_DIRECTORIES: &str = "Failed to create directories for '{}': {}";
+    pub const FILE_ALREADY_EXISTS: &str = "File '{}' already exists";
+    pub const STRING_NOT_FOUND_IN_FILE: &str = "String '{}' not found in file '{}'";
+
+    // Tool operation format strings
+    pub const COMPUTER_ACTION_EXECUTION: &str = "🖥️ Computer Use: {} → {}";
+    pub const PERMISSION_VALIDATION_FAILED: &str = "Permission validation failed: {}";
+    pub const SCREENSHOT_FAILED: &str = "Screenshot failed: {}";
+    pub const LEFT_CLICK_FAILED: &str = "Left click failed: {}";
+    pub const RIGHT_CLICK_FAILED: &str = "Right click failed: {}";
+    pub const MIDDLE_CLICK_FAILED: &str = "Middle click failed: {}";
+    pub const DOUBLE_CLICK_FAILED: &str = "Double click failed: {}";
+    pub const TRIPLE_CLICK_FAILED: &str = "Triple click failed: {}";
+    pub const LEFT_CLICK_DRAG_FAILED: &str = "Left click drag failed: {}";
+    pub const MOUSE_MOVE_FAILED: &str = "Mouse move failed: {}";
+    pub const TYPE_TEXT_FAILED: &str = "Type text failed: {}";
+    pub const KEY_PRESS_FAILED: &str = "Key press failed: {}";
+    pub const SCROLL_FAILED: &str = "Scroll failed: {}";
+    pub const HOLD_KEY_FAILED: &str = "Hold key failed: {}";
+    pub const RELEASE_KEY_FAILED: &str = "Release key failed: {}";
+    pub const LEFT_MOUSE_DOWN_FAILED: &str = "Left mouse down failed: {}";
+    pub const LEFT_MOUSE_UP_FAILED: &str = "Left mouse up failed: {}";
+    pub const WAIT_FAILED: &str = "Wait failed: {}";
+    pub const BASH_COMMAND_FAILED: &str = "Bash command failed: {}";
+    pub const UNKNOWN_STR_REPLACE_COMMAND: &str = "Unknown str_replace_based_edit_tool command: {}";
+    pub const PARSE_BASH_RESULT_FAILED: &str = "Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'";
+
+    // Tool execution logging format strings
+    pub const EXECUTING_COMPUTER_ACTION: &str = "Executing computer action: {}";
+    pub const RAW_BASH_COMMAND_RESULT: &str = "Raw bash_command result: {}";
+    pub const PARSED_BASH_RESULT: &str = "Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}";
+    pub const MISSING_INVALID_STDOUT: &str = "Missing or invalid 'stdout' field in bash command result: {}";
+    pub const MISSING_INVALID_EXIT_CODE: &str = "Missing or invalid 'exit_code' field in bash command result: {}";
+
+    // Success message format strings
+    pub const SUCCESSFULLY_CREATED_FILE: &str = "Successfully created file '{}'";
+    pub const SUCCESSFULLY_REPLACED_TEXT_IN: &str = "Successfully replaced text in '{}'";
+}

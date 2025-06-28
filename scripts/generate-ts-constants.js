@@ -29,6 +29,7 @@ function parseRustConstants() {
         errors: {},
         commands: {},
         memory: {},
+        agent: {},
     };
 
     // Parse each constants module
@@ -80,6 +81,10 @@ function parseRustConstants() {
         // Parse memory module
         const memoryFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'memory.rs'), 'utf8');
         constants.memory = parseModuleConstants(memoryFile);
+
+        // Parse agent module (contains computer actions and tool names)
+        const agentFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'agent.rs'), 'utf8');
+        constants.agent = parseModuleConstants(agentFile);
 
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
@@ -291,6 +296,52 @@ ${Object.entries(constants.memory)
     .join('\n')}
 } as const;
 
+export const AGENT = {
+${Object.entries(constants.agent)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+export const COMPUTER_ACTIONS = {
+${(() => {
+    const computerActions = {};
+
+    // Collect all computer action constants, avoiding duplicates
+    Object.entries(constants.agent)
+        .filter(([key]) =>
+            key.startsWith('COMPUTER_ACTIONS_') ||
+            key.startsWith('TOOL_NAMES_ACTION_') ||
+            (key.startsWith('ACTION_') && !key.startsWith('TOOL_NAMES_'))
+        )
+        .forEach(([key, value]) => {
+            let cleanKey = key;
+            if (cleanKey.startsWith('COMPUTER_ACTIONS_')) {
+                cleanKey = cleanKey.replace('COMPUTER_ACTIONS_', '');
+            } else if (cleanKey.startsWith('TOOL_NAMES_ACTION_')) {
+                cleanKey = cleanKey.replace('TOOL_NAMES_ACTION_', '');
+            } else if (cleanKey.startsWith('ACTION_')) {
+                cleanKey = cleanKey.replace('ACTION_', '');
+            }
+
+            // Only add if not already present, prioritizing ACTION_ prefixed constants
+            if (!computerActions[cleanKey] || key.startsWith('ACTION_') || key.startsWith('TOOL_NAMES_ACTION_')) {
+                computerActions[cleanKey] = value;
+            }
+        });
+
+    return Object.entries(computerActions)
+        .map(([key, value]) => `  ${key}: '${value}',`)
+        .join('\n');
+})()}
+} as const;
+
+export const TOOL_NAMES = {
+${Object.entries(constants.agent)
+    .filter(([key]) => key.startsWith('TOOL_NAMES_'))
+    .map(([key, value]) => `  ${key.replace('TOOL_NAMES_', '')}: '${value}',`)
+    .join('\n')}
+} as const;
+
 export const FILE_EXTENSIONS = {
 ${Object.entries(constants.files)
     .filter(([key]) => key.includes('EXT'))
@@ -416,6 +467,8 @@ export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS]
 export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
 export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
 export type CommandName = typeof COMMANDS[keyof typeof COMMANDS];
+export type ComputerAction = typeof COMPUTER_ACTIONS[keyof typeof COMPUTER_ACTIONS];
+export type ToolName = typeof TOOL_NAMES[keyof typeof TOOL_NAMES];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
 `;
 }
@@ -443,6 +496,7 @@ function main() {
         console.log(`   - Audio: ${Object.keys(constants.audio).length}`);
         console.log(`   - Files: ${Object.keys(constants.files).length}`);
         console.log(`   - Permissions: ${Object.keys(constants.permissions).length}`);
+        console.log(`   - Agent: ${Object.keys(constants.agent).length}`);
 
     } catch (error) {
         console.error('❌ Error generating constants:', error);

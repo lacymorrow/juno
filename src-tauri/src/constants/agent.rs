@@ -285,6 +285,53 @@ pub mod computer_actions {
     pub const DRAG: &str = "drag";
     pub const TYPE: &str = "type";
     pub const KEY: &str = "key";
+    pub const CURSOR_POSITION: &str = "cursor_position";
+    pub const SCREENSHOT: &str = "screenshot";
+    pub const MOUSE_MOVE: &str = "mouse_move";
+    pub const LEFT_CLICK: &str = "left_click";
+    pub const LEFT_CLICK_DRAG: &str = "left_click_drag";
+    pub const LEFT_MOUSE_DOWN: &str = "left_mouse_down";
+    pub const LEFT_MOUSE_UP: &str = "left_mouse_up";
+    pub const HOLD_KEY: &str = "hold_key";
+    pub const RELEASE_KEY: &str = "release_key";
+    pub const SCROLL: &str = "scroll";
+    pub const WAIT: &str = "wait";
+}
+
+// Tool descriptive names for enhanced logging
+pub mod tool_descriptive_names {
+    pub const COMPUTER_SCREENSHOT: &str = "computer/screenshot";
+    pub const COMPUTER_GET_CURSOR_POSITION: &str = "computer/get_cursor_position";
+    pub const COMPUTER_MOUSE_MOVE: &str = "computer/mouse_move";
+    pub const COMPUTER_LEFT_CLICK: &str = "computer/left_click";
+    pub const COMPUTER_RIGHT_CLICK: &str = "computer/right_click";
+    pub const COMPUTER_MIDDLE_CLICK: &str = "computer/middle_click";
+    pub const COMPUTER_DOUBLE_CLICK: &str = "computer/double_click";
+    pub const COMPUTER_TRIPLE_CLICK: &str = "computer/triple_click";
+    pub const COMPUTER_LEFT_CLICK_DRAG: &str = "computer/left_click_drag";
+    pub const COMPUTER_TYPE: &str = "computer/type";
+    pub const COMPUTER_KEY: &str = "computer/key";
+    pub const COMPUTER_SCROLL: &str = "computer/scroll";
+    pub const COMPUTER_HOLD_KEY: &str = "computer/hold_key";
+    pub const COMPUTER_RELEASE_KEY: &str = "computer/release_key";
+    pub const COMPUTER_LEFT_MOUSE_DOWN: &str = "computer/left_mouse_down";
+    pub const COMPUTER_LEFT_MOUSE_UP: &str = "computer/left_mouse_up";
+    pub const COMPUTER_WAIT: &str = "computer/wait";
+
+    // Parametrized descriptive names (format strings)
+    pub const COMPUTER_MOVE_TO_FORMAT: &str = "computer/move_to({}, {})";
+    pub const COMPUTER_CLICK_FORMAT: &str = "computer/click({}, {})";
+    pub const COMPUTER_RIGHT_CLICK_FORMAT: &str = "computer/right_click({}, {})";
+    pub const COMPUTER_MIDDLE_CLICK_FORMAT: &str = "computer/middle_click({}, {})";
+    pub const COMPUTER_DOUBLE_CLICK_FORMAT: &str = "computer/double_click({}, {})";
+    pub const COMPUTER_TRIPLE_CLICK_FORMAT: &str = "computer/triple_click({}, {})";
+    pub const COMPUTER_DRAG_FORMAT: &str = "computer/drag({}, {}, {}, {})";
+    pub const COMPUTER_TYPE_FORMAT: &str = "computer/type(\"{}\")";
+    pub const COMPUTER_KEY_FORMAT: &str = "computer/key(\"{}\")";
+    pub const COMPUTER_SCROLL_FORMAT: &str = "computer/scroll({}, {}, {})";
+    pub const COMPUTER_HOLD_KEY_FORMAT: &str = "computer/hold_key(\"{}\")";
+    pub const COMPUTER_RELEASE_KEY_FORMAT: &str = "computer/release_key(\"{}\")";
+    pub const COMPUTER_WAIT_FORMAT: &str = "computer/wait({})";
 }
 
 // Agent confidence score constants
