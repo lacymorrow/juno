@@ -11,10 +11,8 @@ use tracing::{error, info};
 pub struct ComputerInput {
     pub action: String,
     pub coordinate: Option<Vec<f64>>,
-    #[serde(rename = "startCoordinate")]
-    pub start_coordinate: Option<Vec<f64>>,
-    #[serde(rename = "endCoordinate")]
-    pub end_coordinate: Option<Vec<f64>>,
+    // Note: Following official Anthropic Computer Use specification
+    // Drag operations start from current cursor position and end at 'coordinate'
     pub text: Option<String>,
     #[serde(rename = "scrollCount")]
     pub scroll_count: Option<i32>,
@@ -50,7 +48,7 @@ pub async fn computer(
         "middle_click" => handle_middle_click(&input, &app_handle, state).await,
         "double_click" => handle_double_click(&input, &app_handle, state).await,
         "triple_click" => handle_triple_click(&input, &app_handle, state).await,
-        "drag" => handle_drag(&input, &app_handle, state).await,
+        "left_click_drag" => handle_drag(&input, &app_handle, state).await,
         "move" => handle_move(&input, &app_handle, state).await,
         "scroll" => handle_scroll(&input, &app_handle, state).await,
         "type" => handle_type(&input, &app_handle, state).await,
@@ -253,25 +251,26 @@ async fn handle_drag(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let start_coords = input.start_coordinate.as_ref()
-        .or(input.coordinate.as_ref())
-        .ok_or("Drag action requires startCoordinate parameter")?;
+    // Following official Anthropic Computer Use specification:
+    // Drag starts from current cursor position and ends at 'coordinate'
+    let end_coords = input.coordinate.as_ref()
+        .ok_or("Drag action requires coordinate parameter (end position)")?;
 
-    let end_coords = input.end_coordinate.as_ref()
-        .ok_or("Drag action requires endCoordinate parameter")?;
-
-    if start_coords.len() != 2 || end_coords.len() != 2 {
-        return Err("Coordinates must be arrays of [x, y]".to_string());
+    if end_coords.len() != 2 {
+        return Err("Coordinate must be an array of [x, y]".to_string());
     }
 
-    let start_x = start_coords[0];
-    let start_y = start_coords[1];
+    // Get current cursor position as start point
+    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
+        .await
+        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+
     let end_x = end_coords[0];
     let end_y = end_coords[1];
 
     crate::commands::mouse::left_click_drag(
         app_handle.clone(),
-        state,
+        state.clone(),
         start_x,
         start_y,
         end_x,
@@ -282,8 +281,8 @@ async fn handle_drag(
 
     Ok(ComputerResult {
         success: true,
-        action: "drag".to_string(),
-        message: Some(format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)),
+        action: "left_click_drag".to_string(),
+        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to ({}, {})", start_x, start_y, end_x, end_y)),
         base64_image: None,
         error: None,
         coordinate: None,
