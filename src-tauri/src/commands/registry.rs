@@ -109,13 +109,7 @@ macro_rules! generate_invoke_handler {
             get_clipboard,
             set_clipboard,
 
-            // === QA TESTING COMMANDS ===
-            qa_test_click,
-            qa_test_click_series,
-            qa_test_coordinate_transformation,
-            qa_test_click_visualization,
-            qa_test_select_text,
-            qa_test_scroll,
+
 
             // === SYSTEM MANAGEMENT ===
             // Permissions and security
@@ -277,15 +271,7 @@ pub mod categories {
         "get_cursor_position",
     ];
 
-    /// QA testing commands
-    pub const QA_TEST: &[&str] = &[
-        "qa_test_click",
-        "qa_test_click_series",
-        "qa_test_coordinate_transformation",
-        "qa_test_click_visualization",
-        "qa_test_select_text",
-        "qa_test_scroll"
-    ];
+
 
     /// Production keyboard commands (minimal set - most operations use computer tool)
     pub const KEYBOARD: &[&str] = &[
@@ -315,7 +301,6 @@ pub mod categories {
         ("Workflow", WORKFLOW),
         ("Memory", MEMORY),
         ("Mouse", MOUSE),
-        ("QA Test", QA_TEST),
         ("Keyboard", KEYBOARD),
         ("Window", WINDOW),
     ];
