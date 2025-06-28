@@ -137,7 +137,7 @@ function parseSimpleConstants(rustCode) {
             constants[name] = parseFloat(cleanNumeric);
         } else {
             // Handle escaped quotes in string values
-            const finalValue = stringValue || boolValue;
+            const finalValue = stringValue !== undefined ? stringValue : boolValue;
             if (typeof finalValue === 'string') {
                 // Unescape the quotes in the parsed string
                 constants[name] = finalValue.replace(/\\"/g, '"');
