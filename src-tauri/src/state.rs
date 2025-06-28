@@ -335,21 +335,21 @@ impl AppState {
             use crate::agent::implementations::memory_manager::{AdvancedMemoryManager, MemoryConfig, VisualContextConfig};
 
             let memory_config = MemoryConfig {
-                max_messages: 150, // INCREASED: Even more memory capacity
-                max_tokens: 80000, // INCREASED: Higher token limit for complex conversations
-                min_messages_to_keep: 20, // INCREASED: Keep even more context
+                max_messages: 200, // INCREASED: Maximum memory capacity (was 150)
+                max_tokens: 120000, // INCREASED: Higher token limit for complex conversations (was 80000)
+                min_messages_to_keep: 30, // INCREASED: Keep even more context (was 20)
                 auto_prune: true, // RE-ENABLED: Safe auto-pruning with higher limits
                 enable_summarization: true, // RE-ENABLED: Summarization for better memory management
-                summarization_batch_size: 12, // INCREASED: More efficient batching
+                summarization_batch_size: 15, // INCREASED: More efficient batching (was 12)
                 enable_metrics: true, // ENABLED: Enhanced tracking with error handling
                 enable_summary_cache: true, // RE-ENABLED: Cache for better performance
             };
 
             let visual_config = VisualContextConfig {
                 enable_screenshot_compression: true, // RE-ENABLED: Visual compression for memory efficiency
-                screenshot_retention_seconds: 900, // INCREASED: Even longer retention (15 minutes)
+                screenshot_retention_seconds: 1800, // INCREASED: Even longer retention (30 minutes, was 15)
                 immediate_compression: true, // RE-ENABLED: With safer async handling
-                max_base64_screenshots: 8, // INCREASED: More visual context
+                max_base64_screenshots: 12, // INCREASED: More visual context (was 8)
                 fallback_to_generic_description: true,
             };
 
