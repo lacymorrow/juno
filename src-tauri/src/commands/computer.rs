@@ -2,6 +2,7 @@
 // This provides a unified interface for all mouse, keyboard, and screen operations
 
 use crate::state::AppState;
+use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
@@ -260,7 +261,7 @@ async fn handle_drag(
         return Err("Coordinate must be an array of [x, y]".to_string());
     }
 
-    // Get current cursor position as start point
+    // Get current cursor position as start point (returns screen coordinates)
     let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
         .await
         .map_err(|e| format!("Failed to get cursor position: {}", e))?;
@@ -268,13 +269,16 @@ async fn handle_drag(
     let end_x = end_coords[0];
     let end_y = end_coords[1];
 
+    // Transform end coordinates from screenshot space to screen space to match start coordinates
+    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
     crate::commands::mouse::left_click_drag(
         app_handle.clone(),
         state.clone(),
         start_x,
         start_y,
-        end_x,
-        end_y,
+        screen_end_x,
+        screen_end_y,
     )
     .await
     .map_err(|e| format!("Drag failed: {}", e))?;
@@ -282,7 +286,7 @@ async fn handle_drag(
     Ok(ComputerResult {
         success: true,
         action: "left_click_drag".to_string(),
-        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to ({}, {})", start_x, start_y, end_x, end_y)),
+        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
         base64_image: None,
         error: None,
         coordinate: None,
