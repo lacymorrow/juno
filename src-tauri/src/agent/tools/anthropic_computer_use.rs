@@ -225,10 +225,30 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             }
         },
         "left_click_drag" => {
-            if let Some(end) = input["coordinate"].as_array() {
+            if let Some(start) = input["start_coordinate"].as_array() {
+                if let Some(end) = input["coordinate"].as_array() {
+                    format!("computer/drag({},{} → {},{})",
+                        start[0].as_f64().unwrap_or(0.0) as i32,
+                        start[1].as_f64().unwrap_or(0.0) as i32,
+                        end[0].as_f64().unwrap_or(0.0) as i32,
+                        end[1].as_f64().unwrap_or(0.0) as i32)
+                } else {
+                    "computer/left_click_drag".to_string()
+                }
+            } else if let Some(end) = input["end_coordinate"].as_array() {
+                if let Some(start) = input["coordinate"].as_array() {
+                    format!("computer/drag({},{} → {},{})",
+                        start[0].as_f64().unwrap_or(0.0) as i32,
+                        start[1].as_f64().unwrap_or(0.0) as i32,
+                        end[0].as_f64().unwrap_or(0.0) as i32,
+                        end[1].as_f64().unwrap_or(0.0) as i32)
+                } else {
+                    "computer/left_click_drag".to_string()
+                }
+            } else if let Some(coord) = input["coordinate"].as_array() {
                 format!("computer/drag(cursor → {},{})",
-                    end[0].as_f64().unwrap_or(0.0) as i32,
-                    end[1].as_f64().unwrap_or(0.0) as i32)
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
             } else {
                 "computer/left_click_drag".to_string()
             }
@@ -432,19 +452,32 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_click_drag" => {
-                    // Strict coordinate validation per Anthropic Computer Use API specification
-                    // Support both parameter formats with strict validation
+                    // Proper Anthropic Computer Use API specification compliance
+                    // Support both single coordinate (standard) and dual coordinate formats
                     let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
-                        // Format: start_coordinate + coordinate (end)
+                        // Format: start_coordinate + coordinate (end) - explicit start/end coordinates
                         let (start_coord, end_coord) = validate_coordinate_pair(&input, "start_coordinate", "coordinate")?;
                         let (start_x, start_y) = start_coord.to_f64();
                         let (end_x, end_y) = end_coord.to_f64();
                         (start_x, start_y, end_x, end_y)
-                    } else {
-                        // Format: coordinate (start) + end_coordinate
+                    } else if input.get("end_coordinate").is_some() {
+                        // Format: coordinate (start) + end_coordinate - explicit start/end coordinates
                         let (start_coord, end_coord) = validate_coordinate_pair(&input, "coordinate", "end_coordinate")?;
                         let (start_x, start_y) = start_coord.to_f64();
                         let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
+                    } else {
+                        // Standard format: single coordinate (end position) - drag from current cursor position
+                        // This is the official Anthropic Computer Use API specification behavior
+                        let end_coord = validate_coordinate_parameter(&input, "coordinate")?;
+                        let (end_x, end_y) = end_coord.to_f64();
+
+                        // Get current cursor position as start point
+                        let (start_x, start_y) = crate::commands::mouse::get_cursor_position(
+                            app_handle.clone(),
+                            state_manager.clone(),
+                        ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e))?;
+
                         (start_x, start_y, end_x, end_y)
                     };
 
