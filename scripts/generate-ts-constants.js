@@ -351,28 +351,9 @@ ${Object.entries(constants.agent)
 } as const;
 
 export const FILE_EXTENSIONS = {
-${(() => {
-    const fileExtensions = new Map();
-
-    // Collect all file extension constants from the extensions module
-    Object.entries(constants.files)
-        .filter(([key]) => key.startsWith('EXTENSIONS_'))
-        .forEach(([key, value]) => {
-            // Add the original key with proper prefix
-            fileExtensions.set(key, value);
-        });
-
-    // Add parameters from the files module
-    Object.entries(constants.files)
-        .filter(([key]) => key.startsWith('PARAMETERS_'))
-        .forEach(([key, value]) => {
-            fileExtensions.set(key, value);
-        });
-
-    return Array.from(fileExtensions.entries())
-        .map(([key, value]) => `  ${key}: '${value}',`)
-        .join('\n');
-})()}
+${Object.entries(constants.files)
+    .map(([key, value]) => `  ${key}: '${value}',`)
+    .join('\n')}
 } as const;
 
 export const PERMISSION_TYPES = {

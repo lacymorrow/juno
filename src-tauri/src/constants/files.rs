@@ -4,21 +4,20 @@
 
 // File extensions
 pub mod extensions {
+    // File extensions with dots (for file operations)
     pub const JSON_EXT: &str = ".json";
     pub const RUST_EXT: &str = ".rs";
     pub const TYPESCRIPT_EXT: &str = ".ts";
     pub const JAVASCRIPT_EXT: &str = ".js";
     pub const MARKDOWN_EXT: &str = ".md";
-    pub const LOG_EXTENSION: &str = ".log";
-    pub const TMP_EXTENSION: &str = ".tmp";
-    pub const CACHE_EXTENSION: &str = ".cache";
-    pub const BACKUP_EXTENSION: &str = ".backup";
-
-    // Additional extensions moved from frontend constants.ts
+    pub const LOG_EXT: &str = ".log";
+    pub const TMP_EXT: &str = ".tmp";
+    pub const CACHE_EXT: &str = ".cache";
+    pub const BACKUP_EXT: &str = ".backup";
     pub const TEXT_EXT: &str = ".txt";
     pub const CSV_EXT: &str = ".csv";
 
-    // File extensions for security validation (without dots for easier checking)
+    // File extensions without dots (for security validation and pattern matching)
     pub const TXT: &str = "txt";
     pub const MD: &str = "md";
     pub const RS: &str = "rs";
