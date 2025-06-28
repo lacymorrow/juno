@@ -67,12 +67,16 @@ pub struct VisualContextConfig {
 
 impl Default for VisualContextConfig {
     fn default() -> Self {
+        // Use the corrected defaults for computer use
+        let (enable_compression, retention_seconds, immediate_compression, max_screenshots, fallback_description) =
+            crate::constants::memory::defaults::get_visual_config();
+
         Self {
-            enable_screenshot_compression: true,
-            screenshot_retention_seconds: visual::DEFAULT_SCREENSHOT_RETENTION_SECONDS,
-            immediate_compression: true,
-            max_base64_screenshots: visual::DEFAULT_MAX_BASE64_SCREENSHOTS,
-            fallback_to_generic_description: true,
+            enable_screenshot_compression: enable_compression,
+            screenshot_retention_seconds: retention_seconds,
+            immediate_compression,  // NOW FALSE - allows computer use agents to see screenshots!
+            max_base64_screenshots: max_screenshots,  // NOW 8 - allows multiple screenshots
+            fallback_to_generic_description: fallback_description,
         }
     }
 }
