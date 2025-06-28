@@ -118,8 +118,8 @@ function parseSimpleConstants(rustCode) {
     const constants = {};
 
     // Parse simple constants: pub const NAME: type = value;
-    // Updated regex to handle underscores in numeric literals (e.g., 30_000)
-    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"([^"]+)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
+    // Updated regex to handle underscores in numeric literals (e.g., 30_000) and escaped quotes
+    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
 
     let match;
     while ((match = constRegex.exec(rustCode)) !== null) {
@@ -136,7 +136,14 @@ function parseSimpleConstants(rustCode) {
             const cleanNumeric = numericValue.replace(/_/g, '');
             constants[name] = parseFloat(cleanNumeric);
         } else {
-            constants[name] = stringValue || boolValue;
+            // Handle escaped quotes in string values
+            const finalValue = stringValue || boolValue;
+            if (typeof finalValue === 'string') {
+                // Unescape the quotes in the parsed string
+                constants[name] = finalValue.replace(/\\"/g, '"');
+            } else {
+                constants[name] = finalValue;
+            }
         }
     }
 
@@ -226,9 +233,10 @@ function parseModulesWithBraceMatching(rustCode) {
  */
 function formatValue(value) {
     if (Array.isArray(value)) {
-        return `[${value.map(v => `'${v}'`).join(', ')}]`;
+        return `[${value.map(v => `'${v.replace(/'/g, "\\'")}'`).join(', ')}]`;
     } else if (typeof value === 'string') {
-        return `'${value}'`;
+        // Escape single quotes in the string value
+        return `'${value.replace(/'/g, "\\'")}'`;
     } else {
         return value;
     }
@@ -344,16 +352,7 @@ ${Object.entries(constants.agent)
 
 export const FILE_EXTENSIONS = {
 ${Object.entries(constants.files)
-    .filter(([key]) => key.includes('EXT'))
-    .map(([key, value]) => {
-        // Handle both _EXT and _EXTENSION suffixes correctly
-        let cleanKey = key;
-        if (cleanKey.endsWith('_EXTENSION')) {
-            cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
-        }
-        cleanKey = cleanKey.replace('_EXT', '');
-        return `  ${key}: '${value}',\n  ${cleanKey}: '${value}',`;
-    })
+    .map(([key, value]) => `  ${key}: '${value}',`)
     .join('\n')}
 } as const;
 
