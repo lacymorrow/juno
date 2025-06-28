@@ -140,8 +140,6 @@ pub mod parameters {
     // Computer tool parameters
     pub const ACTION: &str = "action";
     pub const COORDINATE: &str = "coordinate";
-    pub const START_COORDINATE: &str = "start_coordinate";
-    pub const END_COORDINATE: &str = "end_coordinate";
     pub const KEY: &str = "key";
     pub const TEXT: &str = "text";
     pub const DURATION_MS: &str = "duration_ms";
@@ -159,6 +157,21 @@ pub mod parameters {
     pub const OLD_STR: &str = "old_str";
     pub const NEW_STR: &str = "new_str";
     pub const FILE_TEXT: &str = "file_text";
+
+    // Additional computer tool parameters
+    pub const SCROLL_AMOUNT: &str = "scroll_amount";
+
+    // Line number constants for line numbering functions
+    pub const LINE_NUMBER_FORMAT_SIMPLE: &str = "{}: {}";
+    pub const LINE_NUMBER_FORMAT_START_OFFSET: &str = "{}: {}";
+}
+
+// Default values for parameters
+pub mod defaults {
+    pub const SCROLL_DIRECTION_DEFAULT: &str = "up";
+    pub const EMPTY_STRING: &str = "";
+    pub const CRLF_REPLACEMENT: &str = "\r\n";
+    pub const LF_REPLACEMENT: &str = "\n";
 }
 
 // str_replace_tool commands
@@ -173,9 +186,19 @@ pub mod response_fields {
     pub const SUCCESS: &str = "success";
     pub const MESSAGE: &str = "message";
     pub const CONTENT: &str = "content";
+    pub const VIEW_RANGE: &str = "view_range";
     pub const BASE64_IMAGE: &str = "base64_image";
+    pub const COORDINATE: &str = "coordinate";
     pub const OUTPUT: &str = "output";
     pub const EXIT_CODE: &str = "exit_code";
     pub const STDOUT: &str = "stdout";
     pub const STDERR: &str = "stderr";
 }
+
+// --- File/Directory Constants ---
+pub const AGENT_LOG_FILE: &str = "agent_activity.log";
+pub const CONVERSATION_CACHE_FILE: &str = "conversation_cache.json";
+pub const WORKSPACE_CONFIG_FILE: &str = ".workspace_config.json";
+
+// --- Tool Parameter Constants ---
+pub const APP_NAME: &str = "app_name";

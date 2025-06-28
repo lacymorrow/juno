@@ -125,6 +125,12 @@ pub mod recovery_suggestions {
 
 // Tool-specific error messages
 pub mod tool_errors {
+    // Permission error messages
+    pub const SCREEN_RECORDING_PERMISSION_REQUIRED: &str = "Screen recording permission is required for screenshots";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_MOUSE: &str = "Accessibility permission is required for mouse operations";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_KEYBOARD: &str = "Accessibility permission is required for keyboard operations";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_SCROLL: &str = "Accessibility permission is required for scroll operations";
+
     // Computer tool errors
     pub const MISSING_ACTION_PARAMETER: &str = "Missing 'action' parameter";
     pub const MISSING_COORDINATE_PARAMETER: &str = "Missing 'coordinate' parameter";
@@ -139,9 +145,7 @@ pub mod tool_errors {
     pub const MISSING_DURATION_PARAMETER: &str = "Missing 'duration_ms' or 'duration' parameter";
     pub const MISSING_SCROLL_DIRECTION_PARAMETER: &str = "Missing 'scroll_direction' parameter";
     pub const MISSING_SECONDS_PARAMETER: &str = "Missing 'seconds' or 'duration' parameter";
-    pub const MISSING_START_COORDINATE_PARAMETER: &str = "Missing 'start_coordinate' parameter for drag operation";
-    pub const MISSING_END_COORDINATE_PARAMETER: &str = "Missing 'end_coordinate' parameter for drag operation";
-    pub const MISSING_COORDINATE_PARAMETERS_FOR_DRAG: &str = "Missing coordinate parameters for drag operation. Use 'start_coordinate' + 'end_coordinate', 'start_coordinate' + 'coordinate', or 'coordinate' + 'end_coordinate'";
+    pub const MISSING_COORDINATE_PARAMETER_FOR_DRAG: &str = "Missing 'coordinate' parameter for drag operation";
 
     // Bash tool errors
     pub const MISSING_COMMAND_PARAMETER: &str = "Missing 'command' parameter";
@@ -162,6 +166,10 @@ pub mod tool_errors {
     // File operation errors
     pub const FILE_ALREADY_EXISTS: &str = "File already exists";
     pub const STRING_NOT_FOUND_IN_FILE: &str = "String not found in file";
+
+    // Unreachable error messages
+    pub const MOUSE_ACTION_ALREADY_MATCHED: &str = "Mouse action already matched in outer pattern";
+    pub const KEYBOARD_ACTION_ALREADY_MATCHED: &str = "Keyboard action already matched in outer pattern";
 }
 
 // Tool-specific success messages
@@ -215,8 +223,9 @@ pub mod format_strings {
     pub const BASH_COMMAND_FAILED: &str = "Bash command failed: {}";
     pub const UNKNOWN_STR_REPLACE_COMMAND: &str = "Unknown str_replace_based_edit_tool command: {}";
     pub const PARSE_BASH_RESULT_FAILED: &str = "Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'";
+    pub const UNKNOWN_ACTION: &str = "Unknown action: {}";
 
-    // Tool execution logging format strings
+    // Logging format strings
     pub const EXECUTING_COMPUTER_ACTION: &str = "Executing computer action: {}";
     pub const RAW_BASH_COMMAND_RESULT: &str = "Raw bash_command result: {}";
     pub const PARSED_BASH_RESULT: &str = "Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}";
@@ -226,4 +235,11 @@ pub mod format_strings {
     // Success message format strings
     pub const SUCCESSFULLY_CREATED_FILE: &str = "Successfully created file '{}'";
     pub const SUCCESSFULLY_REPLACED_TEXT_IN: &str = "Successfully replaced text in '{}'";
+    pub const TOOL_COMPLETED_SUCCESSFULLY: &str = "✅ {} completed successfully in {}ms";
+    pub const TOOL_FAILED: &str = "❌ {} failed";
+    pub const SUCCESSFULLY_REGISTERED_TOOLS: &str = "Successfully registered {} official Anthropic Computer Use tools";
+
+    // Additional format strings for JSON parsing and bash results
+    pub const FAILED_TO_PARSE_JSON_RESULT: &str = "Failed to parse bash command result as JSON. Error: {}, Raw result: '{}'";
+    pub const MISSING_INVALID_STDERR: &str = "Missing or invalid 'stderr' field in bash command result: {}";
 }
