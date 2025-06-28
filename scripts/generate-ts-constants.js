@@ -354,24 +354,19 @@ export const FILE_EXTENSIONS = {
 ${(() => {
     const fileExtensions = new Map();
 
-    // Collect all file extension constants, avoiding duplicates
+    // Collect all file extension constants from the extensions module
     Object.entries(constants.files)
-        .filter(([key]) => key.includes('EXT'))
+        .filter(([key]) => key.startsWith('EXTENSIONS_'))
         .forEach(([key, value]) => {
-            // Add the original key
+            // Add the original key with proper prefix
             fileExtensions.set(key, value);
+        });
 
-            // Add a cleaned version without _EXT suffix
-            let cleanKey = key;
-            if (cleanKey.endsWith('_EXTENSION')) {
-                cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
-            }
-            cleanKey = cleanKey.replace('_EXT', '');
-
-            // Only add if it doesn't already exist
-            if (!fileExtensions.has(cleanKey)) {
-                fileExtensions.set(cleanKey, value);
-            }
+    // Add parameters from the files module
+    Object.entries(constants.files)
+        .filter(([key]) => key.startsWith('PARAMETERS_'))
+        .forEach(([key, value]) => {
+            fileExtensions.set(key, value);
         });
 
     return Array.from(fileExtensions.entries())
