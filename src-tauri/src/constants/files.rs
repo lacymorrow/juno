@@ -202,5 +202,3 @@ pub const WORKSPACE_CONFIG_FILE: &str = ".workspace_config.json";
 
 // --- Tool Parameter Constants ---
 pub const APP_NAME: &str = "app_name";
-pub const TEXT: &str = "text";
-pub const COORDINATE: &str = "coordinate";
