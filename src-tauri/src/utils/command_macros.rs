@@ -70,48 +70,7 @@ macro_rules! dev_command {
     };
 }
 
-/// Macro for creating QA test commands with standardized timing and result reporting
-#[macro_export]
-macro_rules! qa_test_command {
-    (
-        $(#[$attr:meta])*
-        $vis:vis async fn $name:ident(
-            $app:ident: AppHandle,
-            $state:ident: State<'_, AppState>,
-            $($param:ident: $param_type:ty),* $(,)?
-        ) -> Result<$return_type:ty, String> {
-            test_name: $test_name:expr,
-            operation: $operation:expr,
-            $body:block
-        }
-    ) => {
-        $(#[$attr])*
-        #[tauri::command]
-        #[allow(dead_code)]
-        $vis async fn $name(
-            $app: AppHandle,
-            $state: State<'_, AppState>,
-            $($param: $param_type),*
-        ) -> Result<$return_type, String> {
-            info!("[QA_TOOL] Starting {}: {}", $test_name, format!($operation, $($param),*));
-            let start_time = std::time::Instant::now();
 
-            let result: Result<$return_type, String> = async move $body.await;
-
-            let duration = start_time.elapsed();
-            let latency_ms = duration.as_secs_f64() * 1000.0;
-
-            let status = if result.is_ok() { "Success" } else { "Failed" };
-            let notification_msg = format!("{}: {} - Latency: {:.2}ms", status, format!($operation, $($param),*), latency_ms);
-
-            if let Err(e) = $crate::utils::command_macros::send_dev_notification(&$app, &format!("QA {}", $test_name), &notification_msg) {
-                error!("[QA_TOOL] Failed to send test notification: {}", e);
-            }
-
-            result
-        }
-    };
-}
 
 /// Macro for creating simple state accessor commands
 #[macro_export]
