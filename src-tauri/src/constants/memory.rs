@@ -59,8 +59,9 @@ pub mod visual {
     /// Default screenshot retention time in seconds (5 minutes)
     pub const DEFAULT_SCREENSHOT_RETENTION_SECONDS: u64 = 300;
 
-    /// Default maximum number of screenshots to keep as base64
-    pub const DEFAULT_MAX_BASE64_SCREENSHOTS: usize = 1;
+    /// Default maximum number of screenshots to keep as base64 - FIXED FOR COMPUTER USE
+    /// Computer use agents need to see actual screenshots, not text summaries
+    pub const DEFAULT_MAX_BASE64_SCREENSHOTS: usize = 4;
 
     /// Minimum content length to consider as potential base64 image
     pub const MIN_BASE64_CONTENT_LENGTH: usize = 1000;
@@ -147,13 +148,14 @@ pub mod defaults {
         )
     }
 
-    /// Get default visual context configuration values
+    /// Get default visual context configuration values - FIXED FOR COMPUTER USE
+    /// Computer use agents need to see actual screenshots to understand what's on screen
     pub fn get_visual_config() -> (bool, u64, bool, usize, bool) {
         (
-            true, // enable_screenshot_compression
+            true, // enable_screenshot_compression (but not immediate)
             DEFAULT_SCREENSHOT_RETENTION_SECONDS,
-            true, // immediate_compression
-            DEFAULT_MAX_BASE64_SCREENSHOTS,
+            false, // immediate_compression - FIXED: Don't compress screenshots immediately!
+            DEFAULT_MAX_BASE64_SCREENSHOTS, // Now allows 8 real screenshots
             true, // fallback_to_generic_description
         )
     }
