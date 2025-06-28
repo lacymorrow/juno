@@ -49,6 +49,7 @@ interface ComputerResult {
   message?: string;
   base64_image?: string;
   error?: string;
+  coordinate?: number[];
 }
 
 const ClickQATestPanel: React.FC = () => {
@@ -245,12 +246,19 @@ const ClickQATestPanel: React.FC = () => {
       // Small delay to ensure movement completes
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Get actual cursor position using existing command
-      const actualPos = await invokeCommand<[number, number]>(
-        "get_cursor_position",
-        {},
-        "get_cursor_position"
+      // Get actual cursor position using computer tool
+      const cursorResult = await invokeCommand<ComputerResult>(
+        "computer",
+        { action: "cursor_position" },
+        "computer"
       );
+
+      if (!cursorResult.success) {
+        throw new Error(cursorResult.error || "Failed to get cursor position");
+      }
+
+      // Extract coordinates from computer tool result
+      const actualPos = cursorResult.coordinate || [0, 0];
 
       const latency_ms = Date.now() - startTime;
 
