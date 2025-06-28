@@ -978,7 +978,8 @@ impl AgentBrain for AnthropicBrain {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01") // Current stable API version
-            .header("anthropic-beta", "computer-use-2025-01-24") // Computer Use beta for Claude 4 and 3.7 models
+            // To do, this is only to be enabled for newer models. Older models use the older tag.
+			.header("anthropic-beta", "computer-use-2025-01-24") // Computer Use beta for Claude 4 and 3.7 models
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()

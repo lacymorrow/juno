@@ -17,6 +17,57 @@ pub mod extensions {
     // Additional extensions moved from frontend constants.ts
     pub const TEXT_EXT: &str = ".txt";
     pub const CSV_EXT: &str = ".csv";
+
+    // File extensions for security validation (without dots for easier checking)
+    pub const TXT: &str = "txt";
+    pub const MD: &str = "md";
+    pub const RS: &str = "rs";
+    pub const JS: &str = "js";
+    pub const TS: &str = "ts";
+    pub const PY: &str = "py";
+    pub const JAVA: &str = "java";
+    pub const C: &str = "c";
+    pub const CPP: &str = "cpp";
+    pub const H: &str = "h";
+    pub const HPP: &str = "hpp";
+    pub const CSS: &str = "css";
+    pub const HTML: &str = "html";
+    pub const XML: &str = "xml";
+    pub const JSON: &str = "json";
+    pub const YAML: &str = "yaml";
+    pub const YML: &str = "yml";
+    pub const TOML: &str = "toml";
+    pub const CFG: &str = "cfg";
+    pub const INI: &str = "ini";
+    pub const SH: &str = "sh";
+    pub const BAT: &str = "bat";
+    pub const PS1: &str = "ps1";
+    pub const SQL: &str = "sql";
+    pub const GO: &str = "go";
+    pub const RB: &str = "rb";
+    pub const PHP: &str = "php";
+    pub const SWIFT: &str = "swift";
+    pub const KT: &str = "kt";
+    pub const SCALA: &str = "scala";
+    pub const LOG: &str = "log";
+    pub const OUT: &str = "out";
+    pub const ERR: &str = "err";
+    pub const TMP: &str = "tmp";
+
+    // File extension arrays for SecurityConfig (production)
+    pub const PRODUCTION_EXTENSIONS: &[&str] = &[
+        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
+        "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
+        "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala"
+    ];
+
+    // File extension arrays for SecurityConfig (development mode)
+    pub const DEVELOPMENT_EXTENSIONS: &[&str] = &[
+        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
+        "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
+        "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala",
+        "log", "out", "err", "tmp"
+    ];
 }
 
 // File prefixes
@@ -69,4 +120,63 @@ pub mod shell_commands {
     // Browser binaries
     pub const CHROME_BINARY_MACOS: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     pub const CHROMIUM_BINARY_MACOS: &str = "/Applications/Chromium.app/Contents/MacOS/Chromium";
+}
+
+// Path patterns for security validation
+pub mod path_patterns {
+    pub const PATH_TRAVERSAL_UNIX: &str = "../";
+    pub const PATH_TRAVERSAL_WINDOWS: &str = "..\\";
+    pub const HOME_DIRECTORY: &str = "~/";
+}
+
+// Line ending patterns
+pub mod line_endings {
+    pub const CRLF: &str = "\r\n";
+    pub const LF: &str = "\n";
+    pub const DEFAULT_LF: &str = "\n"; // Default to LF for new files
+}
+
+// Tool parameter names
+pub mod parameters {
+    // Computer tool parameters
+    pub const ACTION: &str = "action";
+    pub const COORDINATE: &str = "coordinate";
+    pub const START_COORDINATE: &str = "start_coordinate";
+    pub const END_COORDINATE: &str = "end_coordinate";
+    pub const KEY: &str = "key";
+    pub const TEXT: &str = "text";
+    pub const DURATION_MS: &str = "duration_ms";
+    pub const DURATION: &str = "duration";
+    pub const SCROLL_DIRECTION: &str = "scroll_direction";
+    pub const SCROLL_CLICKS: &str = "scroll_clicks";
+    pub const SECONDS: &str = "seconds";
+
+    // Bash tool parameters
+    pub const COMMAND: &str = "command";
+
+    // str_replace_tool parameters
+    pub const PATH: &str = "path";
+    pub const VIEW_RANGE: &str = "view_range";
+    pub const OLD_STR: &str = "old_str";
+    pub const NEW_STR: &str = "new_str";
+    pub const FILE_TEXT: &str = "file_text";
+}
+
+// str_replace_tool commands
+pub mod str_replace_commands {
+    pub const VIEW: &str = "view";
+    pub const STR_REPLACE: &str = "str_replace";
+    pub const CREATE: &str = "create";
+}
+
+// JSON response fields
+pub mod response_fields {
+    pub const SUCCESS: &str = "success";
+    pub const MESSAGE: &str = "message";
+    pub const CONTENT: &str = "content";
+    pub const BASE64_IMAGE: &str = "base64_image";
+    pub const OUTPUT: &str = "output";
+    pub const EXIT_CODE: &str = "exit_code";
+    pub const STDOUT: &str = "stdout";
+    pub const STDERR: &str = "stderr";
 }

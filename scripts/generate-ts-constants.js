@@ -29,6 +29,7 @@ function parseRustConstants() {
         errors: {},
         commands: {},
         memory: {},
+        agent: {},
     };
 
     // Parse each constants module
@@ -81,6 +82,10 @@ function parseRustConstants() {
         const memoryFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'memory.rs'), 'utf8');
         constants.memory = parseModuleConstants(memoryFile);
 
+        // Parse agent module (contains computer actions and tool names)
+        const agentFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'agent.rs'), 'utf8');
+        constants.agent = parseModuleConstants(agentFile);
+
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
     }
@@ -113,8 +118,8 @@ function parseSimpleConstants(rustCode) {
     const constants = {};
 
     // Parse simple constants: pub const NAME: type = value;
-    // Updated regex to handle underscores in numeric literals (e.g., 30_000)
-    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"([^"]+)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
+    // Updated regex to handle underscores in numeric literals (e.g., 30_000) and escaped quotes
+    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
 
     let match;
     while ((match = constRegex.exec(rustCode)) !== null) {
@@ -131,7 +136,14 @@ function parseSimpleConstants(rustCode) {
             const cleanNumeric = numericValue.replace(/_/g, '');
             constants[name] = parseFloat(cleanNumeric);
         } else {
-            constants[name] = stringValue || boolValue;
+            // Handle escaped quotes in string values
+            const finalValue = stringValue || boolValue;
+            if (typeof finalValue === 'string') {
+                // Unescape the quotes in the parsed string
+                constants[name] = finalValue.replace(/\\"/g, '"');
+            } else {
+                constants[name] = finalValue;
+            }
         }
     }
 
@@ -221,9 +233,10 @@ function parseModulesWithBraceMatching(rustCode) {
  */
 function formatValue(value) {
     if (Array.isArray(value)) {
-        return `[${value.map(v => `'${v}'`).join(', ')}]`;
+        return `[${value.map(v => `'${v.replace(/'/g, "\\'")}'`).join(', ')}]`;
     } else if (typeof value === 'string') {
-        return `'${value}'`;
+        // Escape single quotes in the string value
+        return `'${value.replace(/'/g, "\\'")}'`;
     } else {
         return value;
     }
@@ -291,19 +304,80 @@ ${Object.entries(constants.memory)
     .join('\n')}
 } as const;
 
-export const FILE_EXTENSIONS = {
-${Object.entries(constants.files)
-    .filter(([key]) => key.includes('EXT'))
-    .map(([key, value]) => {
-        // Handle both _EXT and _EXTENSION suffixes correctly
-        let cleanKey = key;
-        if (cleanKey.endsWith('_EXTENSION')) {
-            cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
-        }
-        cleanKey = cleanKey.replace('_EXT', '');
-        return `  ${key}: '${value}',\n  ${cleanKey}: '${value}',`;
-    })
+export const AGENT = {
+${Object.entries(constants.agent)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
+} as const;
+
+export const COMPUTER_ACTIONS = {
+${(() => {
+    const computerActions = {};
+
+    // Collect all computer action constants, avoiding duplicates
+    Object.entries(constants.agent)
+        .filter(([key]) =>
+            key.startsWith('COMPUTER_ACTIONS_') ||
+            key.startsWith('TOOL_NAMES_ACTION_') ||
+            (key.startsWith('ACTION_') && !key.startsWith('TOOL_NAMES_'))
+        )
+        .forEach(([key, value]) => {
+            let cleanKey = key;
+            if (cleanKey.startsWith('COMPUTER_ACTIONS_')) {
+                cleanKey = cleanKey.replace('COMPUTER_ACTIONS_', '');
+            } else if (cleanKey.startsWith('TOOL_NAMES_ACTION_')) {
+                cleanKey = cleanKey.replace('TOOL_NAMES_ACTION_', '');
+            } else if (cleanKey.startsWith('ACTION_')) {
+                cleanKey = cleanKey.replace('ACTION_', '');
+            }
+
+            // Only add if not already present, prioritizing ACTION_ prefixed constants
+            if (!computerActions[cleanKey] || key.startsWith('ACTION_') || key.startsWith('TOOL_NAMES_ACTION_')) {
+                computerActions[cleanKey] = value;
+            }
+        });
+
+    return Object.entries(computerActions)
+        .map(([key, value]) => `  ${key}: '${value}',`)
+        .join('\n');
+})()}
+} as const;
+
+export const TOOL_NAMES = {
+${Object.entries(constants.agent)
+    .filter(([key]) => key.startsWith('TOOL_NAMES_'))
+    .map(([key, value]) => `  ${key.replace('TOOL_NAMES_', '')}: '${value}',`)
+    .join('\n')}
+} as const;
+
+export const FILE_EXTENSIONS = {
+${(() => {
+    const fileExtensions = new Map();
+
+    // Collect all file extension constants, avoiding duplicates
+    Object.entries(constants.files)
+        .filter(([key]) => key.includes('EXT'))
+        .forEach(([key, value]) => {
+            // Add the original key
+            fileExtensions.set(key, value);
+
+            // Add a cleaned version without _EXT suffix
+            let cleanKey = key;
+            if (cleanKey.endsWith('_EXTENSION')) {
+                cleanKey = cleanKey.replace('_EXTENSION', '_EXT');
+            }
+            cleanKey = cleanKey.replace('_EXT', '');
+
+            // Only add if it doesn't already exist
+            if (!fileExtensions.has(cleanKey)) {
+                fileExtensions.set(cleanKey, value);
+            }
+        });
+
+    return Array.from(fileExtensions.entries())
+        .map(([key, value]) => `  ${key}: '${value}',`)
+        .join('\n');
+})()}
 } as const;
 
 export const PERMISSION_TYPES = {
@@ -416,6 +490,8 @@ export type FileExtension = typeof FILE_EXTENSIONS[keyof typeof FILE_EXTENSIONS]
 export type PermissionType = typeof PERMISSION_TYPES[keyof typeof PERMISSION_TYPES];
 export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
 export type CommandName = typeof COMMANDS[keyof typeof COMMANDS];
+export type ComputerAction = typeof COMPUTER_ACTIONS[keyof typeof COMPUTER_ACTIONS];
+export type ToolName = typeof TOOL_NAMES[keyof typeof TOOL_NAMES];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
 `;
 }
@@ -443,6 +519,7 @@ function main() {
         console.log(`   - Audio: ${Object.keys(constants.audio).length}`);
         console.log(`   - Files: ${Object.keys(constants.files).length}`);
         console.log(`   - Permissions: ${Object.keys(constants.permissions).length}`);
+        console.log(`   - Agent: ${Object.keys(constants.agent).length}`);
 
     } catch (error) {
         console.error('❌ Error generating constants:', error);

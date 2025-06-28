@@ -6,6 +6,12 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
+// Import mouse commands to restore proper functionality
+use crate::commands::mouse::{
+    left_click, right_click, middle_click, double_click, triple_click,
+    left_click_drag, mouse_move as mouse_move_command,
+    left_mouse_down, left_mouse_up
+};
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::{info, warn, error};
@@ -347,13 +353,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::left_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        None, // modifier
-                    ).await.map_err(|e| format!("Left click failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Left click failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -370,13 +372,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::right_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        None, // modifier
-                    ).await.map_err(|e| format!("Right click failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Right click failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -393,13 +391,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::middle_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        None, // modifier
-                    ).await.map_err(|e| format!("Middle click failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Middle click failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -416,13 +410,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::double_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        None, // modifier
-                    ).await.map_err(|e| format!("Double click failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Double click failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -439,37 +429,47 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::triple_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        None, // modifier
-                    ).await.map_err(|e| format!("Triple click failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Triple click failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
                     }))
                 }
                 "left_click_drag" => {
-                    // Support both old and new parameter formats for backward compatibility
+                    // Support multiple parameter formats for backward compatibility
                     let (start_x, start_y, end_x, end_y) = if let Some(start_coordinate) = input["start_coordinate"].as_array() {
-                        // Old format: start_coordinate + coordinate (end)
-                        let coordinate = input["coordinate"].as_array()
-                            .ok_or_else(|| "Missing 'coordinate' (end) parameter for drag operation".to_string())?;
+                        // Check if using start_coordinate + end_coordinate format (most common)
+                        if let Some(end_coordinate) = input["end_coordinate"].as_array() {
+                            // Format: start_coordinate + end_coordinate
+                            let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                            let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                            let end_x = end_coordinate.get(0).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                            let end_y = end_coordinate.get(1).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid end y coordinate".to_string())?;
 
-                        let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start x coordinate".to_string())?;
-                        let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid start y coordinate".to_string())?;
-                        let end_x = coordinate.get(0).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end x coordinate".to_string())?;
-                        let end_y = coordinate.get(1).and_then(|v| v.as_f64())
-                            .ok_or_else(|| "Invalid end y coordinate".to_string())?;
+                            (start_x, start_y, end_x, end_y)
+                        } else if let Some(coordinate) = input["coordinate"].as_array() {
+                            // Legacy format: start_coordinate + coordinate (end)
+                            let start_x = start_coordinate.get(0).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid start x coordinate".to_string())?;
+                            let start_y = start_coordinate.get(1).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid start y coordinate".to_string())?;
+                            let end_x = coordinate.get(0).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid end x coordinate".to_string())?;
+                            let end_y = coordinate.get(1).and_then(|v| v.as_f64())
+                                .ok_or_else(|| "Invalid end y coordinate".to_string())?;
 
-                        (start_x, start_y, end_x, end_y)
+                            (start_x, start_y, end_x, end_y)
+                        } else {
+                            return Err("Missing end coordinate parameter for drag operation. Use 'end_coordinate' or 'coordinate' with 'start_coordinate'".to_string());
+                        }
                     } else if let Some(coordinate) = input["coordinate"].as_array() {
-                        // New format: coordinate (start) + end_coordinate
+                        // Format: coordinate (start) + end_coordinate
                         let end_coordinate = input["end_coordinate"].as_array()
                             .ok_or_else(|| "Missing 'end_coordinate' parameter for drag operation".to_string())?;
 
@@ -484,21 +484,16 @@ pub async fn execute_computer_tool(
 
                         (start_x, start_y, end_x, end_y)
                     } else {
-                        return Err("Missing coordinate parameters for drag operation. Use either 'start_coordinate' + 'coordinate' or 'coordinate' + 'end_coordinate'".to_string());
+                        return Err("Missing coordinate parameters for drag operation. Use 'start_coordinate' + 'end_coordinate', 'start_coordinate' + 'coordinate', or 'coordinate' + 'end_coordinate'".to_string());
                     };
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
                     let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
 
-                    crate::commands::mouse::left_click_drag(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_start_x,
-                        screen_start_y,
-                        screen_end_x,
-                        screen_end_y,
-                    ).await.map_err(|e| format!("Left click drag failed: {}", e))?;
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
+                        .map_err(|e| format!("Left click drag failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -515,12 +510,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::mouse_move(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                    ).await.map_err(|e| format!("Mouse move failed: {}", e))?;
+                    // Use proper mouse command which includes debug logging and validation
+                    mouse_move_command(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Mouse move failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -537,12 +529,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::left_mouse_down(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                    ).await.map_err(|e| format!("Left mouse down failed: {}", e))?;
+                    // Use proper mouse command which includes debug logging and validation
+                    left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Left mouse down failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
@@ -559,12 +548,9 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    crate::commands::mouse::left_mouse_up(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                    ).await.map_err(|e| format!("Left mouse up failed: {}", e))?;
+                    // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
+                    left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Left mouse up failed: {}", e))?;
 
                     Ok(json!({
                         "success": true
