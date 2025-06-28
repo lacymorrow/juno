@@ -6,7 +6,10 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
-// Import mouse commands to restore proper functionality
+// Keep the API types and tool versioning from errors branch (enhanced functionality)
+use crate::constants::api::{computer_use_api_types, beta_flags};
+use super::tool_versioning::{ToolVersionManager, ToolVersionConfig, ApiVersion};
+// Keep the mouse command imports from main branch (proper command usage)
 use crate::commands::mouse::{
     left_click, right_click, middle_click, double_click, triple_click,
     left_click_drag, mouse_move as mouse_move_command,
@@ -17,6 +20,12 @@ use tauri::Manager;
 use tracing::{info, warn, error};
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::agent::core::AgentError;
+use crate::utils::coordinate_validation::{
+    validate_coordinate_parameter,
+    validate_coordinate_pair,
+    CoordinateValidationError
+};
 
 // --- Security and Validation Helpers ---
 
@@ -216,10 +225,30 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             }
         },
         "left_click_drag" => {
-            if let Some(end) = input["coordinate"].as_array() {
+            if let Some(start) = input["start_coordinate"].as_array() {
+                if let Some(end) = input["coordinate"].as_array() {
+                    format!("computer/drag({},{} → {},{})",
+                        start[0].as_f64().unwrap_or(0.0) as i32,
+                        start[1].as_f64().unwrap_or(0.0) as i32,
+                        end[0].as_f64().unwrap_or(0.0) as i32,
+                        end[1].as_f64().unwrap_or(0.0) as i32)
+                } else {
+                    "computer/left_click_drag".to_string()
+                }
+            } else if let Some(end) = input["end_coordinate"].as_array() {
+                if let Some(start) = input["coordinate"].as_array() {
+                    format!("computer/drag({},{} → {},{})",
+                        start[0].as_f64().unwrap_or(0.0) as i32,
+                        start[1].as_f64().unwrap_or(0.0) as i32,
+                        end[0].as_f64().unwrap_or(0.0) as i32,
+                        end[1].as_f64().unwrap_or(0.0) as i32)
+                } else {
+                    "computer/left_click_drag".to_string()
+                }
+            } else if let Some(coord) = input["coordinate"].as_array() {
                 format!("computer/drag(cursor → {},{})",
-                    end[0].as_f64().unwrap_or(0.0) as i32,
-                    end[1].as_f64().unwrap_or(0.0) as i32)
+                    coord[0].as_f64().unwrap_or(0.0) as i32,
+                    coord[1].as_f64().unwrap_or(0.0) as i32)
             } else {
                 "computer/left_click_drag".to_string()
             }
@@ -280,6 +309,12 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
     }
 }
 
+impl From<CoordinateValidationError> for String {
+    fn from(error: CoordinateValidationError) -> String {
+        error.to_string()
+    }
+}
+
 // --- Main computer tool execution function ---
 
 /// Execute computer tool
@@ -337,12 +372,9 @@ pub async fn execute_computer_tool(
 
             match action {
                 "left_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -356,12 +388,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "right_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -375,12 +404,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "middle_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -394,12 +420,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "double_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -413,12 +436,9 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "triple_click" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
@@ -432,27 +452,52 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_click_drag" => {
-                    // Official Anthropic Computer Use specification: use simple coordinate parameter for end position
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter for drag operation".to_string())?;
+                    // Proper Anthropic Computer Use API specification compliance
+                    // Support both single coordinate (standard) and dual coordinate formats
+                    let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
+                        // Format: start_coordinate + coordinate (end) - explicit start/end coordinates
+                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "start_coordinate", "coordinate")?;
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
+                    } else if input.get("end_coordinate").is_some() {
+                        // Format: coordinate (start) + end_coordinate - explicit start/end coordinates
+                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "coordinate", "end_coordinate")?;
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
+                    } else {
+                        // Standard format: single coordinate (end position) - drag from current cursor position
+                        // This is the official Anthropic Computer Use API specification behavior
+                        let end_coord = validate_coordinate_parameter(&input, "coordinate")?;
+                        let (end_x, end_y) = end_coord.to_f64();
 
-                    let end_x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let end_y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                        // Get current cursor position as start point (already in screen coordinates)
+                        let (start_x, start_y) = crate::commands::mouse::get_cursor_position(
+                            app_handle.clone(),
+                            state_manager.clone(),
+                        ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e))?;
 
-                    // Get current cursor position for start coordinates
-                    // Note: This follows the official Anthropic spec where drag starts from current cursor position
-                    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(
-                        app_handle.clone(),
-                        state_manager.clone(),
-                    ).await.map_err(|e| format!("Failed to get cursor position: {}", e))?;
+                        // Transform only the end coordinates since start coordinates are already screen coordinates
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
 
-                    // Transform end coordinates from scaled screenshot to screen coordinates
-                    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        // Return start coordinates as-is (already screen coordinates) and transformed end coordinates
+                        (start_x, start_y, screen_end_x, screen_end_y)
+                    };
+
+                    // Transform coordinates from scaled screenshot to screen coordinates (only for explicit coordinate cases)
+                    let (screen_start_x, screen_start_y, screen_end_x, screen_end_y) = if input.get("start_coordinate").is_some() || input.get("end_coordinate").is_some() {
+                        // Both coordinates need transformation for explicit coordinate cases
+                        let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        (screen_start_x, screen_start_y, screen_end_x, screen_end_y)
+                    } else {
+                        // For cursor position case, coordinates are already handled above
+                        (start_x, start_y, end_x, end_y)
+                    };
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    left_click_drag(app_handle.clone(), state_manager.clone(), start_x, start_y, screen_end_x, screen_end_y).await
+                    left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
                         .map_err(|e| format!("Left click drag failed: {}", e))?;
 
                     Ok(json!({
@@ -460,18 +505,15 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "mouse_move" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    mouse_move_command(app_handle.clone(), state_manager.clone(), screen_x, screen_y).await
+                    crate::commands::mouse::mouse_move(app_handle.clone(), state_manager, screen_x, screen_y).await
                         .map_err(|e| format!("Mouse move failed: {}", e))?;
 
                     Ok(json!({
@@ -479,18 +521,15 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_down" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    left_mouse_down(app_handle.clone(), state_manager.clone(), screen_x, screen_y).await
+                    crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
                         .map_err(|e| format!("Left mouse down failed: {}", e))?;
 
                     Ok(json!({
@@ -498,18 +537,15 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_up" => {
-                    let coordinate = input["coordinate"].as_array()
-                        .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-                    let x = coordinate.get(0).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid x coordinate".to_string())?;
-                    let y = coordinate.get(1).and_then(|v| v.as_f64())
-                        .ok_or_else(|| "Invalid y coordinate".to_string())?;
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
-                    left_mouse_up(app_handle.clone(), state_manager.clone(), screen_x, screen_y).await
+                    crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
                         .map_err(|e| format!("Left mouse up failed: {}", e))?;
 
                     Ok(json!({
@@ -538,7 +574,7 @@ pub async fn execute_computer_tool(
                         key.to_string(),
                         None, // modifier
                         app_handle.clone(),
-                        state_manager.clone(),
+                        state_manager,
                     ).await.map_err(|e| format!("Key press failed: {}", e))?;
 
                     Ok(json!({
@@ -560,7 +596,7 @@ pub async fn execute_computer_tool(
                         key.to_string(),
                         Some(duration_ms),
                         app_handle.clone(),
-                        state_manager.clone(),
+                        state_manager,
                     ).await.map_err(|e| format!("Hold key failed: {}", e))?;
 
                     Ok(json!({
@@ -574,7 +610,7 @@ pub async fn execute_computer_tool(
                     crate::commands::keyboard::type_text(
                         text.to_string(),
                         app_handle.clone(),
-                        state_manager.clone(),
+                        state_manager,
                     ).await.map_err(|e| format!("Type text failed: {}", e))?;
 
                     Ok(json!({
@@ -592,12 +628,9 @@ pub async fn execute_computer_tool(
                 "computer (scroll)"
             ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
 
-            let coordinate = input["coordinate"].as_array()
-                .ok_or_else(|| "Missing 'coordinate' parameter".to_string())?;
-            let x = coordinate.get(0).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid x coordinate".to_string())?;
-            let y = coordinate.get(1).and_then(|v| v.as_f64())
-                .ok_or_else(|| "Invalid y coordinate".to_string())?;
+            // Strict coordinate validation per Anthropic Computer Use API specification
+            let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+            let (x, y) = coordinate.to_f64();
 
             let scroll_direction = input["scroll_direction"].as_str()
                 .ok_or_else(|| "Missing 'scroll_direction' parameter".to_string())?;
@@ -612,7 +645,7 @@ pub async fn execute_computer_tool(
                 Some(screen_x),
                 Some(screen_y),
                 app_handle.clone(),
-                state_manager.clone(),
+                state_manager,
             ).await.map_err(|e| format!("Scroll failed: {}", e))?;
 
             Ok(json!({
@@ -623,7 +656,7 @@ pub async fn execute_computer_tool(
             // No permission validation needed for cursor position query
             let (x, y) = crate::commands::mouse::get_cursor_position(
                 app_handle.clone(),
-                state_manager.clone(),
+                state_manager,
             ).await.map_err(|e| format!("Get cursor position failed: {}", e))?;
 
             Ok(json!({
@@ -881,13 +914,20 @@ pub async fn execute_str_replace_tool(
 }
 
 /// Register all Anthropic Computer Use tools with the provider
-pub async fn register_anthropic_computer_use_tools(
-    provider: &mut LocalToolProvider,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    info!("Registering official Anthropic Computer Use tools...");
+/// Create versioned Anthropic Computer Use tools based on API version
+///
+/// This function creates tools with proper API types and versioning to ensure
+/// compliance with the official Anthropic Computer Use specification
+pub fn create_versioned_tools(version_config: Option<ToolVersionConfig>) -> Vec<ToolDefinition> {
+    let manager = if let Some(config) = version_config {
+        ToolVersionManager::with_config(config)
+    } else {
+        ToolVersionManager::new()
+    };
 
-    // Computer tool - main screen interaction tool
+    let mut tools = Vec::new();
+
+    // Computer tool - main screen interaction tool (Official Anthropic Computer Use API)
     let computer_tool = ToolDefinition {
         name: "computer".to_string(),
         description: "Use a computer to complete tasks. This tool gives you access to interact with any desktop application using the mouse and keyboard, take screenshots, and perform various system operations.
@@ -911,6 +951,8 @@ The computer tool accepts these actions:
 - wait: Wait for specified number of seconds
 
 Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -957,7 +999,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
         }),
     };
 
-    // Bash tool - command execution
+    // Bash tool - command execution (Official Anthropic Computer Use API)
     let bash_tool = ToolDefinition {
         name: "bash".to_string(),
         description: "Execute bash commands on the system. Use this tool to run shell commands, scripts, and interact with the command line.
@@ -969,6 +1011,8 @@ Example usage:
 - List files: {\"command\": \"ls -la\"}
 - Check system info: {\"command\": \"uname -a\"}
 - Run scripts: {\"command\": \"./script.sh\"}".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -981,7 +1025,7 @@ Example usage:
         }),
     };
 
-    // String replacement based edit tool
+    // String replacement based edit tool (Official Anthropic Computer Use API)
     let str_replace_tool = ToolDefinition {
         name: "str_replace_based_edit_tool".to_string(),
         description: "Edit files using string replacement operations. This tool provides safe file editing capabilities with security validation.
@@ -1002,6 +1046,8 @@ Example usage:
 - View range: {\"command\": \"view\", \"path\": \"file.txt\", \"view_range\": [1, 10]}
 - Replace text: {\"command\": \"str_replace\", \"path\": \"file.txt\", \"old_str\": \"old text\", \"new_str\": \"new text\"}
 - Create file: {\"command\": \"create\", \"path\": \"new_file.txt\", \"file_text\": \"content\"}".to_string(),
+        api_type: None, // Will be set by version manager
+        beta_flag: None, // Will be set by version manager
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1036,38 +1082,80 @@ Example usage:
         }),
     };
 
-    // Register all tools with the provider using the correct method
-    provider.register_async_tool(computer_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_computer_tool(&handle, input).await
+    // Apply versioning to all tools
+    tools.push(manager.apply_versioning(computer_tool));
+    tools.push(manager.apply_versioning(bash_tool));
+    tools.push(manager.apply_versioning(str_replace_tool));
+
+    tools
+}
+
+pub async fn register_anthropic_computer_use_tools(
+    provider: &mut LocalToolProvider,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    register_anthropic_computer_use_tools_with_version(provider, app_handle, None).await
+}
+
+/// Register Anthropic Computer Use tools with specific API version
+pub async fn register_anthropic_computer_use_tools_with_version(
+    provider: &mut LocalToolProvider,
+    app_handle: tauri::AppHandle,
+    version_config: Option<ToolVersionConfig>,
+) -> Result<(), String> {
+    let version_info = version_config
+        .as_ref()
+        .map(|c| format!("{:?}", c.current_version))
+        .unwrap_or_else(|| "latest".to_string());
+
+    info!("Registering official Anthropic Computer Use tools (API version: {})...", version_info);
+
+    // Create versioned tools
+    let versioned_tools = create_versioned_tools(version_config);
+    let tool_count = versioned_tools.len();
+
+    for tool in versioned_tools {
+        match tool.name.as_str() {
+            "computer" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_computer_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            "bash" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_bash_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            "str_replace_based_edit_tool" => {
+                provider.register_async_tool(tool, {
+                    let handle = app_handle.clone();
+                    move |input: Value| {
+                        let handle = handle.clone();
+                        async move {
+                            execute_str_replace_tool(&handle, input).await
+                        }
+                    }
+                }).await;
+            }
+            _ => {
+                warn!("Unknown tool name in versioned tools: {}", tool.name);
             }
         }
-    }).await;
+    }
 
-    provider.register_async_tool(bash_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_bash_tool(&handle, input).await
-            }
-        }
-    }).await;
-
-    provider.register_async_tool(str_replace_tool, {
-        let handle = app_handle.clone();
-        move |input: Value| {
-            let handle = handle.clone();
-            async move {
-                execute_str_replace_tool(&handle, input).await
-            }
-        }
-    }).await;
-
-    info!("Successfully registered 3 official Anthropic Computer Use tools");
+    info!("Successfully registered {} official Anthropic Computer Use tools", tool_count);
     Ok(())
 }
 
