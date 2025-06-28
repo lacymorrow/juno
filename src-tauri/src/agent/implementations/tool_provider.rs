@@ -58,6 +58,7 @@ use crate::agent::tools::ToolCategory;
 use crate::agent::traits::ToolProvider;
 use crate::state::AppState;
 use crate::constants::events;
+use crate::utils::coordinate_validation::{validate_coordinate_parameter, CoordinateValidationError};
 // Error recovery will be implemented in future iterations
 
 // Define an async tool function type
@@ -1028,31 +1029,38 @@ impl LocalToolProvider {
             if let Some(action) = args.get("action").and_then(|a| a.as_str()) {
                 // Coordinate validation for actions that need them
                 match action {
-                    "left_click" | "right_click" | "middle_click" | "double_click" | "mouse_move" => {
-                        if let Some(coord) = args.get("coordinate").and_then(|c| c.as_array()) {
-                            if coord.len() != 2 {
+                    "left_click" | "right_click" | "middle_click" | "double_click" | "mouse_move" | "scroll" => {
+                        // Use strict coordinate validation per Anthropic Computer Use API specification
+                        match validate_coordinate_parameter(&tool_call.input, "coordinate") {
+                            Ok(_) => {
+                                // Coordinate is valid according to Anthropic spec
+                                debug!("Computer tool coordinate validation passed for action '{}'", action);
+                            }
+                            Err(CoordinateValidationError::Missing) => {
                                 return Err(AgentError::InvalidInput(
-                                    "Computer tool coordinate must be [x, y] array with 2 elements".to_string()
+                                    format!("Computer tool action '{}' requires coordinate parameter", action)
                                 ));
                             }
-                            // Validate coordinate bounds (assuming 4K display max)
-                            for (i, val) in coord.iter().enumerate() {
-                                if let Some(num) = val.as_f64() {
-                                    if num < 0.0 || num > 4096.0 {
-                                        return Err(AgentError::InvalidInput(
-                                            format!("Computer tool coordinate[{}] {} is out of reasonable bounds (0-4096)", i, num)
-                                        ));
-                                    }
-                                } else {
-                                    return Err(AgentError::InvalidInput(
-                                        "Computer tool coordinate values must be numbers".to_string()
-                                    ));
-                                }
+                            Err(CoordinateValidationError::NotArray) => {
+                                return Err(AgentError::InvalidInput(
+                                    "Computer tool coordinate parameter must be a list/array".to_string()
+                                ));
                             }
-                        } else {
-                            return Err(AgentError::InvalidInput(
-                                format!("Computer tool action '{}' requires coordinate parameter", action)
-                            ));
+                            Err(CoordinateValidationError::InvalidLength(len)) => {
+                                return Err(AgentError::InvalidInput(
+                                    format!("Computer tool coordinate must have exactly 2 elements, got {}", len)
+                                ));
+                            }
+                            Err(CoordinateValidationError::NotInteger(index, value)) => {
+                                return Err(AgentError::InvalidInput(
+                                    format!("Computer tool coordinate[{}] must be an integer, got '{}'", index, value)
+                                ));
+                            }
+                            Err(CoordinateValidationError::OutOfBounds(index, value)) => {
+                                return Err(AgentError::InvalidInput(
+                                    format!("Computer tool coordinate[{}] value {} is out of reasonable bounds", index, value)
+                                ));
+                            }
                         }
                     },
                     "type" => {

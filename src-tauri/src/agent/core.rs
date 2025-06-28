@@ -111,6 +111,13 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     pub input_schema: Value, // JSON schema for the 'input' field in ToolCall
+    /// API type identifier for tool versioning (e.g., "computer_20250124", "bash_20250124")
+    /// This ensures compatibility with specific API versions and enables version-based tool selection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_type: Option<String>,
+    /// Beta flag identifier for tools requiring beta access (e.g., "computer-use-2025-01-24")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beta_flag: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

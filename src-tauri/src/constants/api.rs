@@ -28,6 +28,55 @@ pub mod endpoints {
     pub const HMR_WEBSOCKET: &str = "ws://localhost:1421";
 }
 
+// Anthropic Computer Use API Type Definitions (Official Specification)
+pub mod computer_use_api_types {
+    /// Computer Use API Version 2024-10-22
+    pub const COMPUTER_20241022: &str = "computer_20241022";
+
+    /// Computer Use API Version 2025-01-24 (Latest)
+    pub const COMPUTER_20250124: &str = "computer_20250124";
+
+    /// Text Editor API Type
+    pub const EDIT_TOOL_20250124: &str = "str_replace_based_edit_tool_20250124";
+
+    /// Enhanced Text Editor API Type with undo support
+    pub const EDIT_TOOL_20250429: &str = "str_replace_based_edit_tool_20250429";
+
+    /// Bash Command Execution API Type
+    pub const BASH_20250124: &str = "bash_20250124";
+}
+
+// Beta Flags for Tool Groups (Official Anthropic Specification)
+pub mod beta_flags {
+    /// Beta flag for computer use 2024-10-22
+    pub const COMPUTER_USE_2024_10_22: &str = "computer-use-2024-10-22";
+
+    /// Beta flag for computer use 2025-01-24
+    pub const COMPUTER_USE_2025_01_24: &str = "computer-use-2025-01-24";
+
+    /// Beta flag for prompt caching
+    pub const PROMPT_CACHING: &str = "prompt-caching-2024-07-31";
+}
+
+// Tool Version Groups (Mapping API versions to tool sets)
+pub mod tool_version_groups {
+    use super::computer_use_api_types::*;
+
+    /// Tools available in computer use 2024-10-22
+    pub const COMPUTER_USE_2024_10_22_TOOLS: &[&str] = &[
+        COMPUTER_20241022,
+        EDIT_TOOL_20250124,
+        BASH_20250124,
+    ];
+
+    /// Tools available in computer use 2025-01-24 (Latest)
+    pub const COMPUTER_USE_2025_01_24_TOOLS: &[&str] = &[
+        COMPUTER_20250124,
+        EDIT_TOOL_20250429,
+        BASH_20250124,
+    ];
+}
+
 // HTTP headers
 pub mod http_headers {
     pub const CONTENT_TYPE: &str = "Content-Type";
@@ -35,6 +84,7 @@ pub mod http_headers {
     pub const APPLICATION_JSON: &str = "application/json";
     pub const AUTHORIZATION: &str = "Authorization";
     pub const USER_AGENT: &str = "User-Agent";
+    pub const ANTHROPIC_BETA: &str = "anthropic-beta";
 }
 
 // Anthropic content types
