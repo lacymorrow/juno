@@ -551,94 +551,100 @@ async fn execute_agent_internal(
         }
     }
 
-    // --- Setup Tool Provider for Specialized Agents ---
-    let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
-
-    // Register basic file/shell tools
-    register_basic_tools(&mut tool_provider).await;
-    info!("Registered basic tools for specialized agents.");
-
-    // Setup desktop tools for specialized agents and get the shared provider
-    let shared_tool_provider =
-        setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
-
-    // Extract the tool provider from Arc<Mutex<>> for agent creation
-    let agent_tool_provider = {
-        let guard = shared_tool_provider.lock().await;
-        guard.clone()
-    };
-
-    // Register browser tools for specialized agents (with lazy initialization)
-    let browser_definitions = get_browser_tool_definitions();
-    for definition in browser_definitions {
-        let tool_name = definition.name.clone();
-        let app_handle_for_tool_executor = app_handle.clone();
-
-        let executor = move |input: Value| {
-            let app_handle_captured = app_handle_for_tool_executor.clone();
-            let current_tool_name_captured = tool_name.clone();
-            async move {
-                let state_from_handle = app_handle_captured.state::<AppState>();
-
-                let browser_controller_instance =
-                    match state_from_handle.get_or_init_browser_controller().await {
-                        Ok(controller) => controller,
-                        Err(e) => {
-                            let err_msg = format!(
-                                "Failed to start {}: {}",
-                                current_tool_name_captured, e
-                            );
-                            error!("{}", err_msg);
-                            return Err(err_msg);
-                        }
-                    };
-
-                let result = match current_tool_name_captured.as_str() {
-                    "browser_navigate" => browser_controller_instance.navigate(&input).await,
-                    "browser_extract_content" => {
-                        browser_controller_instance.extract_content(&input).await
-                    }
-                    "browser_interact" => browser_controller_instance.interact(&input).await,
-                    "browser_get_current_url" => {
-                        browser_controller_instance.get_current_url(&input).await
-                    }
-                    "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
-                    _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
-                };
-
-                match result {
-                    Ok(tool_result) => Ok(tool_result.output),
-                    Err(agent_error) => Err(agent_error.to_string()),
-                }
-            }
-        };
-        // Register browser tools on the shared provider instance
-        {
-            let guard = shared_tool_provider.lock().await;
-            guard
-                .register_async_tool(definition.clone(), executor)
-                .await;
-        }
-        info!(
-            "Registered browser tool for specialized agents: {}",
-            definition.name
-        );
-    }
-
-    // --- Determine Agent Mode and Create Runtime ---
+    // --- Setup Tool Provider Based on Agent Mode ---
     let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
 
     let agent_result = match agent_mode {
         AgentMode::Single => {
-            // Single agent mode - use traditional approach with all tools
+            info!("🔧 Setting up SINGLE AGENT mode with direct tools (no delegation)");
+
+            // Create a clean tool provider for single agent with direct tools only
+            let mut single_agent_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+
+            // Register basic file/shell tools for single agent
+            register_basic_tools(&mut single_agent_tool_provider).await;
+            info!("✅ Registered basic tools for single agent");
+
+            // Register desktop tools for single agent
+            let _shared_tool_provider = setup_tools(
+                &mut single_agent_tool_provider,
+                state.clone(),
+                app_handle.clone(),
+            ).await;
+            info!("✅ Registered desktop tools for single agent");
+
+            // Register browser tools for single agent
+            let browser_definitions = get_browser_tool_definitions();
+            for definition in browser_definitions {
+                let tool_name = definition.name.clone();
+                let app_handle_for_tool_executor = app_handle.clone();
+
+                let executor = move |input: Value| {
+                    let app_handle_captured = app_handle_for_tool_executor.clone();
+                    let current_tool_name_captured = tool_name.clone();
+                    async move {
+                        let state_from_handle = app_handle_captured.state::<AppState>();
+
+                        let browser_controller_instance =
+                            match state_from_handle.get_or_init_browser_controller().await {
+                                Ok(controller) => controller,
+                                Err(e) => {
+                                    let err_msg = format!(
+                                        "Failed to start {}: {}",
+                                        current_tool_name_captured, e
+                                    );
+                                    error!("{}", err_msg);
+                                    return Err(err_msg);
+                                }
+                            };
+
+                        let result = match current_tool_name_captured.as_str() {
+                            "browser_navigate" => browser_controller_instance.navigate(&input).await,
+                            "browser_extract_content" => {
+                                browser_controller_instance.extract_content(&input).await
+                            }
+                            "browser_interact" => browser_controller_instance.interact(&input).await,
+                            "browser_get_current_url" => {
+                                browser_controller_instance.get_current_url(&input).await
+                            }
+                            "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
+                            _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
+                        };
+
+                        match result {
+                            Ok(tool_result) => Ok(tool_result.output),
+                            Err(agent_error) => Err(agent_error.to_string()),
+                        }
+                    }
+                };
+                single_agent_tool_provider
+                    .register_async_tool(definition.clone(), executor)
+                    .await;
+                info!("✅ Registered browser tool for single agent: {}", definition.name);
+            }
+
+            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
+            if let Err(e) = BrainFactory::register_computer_use_tools(
+                &mut single_agent_tool_provider,
+                app_handle.clone(),
+            )
+            .await
+            {
+                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+            info!("✅ Registered full Computer Use tools for single agent mode");
+
+            // Create single agent brain
             let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize agent brain: {}", e);
+                    let err_msg = format!("Failed to initialize single agent brain: {}", e);
                     error!("{}", err_msg);
 
-                    // Emit error via streaming events instead of backend-response
+                    // Emit error via streaming events
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(
                         &app_handle,
@@ -658,27 +664,9 @@ async fn execute_agent_internal(
                     return Err(err_msg);
                 }
             };
-            info!("Single agent brain initialized.");
+            info!("✅ Single agent brain initialized");
 
-            // CRITICAL FIX: Register full Computer Use tools for single agent mode
-            // The agent_tool_provider was missing the core Anthropic Computer Use tools
-            // that provide mouse, keyboard, and screenshot capabilities
-            let mut single_agent_tool_provider = agent_tool_provider.clone();
-
-            // Register the complete Anthropic Computer Use tools (computer, str_replace_based_edit_tool, bash)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut single_agent_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
-                error!("{}", err_msg);
-                return Err(err_msg);
-            }
-            info!("Registered full Computer Use tools for single agent mode.");
-
-            // Create single agent runner with all tools (including computer use tools)
+            // Create single agent runner with direct tools (no delegation)
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
                 {
                     let memory_guard = memory_manager_arc.lock().await;
@@ -689,11 +677,9 @@ async fn execute_agent_internal(
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
-            info!(
-                "Single agent runner created with all tools including Computer Use capabilities."
-            );
+            info!("✅ Single agent runner created with direct tools (no delegation capabilities)");
 
-            info!("Starting single agent run...");
+            info!("🚀 Starting single agent run...");
 
             // Prepare the query with system context
             let contextual_query = if let Some(ref context) = system_context {
@@ -707,20 +693,95 @@ async fn execute_agent_internal(
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
-
             result
         }
         AgentMode::Multi => {
-            // Multi-agent mode - use orchestrator with specialized agents
+            info!("🔧 Setting up MULTI-AGENT mode with orchestrator delegation");
+
+            // Create tool provider for specialist agents (used by delegation system)
+            let mut specialist_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+
+            // Register basic file/shell tools for specialists
+            register_basic_tools(&mut specialist_tool_provider).await;
+            info!("✅ Registered basic tools for specialist agents");
+
+            // Setup desktop tools for specialists and get the shared provider
+            let shared_tool_provider = setup_tools(
+                &mut specialist_tool_provider,
+                state.clone(),
+                app_handle.clone(),
+            ).await;
+
+            // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
+            let specialist_agent_tool_provider = {
+                let guard = shared_tool_provider.lock().await;
+                guard.clone()
+            };
+
+            // Register browser tools for specialist agents
+            let browser_definitions = get_browser_tool_definitions();
+            for definition in browser_definitions {
+                let tool_name = definition.name.clone();
+                let app_handle_for_tool_executor = app_handle.clone();
+
+                let executor = move |input: Value| {
+                    let app_handle_captured = app_handle_for_tool_executor.clone();
+                    let current_tool_name_captured = tool_name.clone();
+                    async move {
+                        let state_from_handle = app_handle_captured.state::<AppState>();
+
+                        let browser_controller_instance =
+                            match state_from_handle.get_or_init_browser_controller().await {
+                                Ok(controller) => controller,
+                                Err(e) => {
+                                    let err_msg = format!(
+                                        "Failed to start {}: {}",
+                                        current_tool_name_captured, e
+                                    );
+                                    error!("{}", err_msg);
+                                    return Err(err_msg);
+                                }
+                            };
+
+                        let result = match current_tool_name_captured.as_str() {
+                            "browser_navigate" => browser_controller_instance.navigate(&input).await,
+                            "browser_extract_content" => {
+                                browser_controller_instance.extract_content(&input).await
+                            }
+                            "browser_interact" => browser_controller_instance.interact(&input).await,
+                            "browser_get_current_url" => {
+                                browser_controller_instance.get_current_url(&input).await
+                            }
+                            "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
+                            _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
+                        };
+
+                        match result {
+                            Ok(tool_result) => Ok(tool_result.output),
+                            Err(agent_error) => Err(agent_error.to_string()),
+                        }
+                    }
+                };
+                // Register browser tools on the shared provider instance for specialists
+                {
+                    let guard = shared_tool_provider.lock().await;
+                    guard
+                        .register_async_tool(definition.clone(), executor)
+                        .await;
+                }
+                info!("✅ Registered browser tool for specialist agents: {}", definition.name);
+            }
+
+            // Create orchestrator brain with delegation personality
             let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(
                 get_orchestrator_personality_prompt(&app_handle).await,
             ) {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize orchestrator: {}", e);
+                    let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
                     error!("{}", err_msg);
 
-                    // Emit error via streaming events instead of backend-response
+                    // Emit error via streaming events
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(
                         &app_handle,
@@ -740,22 +801,21 @@ async fn execute_agent_internal(
                     return Err(err_msg);
                 }
             };
-            info!("Orchestrator brain initialized.");
+            info!("✅ Orchestrator brain initialized");
 
-            // Create orchestrator with delegation tools
-            let mut orchestrator_tool_provider =
-                LocalToolProvider::with_app_handle(app_handle.clone());
+            // Create orchestrator with ONLY delegation tools (no direct tools)
+            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Register delegation tools for the orchestrator
             register_orchestrator_delegation_tools(
                 &mut orchestrator_tool_provider,
-                agent_tool_provider,
+                specialist_agent_tool_provider,
                 app_handle.clone(),
             )
             .await;
-            info!("Registered delegation tools for orchestrator.");
+            info!("✅ Registered delegation tools for orchestrator (no direct tools)");
 
-            // Create the orchestrator agent runner with personality-focused system prompt
+            // Create the orchestrator agent runner with delegation-only tools
             let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
                 {
                     let memory_guard = memory_manager_arc.lock().await;
@@ -766,11 +826,9 @@ async fn execute_agent_internal(
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
-            info!(
-                "Orchestrator agent runner created with personality and delegation capabilities."
-            );
+            info!("✅ Orchestrator runner created with delegation tools only");
 
-            info!("Starting orchestrator run...");
+            info!("🚀 Starting multi-agent orchestrator run...");
 
             // Prepare the query with system context for orchestrator
             let contextual_query = if let Some(ref context) = system_context {
@@ -784,7 +842,6 @@ async fn execute_agent_internal(
             };
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
-
             result
         }
     };
