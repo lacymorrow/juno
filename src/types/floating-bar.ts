@@ -4,20 +4,16 @@ export type BarState =
   | "expanding"
   | "input"
   | "shrinking"
-  | "loading"
+  | "loading"        // Universal processing state (replaces agent_listening, agent_thinking)
   | "finishing"
   | "success"
   | "error"
   | "dictation_ready"
-  | "dictation_active"
-  | "dictation_processing"
-  | "agent_listening"
-  | "agent_thinking"
-  | "agent_responding"
+  | "agent_responding" // Only unique agent state
   | "speaking"
-  | "listening"
-  | "transcribing"
-  | "dictating"
+  | "listening"       // Universal voice listening state
+  | "transcribing"    // Universal transcription state (replaces dictation_processing)
+  | "dictating"       // Universal dictation state (replaces dictation_active)
   | "always-listening";
 
 export interface BarStateData {
