@@ -11,118 +11,95 @@ use regex::Regex;
 // Global flag to indicate if TTS should be stopped
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-// Separate flag to track user-initiated stops (vs cleanup stops)
-static USER_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
-
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
+/// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
 pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
 
     let mut filtered_text = text.to_string();
 
-    // 0. Extract TTS XML content first (this is for fallback cases where immediate TTS didn't work)
-    let tts_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
-    if tts_regex.is_match(&filtered_text) {
-        // CRITICAL FIX: If we have TTS tags, this means immediate TTS processing failed
-        // In most cases, immediate TTS should have already processed this content
-        warn!("[TTS Filter] Found TTS tags in final processing - this suggests immediate TTS didn't work properly");
+    // Remove any TTS XML tags completely - content should have been processed by streaming system
+    let tts_tag_regex = Regex::new(r"</?TTS>").unwrap();
+    filtered_text = tts_tag_regex.replace_all(&filtered_text, "").to_string();
 
-        // Extract only the content inside them as fallback
-        let extracted_content: Vec<&str> = tts_regex
-            .captures_iter(&filtered_text)
-            .map(|cap| cap.get(1).unwrap().as_str())
-            .collect();
-
-        if !extracted_content.is_empty() {
-            // Return only the TTS content, joined together
-            filtered_text = extracted_content.join(" ");
-            debug!("[TTS Filter] Extracted TTS content from XML tags (FALLBACK): '{}'", filtered_text);
-            return filtered_text;
-        }
-    }
-
-    // 1. Remove any remaining TTS XML tags that weren't processed (safety net)
-    let remaining_tts_regex = Regex::new(r"</?TTS>").unwrap();
-    filtered_text = remaining_tts_regex.replace_all(&filtered_text, "").to_string();
-
-    // 2. Remove code blocks (```...```)
+    // 1. Remove code blocks (```...```)
     let code_block_regex = Regex::new(r"```[\s\S]*?```").unwrap();
     filtered_text = code_block_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 3. Remove inline code (`...`)
+    // 2. Remove inline code (`...`)
     let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
     filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 4. Remove HTML/JSX tags (excluding TTS tags which were handled above)
-    let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
+    // 3. Remove HTML/JSX tags (excluding TTS tags which were handled above)
+    // let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
+    // filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 5. Remove JSX/React component syntax
-    let jsx_component_regex = Regex::new(r"</?[A-Z][a-zA-Z0-9]*[^>]*>").unwrap();
-    filtered_text = jsx_component_regex.replace_all(&filtered_text, " ").to_string();
+    // // 4. Remove JSX/React component syntax
+    // let jsx_component_regex = Regex::new(r"</?[A-Z][a-zA-Z0-9]*[^>]*>").unwrap();
+    // filtered_text = jsx_component_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 6. Remove code-like patterns (function calls, method chaining, etc.)
-    let function_call_regex = Regex::new(r"\w+\(\s*[^)]*\s*\)").unwrap();
-    filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
+    // // 5. Remove code-like patterns (function calls, method chaining, etc.)
+    // let function_call_regex = Regex::new(r"\w+\(\s*[^)]*\s*\)").unwrap();
+    // filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 7. Remove method chaining (e.g., object.method().anotherMethod())
-    let method_chain_regex = Regex::new(r"\w+(\.\w+)+\([^)]*\)").unwrap();
-    filtered_text = method_chain_regex.replace_all(&filtered_text, " ").to_string();
+    // // 6. Remove method chaining (e.g., object.method().anotherMethod())
+    // let method_chain_regex = Regex::new(r"\w+(\.\w+)+\([^)]*\)").unwrap();
+    // filtered_text = method_chain_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 8. Remove property access chains (e.g., object.property.subProperty)
-    let property_chain_regex = Regex::new(r"\w+(\.\w+){2,}").unwrap();
-    filtered_text = property_chain_regex.replace_all(&filtered_text, " ").to_string();
+    // // 7. Remove property access chains (e.g., object.property.subProperty)
+    // let property_chain_regex = Regex::new(r"\w+(\.\w+){2,}").unwrap();
+    // filtered_text = property_chain_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 9. Remove file paths and URLs
-    let path_url_regex = Regex::new(r"(?:https?://|/|~/|\.\./)[\w\-_\./?=&%#]+").unwrap();
-    filtered_text = path_url_regex.replace_all(&filtered_text, " ").to_string();
+    // // 8. Remove file paths and URLs
+    // let path_url_regex = Regex::new(r"(?:https?://|/|~/|\.\./)[\w\-_\./?=&%#]+").unwrap();
+    // filtered_text = path_url_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 10. Remove common programming keywords and patterns
-    let programming_keywords = [
-        r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*=", r"\bvar\s+\w+\s*=",
-        r"\bfunction\s+\w+", r"\bclass\s+\w+", r"\binterface\s+\w+",
-        r"\bimport\s+", r"\bexport\s+", r"\breturn\s+", r"\bif\s*\(",
-        r"\bfor\s*\(", r"\bwhile\s*\(", r"\btry\s*\{", r"\bcatch\s*\(",
-        r"\basync\s+", r"\bawait\s+", r"\bnew\s+\w+", r"\bthis\.",
-        r"\bconsole\.", r"\bdocument\.", r"\bwindow\.", r"\bprocess\.",
-    ];
+    // // 9. Remove common programming keywords and patterns
+    // let programming_keywords = [
+    //     r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*=", r"\bvar\s+\w+\s*=",
+    //     r"\bfunction\s+\w+", r"\bclass\s+\w+", r"\binterface\s+\w+",
+    //     r"\bimport\s+", r"\bexport\s+", r"\breturn\s+", r"\bif\s*\(",
+    //     r"\bfor\s*\(", r"\bwhile\s*\(", r"\btry\s*\{", r"\bcatch\s*\(",
+    //     r"\basync\s+", r"\bawait\s+", r"\bnew\s+\w+", r"\bthis\.",
+    //     r"\bconsole\.", r"\bdocument\.", r"\bwindow\.", r"\bprocess\.",
+    // ];
 
-    for keyword_pattern in &programming_keywords {
-        let keyword_regex = Regex::new(keyword_pattern).unwrap();
-        filtered_text = keyword_regex.replace_all(&filtered_text, " ").to_string();
-    }
+    // for keyword_pattern in &programming_keywords {
+    //     let keyword_regex = Regex::new(keyword_pattern).unwrap();
+    //     filtered_text = keyword_regex.replace_all(&filtered_text, " ").to_string();
+    // }
 
-    // 11. Remove emojis (Unicode ranges for various emoji blocks)
-    let emoji_regex = Regex::new(r"[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}-\u{2454}]|[\u{20D0}-\u{20FF}]").unwrap();
-    filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
+    // // 10. Remove emojis (Unicode ranges for various emoji blocks)
+    // let emoji_regex = Regex::new(r"[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}-\u{2454}]|[\u{20D0}-\u{20FF}]").unwrap();
+    // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 12. Remove mathematical expressions and formulas
-    let math_regex = Regex::new(r"\$[^$]+\$|\\[a-zA-Z]+\{[^}]*\}").unwrap();
-    filtered_text = math_regex.replace_all(&filtered_text, " ").to_string();
+    // // 11. Remove mathematical expressions and formulas
+    // let math_regex = Regex::new(r"\$[^$]+\$|\\[a-zA-Z]+\{[^}]*\}").unwrap();
+    // filtered_text = math_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 13. Remove JSON-like structures
-    let json_regex = Regex::new(r"\{[^{}]*:[^{}]*\}|\[[^\[\]]*\]").unwrap();
-    filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
+    // // 12. Remove JSON-like structures
+    // let json_regex = Regex::new(r"\{[^{}]*:[^{}]*\}|\[[^\[\]]*\]").unwrap();
+    // filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 14. Remove variable assignments and declarations
-    let assignment_regex = Regex::new(r"\w+\s*[:=]\s*[^,;\n]+").unwrap();
-    filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
+    // // 13. Remove variable assignments and declarations
+    // let assignment_regex = Regex::new(r"\w+\s*[:=]\s*[^,;\n]+").unwrap();
+    // filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 15. Remove CSS selectors and properties
-    let css_regex = Regex::new(r"[.#][\w-]+\s*\{[^}]*\}|[\w-]+\s*:\s*[^;]+;").unwrap();
-    filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
+    // // 14. Remove CSS selectors and properties
+    // let css_regex = Regex::new(r"[.#][\w-]+\s*\{[^}]*\}|[\w-]+\s*:\s*[^;]+;").unwrap();
+    // filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 16. Clean up whitespace and normalize
-    let whitespace_regex = Regex::new(r"\s+").unwrap();
-    filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
-    filtered_text = filtered_text.trim().to_string();
+    // // 15. Clean up whitespace and normalize
+    // let whitespace_regex = Regex::new(r"\s+").unwrap();
+    // filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+    // filtered_text = filtered_text.trim().to_string();
 
-    // If after filtering we have very little meaningful content left,
-    // it was probably mostly code - return empty string to skip TTS
-    if filtered_text.len() < 10 || filtered_text.split_whitespace().count() < 3 {
-        debug!("[TTS Filter] Content appears to be mostly code, skipping TTS");
-        return String::new();
-    }
+    // // If after filtering we have very little meaningful content left,
+    // // it was probably mostly code - return empty string to skip TTS
+    // if filtered_text.len() < 10 || filtered_text.split_whitespace().count() < 3 {
+    //     debug!("[TTS Filter] Content appears to be mostly code, skipping TTS");
+    //     return String::new();
+    // }
 
     debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());
     if filtered_text.len() != text.len() {
@@ -134,31 +111,10 @@ pub fn filter_tts_content(text: &str) -> String {
     filtered_text
 }
 
-// Function to stop speech playback with deduplication
+// Function to stop speech playback
 pub fn stop_speech() {
-    stop_speech_internal(false)
-}
-
-// Function to stop speech when user requests it (e.g., escape key)
-pub fn stop_speech_by_user() {
-    stop_speech_internal(true)
-}
-
-// Internal function to stop speech with user flag tracking
-fn stop_speech_internal(is_user_initiated: bool) {
-    // Check if already stopped to prevent redundant operations
-    if TTS_STOP_REQUESTED.load(Ordering::SeqCst) {
-        debug!("[TTS] Stop speech already requested, skipping redundant operation");
-        return;
-    }
-
-    info!("[TTS] Stop speech requested (user initiated: {})", is_user_initiated);
+    info!("[TTS] Stop speech requested");
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
-
-    // Track user-initiated stops separately
-    if is_user_initiated {
-        USER_STOP_REQUESTED.store(true, Ordering::SeqCst);
-    }
 
     // For system TTS, we can try to stop speech synthesis
     #[cfg(target_os = "macos")]
@@ -192,25 +148,9 @@ pub fn is_tts_stop_requested() -> bool {
     TTS_STOP_REQUESTED.load(Ordering::SeqCst)
 }
 
-// Check if user specifically requested TTS stop (not just cleanup)
-pub fn is_user_stop_requested() -> bool {
-    USER_STOP_REQUESTED.load(Ordering::SeqCst)
-}
-
 // Reset the stop flag
 pub fn reset_tts_stop_flag() {
     TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
-}
-
-// Reset the user stop flag
-pub fn reset_user_stop_flag() {
-    USER_STOP_REQUESTED.store(false, Ordering::SeqCst);
-}
-
-// Reset both flags
-pub fn reset_all_stop_flags() {
-    TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
-    USER_STOP_REQUESTED.store(false, Ordering::SeqCst);
 }
 
 // Register escape key for TTS cancellation
@@ -234,8 +174,8 @@ pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
 // Tauri command to stop TTS from frontend
 #[tauri::command]
 pub async fn stop_tts() -> Result<(), String> {
-    info!("Stop TTS command received from frontend (user-initiated)");
-    stop_speech_by_user();
+    info!("Stop TTS command received from frontend");
+    stop_speech();
     Ok(())
 }
 
@@ -290,36 +230,13 @@ pub async fn get_tts_provider_command(
     Ok(audio_settings.tts_provider)
 }
 
-// Central TTS invocation function with escape key registration and fallback logic
+// FIXED: Immediate, non-blocking TTS with proper escape key handling
 #[tauri::command]
 pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-        // FIRST: Check if user has already requested stop - if so, don't start ANY new TTS
-    if is_user_stop_requested() {
-        info!("User has requested TTS stop, aborting new TTS request immediately");
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-
-    // SECOND: Stop any existing TTS to prevent token waste (this is cleanup, not user-initiated)
-    info!("New TTS request received, stopping any existing TTS to prevent token waste");
-    stop_speech(); // This sets TTS_STOP_REQUESTED but NOT USER_STOP_REQUESTED
-
-    // Brief pause to allow existing TTS operations to detect the stop signal
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    // THIRD: Check again if user requested stop during cleanup - if so, honor it immediately
-    if is_user_stop_requested() {
-        info!("User requested TTS stop during cleanup, aborting new TTS request");
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-
-    // ONLY NOW reset the flags since we're certain the user hasn't requested a stop
-    // Reset both flags - the cleanup flag and start fresh for the new TTS
-    reset_all_stop_flags();
-
     let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
@@ -337,66 +254,98 @@ pub async fn invoke_tts(
         return Ok("TTS_CONTENT_FILTERED".to_string());
     }
 
-    // Register escape key for TTS cancellation
-    register_tts_escape_key(&app_handle).await;
+    // CRITICAL FIX: Make TTS completely immediate and non-blocking
+    // Spawn async task so TTS doesn't block anything and escape key works immediately
+    let app_handle_clone = app_handle.clone();
+    let provider_clone = provider.clone();
+    let filtered_text_clone = filtered_text.clone();
 
-    info!("Using TTS provider from state: {}", provider);
+    tokio::spawn(async move {
+        // Register escape key for TTS cancellation
+        register_tts_escape_key(&app_handle_clone).await;
 
+        // Check if stop was requested immediately
+        if is_tts_stop_requested() {
+            info!("TTS stop was requested immediately, aborting");
+            unregister_tts_escape_key(&app_handle_clone).await;
+            return;
+        }
+
+        info!("Starting IMMEDIATE TTS with provider: {}", provider_clone);
+
+        // Execute TTS with fallback logic but without blocking
+        match execute_tts_with_fallback(filtered_text_clone, &provider_clone).await {
+            Ok(result) => {
+                if result == "TTS_STOPPED_BY_USER" {
+                    info!("TTS was stopped by user during execution");
+                } else {
+                    info!("TTS completed successfully");
+                }
+            }
+            Err(e) => {
+                error!("TTS failed: {}", e);
+            }
+        }
+
+        // Always unregister escape key when done
+        unregister_tts_escape_key(&app_handle_clone).await;
+    });
+
+    // Return immediately - TTS is running asynchronously
+    info!("TTS started asynchronously for provider: {}", provider);
+    Ok("TTS_STARTED_ASYNC".to_string())
+}
+
+// Execute TTS with fallback logic (no blocking, no race conditions)
+async fn execute_tts_with_fallback(
+    text: String,
+    primary_provider: &str,
+) -> Result<String, String> {
     // Check network connectivity for cloud-based providers
-    let is_cloud_provider = matches!(provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
+    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
 
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
         let is_online = crate::utils::network::is_online().await;
         if !is_online {
-            warn!("Device appears offline, skipping cloud TTS providers and using system TTS directly");
-            let result = invoke_tts_for_provider(filtered_text, None, "system").await;
-            unregister_tts_escape_key(&app_handle).await;
-            return result;
+            warn!("Device appears offline, using system TTS directly");
+            return invoke_tts_for_provider(text, None, "system").await;
         }
     }
 
     // Define the provider fallback order based on the primary provider
-    let fallback_providers = match provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "system"], // Prioritize system over other cloud providers when offline
-        "elevenlabs" => vec!["elevenlabs", "system"], // Prioritize system over other cloud providers when offline
-        "system" => vec!["system"], // System only, no cloud fallbacks needed
-        "off" => {
-            unregister_tts_escape_key(&app_handle).await;
-            return Ok("TTS_DISABLED_BY_SETTING".to_string());
-        }
+    let fallback_providers = match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "system"],
+        "elevenlabs" => vec!["elevenlabs", "system"],
+        "system" => vec!["system"],
+        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
         _ => {
-            warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", provider);
-            vec!["system"] // Default to system for unknown providers
+            warn!("Unknown primary TTS provider: '{}'. Using system fallback only.", primary_provider);
+            vec!["system"]
         }
     };
 
     let mut last_error = String::new();
 
     for (index, fallback_provider) in fallback_providers.iter().enumerate() {
-        // Check if user requested stop before each attempt
-        if is_user_stop_requested() {
-            info!("User requested TTS stop during fallback attempts, aborting");
-            unregister_tts_escape_key(&app_handle).await;
+        // Check if stop was requested before each attempt
+        if is_tts_stop_requested() {
+            info!("TTS stop was requested during fallback attempts, aborting");
             return Ok("TTS_STOPPED_BY_USER".to_string());
         }
 
         let is_primary = index == 0;
         info!("Attempting TTS with provider: {} ({})", fallback_provider, if is_primary { "primary" } else { "fallback" });
 
-        match invoke_tts_for_provider(filtered_text.clone(), None, fallback_provider).await {
+        match invoke_tts_for_provider(text.clone(), None, fallback_provider).await {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
-                    unregister_tts_escape_key(&app_handle).await;
                     return Ok(result);
                 }
                 if !is_primary {
-                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", provider, fallback_provider);
+                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", primary_provider, fallback_provider);
                 }
-
-                // Unregister escape key after successful TTS
-                unregister_tts_escape_key(&app_handle).await;
                 return Ok(result);
             }
             Err(e) => {
@@ -405,27 +354,21 @@ pub async fn invoke_tts(
                 // Check if this is a network-related error
                 let is_network_error = crate::utils::network::is_network_error(&e);
 
-                if is_primary {
-                    if is_network_error {
-                        warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
-                        // For network errors, skip other cloud providers and go straight to system
-                        match invoke_tts_for_provider(filtered_text.clone(), None, "system").await {
-                            Ok(system_result) => {
-                                warn!("Network error detected, successfully fell back to system TTS");
-                                unregister_tts_escape_key(&app_handle).await;
-                                return Ok(system_result);
-                            }
-                            Err(system_error) => {
-                                error!("Even system TTS failed: {}", system_error);
-                                unregister_tts_escape_key(&app_handle).await;
-                                return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
-                            }
+                if is_primary && is_network_error {
+                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
+                    // For network errors, skip other cloud providers and go straight to system
+                    match invoke_tts_for_provider(text.clone(), None, "system").await {
+                        Ok(system_result) => {
+                            warn!("Network error detected, successfully fell back to system TTS");
+                            return Ok(system_result);
                         }
-                    } else {
-                        warn!("Primary TTS provider '{}' failed: {}", fallback_provider, e);
+                        Err(system_error) => {
+                            error!("Even system TTS failed: {}", system_error);
+                            return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                        }
                     }
                 } else {
-                    warn!("Fallback TTS provider '{}' also failed: {}", fallback_provider, e);
+                    warn!("TTS provider '{}' failed: {}", fallback_provider, e);
                 }
             }
         }
@@ -433,10 +376,6 @@ pub async fn invoke_tts(
 
     let final_error = format!("All TTS providers failed. Last error: {}", last_error);
     error!("{}", final_error);
-
-    // Unregister escape key after TTS failure
-    unregister_tts_escape_key(&app_handle).await;
-
     Err(final_error)
 }
 
@@ -448,9 +387,9 @@ pub async fn invoke_tts_for_provider(
 ) -> Result<String, String> {
     info!("Invoking TTS for provider: {}", provider);
 
-    // Check if user requested stop before starting
-    if is_user_stop_requested() {
-        info!("User requested TTS stop before starting, aborting");
+    // Check if stop was requested before starting
+    if is_tts_stop_requested() {
+        info!("TTS stop was requested before starting, aborting");
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
@@ -458,7 +397,7 @@ pub async fn invoke_tts_for_provider(
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "system" => system::invoke_system_tts(text).await,
-        "off" => { // Explicitly handle "off" here as well, though invoke_tts should catch it.
+        "off" => {
              warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
              Ok("TTS_DISABLED_BY_SETTING".to_string())
         }
