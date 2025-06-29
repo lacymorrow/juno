@@ -4,6 +4,7 @@ export type BarState =
   | "expanding"
   | "input"
   | "shrinking"
+  | "submitting"     // Immediate feedback when query is submitted
   | "loading"        // Universal processing state (replaces agent_listening, agent_thinking)
   | "finishing"
   | "success"
