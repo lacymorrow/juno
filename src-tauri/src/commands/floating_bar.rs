@@ -814,9 +814,8 @@ pub async fn floating_bar_submit(app: AppHandle, query: String) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn notify_query_submitted(app: AppHandle, query: String) -> Result<(), String> {
+pub async fn notify_query_submitted(app: AppHandle, query: String) {
     handle_query_submitted(&app, query).await;
-    Ok(())
 }
 
 // Event handlers for backend events
@@ -932,9 +931,7 @@ pub async fn handle_query_submitted(app_handle: &AppHandle, query: String) {
         manager.is_agent_working = true;
         manager.voice_mode = "agent".to_string();
 
-        if let Err(e) = manager.set_state(BarState::Submitting).await {
-            error!("Failed to set submitting state: {}", e);
-        }
+        manager.set_state(BarState::Submitting).await;
     }
 }
 
