@@ -332,14 +332,13 @@ impl AdvancedMemoryManager {
             if let Some(start_offset) = base64_char_start {
                 let start = pos + start_offset;
 
-                // Find end of base64 sequence using byte-based iteration
+                // Find end of base64 sequence using safe UTF-8 character iteration
                 let mut end = start;
-                let bytes = content.as_bytes();
+                let remaining_from_start = &content[start..];
 
-                while end < content.len() {
-                    let ch = bytes[end] as char;
+                for (byte_offset, ch) in remaining_from_start.char_indices() {
                     if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' || ch.is_ascii_whitespace() {
-                        end += 1;
+                        end = start + byte_offset + ch.len_utf8();
                     } else {
                         break;
                     }
