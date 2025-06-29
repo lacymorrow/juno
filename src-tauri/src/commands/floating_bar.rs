@@ -104,6 +104,7 @@ pub enum BarState {
     Expanding,
     Input,
     Shrinking,
+    Submitting,     // Immediate feedback when query is submitted
     Loading,        // Universal processing state (replaces AgentListening, AgentThinking)
     Finishing,
     Success,
@@ -125,6 +126,7 @@ impl BarState {
             BarState::Expanding => "expanding",
             BarState::Input => "input",
             BarState::Shrinking => "shrinking",
+            BarState::Submitting => "submitting",
             BarState::Loading => "loading",
             BarState::Finishing => "finishing",
             BarState::Success => "success",
@@ -339,9 +341,8 @@ impl FloatingBarManager {
         self.agent_state = None; // Clear agent state for new task
         self.is_agent_working = true;
 
-        // FIXED: Consolidated state transition to avoid race conditions
-        // Show success state briefly, then transition directly to loading (stay expanded)
-        self.set_state(BarState::Success).await;
+        // IMMEDIATE FEEDBACK: Show submitting state right away
+        self.set_state(BarState::Submitting).await;
 
         // Store transition target to prevent race conditions with other operations
         let transition_id = Uuid::new_v4().to_string();
@@ -559,7 +560,7 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling agent started");
         self.is_agent_working = true;
         self.voice_mode = "agent".to_string();
-        // Use universal Loading state for all agent processing
+        // Transition from Submitting to Loading state for agent processing
         self.set_state(BarState::Loading).await;
         Ok(())
     }
@@ -569,7 +570,7 @@ impl FloatingBarManager {
         self.is_agent_working = false;
         self.voice_mode = "idle".to_string();
         // Return to default state unless we're in a specific state that should be preserved
-        if matches!(self.current_state, BarState::Loading | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
+        if matches!(self.current_state, BarState::Submitting | BarState::Loading | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
             self.set_state(BarState::Default).await;
         }
         Ok(())
@@ -592,7 +593,7 @@ impl FloatingBarManager {
     // Helper to check if bar should remain expanded
     fn should_remain_expanded_for_status(&self) -> bool {
         matches!(self.current_state,
-            BarState::Loading | BarState::Finishing | BarState::Success |
+            BarState::Submitting | BarState::Loading | BarState::Finishing | BarState::Success |
             BarState::Speaking | BarState::Listening | BarState::Transcribing |
             BarState::Dictating | BarState::AlwaysListening | BarState::Error |
             BarState::AgentResponding | BarState::DictationReady
@@ -812,6 +813,12 @@ pub async fn floating_bar_submit(app: AppHandle, query: String) -> Result<(), St
     }
 }
 
+#[tauri::command]
+pub async fn notify_query_submitted(app: AppHandle, query: String) -> Result<(), String> {
+    handle_query_submitted(&app, query).await;
+    Ok(())
+}
+
 // Event handlers for backend events
 pub async fn handle_backend_response(app_handle: &AppHandle, agent_state: &str, response_text: Option<String>) {
     if let Some(manager) = get_bar_manager(app_handle).await {
@@ -909,6 +916,24 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_agent_cancelled().await {
             error!("Failed to handle agent cancelled: {}", e);
+        }
+    }
+}
+
+// New function to handle query submission from anywhere in the app
+pub async fn handle_query_submitted(app_handle: &AppHandle, query: String) {
+    if let Some(manager) = get_bar_manager(app_handle).await {
+        let mut manager = manager.lock().await;
+
+        // Set immediate submitting state for visual feedback
+        manager.last_submitted_value = query;
+        manager.current_error = None;
+        manager.agent_state = None;
+        manager.is_agent_working = true;
+        manager.voice_mode = "agent".to_string();
+
+        if let Err(e) = manager.set_state(BarState::Submitting).await {
+            error!("Failed to set submitting state: {}", e);
         }
     }
 }
