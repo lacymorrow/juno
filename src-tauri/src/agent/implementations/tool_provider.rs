@@ -464,10 +464,35 @@ impl LocalToolProvider {
         // Store the definition
         {
             let mut definitions = self.definitions.write().await;
-            definitions.insert(tool_name.clone(), definition);
+            definitions.insert(tool_name.clone(), definition.clone());
             debug!("Stored definition for tool: '{}'", tool_name);
             debug!("Total definitions after insert: {}", definitions.len());
         }
+
+            // Automatically add tool to configuration manager if app handle is available
+    if let Some(ref app_handle) = self.app_handle {
+        let state = app_handle.state::<AppState>();
+        let config_manager = state.get_tool_config_manager().await;
+        let mut config_guard = config_manager.lock().await;
+
+        // Only add if the tool doesn't already exist in configuration
+        if config_guard.get_tool_config(&tool_name).is_none() {
+            // Automatically determine category from tool name and metadata
+            let category = Self::infer_tool_category(&tool_name, &definition.description);
+
+            let tool_config = crate::agent::tools::tool_config::ToolConfig::new(
+                tool_name.clone(),
+                category.clone(),
+                true, // Enable by default
+            ).with_description(definition.description.clone());
+
+            config_guard.add_tool_config(tool_config);
+
+            debug!("Auto-added tool configuration for: '{}' in category: {:?}", tool_name, category);
+        }
+    } else {
+        warn!("Cannot auto-configure tool '{}' - no app handle available during registration", tool_name);
+    }
 
         // Wrap the executor with additional error handling for display-related operations
         let wrapped_executor: AsyncToolExecutor = Arc::new(move |input| {
@@ -1287,12 +1312,82 @@ impl LocalToolProvider {
         Vec::new()
     }
 
-    /// Reset recovery stats (simplified version)
+    /// Reset circuit breaker for a specific tool (simplified implementation)
     pub async fn reset_circuit_breaker(&self, _tool_name: &str) -> bool {
         let mut stats = self.recovery_stats.lock().await;
         *stats = SimpleRecoveryStats::default();
         info!("Reset recovery stats");
         true
+    }
+
+    /// Get all registered tool definitions without filtering
+    /// This bypasses enablement checks and returns everything that's been registered
+    /// Used by: Frontend tool discovery and debugging
+    pub async fn get_all_registered_tools(&self) -> Vec<ToolDefinition> {
+        let definitions = self.definitions.read().await;
+        definitions.values().cloned().collect()
+    }
+
+    /// Automatically determine tool category based on tool name and description
+    pub fn infer_tool_category(tool_name: &str, description: &str) -> crate::agent::tools::ToolCategory {
+        use crate::agent::tools::ToolCategory;
+
+        let name_lower = tool_name.to_lowercase();
+        let desc_lower = description.to_lowercase();
+
+        // Check for Anthropic Computer Use tools
+        if matches!(tool_name, "computer" | "bash" | "str_replace_based_edit_tool") ||
+           name_lower.contains("screenshot") || name_lower.contains("click") ||
+           name_lower.contains("type") || name_lower.contains("key") ||
+           name_lower.contains("scroll") || name_lower.contains("drag") ||
+           name_lower.contains("move") || name_lower.contains("accessibility_interface") {
+            return ToolCategory::AnthropicComputerUse;
+        }
+
+        // Check for Browser tools
+        if name_lower.starts_with("browser_") || name_lower.starts_with("safari_") ||
+           name_lower.contains("navigate") || name_lower.contains("web") ||
+           desc_lower.contains("browser") || desc_lower.contains("web") ||
+           desc_lower.contains("url") || desc_lower.contains("safari") {
+            return ToolCategory::Browser;
+        }
+
+        // Check for Timer tools
+        if name_lower.contains("timer") || name_lower.contains("schedule") ||
+           name_lower.contains("monitor") || name_lower.contains("expired") ||
+           desc_lower.contains("timer") || desc_lower.contains("schedule") ||
+           desc_lower.contains("monitor") {
+            return ToolCategory::Timer;
+        }
+
+        // Check for Desktop tools
+        if name_lower.contains("window") || name_lower.contains("application") ||
+           name_lower.contains("desktop") || name_lower.contains("clipboard") ||
+           name_lower.contains("cursor") || name_lower.contains("element") ||
+           name_lower.contains("focus") || name_lower.contains("launch") ||
+           desc_lower.contains("desktop") || desc_lower.contains("application") ||
+           desc_lower.contains("window") || desc_lower.contains("macos") {
+            return ToolCategory::Desktop;
+        }
+
+        // Check for MCP tools
+        if name_lower.contains("mcp") || name_lower.starts_with("mcp_") ||
+           desc_lower.contains("mcp") || desc_lower.contains("external") {
+            return ToolCategory::MCP;
+        }
+
+        // Check for Basic tools (file operations, commands, etc.)
+        if name_lower.contains("file") || name_lower.contains("read") ||
+           name_lower.contains("write") || name_lower.contains("command") ||
+           name_lower.contains("terminal") || name_lower.contains("bash") ||
+           name_lower.contains("shell") || name_lower.contains("execute") ||
+           desc_lower.contains("file") || desc_lower.contains("command") ||
+           desc_lower.contains("terminal") || desc_lower.contains("bash") {
+            return ToolCategory::Basic;
+        }
+
+        // Default to Basic for unknown tools
+        ToolCategory::Basic
     }
 }
 
@@ -1385,11 +1480,20 @@ impl ToolProvider for LocalToolProvider {
             let mut disabled_count = 0;
 
             for tool in all_tools {
-                if config_guard.is_tool_enabled(&tool.name) {
-                    enabled_tools.push(tool);
+                let tool_name = tool.name.clone();
+                // Check if tool has any configuration at all
+                if let Some(_tool_config) = config_guard.get_tool_config(&tool_name) {
+                    // Tool is configured - check if enabled
+                    if config_guard.is_tool_enabled(&tool_name) {
+                        enabled_tools.push(tool);
+                    } else {
+                        disabled_count += 1;
+                        debug!("Tool '{}' is disabled, excluding from available tools", tool_name);
+                    }
                 } else {
-                    disabled_count += 1;
-                    debug!("Tool '{}' is disabled, excluding from available tools", tool.name);
+                    // Tool is unconfigured - treat as enabled by default
+                    debug!("Tool '{}' is unconfigured, including by default", tool_name);
+                    enabled_tools.push(tool);
                 }
             }
 

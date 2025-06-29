@@ -367,17 +367,64 @@ export function useSettings() {
 	const loadToolConfigurations = useCallback(async () => {
 		setToolConfigLoading(true);
 		try {
-			const configs = await getCachedOrFetch('toolConfigurations', () =>
-				invokeCommand<Record<string, ToolCategory>>("get_tool_configurations")
-			);
+			const configs = await getCachedOrFetch('toolConfigurations', async () => {
+				console.log("🔄 Loading tool configurations from backend...");
+
+				// Use the batch API endpoint to get all tool configurations in a single call
+				const toolConfigsResponse = await invokeCommand<Record<string, {
+					name: string;
+					description: string;
+					enabled: boolean;
+					tools: Array<{
+						name: string;
+						category: string;
+						enabled: boolean;
+						description: string;
+						required: boolean;
+						server_id?: string;
+					}>;
+				}>>("get_tool_configurations");
+
+				console.log(`📊 Loaded ${Object.keys(toolConfigsResponse).length} tool categories from backend`);
+
+				// Transform the response to match our TypeScript ToolCategory interface
+				const transformedConfigs: Record<string, ToolCategory> = {};
+
+				for (const [categoryKey, categoryData] of Object.entries(toolConfigsResponse)) {
+					// Transform tools to match ToolConfig interface
+					const transformedTools = categoryData.tools.map(tool => ({
+						name: tool.name,
+						category: tool.category,
+						enabled: tool.enabled,
+						description: tool.description,
+						required: tool.required,
+					}));
+
+					transformedConfigs[categoryKey] = {
+						name: categoryData.name,
+						description: categoryData.description,
+						enabled: categoryData.enabled,
+						tools: transformedTools,
+					};
+				}
+
+				console.log(`✅ Transformed ${Object.keys(transformedConfigs).length} tool categories for frontend`);
+				return transformedConfigs;
+			});
+
 			setToolConfigurations(configs);
 		} catch (error) {
 			console.error("Error loading tool configurations:", error);
-			toast.error("Failed to load tool configurations");
+			toast.error(`Failed to load tool configurations: ${error}`);
+
+			// Set empty configurations on error to prevent UI issues
+			setToolConfigurations({});
 		} finally {
 			setToolConfigLoading(false);
 		}
 	}, [invokeCommand]);
+
+
 
 	const loadMcpServers = useCallback(async () => {
 		setMcpLoading(true);
