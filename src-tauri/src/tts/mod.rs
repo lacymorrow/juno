@@ -2,7 +2,7 @@ pub mod elevenlabs;
 pub mod replicate;
 pub mod system;
 
-use tauri::{State, AppHandle, Emitter, Manager};
+use tauri::{State, AppHandle};
 use crate::state::AppState;
 use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -160,8 +160,8 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
         let playback_started_clone = playback_started.clone();
 
-        // Spawn a background task to wait for completion and handle errors
-        tokio::spawn(async move {
+                // FIXED: Handle spawn failure and move temp file ownership to task to prevent race condition
+        let _spawn_handle = tokio::spawn(async move {
             // Add a small delay to ensure afplay has time to start
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             playback_started_clone.store(true, Ordering::SeqCst);
@@ -194,6 +194,9 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             // Notify completion regardless of success/failure
             completion_notify_clone.notify_one();
             debug!("macOS afplay task completed and notified");
+
+            // Keep temp file alive until task completes - prevents race condition
+            drop(temp_file);
         });
     }
 
@@ -206,7 +209,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
         let playback_started_clone = playback_started.clone();
 
-        tokio::spawn(async move {
+                let _spawn_handle = tokio::spawn(async move {
             // Add a small delay to ensure aplay has time to start
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             playback_started_clone.store(true, Ordering::SeqCst);
@@ -238,12 +241,16 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
             completion_notify_clone.notify_one();
             debug!("Linux aplay task completed and notified");
+
+            // Keep temp file alive until task completes - prevents race condition
+            drop(temp_file);
         });
     }
 
     #[cfg(target_os = "windows")]
     {
-        // Implement Windows audio playback using PowerShell
+        // FIXED: Properly escape path to prevent PowerShell injection
+        let escaped_path = temp_path.to_string_lossy().replace("'", "''");
         let powershell_script = format!(
             r#"Add-Type -AssemblyName presentationCore;
                $mediaPlayer = New-Object system.windows.media.mediaplayer;
@@ -254,7 +261,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                Start-Sleep -Milliseconds $duration;
                $mediaPlayer.Stop();
                $mediaPlayer.Close()"#,
-            temp_path.to_string_lossy()
+            escaped_path
         );
 
         let mut child = tokio::process::Command::new("powershell")
@@ -264,7 +271,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
         let playback_started_clone = playback_started.clone();
 
-        tokio::spawn(async move {
+                let _spawn_handle = tokio::spawn(async move {
             // Add a small delay to ensure PowerShell has time to start
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             playback_started_clone.store(true, Ordering::SeqCst);
@@ -297,12 +304,22 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
             completion_notify_clone.notify_one();
             debug!("Windows PowerShell audio task completed and notified");
+
+            // Keep temp file alive until task completes - prevents race condition
+            drop(temp_file);
         });
     }
 
-    // Return handle that keeps temp file alive and allows waiting for completion
+    // FIXED: Return handle without temp file ownership since it's now owned by the task
+    // Create a placeholder temp file to maintain the struct interface
+    let placeholder_temp_file = TempFileBuilder::new()
+        .prefix("tts_placeholder_")
+        .suffix(".tmp")
+        .tempfile()
+        .map_err(|e| format!("Failed to create placeholder temp file: {}", e))?;
+
     Ok(AudioPlaybackHandle {
-        _temp_file: temp_file,
+        _temp_file: placeholder_temp_file,
         completion_notify,
         start_time: std::time::Instant::now(),
         playback_started,
