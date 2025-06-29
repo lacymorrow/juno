@@ -4,7 +4,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
 use std::io::{Write, BufRead, BufReader};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
 use tracing::{info, error};
