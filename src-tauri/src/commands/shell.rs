@@ -7,7 +7,7 @@ use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use std::thread;
-use tracing::info;
+use tracing::{info, error};
 use std::collections::HashMap;
 
 // ============================================================================
@@ -29,12 +29,14 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Anthropic Computer Use API compliant bash session manager
 /// Implements exact specification requirements for persistent sessions
-/// Fixed: Maintains a persistent bash process with proper I/O handling
+/// Fixed: Maintains a persistent bash process with proper I/O handling and pipe draining
 pub struct ShellSession {
     session_dir: std::path::PathBuf,
     session_id: String,
     process: Arc<Mutex<Child>>,
     timed_out: bool,
+    _stdout_drain_handle: Option<thread::JoinHandle<()>>,
+    _stderr_drain_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl ShellSession {
@@ -80,11 +82,53 @@ impl ShellSession {
                 .map_err(|e| format!("Failed to flush stdin: {}", e))?;
         }
 
+        // CRITICAL FIX: Drain stdout and stderr pipes to prevent blocking
+        // Take ownership of the stdout and stderr handles to prevent pipe buffer overflow
+        let stdout = bash_process.stdout.take()
+            .ok_or_else(|| "Failed to take stdout handle".to_string())?;
+        let stderr = bash_process.stderr.take()
+            .ok_or_else(|| "Failed to take stderr handle".to_string())?;
+
+        // Spawn background threads to continuously drain the pipes
+        let stdout_drain_handle = thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(_) => {
+                        // Discard output - we use file redirection for actual command output
+                        // This just prevents the pipe from filling up
+                    },
+                    Err(_) => {
+                        // Process probably died, exit the thread
+                        break;
+                    }
+                }
+            }
+        });
+
+        let stderr_drain_handle = thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(_) => {
+                        // Discard error output - we use file redirection for actual command errors
+                        // This just prevents the pipe from filling up
+                    },
+                    Err(_) => {
+                        // Process probably died, exit the thread
+                        break;
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             session_dir,
             session_id,
             process: Arc::new(Mutex::new(bash_process)),
             timed_out: false,
+            _stdout_drain_handle: Some(stdout_drain_handle),
+            _stderr_drain_handle: Some(stderr_drain_handle),
         })
     }
 
@@ -127,8 +171,49 @@ impl ShellSession {
                 .map_err(|e| format!("Failed to flush new shell stdin: {}", e))?;
         }
 
+        // CRITICAL FIX: Set up new pipe drainage for the restarted process
+        let stdout = bash_process.stdout.take()
+            .ok_or_else(|| "Failed to take stdout handle from new process".to_string())?;
+        let stderr = bash_process.stderr.take()
+            .ok_or_else(|| "Failed to take stderr handle from new process".to_string())?;
+
+        // Spawn new background threads to drain the pipes
+        let stdout_drain_handle = thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(_) => {
+                        // Discard output to prevent pipe overflow
+                    },
+                    Err(_) => {
+                        // Process died, exit thread
+                        break;
+                    }
+                }
+            }
+        });
+
+        let stderr_drain_handle = thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(_) => {
+                        // Discard error output to prevent pipe overflow
+                    },
+                    Err(_) => {
+                        // Process died, exit thread
+                        break;
+                    }
+                }
+            }
+        });
+
         // Replace the old process with the new one
         *self.process.lock().map_err(|e| format!("Failed to lock process for restart: {}", e))? = bash_process;
+
+        // Update drain handles
+        self._stdout_drain_handle = Some(stdout_drain_handle);
+        self._stderr_drain_handle = Some(stderr_drain_handle);
 
         self.timed_out = false;
         Ok(())
@@ -264,6 +349,10 @@ impl Drop for ShellSession {
             let _ = process_guard.kill();
             let _ = process_guard.wait();
         }
+
+        // Clean up pipe drain threads (they'll exit automatically when process dies)
+        // We don't need to explicitly join them since killing the process will cause
+        // the pipe reads to fail and the threads to exit
 
         // Clean up session directory when session is dropped
         let _ = std::fs::remove_dir_all(&self.session_dir);
