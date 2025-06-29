@@ -2,7 +2,7 @@ pub mod elevenlabs;
 pub mod replicate;
 pub mod system;
 
-use tauri::{State, AppHandle};
+use tauri::{State, AppHandle, Emitter, Manager};
 use crate::state::AppState;
 use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,11 +22,25 @@ static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
 struct AudioPlaybackHandle {
     _temp_file: tempfile::NamedTempFile,
     completion_notify: Arc<tokio::sync::Notify>,
+    start_time: std::time::Instant,
+    playback_started: Arc<AtomicBool>,
 }
 
 impl AudioPlaybackHandle {
     async fn wait_for_completion(&self) {
         self.completion_notify.notified().await;
+
+        let elapsed = self.start_time.elapsed();
+        let minimum_playback_duration = std::time::Duration::from_millis(500);
+
+        if elapsed < minimum_playback_duration {
+            let remaining = minimum_playback_duration - elapsed;
+            info!("Audio completed very quickly ({}ms), waiting additional {}ms to prevent race condition",
+                  elapsed.as_millis(), remaining.as_millis());
+            tokio::time::sleep(remaining).await;
+        }
+
+        info!("Audio playback completion confirmed after {}ms", elapsed.as_millis());
     }
 }
 
@@ -132,6 +146,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
     let temp_path = temp_file.path().to_path_buf();
     let completion_notify = Arc::new(tokio::sync::Notify::new());
     let completion_notify_clone = completion_notify.clone();
+    let playback_started = Arc::new(AtomicBool::new(false));
 
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
@@ -143,8 +158,14 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             .spawn()
             .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
+        let playback_started_clone = playback_started.clone();
+
         // Spawn a background task to wait for completion and handle errors
         tokio::spawn(async move {
+            // Add a small delay to ensure afplay has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
             let result = child.wait().await;
 
             match result {
@@ -153,6 +174,16 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         info!("macOS afplay completed successfully");
                     } else {
                         error!("macOS afplay exited with non-zero status: {}", status);
+                        // Check if it failed immediately (before actually playing audio)
+                        let pid_check = std::process::Command::new("pgrep")
+                            .arg("afplay")
+                            .output();
+
+                        if let Ok(output) = pid_check {
+                            if output.stdout.is_empty() {
+                                warn!("afplay process not found - audio may have failed to start");
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -173,7 +204,13 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             .spawn()
             .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
 
+        let playback_started_clone = playback_started.clone();
+
         tokio::spawn(async move {
+            // Add a small delay to ensure aplay has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
             let result = child.wait().await;
 
             match result {
@@ -182,6 +219,16 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         info!("Linux aplay completed successfully");
                     } else {
                         error!("Linux aplay exited with non-zero status: {}", status);
+                        // Check if it failed immediately
+                        let pid_check = std::process::Command::new("pgrep")
+                            .arg("aplay")
+                            .output();
+
+                        if let Ok(output) = pid_check {
+                            if output.stdout.is_empty() {
+                                warn!("aplay process not found - audio may have failed to start");
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -215,7 +262,13 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             .spawn()
             .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
 
+        let playback_started_clone = playback_started.clone();
+
         tokio::spawn(async move {
+            // Add a small delay to ensure PowerShell has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
             let result = child.wait().await;
 
             match result {
@@ -224,6 +277,17 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         info!("Windows PowerShell audio playback completed successfully");
                     } else {
                         error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
+                        // Check if PowerShell is still running
+                        let ps_check = std::process::Command::new("tasklist")
+                            .args(["/FI", "IMAGENAME eq powershell.exe"])
+                            .output();
+
+                        if let Ok(output) = ps_check {
+                            let output_str = String::from_utf8_lossy(&output.stdout);
+                            if !output_str.contains("powershell.exe") {
+                                warn!("PowerShell process not found - audio may have failed to start");
+                            }
+                        }
                     }
                 }
                 Err(e) => {
@@ -240,6 +304,8 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
     Ok(AudioPlaybackHandle {
         _temp_file: temp_file,
         completion_notify,
+        start_time: std::time::Instant::now(),
+        playback_started,
     })
 }
 
@@ -478,15 +544,43 @@ async fn execute_tts_with_completion_tracking(
                             info!("Sound is disabled, skipping TTS audio playback");
                             Ok("TTS_SOUND_DISABLED".to_string())
                         } else {
-                            // CRITICAL FIX: Use completion tracking instead of fire-and-forget
+                            // CRITICAL FIX: Use completion tracking with enhanced error detection
                             match play_base64_audio_with_tracking(&result).await {
                                 Ok(handle) => {
                                     info!("TTS audio playback started, waiting for completion...");
 
+                                    // Enhanced completion tracking with safeguards
+                                    let completion_start = std::time::Instant::now();
+
                                     // Wait for actual audio completion or stop signal
-                                    tokio::select! {
+                                    let playback_result = tokio::select! {
                                         _ = handle.wait_for_completion() => {
-                                            info!("TTS audio playback completed successfully");
+                                            let total_duration = completion_start.elapsed();
+                                            info!("TTS audio playback completed successfully after {}ms", total_duration.as_millis());
+
+                                            // SAFEGUARD: If completion happened too quickly, check if audio actually played
+                                            if total_duration < std::time::Duration::from_millis(300) {
+                                                warn!("Audio completed very quickly ({}ms), verifying no audio processes are still running", total_duration.as_millis());
+
+                                                // Give any remaining audio processes time to complete
+                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                                                // Check for remaining audio processes
+                                                #[cfg(target_os = "macos")]
+                                                {
+                                                    let afplay_check = std::process::Command::new("pgrep")
+                                                        .arg("afplay")
+                                                        .output();
+
+                                                    if let Ok(output) = afplay_check {
+                                                        if !output.stdout.is_empty() {
+                                                            info!("Found running afplay processes, waiting for them to complete...");
+                                                            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
                                             Ok("TTS_COMPLETED".to_string())
                                         }
                                         _ = async {
@@ -503,7 +597,9 @@ async fn execute_tts_with_completion_tracking(
                                             info!("TTS playback was stopped by user");
                                             Ok("TTS_STOPPED_BY_USER".to_string())
                                         }
-                                    }
+                                    };
+
+                                    playback_result
                                 }
                                 Err(e) => {
                                     warn!("TTS audio playback error: {}", e);

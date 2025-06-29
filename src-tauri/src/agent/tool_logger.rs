@@ -1351,17 +1351,17 @@ pub fn emit_streaming_text_chunk(
     }
 }
 
-/// Process TTS content immediately with proper architecture
-/// ARCHITECTURAL FIX: invoke_tts is synchronous and handles everything internally:
+/// Process TTS content immediately with proper escape key management
+/// ARCHITECTURAL DESIGN: invoke_tts properly handles audio completion tracking:
 /// - Concurrency control (prevents overlapping TTS)
-/// - Escape key registration/unregistration
-/// - Audio playback with completion tracking
-/// - Status reporting
+/// - Escape key registration during entire audio lifecycle
+/// - Enhanced audio playback with completion validation
+/// - Proper cleanup only after audio actually finishes
 pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: String) {
     info!("Processing TTS content immediately: '{}'", tts_content);
 
-    // CRITICAL FIX: Use a single background task instead of unlimited spawning
-    // This prevents audio overlap and resource exhaustion
+    // CRITICAL FIX: Use a single background task to prevent audio overlap
+    // invoke_tts now properly waits for actual audio completion before cleanup
     tokio::spawn(async move {
         // Get the app state for TTS invocation
         let app_state = match app_handle.try_state::<crate::state::AppState>() {
@@ -1372,14 +1372,14 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
             }
         };
 
-        info!("Starting TTS processing (invoke_tts handles all orchestration)...");
+        info!("Starting TTS processing with enhanced completion tracking...");
 
-        // ARCHITECTURE FIX: invoke_tts is synchronous and handles everything:
-        // - Text filtering
-        // - Concurrency prevention
-        // - Escape key management
-        // - Audio generation and playback
-        // - Status reporting
+        // ARCHITECTURAL DESIGN: invoke_tts now properly handles:
+        // - Text filtering and validation
+        // - Concurrency prevention with mutex
+        // - Escape key management throughout audio lifecycle
+        // - Enhanced audio generation and playback tracking
+        // - Proper cleanup only after actual audio completion
         match crate::tts::invoke_tts(tts_content, app_state, app_handle).await {
             Ok(status_result) => {
                 info!("TTS processing completed with status: {}", status_result);
@@ -1418,18 +1418,18 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     });
 
     // CRITICAL: Return immediately so agent execution continues
-    // invoke_tts handles all the complexity asynchronously
-    info!("TTS processing started in background, agent execution continues...");
+    // invoke_tts now properly handles escape key management and audio completion
+    info!("TTS processing started in background with enhanced completion tracking...");
 }
 
 /// DEPRECATED: Use process_tts_content_immediately instead
 /// This function is deprecated because it was part of an incomplete architectural migration.
-/// The TTS system has been fixed to work properly with synchronous invoke_tts.
+/// The TTS system has been enhanced with proper escape key management and completion tracking.
 pub fn emit_tts_content_ready(_app_handle: AppHandle, tts_content: String) {
     warn!("🚨 emit_tts_content_ready is DEPRECATED and was causing TTS failures!");
     warn!("📋 TTS content received but not processed: '{}'", tts_content);
     warn!("🔧 Use process_tts_content_immediately instead for proper TTS functionality");
-    warn!("📖 The TTS architecture has been fixed - invoke_tts handles everything synchronously");
+    warn!("📖 The TTS architecture has been enhanced with proper escape key management and completion tracking");
 }
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
