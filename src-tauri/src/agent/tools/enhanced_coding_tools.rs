@@ -685,6 +685,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
                         }
                     }
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "plan_multi_file_changes".to_string(),
@@ -704,6 +706,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
                     },
                     "required": ["description", "files"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "communicate_with_cursor".to_string(),
@@ -731,6 +735,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
                     },
                     "required": ["type", "message"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "generate_code_review".to_string(),
@@ -751,6 +757,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
                     },
                     "required": ["files"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "smart_create_file".to_string(),
@@ -775,6 +783,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
                     },
                     "required": ["file_path"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
         ])
     }
