@@ -6,13 +6,16 @@
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, LazyLock};
 use tauri::{AppHandle, Builder, App, Manager, State};
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
+use crate::agent::providers::factory::BrainFactory;
+use crate::constants::timeouts;
+use crate::state::AppState;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -106,13 +109,16 @@ pub fn validate_environment_variables() {
 
 // Rate limiter and cache for desktop engine initialization
 // Stores (last_init_timestamp, cached_desktop_instance)
-static DESKTOP_CACHE: OnceLock<Mutex<(u64, Option<Arc<Desktop>>)>> = OnceLock::new();
-const DESKTOP_INIT_COOLDOWN_MS: u64 = 5000; // 5 seconds
+static DESKTOP_CACHE: LazyLock<Mutex<(u64, Option<Arc<Desktop>>)>> = LazyLock::new(|| Mutex::new((0, None)));
+const DESKTOP_INIT_COOLDOWN_MS: u64 = 2000; // 2 second cooldown
+
+// Permission check caching to prevent redundant checks
+static PERMISSION_CACHE: LazyLock<Mutex<Option<(bool, Instant)>>> = LazyLock::new(|| Mutex::new(None));
+const PERMISSION_CACHE_DURATION: Duration = Duration::from_secs(10); // 10 second cache
 
 /// Initialize the Desktop Automation Engine with proper error handling and rate limiting
 pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
-    let cache = DESKTOP_CACHE.get_or_init(|| Mutex::new((0, None)));
-    let mut cache_guard = match cache.lock() {
+    let mut cache_guard = match DESKTOP_CACHE.lock() {
         Ok(guard) => guard,
         Err(e) => {
             warn!("Failed to acquire desktop engine cache lock: {}", e);
@@ -135,6 +141,16 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
         return cached_desktop.clone();
     }
 
+    // Check permission cache first to avoid redundant permission checks
+    if let Ok(perm_cache) = PERMISSION_CACHE.lock() {
+        if let Some((has_permissions, timestamp)) = *perm_cache {
+            if timestamp.elapsed() < PERMISSION_CACHE_DURATION && !has_permissions {
+                debug!("Permission cache indicates no permissions, skipping desktop initialization");
+                return None;
+            }
+        }
+    }
+
     // Update timestamp before attempting initialization
     *last_init = now;
 
@@ -142,6 +158,12 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     let result = match desktop_instance_result {
         Ok(instance) => {
             info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");
+
+            // Update permission cache with success
+            if let Ok(mut perm_cache) = PERMISSION_CACHE.lock() {
+                *perm_cache = Some((true, Instant::now()));
+            }
+
             Some(Arc::new(instance))
         },
         Err(e) => {
@@ -154,6 +176,11 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
             if error_str.contains("permission") || error_str.contains("accessibility") || error_str.contains("denied") {
                 info!("Permission-related error detected - the app's permission flow will guide you through setup");
                 info!("System Settings may have opened automatically to grant permissions");
+
+                // Update permission cache with failure
+                if let Ok(mut perm_cache) = PERMISSION_CACHE.lock() {
+                    *perm_cache = Some((false, Instant::now()));
+                }
             } else {
                 warn!("Unexpected Desktop initialization error: {}", e);
             }
@@ -179,6 +206,14 @@ pub fn init_ai_providers() -> Result<(), String> {
             info!("Continuing with environment variables or fallback defaults");
             Err(e.to_string())
         }
+    }
+}
+
+/// Clear permission cache to force re-check (useful after permission changes)
+pub fn clear_permission_cache() {
+    if let Ok(mut perm_cache) = PERMISSION_CACHE.lock() {
+        *perm_cache = None;
+        debug!("Cleared permission cache");
     }
 }
 
