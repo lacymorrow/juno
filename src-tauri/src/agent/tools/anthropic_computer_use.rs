@@ -633,14 +633,14 @@ pub async fn execute_computer_tool(
 
             let scroll_direction = input["scroll_direction"].as_str()
                 .ok_or_else(|| "Missing 'scroll_direction' parameter".to_string())?;
-            let scroll_clicks = input["scroll_clicks"].as_u64().unwrap_or(3);
+            let scroll_amount = input["scroll_amount"].as_u64().unwrap_or(3);
 
             // Transform coordinates from scaled screenshot to screen coordinates
             let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
             crate::commands::window::scroll_window(
                 scroll_direction.to_string(),
-                scroll_clicks as f64,
+                scroll_amount as f64,
                 Some(screen_x),
                 Some(screen_y),
                 app_handle.clone(),
@@ -970,9 +970,9 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                     "type": "string",
                     "description": "Direction to scroll: 'up', 'down', 'left', 'right'"
                 },
-                "scroll_clicks": {
+                "scroll_amount": {
                     "type": "number",
-                    "description": "Number of scroll clicks (default: 3)"
+                    "description": "Amount to scroll (default: 3)"
                 },
                 "seconds": {
                     "type": "number",

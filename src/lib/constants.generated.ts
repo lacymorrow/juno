@@ -938,7 +938,6 @@ export const FILE_EXTENSIONS = {
   PARAMETERS_DURATION_MS: 'duration_ms',
   PARAMETERS_DURATION: 'duration',
   PARAMETERS_SCROLL_DIRECTION: 'scroll_direction',
-  PARAMETERS_SCROLL_CLICKS: 'scroll_clicks',
   PARAMETERS_SECONDS: 'seconds',
   PARAMETERS_COMMAND: 'command',
   PARAMETERS_PATH: 'path',
