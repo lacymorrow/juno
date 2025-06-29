@@ -433,6 +433,8 @@ impl MCPServerConnection {
             name: prefixed_name,
             description: format!("[{}] {}", self.config.name, description),
             input_schema,
+            api_type: None,
+            beta_flag: None,
         })
     }
 

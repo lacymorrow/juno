@@ -296,6 +296,8 @@ mod timer_tools_impl {
                 },
                 "required": ["delay_seconds", "context", "description"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -435,6 +437,8 @@ mod timer_tools_impl {
                 },
                 "required": ["context", "description"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -644,6 +648,8 @@ mod timer_tools_impl {
                 },
                 "required": ["file_path", "monitor_type", "context", "description"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -846,6 +852,8 @@ mod timer_tools_impl {
                 },
                 "required": ["timer_id"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -909,6 +917,8 @@ mod timer_tools_impl {
                 "properties": {},
                 "additionalProperties": false
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -985,6 +995,8 @@ mod timer_tools_impl {
                 "properties": {},
                 "additionalProperties": false
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
