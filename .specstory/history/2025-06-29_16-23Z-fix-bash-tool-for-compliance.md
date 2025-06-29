@@ -1484,4 +1484,3 @@ The bash tool now **fully complies** with the Anthropic Computer Use specificati
 Plus the critical **freezing issue** has been eliminated.
 
 ---
-

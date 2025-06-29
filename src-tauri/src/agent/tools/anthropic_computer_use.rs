@@ -6,21 +6,19 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
-// Keep the API types and tool versioning from errors branch (enhanced functionality)
-use crate::constants::api::{computer_use_api_types, beta_flags};
-use super::tool_versioning::{ToolVersionManager, ToolVersionConfig, ApiVersion};
+use crate::commands::shell::BashResult;
+// Keep the tool versioning from errors branch (enhanced functionality)
+use super::tool_versioning::{ToolVersionManager, ToolVersionConfig};
 // Keep the mouse command imports from main branch (proper command usage)
 use crate::commands::mouse::{
     left_click, right_click, middle_click, double_click, triple_click,
-    left_click_drag, mouse_move as mouse_move_command,
-    left_mouse_down, left_mouse_up
+    left_click_drag
 };
 use serde_json::{json, Value};
 use tauri::Manager;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::agent::core::AgentError;
 use crate::utils::coordinate_validation::{
     validate_coordinate_parameter,
     validate_coordinate_pair,
@@ -719,7 +717,7 @@ pub async fn execute_computer_tool(
     result
 }
 
-/// Execute bash tool
+/// Execute bash tool - Anthropic Computer Use API compliant
 pub async fn execute_bash_tool(
     app_handle: &tauri::AppHandle,
     input: Value,
@@ -727,62 +725,45 @@ pub async fn execute_bash_tool(
     let command = input["command"].as_str()
         .ok_or_else(|| "Missing 'command' parameter".to_string())?;
 
+    // Handle restart parameter if provided (Anthropic Computer Use API requirement)
+    let restart = input["restart"].as_bool().unwrap_or(false);
+
     let state_manager = app_handle.state::<AppState>();
 
-    // Use the bash command execution
+    // Use the Anthropic-compliant bash command execution - NO STRING COMPARISONS
     let result = crate::commands::shell::bash_command(
         app_handle.clone(),
         state_manager,
         command.to_string(),
-        None, // timeout_seconds
-        None, // restart
+        None, // timeout_seconds (uses default 120s per specification)
+        Some(restart), // restart parameter
         None, // debug_mode
     ).await.map_err(|e| format!("Bash command failed: {}", e))?;
 
-    // Log the raw result for debugging
-    info!("Raw bash_command result: {}", result);
+    // Log the result for debugging
+    info!("Anthropic compliant bash result: {:?}", result);
 
-    // The bash_command function returns a JSON string containing stdout, stderr, exit_code, etc.
-    // We need to parse this JSON to extract the specific fields we want to return
-    let result_json: Value = serde_json::from_str(&result)
-        .map_err(|e| {
-            // If JSON parsing fails, provide detailed error information
-            error!("Failed to parse bash_command result as JSON. Error: {}, Raw result: '{}'", e, result);
-            format!("Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'", e, result)
-        })?;
-
-    // Extract stdout and exit_code from the parsed JSON with better error handling
-    let stdout = result_json.get("stdout")
-        .and_then(|v| v.as_str())
-        .unwrap_or_else(|| {
-            warn!("Missing or invalid 'stdout' field in bash command result: {}", result_json);
-            ""
-        });
-
-    let exit_code = result_json.get("exit_code")
-        .and_then(|v| v.as_i64())
-        .unwrap_or_else(|| {
-            warn!("Missing or invalid 'exit_code' field in bash command result: {}", result_json);
-            -1
-        });
-
-    // Also extract stderr for completeness (even though we don't return it in the final result)
-    let stderr = result_json.get("stderr")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let success = result_json.get("success")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(exit_code == 0);
-
-    info!("Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}",
-          stdout, stderr, exit_code, success);
-
-    // Return the result in the format expected by the Anthropic Computer Use API
-    Ok(json!({
-        "output": stdout,
-        "exit_code": exit_code
-    }))
+    // Handle structured result - NO STRING COMPARISONS NEEDED
+    match result {
+        crate::commands::shell::BashResult::Restarted => {
+            // Tool was restarted - return official Anthropic message
+            Ok(json!({
+                "output": "tool has been restarted."
+            }))
+        }
+        crate::commands::shell::BashResult::Output(output) => {
+            // Regular output
+            Ok(json!({
+                "output": output
+            }))
+        }
+        crate::commands::shell::BashResult::CommandResult { output, success: _ } => {
+            // Command execution result (success flag is informational)
+            Ok(json!({
+                "output": output
+            }))
+        }
+    }
 }
 
 /// Execute str_replace_based_edit_tool
