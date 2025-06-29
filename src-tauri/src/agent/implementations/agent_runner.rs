@@ -84,49 +84,10 @@ where
         &self,
         all_tools: &[crate::agent::core::ToolDefinition],
     ) -> Vec<crate::agent::core::ToolDefinition> {
-        // Check if this brain is an orchestrator by checking if it only has delegation tools
-        let has_delegation_tools = all_tools
-            .iter()
-            .any(|tool| tool.name.starts_with("delegate_to_"));
-
-        // If this tool provider has delegation tools, it's likely an orchestrator
-        // Only allow delegation tools and basic coordination tools
-        if has_delegation_tools {
-            let delegation_tool_count = all_tools
-                .iter()
-                .filter(|tool| tool.name.starts_with("delegate_to_"))
-                .count();
-
-            // If most tools are delegation tools, this is an orchestrator
-            if delegation_tool_count > 0
-                && (delegation_tool_count as f32 / all_tools.len() as f32) > 0.3
-            {
-                let filtered_tools: Vec<crate::agent::core::ToolDefinition> = all_tools
-                    .iter()
-                    .filter(|tool| {
-                        // Allow delegation tools
-                        if tool.name.starts_with("delegate_to_") {
-                            return true;
-                        }
-
-                        // Allow basic coordination tools that orchestrators might need
-                        match tool.name.as_str() {
-                            "analyze_task" | "plan_workflow" | "coordinate_agents"
-                            | "check_task_status" | "summarize_results" => true,
-                            _ => false,
-                        }
-                    })
-                    .cloned()
-                    .collect();
-
-                log::info!("Orchestrator brain detected: filtering tools from {} to {} (keeping only delegation and coordination tools)",
-                    all_tools.len(), filtered_tools.len());
-                return filtered_tools;
-            }
-        }
-
-        // For non-orchestrator brains, return all tools
-        // The specialist agents will get their tools filtered by ToolMappingService elsewhere
+        // No filtering needed - tool providers are correctly separated at creation:
+        // - Single agent: Gets all tools via agent_tool_provider
+        // - Multi-agent orchestrator: Gets only delegation tools via orchestrator_tool_provider
+        // - Specialists: Get domain-specific tools via their own providers
         all_tools.to_vec()
     }
 
