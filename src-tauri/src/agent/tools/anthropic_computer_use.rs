@@ -27,6 +27,7 @@ use crate::utils::coordinate_validation::{
 
 // --- Security and Validation Helpers ---
 
+
 /// Security configuration for text editor operations
 struct SecurityConfig {
     max_file_size: usize,
