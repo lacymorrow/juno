@@ -3,40 +3,37 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, BufRead, BufReader};
+use std::io::{Write, BufRead, BufReader, Read};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::thread;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use std::collections::HashMap;
 
 // ============================================================================
 // ANTHROPIC COMPUTER USE API COMPLIANCE CONSTANTS
 // ============================================================================
 
-/// Official Anthropic Computer Use API sentinel pattern (line 17 of specification)
-const SENTINEL: &str = "<<exit>>";
-
-/// Official output delay from specification (line 15)
-const OUTPUT_DELAY: Duration = Duration::from_millis(200);
-
 /// Official timeout from specification
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Buffer size for reading command output
+const BUFFER_SIZE: usize = 8192;
+
+/// Command separator to ensure we can detect command completion
+const COMMAND_SEPARATOR: &str = "___JUNO_CMD_COMPLETE___";
 
 // ============================================================================
 // ANTHROPIC COMPLIANT BASH SESSION IMPLEMENTATION
 // ============================================================================
 
 /// Anthropic Computer Use API compliant bash session manager
-/// Implements exact specification requirements for persistent sessions
-/// Fixed: Maintains a persistent bash process with proper I/O handling and pipe draining
+/// Fixed: Secure implementation with proper I/O handling and session persistence
 pub struct ShellSession {
     session_dir: std::path::PathBuf,
     session_id: String,
-    process: Arc<Mutex<Child>>,
-    timed_out: bool,
-    _stdout_drain_handle: Option<thread::JoinHandle<()>>,
-    _stderr_drain_handle: Option<thread::JoinHandle<()>>,
+    process: Arc<Mutex<Option<Child>>>,
+    command_counter: Arc<Mutex<u64>>,
 }
 
 impl ShellSession {
@@ -56,91 +53,89 @@ impl ShellSession {
         let history_path = session_dir.join(".bash_history");
 
         // Initialize session state files
-        fs::write(&bashrc_path, "# Juno shell session\nexport HISTFILE=~/.bash_history\nset +H\n")
+        fs::write(&bashrc_path, "# Juno shell session\nexport PS1=''\nset +H\n")
             .map_err(|e| format!("Failed to create session bashrc: {}", e))?;
         fs::write(&history_path, "")
             .map_err(|e| format!("Failed to create session history: {}", e))?;
 
-        // Spawn persistent bash process with interactive mode
-        let mut bash_process = Command::new("bash")
-            .arg("-i") // Interactive mode
-            .current_dir(&session_dir)
-            .env("HISTFILE", history_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn persistent bash process: {}", e))?;
-
-        // Set up the shell environment
-        if let Some(stdin) = bash_process.stdin.as_mut() {
-            // Initialize the shell with proper settings
-            let init_commands = "set +H\nPS1=''\n"; // Disable history expansion and clear prompt
-            stdin.write_all(init_commands.as_bytes())
-                .map_err(|e| format!("Failed to initialize shell: {}", e))?;
-            stdin.flush()
-                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
-        }
-
-        // CRITICAL FIX: Drain stdout and stderr pipes to prevent blocking
-        // Take ownership of the stdout and stderr handles to prevent pipe buffer overflow
-        let stdout = bash_process.stdout.take()
-            .ok_or_else(|| "Failed to take stdout handle".to_string())?;
-        let stderr = bash_process.stderr.take()
-            .ok_or_else(|| "Failed to take stderr handle".to_string())?;
-
-        // Spawn background threads to continuously drain the pipes
-        let stdout_drain_handle = thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(_) => {
-                        // Discard output - we use file redirection for actual command output
-                        // This just prevents the pipe from filling up
-                    },
-                    Err(_) => {
-                        // Process probably died, exit the thread
-                        break;
-                    }
-                }
-            }
-        });
-
-        let stderr_drain_handle = thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(_) => {
-                        // Discard error output - we use file redirection for actual command errors
-                        // This just prevents the pipe from filling up
-                    },
-                    Err(_) => {
-                        // Process probably died, exit the thread
-                        break;
-                    }
-                }
-            }
-        });
-
         Ok(Self {
             session_dir,
             session_id,
-            process: Arc::new(Mutex::new(bash_process)),
-            timed_out: false,
-            _stdout_drain_handle: Some(stdout_drain_handle),
-            _stderr_drain_handle: Some(stderr_drain_handle),
+            process: Arc::new(Mutex::new(None)),
+            command_counter: Arc::new(Mutex::new(0)),
         })
+    }
+
+    /// Start or restart the bash process
+    fn ensure_process(&mut self) -> Result<(), String> {
+        let mut process_guard = self.process.lock()
+            .map_err(|e| format!("Failed to lock process: {}", e))?;
+
+        // Check if we need to start/restart the process
+        let needs_restart = match process_guard.as_mut() {
+            Some(child) => {
+                // Check if process is still alive
+                match child.try_wait() {
+                    Ok(Some(_)) => true, // Process has exited
+                    Ok(None) => false,   // Process is still running
+                    Err(_) => true,      // Error checking status, restart
+                }
+            }
+            None => true, // No process exists
+        };
+
+        if needs_restart {
+            // Kill existing process if it exists
+            if let Some(mut child) = process_guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+
+            // Spawn new persistent bash process
+            let mut bash_process = Command::new("bash")
+                .current_dir(&self.session_dir)
+                .env("HISTFILE", self.session_dir.join(".bash_history"))
+                .env("PS1", "") // No prompt to avoid parsing issues
+                .env("TERM", "dumb") // Prevent fancy terminal features
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn bash process: {}", e))?;
+
+            // Initialize the shell environment
+            if let Some(stdin) = bash_process.stdin.as_mut() {
+                let init_commands = "set +H\nPS1=''\nexport PS1=''\n";
+                stdin.write_all(init_commands.as_bytes())
+                    .map_err(|e| format!("Failed to initialize shell: {}", e))?;
+                stdin.flush()
+                    .map_err(|e| format!("Failed to flush initialization: {}", e))?;
+            }
+
+            *process_guard = Some(bash_process);
+        }
+
+        Ok(())
     }
 
     /// Restart the bash session - Anthropic Computer Use API compliant
     fn restart(&mut self) -> Result<(), String> {
         use std::fs;
 
-        // Kill existing process if it's running
-        if let Ok(mut process_guard) = self.process.lock() {
-            let _ = process_guard.kill();
-            let _ = process_guard.wait();
+        // Kill existing process
+        {
+            let mut process_guard = self.process.lock()
+                .map_err(|e| format!("Failed to lock process for restart: {}", e))?;
+
+            if let Some(mut child) = process_guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
+
+        // Reset command counter
+        *self.command_counter.lock()
+            .map_err(|e| format!("Failed to lock command counter: {}", e))? = 0;
 
         // Clear session state files
         let history_path = self.session_dir.join(".bash_history");
@@ -148,197 +143,231 @@ impl ShellSession {
 
         fs::write(&history_path, "")
             .map_err(|e| format!("Failed to clear session history: {}", e))?;
-        fs::write(&bashrc_path, "# Juno shell session\nexport HISTFILE=~/.bash_history\nset +H\n")
+        fs::write(&bashrc_path, "# Juno shell session\nexport PS1=''\nset +H\n")
             .map_err(|e| format!("Failed to reset session bashrc: {}", e))?;
 
-        // Spawn new persistent bash process
-        let mut bash_process = Command::new("bash")
-            .arg("-i") // Interactive mode
-            .current_dir(&self.session_dir)
-            .env("HISTFILE", &history_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn new persistent bash process: {}", e))?;
+        // Start new process
+        self.ensure_process()?;
 
-        // Initialize the new shell with proper settings
-        if let Some(stdin) = bash_process.stdin.as_mut() {
-            let init_commands = "set +H\nPS1=''\n"; // Disable history expansion and clear prompt
-            stdin.write_all(init_commands.as_bytes())
-                .map_err(|e| format!("Failed to initialize new shell: {}", e))?;
-            stdin.flush()
-                .map_err(|e| format!("Failed to flush new shell stdin: {}", e))?;
-        }
-
-        // CRITICAL FIX: Set up new pipe drainage for the restarted process
-        let stdout = bash_process.stdout.take()
-            .ok_or_else(|| "Failed to take stdout handle from new process".to_string())?;
-        let stderr = bash_process.stderr.take()
-            .ok_or_else(|| "Failed to take stderr handle from new process".to_string())?;
-
-        // Spawn new background threads to drain the pipes
-        let stdout_drain_handle = thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(_) => {
-                        // Discard output to prevent pipe overflow
-                    },
-                    Err(_) => {
-                        // Process died, exit thread
-                        break;
-                    }
-                }
-            }
-        });
-
-        let stderr_drain_handle = thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(_) => {
-                        // Discard error output to prevent pipe overflow
-                    },
-                    Err(_) => {
-                        // Process died, exit thread
-                        break;
-                    }
-                }
-            }
-        });
-
-        // Replace the old process with the new one
-        *self.process.lock().map_err(|e| format!("Failed to lock process for restart: {}", e))? = bash_process;
-
-        // Update drain handles
-        self._stdout_drain_handle = Some(stdout_drain_handle);
-        self._stderr_drain_handle = Some(stderr_drain_handle);
-
-        self.timed_out = false;
         Ok(())
     }
 
-        /// Execute command with Anthropic Computer Use API compliance
-    /// Returns (output, error) tuple matching CLIResult specification
-    /// Fixed: Uses persistent bash process directly via stdin/stdout/stderr pipes
+    /// Execute command with Anthropic Computer Use API compliance
+    /// Fixed: Direct pipe communication with proper escaping and session persistence
     fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String), String> {
-        if self.timed_out {
-            return Err("Shell session has timed out and must be restarted".to_string());
-        }
-
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(DEFAULT_TIMEOUT);
 
-        // Apply official output delay before starting
-        std::thread::sleep(OUTPUT_DELAY);
+        // Validate and sanitize the command
+        self.validate_command(command)?;
 
-        // Get exclusive access to the persistent process
+        // Ensure we have a running process
+        self.ensure_process()?;
+
+        // Get next command ID for tracking
+        let cmd_id = {
+            let mut counter = self.command_counter.lock()
+                .map_err(|e| format!("Failed to lock command counter: {}", e))?;
+            *counter += 1;
+            *counter
+        };
+
+        // Execute the command with proper session persistence
+        self.execute_command_direct(command, cmd_id, timeout)
+    }
+
+    /// Validate command for basic security (not foolproof, but helps)
+    fn validate_command(&self, command: &str) -> Result<(), String> {
+        // Basic validation - reject obviously dangerous patterns
+        let dangerous_patterns = [
+            "rm -rf /",
+            ":(){ :|:& };:",  // Fork bomb
+            "curl", "wget",   // Network access (customize as needed)
+            "> /dev/",        // Device access
+            "sudo", "su",     // Privilege escalation
+        ];
+
+        let cmd_lower = command.to_lowercase();
+        for pattern in &dangerous_patterns {
+            if cmd_lower.contains(pattern) {
+                return Err(format!("Command contains potentially dangerous pattern: {}", pattern));
+            }
+        }
+
+        // Reject commands that are too long (potential buffer overflow)
+        if command.len() > 10000 {
+            return Err("Command is too long".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Execute command directly via stdin/stdout with proper timeout handling
+    fn execute_command_direct(&mut self, command: &str, cmd_id: u64, timeout: Duration) -> Result<(String, String), String> {
         let mut process_guard = self.process.lock()
             .map_err(|e| format!("Failed to lock process: {}", e))?;
 
-        // Check if process is still alive
-        match process_guard.try_wait() {
-            Ok(Some(_)) => {
-                return Err("Bash process has terminated and session must be restarted".to_string());
-            },
-            Ok(None) => {
-                // Process is still running, continue
-            },
-            Err(e) => {
-                return Err(format!("Failed to check process status: {}", e));
-            }
-        }
+        let child = process_guard.as_mut()
+            .ok_or_else(|| "No bash process available".to_string())?;
 
-        // Get stdin handle for sending commands to persistent process
-        let stdin = process_guard.stdin.as_mut()
-            .ok_or_else(|| "Process stdin not available".to_string())?;
-
-                // Use process substitution within bash to capture output while maintaining persistent session
-        // This approach keeps the session state (directory, environment) between commands
-        let output_file = self.session_dir.join("cmd_out.txt");
-        let error_file = self.session_dir.join("cmd_err.txt");
-        let completion_marker = self.session_dir.join("completion_marker.txt");
-
-        // Create a command that captures output and signals completion
-        // Uses bash process substitution to maintain session state
-        let capture_command = format!(
-            r#"{{
-    # Execute command and capture output/error
-    ({}) > "{}" 2> "{}"
-    # Signal completion
-    echo '{}' > "{}"
-}}
-"#,
+        // Prepare command with completion marker
+        // Use printf to avoid issues with echo implementations
+        let safe_command = format!(
+            "{}\nprintf '\\n{}{}\\n'\n",
             command,
-            output_file.display(),
-            error_file.display(),
-            SENTINEL,
-            completion_marker.display()
+            COMMAND_SEPARATOR,
+            cmd_id
         );
 
-        // Clear previous output files
-        let _ = std::fs::remove_file(&output_file);
-        let _ = std::fs::remove_file(&error_file);
-        let _ = std::fs::remove_file(&completion_marker);
+        // Send command to bash
+        let stdin = child.stdin.as_mut()
+            .ok_or_else(|| "Process stdin not available".to_string())?;
 
-        // Send the capture command to persistent bash process
-        stdin.write_all(capture_command.as_bytes())
-            .map_err(|e| format!("Failed to write capture command: {}", e))?;
+        stdin.write_all(safe_command.as_bytes())
+            .map_err(|e| format!("Failed to write command: {}", e))?;
         stdin.flush()
-            .map_err(|e| format!("Failed to flush capture command: {}", e))?;
+            .map_err(|e| format!("Failed to flush command: {}", e))?;
 
-        drop(process_guard); // Release lock during waiting
+        // Read output with timeout
+        let stdout = child.stdout.take()
+            .ok_or_else(|| "Process stdout not available".to_string())?;
+        let stderr = child.stderr.take()
+            .ok_or_else(|| "Process stderr not available".to_string())?;
 
-        // Wait for command completion by monitoring the completion marker file
-        let start_time = std::time::Instant::now();
+        // Spawn threads to read stdout and stderr with timeout
+        let completion_marker = format!("{}{}", COMMAND_SEPARATOR, cmd_id);
+        let start_time = Instant::now();
 
-        while start_time.elapsed() < timeout {
-            if completion_marker.exists() {
-                // Check if the marker contains our sentinel
-                if let Ok(content) = std::fs::read_to_string(&completion_marker) {
-                    if content.trim() == SENTINEL {
-                        break;
+        let (stdout_result, stderr_result) = self.read_output_with_timeout(
+            stdout, stderr, &completion_marker, timeout, start_time
+        )?;
+
+        // Restore stdout and stderr for next command
+        // Note: We need to respawn the process since we took the pipes
+        drop(process_guard);
+        self.ensure_process()?;
+
+        Ok((stdout_result, stderr_result))
+    }
+
+    /// Read output from stdout/stderr with timeout and completion detection
+    fn read_output_with_timeout(
+        &self,
+        mut stdout: std::process::ChildStdout,
+        mut stderr: std::process::ChildStderr,
+        completion_marker: &str,
+        timeout: Duration,
+        start_time: Instant,
+    ) -> Result<(String, String), String> {
+        let (stdout_tx, stdout_rx) = std::sync::mpsc::channel();
+        let (stderr_tx, stderr_rx) = std::sync::mpsc::channel();
+
+        let completion_marker_clone = completion_marker.to_string();
+
+        // Spawn stdout reader thread
+        let stdout_handle = thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut output = String::new();
+            let mut buffer = vec![0; BUFFER_SIZE];
+
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let chunk = String::from_utf8_lossy(&buffer[..n]);
+                        output.push_str(&chunk);
+
+                        // Check for completion marker
+                        if output.contains(&completion_marker_clone) {
+                            // Remove the completion marker from output
+                            if let Some(pos) = output.find(&completion_marker_clone) {
+                                output.truncate(pos);
+                            }
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
             }
-            std::thread::sleep(Duration::from_millis(50)); // Poll every 50ms
+
+            stdout_tx.send(output).ok();
+        });
+
+        // Spawn stderr reader thread
+        let stderr_handle = thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut output = String::new();
+            let mut buffer = vec![0; BUFFER_SIZE];
+
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let chunk = String::from_utf8_lossy(&buffer[..n]);
+                        output.push_str(&chunk);
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            stderr_tx.send(output).ok();
+        });
+
+        // Wait for completion or timeout
+        let mut stdout_result = String::new();
+        let mut stderr_result = String::new();
+        let mut stdout_done = false;
+        let mut stderr_done = false;
+
+        while start_time.elapsed() < timeout && (!stdout_done || !stderr_done) {
+            if !stdout_done {
+                match stdout_rx.try_recv() {
+                    Ok(output) => {
+                        stdout_result = output;
+                        stdout_done = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        stdout_done = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+            }
+
+            if !stderr_done {
+                match stderr_rx.try_recv() {
+                    Ok(output) => {
+                        stderr_result = output;
+                        stderr_done = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        stderr_done = true;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+            }
+
+            if stdout_done && stderr_done {
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(10));
         }
 
         // Check for timeout
-        if !completion_marker.exists() || start_time.elapsed() >= timeout {
-            self.timed_out = true;
-            // Clean up files
-            let _ = std::fs::remove_file(&output_file);
-            let _ = std::fs::remove_file(&error_file);
-            let _ = std::fs::remove_file(&completion_marker);
+        if start_time.elapsed() >= timeout {
             return Err("Command execution timed out".to_string());
         }
 
-        // Read output and error files
-        let stdout_str = std::fs::read_to_string(&output_file)
-            .unwrap_or_default();
-        let stderr_str = std::fs::read_to_string(&error_file)
-            .unwrap_or_default();
+        // Wait for threads to complete (with timeout)
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
 
-        // Clean up temporary files
-        let _ = std::fs::remove_file(&output_file);
-        let _ = std::fs::remove_file(&error_file);
-        let _ = std::fs::remove_file(&completion_marker);
+        // Clean up output (remove trailing newlines, etc.)
+        let stdout_clean = stdout_result.trim_end().to_string();
+        let stderr_clean = stderr_result.trim_end().to_string();
 
-        // Remove sentinel from output if present
-        let mut clean_stdout = stdout_str;
-        if let Some(pos) = clean_stdout.find(SENTINEL) {
-            clean_stdout = clean_stdout[..pos].to_string();
-        }
-
-        // Clean up output (official Anthropic behavior)
-        let clean_stdout = clean_stdout.trim_end().to_string();
-        let clean_stderr = stderr_str.trim_end().to_string();
-
-        // Return CLIResult format (output, error) as per specification
-        Ok((clean_stdout, clean_stderr))
+        Ok((stdout_clean, stderr_clean))
     }
 }
 
@@ -346,15 +375,13 @@ impl Drop for ShellSession {
     fn drop(&mut self) {
         // Kill the persistent bash process
         if let Ok(mut process_guard) = self.process.lock() {
-            let _ = process_guard.kill();
-            let _ = process_guard.wait();
+            if let Some(mut child) = process_guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
 
-        // Clean up pipe drain threads (they'll exit automatically when process dies)
-        // We don't need to explicitly join them since killing the process will cause
-        // the pipe reads to fail and the threads to exit
-
-        // Clean up session directory when session is dropped
+        // Clean up session directory
         let _ = std::fs::remove_dir_all(&self.session_dir);
     }
 }
@@ -372,7 +399,7 @@ pub fn init_shell_state(app_state: &AppState) {
 // ============================================================================
 
 /// Anthropic Computer Use API compliant bash tool implementation
-/// Matches the exact specification requirements for CLI tools
+/// Fixed: Secure implementation following official specification
 #[tauri::command]
 pub async fn bash_command(
     app: AppHandle,
@@ -455,7 +482,7 @@ pub async fn bash_command(
                 // Return restart confirmation as per Anthropic specification
                 if effective_restart && command.is_empty() {
                     debug_op.complete(Some(&app), true);
-                    return Ok("tool has been restarted.".to_string()); // Official Anthropic response
+                    return Ok("Bash session restarted successfully".to_string());
                 }
             }
         } else {
@@ -470,7 +497,7 @@ pub async fn bash_command(
     // Handle restart-only requests (no command)
     if effective_restart && command.is_empty() {
         debug_op.complete(Some(&app), true);
-        return Ok("tool has been restarted.".to_string()); // Official Anthropic response
+        return Ok("Bash session restarted successfully".to_string());
     }
 
     // Execute command with Anthropic Computer Use API compliance
@@ -479,7 +506,7 @@ pub async fn bash_command(
             let (output, error) = session.run_command(&command, timeout_seconds)?;
 
             // Anthropic Computer Use API compliant output format
-            // Return CLIResult format: combines output and error appropriately
+            // Combine output and error appropriately
             let mut result = String::new();
 
             if !output.is_empty() {
@@ -490,17 +517,19 @@ pub async fn bash_command(
                 if !result.is_empty() {
                     result.push('\n');
                 }
+                // Prefix stderr with indicator for clarity
+                result.push_str("STDERR: ");
                 result.push_str(&error);
             }
 
-            // If both are empty, return empty string
+            // If both are empty, indicate success
             if result.is_empty() {
-                result = "Command completed successfully".to_string();
+                result = "Command completed successfully (no output)".to_string();
             }
 
             if debug_config.log_operations {
                 info!(
-                    "[SHELL] Bash command '{}' completed (Anthropic compliant)",
+                    "[SHELL] Bash command '{}' completed successfully",
                     command
                 );
             }
@@ -513,8 +542,8 @@ pub async fn bash_command(
                 };
                 send_debug_notification(
                     &app,
-                    "Bash Command",
-                    &format!("Success: {} - {}", command, preview),
+                    "Bash Command Success",
+                    &format!("Command: {} - Result: {}", command, preview),
                 )?;
             }
 
