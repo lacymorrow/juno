@@ -76,6 +76,8 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["url"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         // Extract content from page using CSS selectors
         ToolDefinition {
@@ -105,6 +107,8 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["selector"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         // Interact with page elements (click, type, select, scroll)
         ToolDefinition {
@@ -151,6 +155,8 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["action"] // Selector required for most, value for type/select
                 // TODO: Add conditional requirements (e.g., selector required if action is not scroll)
             }),
+            api_type: None,
+            beta_flag: None,
         },
         // Get current browser page URL
          ToolDefinition {
@@ -160,6 +166,8 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {}, // No input needed
             }),
+            api_type: None,
+            beta_flag: None,
         },
         // Take screenshots of page or specific elements
         ToolDefinition {
@@ -190,6 +198,8 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            api_type: None,
+            beta_flag: None,
         },
         // Add more tools like execute_script later if needed
     ]

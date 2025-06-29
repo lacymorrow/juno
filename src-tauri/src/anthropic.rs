@@ -1064,6 +1064,8 @@ async fn register_orchestrator_delegation_tools(
             },
             "required": ["task"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let browser_provider = specialist_provider_arc.clone();
@@ -1117,6 +1119,8 @@ async fn register_orchestrator_delegation_tools(
             },
             "required": ["task"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let desktop_provider = specialist_provider_arc.clone();
@@ -1170,6 +1174,8 @@ async fn register_orchestrator_delegation_tools(
             },
             "required": ["task"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let file_provider = specialist_provider_arc.clone();
