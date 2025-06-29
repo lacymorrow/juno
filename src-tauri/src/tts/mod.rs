@@ -77,7 +77,7 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
 
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
-    // Play the audio file using non-blocking platform-specific playback
+    // Play the audio file directly using non-blocking platform-specific playback
     // Use spawn() instead of output().await to avoid blocking the async runtime
     #[cfg(target_os = "macos")]
     {
