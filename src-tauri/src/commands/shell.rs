@@ -3,9 +3,10 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, Read};
-use std::sync::{Arc, Mutex};
+use std::io::{Write, BufRead, BufReader};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
+use std::thread;
 use tracing::info;
 use std::collections::HashMap;
 
@@ -28,57 +29,69 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Anthropic Computer Use API compliant bash session manager
 /// Implements exact specification requirements for persistent sessions
+/// Fixed: Uses session directory and script files for reliable I/O
 #[derive(Clone)]
 pub struct ShellSession {
-    process: Arc<Mutex<Child>>,
+    session_dir: std::path::PathBuf,
+    session_id: String,
     timed_out: bool,
 }
 
 impl ShellSession {
     fn new() -> Result<Self, String> {
-        let process = Command::new("bash")  // Use bash instead of sh for compliance
-            .arg("-c")  // Use -c instead of -i for better non-interactive behavior
-            .arg("exec bash") // Then exec into an interactive bash
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn bash session: {}", e))?;
+        use std::fs;
+
+        // Create a unique session ID and directory
+        let session_id = format!("bash_session_{}", std::process::id());
+        let session_dir = std::env::temp_dir().join(format!("juno_shell_{}", session_id));
+
+        // Create session directory
+        fs::create_dir_all(&session_dir)
+            .map_err(|e| format!("Failed to create session directory: {}", e))?;
+
+        // Create session state files
+        let bashrc_path = session_dir.join(".bashrc");
+        let history_path = session_dir.join(".bash_history");
+        let env_path = session_dir.join(".env");
+
+        // Initialize session state files
+        fs::write(&bashrc_path, "# Juno shell session\nexport HISTFILE=~/.bash_history\nset +H\n")
+            .map_err(|e| format!("Failed to create session bashrc: {}", e))?;
+        fs::write(&history_path, "")
+            .map_err(|e| format!("Failed to create session history: {}", e))?;
+        fs::write(&env_path, "")
+            .map_err(|e| format!("Failed to create session env: {}", e))?;
 
         Ok(Self {
-            process: Arc::new(Mutex::new(process)),
+            session_dir,
+            session_id,
             timed_out: false,
         })
     }
 
     /// Restart the bash session - Anthropic Computer Use API compliant
     fn restart(&mut self) -> Result<(), String> {
-        // Kill existing process
-        {
-            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-            let _ = process.kill();
-        }
+        use std::fs;
 
-        // Create new process
-        let new_process = Command::new("bash")
-            .arg("-c")
-            .arg("exec bash")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn new bash session: {}", e))?;
+        // Clear session state files
+        let history_path = self.session_dir.join(".bash_history");
+        let env_path = self.session_dir.join(".env");
 
-        // Replace process
-        *self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))? = new_process;
+        fs::write(&history_path, "")
+            .map_err(|e| format!("Failed to clear session history: {}", e))?;
+        fs::write(&env_path, "")
+            .map_err(|e| format!("Failed to clear session env: {}", e))?;
+
         self.timed_out = false;
-
         Ok(())
     }
 
-    /// Execute command with Anthropic Computer Use API compliance
+        /// Execute command with Anthropic Computer Use API compliance
     /// Returns (output, error) tuple matching CLIResult specification
+    /// Fixed: Uses session-based execution with proper non-blocking I/O
     fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String), String> {
+        use std::fs;
+
         if self.timed_out {
             return Err("Shell session has timed out and must be restarted".to_string());
         }
@@ -90,93 +103,209 @@ impl ShellSession {
         // Apply official output delay before starting
         std::thread::sleep(OUTPUT_DELAY);
 
-        // Use the persistent bash process (NOT spawning new ones)
-        {
-            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
+        // Create session script with state persistence
+        let script_path = self.session_dir.join("command.sh");
+        let history_path = self.session_dir.join(".bash_history");
+        let env_path = self.session_dir.join(".env");
 
-            // Check if process is still alive
-            match process.try_wait() {
-                Ok(Some(_)) => {
-                    return Err("Bash session process has died and must be restarted".to_string());
-                },
-                Ok(None) => {}, // Process still running - good
-                Err(e) => {
-                    return Err(format!("Failed to check process status: {}", e));
+        // Build script that maintains session state
+        let script_content = format!(
+            r#"#!/bin/bash
+set +H  # Disable history expansion
+cd "{session_dir}"
+export HISTFILE="{history_path}"
+export HOME="{session_dir}"
+
+# Source any previous environment variables
+if [ -f "{env_path}" ]; then
+    source "{env_path}"
+fi
+
+# Execute the command and capture environment changes
+({command}) && echo '{sentinel}' || echo '{sentinel}'
+
+# Save environment variables for next command
+declare -x | grep -v '^declare -x _' > "{env_path}"
+"#,
+            session_dir = self.session_dir.display(),
+            history_path = history_path.display(),
+            env_path = env_path.display(),
+            command = command,
+            sentinel = SENTINEL
+        );
+
+        // Write script content
+        fs::write(&script_path, script_content)
+            .map_err(|e| format!("Failed to write session script: {}", e))?;
+
+        // Execute script with proper I/O handling (no need to make executable)
+        let mut child = Command::new("bash")
+            .arg(&script_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .current_dir(&self.session_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn command process: {}", e))?;
+
+        // Take handles for thread-based reading
+        let stdout = child.stdout.take()
+            .ok_or_else(|| "Failed to take stdout handle".to_string())?;
+        let stderr = child.stderr.take()
+            .ok_or_else(|| "Failed to take stderr handle".to_string())?;
+
+        // Create channels for non-blocking communication
+        let (stdout_tx, stdout_rx) = mpsc::channel();
+        let (stderr_tx, stderr_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        // Spawn stdout reading thread
+        let stdout_thread = {
+            let stdout_tx = stdout_tx.clone();
+            let done_tx = done_tx.clone();
+            thread::spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                let mut buffer = String::new();
+
+                loop {
+                    buffer.clear();
+                    match reader.read_line(&mut buffer) {
+                        Ok(0) => {
+                            // EOF reached
+                            let _ = done_tx.send(());
+                            break;
+                        },
+                        Ok(_) => {
+                            if stdout_tx.send(buffer.clone()).is_err() {
+                                break; // Main thread dropped receiver
+                            }
+                        },
+                        Err(_) => {
+                            // Error reading
+                            let _ = done_tx.send(());
+                            break;
+                        }
+                    }
                 }
-            }
+            })
+        };
 
-            // Get stdin handle and write command
-            let stdin = process.stdin.as_mut()
-                .ok_or_else(|| "Failed to access stdin".to_string())?;
+        // Spawn stderr reading thread
+        let stderr_thread = {
+            let done_tx = done_tx.clone();
+            thread::spawn(move || {
+                let mut reader = BufReader::new(stderr);
+                let mut buffer = String::new();
 
-            // Write command with sentinel to the persistent process
-            let command_with_sentinel = format!("{} && echo '{}' || echo '{}'", command, SENTINEL, SENTINEL);
-            writeln!(stdin, "{}", command_with_sentinel)
-                .map_err(|e| format!("Failed to write command to stdin: {}", e))?;
-            stdin.flush()
-                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
-        } // Release process lock for reading
+                loop {
+                    buffer.clear();
+                    match reader.read_line(&mut buffer) {
+                        Ok(0) => {
+                            // EOF reached
+                            let _ = done_tx.send(());
+                            break;
+                        },
+                        Ok(_) => {
+                            if stderr_tx.send(buffer.clone()).is_err() {
+                                break; // Main thread dropped receiver
+                            }
+                        },
+                        Err(_) => {
+                            // Error reading
+                            let _ = done_tx.send(());
+                            break;
+                        }
+                    }
+                }
+            })
+        };
 
-        // Read output until sentinel or timeout
-        let mut output_buffer = Vec::new();
-        let mut error_buffer = Vec::new();
+        // Collect output with timeout
+        let mut stdout_lines = Vec::new();
+        let mut stderr_lines = Vec::new();
         let start_time = std::time::Instant::now();
         let mut found_sentinel = false;
+        let mut process_finished = false;
 
-        // Read output in a loop with timeout
-        while !found_sentinel && start_time.elapsed() < timeout {
-            {
-                let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
+        // Main collection loop
+        while !found_sentinel && !process_finished && start_time.elapsed() < timeout {
+            let timeout_duration = Duration::from_millis(50); // Poll frequently
 
-                // Read from stdout
-                if let Some(stdout) = process.stdout.as_mut() {
-                    let mut buffer = [0; 1024];
-                    match stdout.read(&mut buffer) {
-                        Ok(0) => {}, // No data available
-                        Ok(n) => {
-                            let data = &buffer[..n];
-                            output_buffer.extend_from_slice(data);
-                        },
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}, // Non-blocking, continue
-                        Err(e) => return Err(format!("Failed to read stdout: {}", e)),
+            // Try to receive from stdout
+            match stdout_rx.recv_timeout(timeout_duration) {
+                Ok(line) => {
+                    stdout_lines.push(line.clone());
+                    if line.contains(SENTINEL) {
+                        found_sentinel = true;
                     }
+                },
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // Continue to other channels
+                },
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // stdout thread finished
                 }
-
-                // Read from stderr
-                if let Some(stderr) = process.stderr.as_mut() {
-                    let mut buffer = [0; 1024];
-                    match stderr.read(&mut buffer) {
-                        Ok(0) => {}, // No data available
-                        Ok(n) => {
-                            let data = &buffer[..n];
-                            error_buffer.extend_from_slice(data);
-                        },
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}, // Non-blocking, continue
-                        Err(e) => return Err(format!("Failed to read stderr: {}", e)),
-                    }
-                }
-            } // Release process lock
-
-            // Check if we've found the sentinel in output
-            let output_str = String::from_utf8_lossy(&output_buffer);
-            if output_str.contains(SENTINEL) {
-                found_sentinel = true;
-                break;
             }
 
-            // Small sleep to prevent high CPU usage
-            std::thread::sleep(Duration::from_millis(10));
+            // Collect stderr (non-blocking)
+            while let Ok(line) = stderr_rx.try_recv() {
+                stderr_lines.push(line);
+            }
+
+            // Check if process finished
+            if done_rx.try_recv().is_ok() {
+                process_finished = true;
+                // Collect any remaining output
+                while let Ok(line) = stdout_rx.try_recv() {
+                    stdout_lines.push(line.clone());
+                    if line.contains(SENTINEL) {
+                        found_sentinel = true;
+                    }
+                }
+                while let Ok(line) = stderr_rx.try_recv() {
+                    stderr_lines.push(line);
+                }
+            }
+
+            // Check process status
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    process_finished = true;
+                },
+                Ok(None) => {
+                    // Still running
+                },
+                Err(_) => {
+                    process_finished = true;
+                }
+            }
         }
 
-        // Check for timeout
-        if !found_sentinel {
+        // Handle timeout
+        if !process_finished && start_time.elapsed() >= timeout {
+            let _ = child.kill(); // Kill the process
             self.timed_out = true;
             return Err("Command execution timed out".to_string());
         }
 
-        // Process the collected output
-        let mut stdout_str = String::from_utf8_lossy(&output_buffer).to_string();
-        let stderr_str = String::from_utf8_lossy(&error_buffer).to_string();
+        // Wait for process to complete if not already finished
+        if !process_finished {
+            let _ = child.wait();
+        }
+
+        // Clean up threads
+        drop(stdout_tx);
+        drop(stderr_tx);
+        drop(done_tx);
+        let _ = stdout_thread.join();
+        let _ = stderr_thread.join();
+
+        // Clean up script file
+        let _ = fs::remove_file(&script_path);
+
+        // Process output
+        let mut stdout_str = stdout_lines.join("");
+        let stderr_str = stderr_lines.join("");
 
         // Remove sentinel from output (official Anthropic behavior)
         if let Some(pos) = stdout_str.find(SENTINEL) {
@@ -189,6 +318,13 @@ impl ShellSession {
 
         // Return CLIResult format (output, error) as per specification
         Ok((stdout_str, stderr_clean))
+    }
+}
+
+impl Drop for ShellSession {
+    fn drop(&mut self) {
+        // Clean up session directory when session is dropped
+        let _ = std::fs::remove_dir_all(&self.session_dir);
     }
 }
 
