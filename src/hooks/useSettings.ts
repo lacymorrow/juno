@@ -367,9 +367,91 @@ export function useSettings() {
 	const loadToolConfigurations = useCallback(async () => {
 		setToolConfigLoading(true);
 		try {
-			const configs = await getCachedOrFetch('toolConfigurations', () =>
-				invokeCommand<Record<string, ToolCategory>>("get_tool_configurations")
-			);
+			// Use our new dynamic approach - get all registered tools and their states
+			const configs = await getCachedOrFetch('toolConfigurations', async () => {
+				console.log("🔄 Loading tool configurations dynamically...");
+
+				// Step 1: Get all currently registered tools
+				const registeredToolsResponse = await invokeCommand<{
+					tools: Array<{
+						name: string;
+						description: string;
+						input_schema: any;
+						api_type: string;
+						beta_flag: boolean;
+					}>;
+					total_count: number;
+				}>("get_registered_tools");
+
+				console.log(`📊 Found ${registeredToolsResponse.total_count} registered tools`);
+
+				// Step 2: Get configuration state for each tool
+				const toolConfigs: Record<string, ToolCategory> = {};
+				const categoryTools: Record<string, any[]> = {};
+
+				// Process each registered tool
+				for (const tool of registeredToolsResponse.tools) {
+					try {
+						// Get the tool's configuration (includes category and enabled state)
+						const toolConfigResponse = await invokeCommand<{
+							name: string;
+							category: string;
+							enabled: boolean;
+							description: string;
+							required: boolean;
+							server_id?: string;
+						}>("get_tool_config", { tool_name: tool.name });
+
+						const categoryName = toolConfigResponse.category;
+
+						// Initialize category if not exists
+						if (!categoryTools[categoryName]) {
+							categoryTools[categoryName] = [];
+						}
+
+						// Add tool to category
+						categoryTools[categoryName].push({
+							name: tool.name,
+							category: categoryName,
+							enabled: toolConfigResponse.enabled,
+							description: tool.description || toolConfigResponse.description || "",
+							required: toolConfigResponse.required || false,
+						});
+
+					} catch (toolError) {
+						console.warn(`⚠️  Failed to get config for tool '${tool.name}':`, toolError);
+
+						// Fallback: Add to "Basic" category with default settings
+						if (!categoryTools["Basic"]) {
+							categoryTools["Basic"] = [];
+						}
+						categoryTools["Basic"].push({
+							name: tool.name,
+							category: "Basic",
+							enabled: true, // Default enabled for unknown tools
+							description: tool.description || "",
+							required: false,
+						});
+					}
+				}
+
+				// Step 3: Build final category structure
+				for (const [categoryName, tools] of Object.entries(categoryTools)) {
+					// Check if category is enabled (use the first tool's state for category state)
+					const categoryEnabled = tools.length > 0 ? tools.some(t => t.enabled) : true;
+
+					toolConfigs[categoryName] = {
+						name: categoryName,
+						description: getCategoryDescription(categoryName),
+						enabled: categoryEnabled,
+						tools: tools,
+					};
+				}
+
+				console.log(`✅ Built ${Object.keys(toolConfigs).length} tool categories:`, Object.keys(toolConfigs));
+				return toolConfigs;
+			});
+
 			setToolConfigurations(configs);
 		} catch (error) {
 			console.error("Error loading tool configurations:", error);
@@ -378,6 +460,19 @@ export function useSettings() {
 			setToolConfigLoading(false);
 		}
 	}, [invokeCommand]);
+
+	// Helper function to get category descriptions
+	const getCategoryDescription = (categoryName: string): string => {
+		const descriptions: Record<string, string> = {
+			"AnthropicComputerUse": "Core computer interaction tools for screen, keyboard, and mouse control",
+			"Browser": "Web browser automation and navigation tools",
+			"Desktop": "Desktop application and window management tools",
+			"Timer": "Scheduling and monitoring tools for time-based operations",
+			"Basic": "File operations, commands, and basic system tools",
+			"MCP": "External tools provided by MCP (Model Context Protocol) servers",
+		};
+		return descriptions[categoryName] || `${categoryName} tools for specialized operations`;
+	};
 
 	const loadMcpServers = useCallback(async () => {
 		setMcpLoading(true);

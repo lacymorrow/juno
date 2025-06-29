@@ -291,3 +291,92 @@ pub async fn clear_pending_tool_approvals(
     state.clear_pending_tool_approvals().await;
     Ok(())
 }
+
+/// Simple test command to verify tool config system works
+#[tauri::command]
+pub async fn test_tool_config_command() -> Result<String, String> {
+    Ok("Tool config system is working".to_string())
+}
+
+/// Get all currently registered tools from the tool provider
+/// This provides dynamic discovery of tools without relying on static configurations
+#[tauri::command]
+pub async fn get_registered_tools(
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    info!("Getting all registered tools dynamically");
+
+    // Get the current tool provider instance
+    let tool_provider_registry = state.tool_provider_registry.lock().await;
+
+    if let Some(provider_weak) = tool_provider_registry.first() {
+        if let Some(provider_arc) = provider_weak.upgrade() {
+            let provider_guard = provider_arc.lock().await;
+
+            // Get all tools directly from the provider (bypasses filtering)
+            let all_tools_defs = provider_guard.get_all_registered_tools().await;
+            let mut all_tools = Vec::new();
+
+            for tool_def in all_tools_defs {
+                all_tools.push(json!({
+                    "name": tool_def.name,
+                    "description": tool_def.description,
+                    "input_schema": tool_def.input_schema,
+                    "api_type": tool_def.api_type,
+                    "beta_flag": tool_def.beta_flag
+                }));
+            }
+
+            info!("Found {} registered tools", all_tools.len());
+            return Ok(json!({
+                "tools": all_tools,
+                "total_count": all_tools.len()
+            }));
+        }
+    }
+
+    // Fallback: if no provider found, return empty list
+    Ok(json!({
+        "tools": [],
+        "total_count": 0,
+        "note": "No tool provider found - this might indicate a system issue"
+    }))
+}
+
+/// Test the dynamic tool categorization system
+/// This demonstrates how tools are automatically categorized without static mappings
+#[tauri::command]
+pub async fn test_dynamic_tool_categorization() -> Result<Value, String> {
+    use crate::agent::implementations::tool_provider::LocalToolProvider;
+
+    // Test data - examples of tool names and descriptions
+    let test_tools = vec![
+        ("screenshot", "Take a screenshot of the desktop"),
+        ("safari_navigate", "Navigate to a URL in Safari browser"),
+        ("set_timer", "Set a timer for a specific duration"),
+        ("read_file", "Read contents of a file"),
+        ("get_window_list", "Get list of all open windows"),
+        ("mcp_server_tool", "External MCP server tool"),
+        ("click", "Click at coordinates on screen"),
+        ("browser_close_tab", "Close a browser tab"),
+        ("file_monitor", "Monitor file changes"),
+        ("type_text", "Type text using keyboard"),
+    ];
+
+    let mut results = Vec::new();
+
+    for (tool_name, description) in test_tools {
+        let category = LocalToolProvider::infer_tool_category(tool_name, description);
+        results.push(json!({
+            "tool_name": tool_name,
+            "description": description,
+            "inferred_category": format!("{:?}", category)
+        }));
+    }
+
+    Ok(json!({
+        "message": "Dynamic tool categorization test completed",
+        "test_results": results,
+        "note": "This shows how tools are automatically categorized by name and description patterns"
+    }))
+}
