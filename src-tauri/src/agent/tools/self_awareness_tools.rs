@@ -75,6 +75,8 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
                 }
             }
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider.register_async_tool(build_self_def, |input| {
@@ -102,6 +104,8 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
                 }
             }
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider.register_async_tool(analyze_source_def, |input| {
@@ -122,6 +126,8 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
                 }
             }
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider.register_async_tool(inspect_prompts_def, |input| {
@@ -136,6 +142,8 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
             "type": "object",
             "properties": {}
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider.register_async_tool(system_info_def, |_input| {

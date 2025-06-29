@@ -2312,6 +2312,8 @@ pub async fn register_self_improvement_tools_with_provider(
                 }
             }
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider
@@ -2341,6 +2343,8 @@ pub async fn register_self_improvement_tools_with_provider(
             },
             "required": ["analysis_results"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider
@@ -2369,6 +2373,8 @@ pub async fn register_self_improvement_tools_with_provider(
             },
             "required": ["improvements"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider
@@ -2402,6 +2408,8 @@ pub async fn register_self_improvement_tools_with_provider(
                 }
             }
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     provider
