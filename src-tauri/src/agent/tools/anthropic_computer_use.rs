@@ -6,21 +6,19 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
-// Keep the API types and tool versioning from errors branch (enhanced functionality)
-use crate::constants::api::{computer_use_api_types, beta_flags};
-use super::tool_versioning::{ToolVersionManager, ToolVersionConfig, ApiVersion};
+use crate::commands::shell::BashResult;
+// Keep the tool versioning from errors branch (enhanced functionality)
+use super::tool_versioning::{ToolVersionManager, ToolVersionConfig};
 // Keep the mouse command imports from main branch (proper command usage)
 use crate::commands::mouse::{
     left_click, right_click, middle_click, double_click, triple_click,
-    left_click_drag, mouse_move as mouse_move_command,
-    left_mouse_down, left_mouse_up
+    left_click_drag
 };
 use serde_json::{json, Value};
 use tauri::Manager;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::agent::core::AgentError;
 use crate::utils::coordinate_validation::{
     validate_coordinate_parameter,
     validate_coordinate_pair,
@@ -732,7 +730,7 @@ pub async fn execute_bash_tool(
 
     let state_manager = app_handle.state::<AppState>();
 
-    // Use the Anthropic-compliant bash command execution
+    // Use the Anthropic-compliant bash command execution - NO STRING COMPARISONS
     let result = crate::commands::shell::bash_command(
         app_handle.clone(),
         state_manager,
@@ -743,23 +741,29 @@ pub async fn execute_bash_tool(
     ).await.map_err(|e| format!("Bash command failed: {}", e))?;
 
     // Log the result for debugging
-    info!("Anthropic compliant bash result: {}", result);
+    info!("Anthropic compliant bash result: {:?}", result);
 
-    // The bash_command function now returns CLIResult format (simple string output)
-    // as per the official Anthropic Computer Use specification
-
-    // Check if it's a restart confirmation message
-    if restart && result == "tool has been restarted." {
-        return Ok(json!({
-            "output": result
-        }));
+    // Handle structured result - NO STRING COMPARISONS NEEDED
+    match result {
+        crate::commands::shell::BashResult::Restarted => {
+            // Tool was restarted - return official Anthropic message
+            Ok(json!({
+                "output": "tool has been restarted."
+            }))
+        }
+        crate::commands::shell::BashResult::Output(output) => {
+            // Regular output
+            Ok(json!({
+                "output": output
+            }))
+        }
+        crate::commands::shell::BashResult::CommandResult { output, success: _ } => {
+            // Command execution result (success flag is informational)
+            Ok(json!({
+                "output": output
+            }))
+        }
     }
-
-    // Return the result in the format expected by the Anthropic Computer Use API
-    // The result is already in CLIResult format (combined output and error)
-    Ok(json!({
-        "output": result
-    }))
 }
 
 /// Execute str_replace_based_edit_tool
