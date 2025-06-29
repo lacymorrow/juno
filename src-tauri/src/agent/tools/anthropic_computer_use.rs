@@ -757,10 +757,12 @@ pub async fn execute_bash_tool(
                 "output": output
             }))
         }
-        crate::commands::shell::BashResult::CommandResult { output, success: _ } => {
-            // Command execution result (success flag is informational)
+        crate::commands::shell::BashResult::CommandResult { output, success } => {
+            // Command execution result with exit code information
+            let exit_code = if success { 0 } else { 1 };
             Ok(json!({
-                "output": output
+                "output": output,
+                "exit_code": exit_code
             }))
         }
     }
