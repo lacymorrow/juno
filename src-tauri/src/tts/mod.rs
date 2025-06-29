@@ -30,76 +30,10 @@ pub fn filter_tts_content(text: &str) -> String {
     let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
     filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 3. Remove HTML/JSX tags (excluding TTS tags which were handled above)
-    // let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    // filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 4. Remove JSX/React component syntax
-    // let jsx_component_regex = Regex::new(r"</?[A-Z][a-zA-Z0-9]*[^>]*>").unwrap();
-    // filtered_text = jsx_component_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 5. Remove code-like patterns (function calls, method chaining, etc.)
-    // let function_call_regex = Regex::new(r"\w+\(\s*[^)]*\s*\)").unwrap();
-    // filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 6. Remove method chaining (e.g., object.method().anotherMethod())
-    // let method_chain_regex = Regex::new(r"\w+(\.\w+)+\([^)]*\)").unwrap();
-    // filtered_text = method_chain_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 7. Remove property access chains (e.g., object.property.subProperty)
-    // let property_chain_regex = Regex::new(r"\w+(\.\w+){2,}").unwrap();
-    // filtered_text = property_chain_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 8. Remove file paths and URLs
-    // let path_url_regex = Regex::new(r"(?:https?://|/|~/|\.\./)[\w\-_\./?=&%#]+").unwrap();
-    // filtered_text = path_url_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 9. Remove common programming keywords and patterns
-    // let programming_keywords = [
-    //     r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*=", r"\bvar\s+\w+\s*=",
-    //     r"\bfunction\s+\w+", r"\bclass\s+\w+", r"\binterface\s+\w+",
-    //     r"\bimport\s+", r"\bexport\s+", r"\breturn\s+", r"\bif\s*\(",
-    //     r"\bfor\s*\(", r"\bwhile\s*\(", r"\btry\s*\{", r"\bcatch\s*\(",
-    //     r"\basync\s+", r"\bawait\s+", r"\bnew\s+\w+", r"\bthis\.",
-    //     r"\bconsole\.", r"\bdocument\.", r"\bwindow\.", r"\bprocess\.",
-    // ];
-
-    // for keyword_pattern in &programming_keywords {
-    //     let keyword_regex = Regex::new(keyword_pattern).unwrap();
-    //     filtered_text = keyword_regex.replace_all(&filtered_text, " ").to_string();
-    // }
-
-    // // 10. Remove emojis (Unicode ranges for various emoji blocks)
-    // let emoji_regex = Regex::new(r"[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}-\u{2454}]|[\u{20D0}-\u{20FF}]").unwrap();
-    // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 11. Remove mathematical expressions and formulas
-    // let math_regex = Regex::new(r"\$[^$]+\$|\\[a-zA-Z]+\{[^}]*\}").unwrap();
-    // filtered_text = math_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 12. Remove JSON-like structures
-    // let json_regex = Regex::new(r"\{[^{}]*:[^{}]*\}|\[[^\[\]]*\]").unwrap();
-    // filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 13. Remove variable assignments and declarations
-    // let assignment_regex = Regex::new(r"\w+\s*[:=]\s*[^,;\n]+").unwrap();
-    // filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 14. Remove CSS selectors and properties
-    // let css_regex = Regex::new(r"[.#][\w-]+\s*\{[^}]*\}|[\w-]+\s*:\s*[^;]+;").unwrap();
-    // filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
-
-    // // 15. Clean up whitespace and normalize
-    // let whitespace_regex = Regex::new(r"\s+").unwrap();
-    // filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
-    // filtered_text = filtered_text.trim().to_string();
-
-    // // If after filtering we have very little meaningful content left,
-    // // it was probably mostly code - return empty string to skip TTS
-    // if filtered_text.len() < 10 || filtered_text.split_whitespace().count() < 3 {
-    //     debug!("[TTS Filter] Content appears to be mostly code, skipping TTS");
-    //     return String::new();
-    // }
+    // 3. Clean up whitespace and normalize
+    let whitespace_regex = Regex::new(r"\s+").unwrap();
+    filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+    filtered_text = filtered_text.trim().to_string();
 
     debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());
     if filtered_text.len() != text.len() {
@@ -109,6 +43,78 @@ pub fn filter_tts_content(text: &str) -> String {
     }
 
     filtered_text
+}
+
+/// Play base64 audio directly without requiring tauri::State
+/// This is a simplified version of play_tts_audio_backend for use in async contexts
+async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
+    use base64::prelude::*;
+    use std::io::Write;
+    use tempfile::Builder as TempFileBuilder;
+
+    info!("Playing TTS audio directly from base64 data ({} bytes)", base64_audio.len());
+
+    // Decode base64 audio data
+    let audio_bytes = BASE64_STANDARD.decode(base64_audio)
+        .map_err(|e| format!("Failed to decode base64 TTS audio: {}", e))?;
+
+    // Create temporary file for audio playback
+    let mut temp_file = TempFileBuilder::new()
+        .prefix("tts_audio_")
+        .suffix(".m4a") // Use .m4a for compatibility
+        .tempfile()
+        .map_err(|e| format!("Failed to create temporary file for TTS audio: {}", e))?;
+
+    // Write audio data to temporary file
+    temp_file.write_all(&audio_bytes)
+        .map_err(|e| format!("Failed to write TTS audio to temporary file: {}", e))?;
+
+    temp_file.flush()
+        .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
+
+    let temp_path = temp_file.path().to_path_buf();
+
+    info!("Playing TTS audio from temporary file: {:?}", temp_path);
+
+    // Play the audio file using the existing platform-specific playback
+    // We'll use the same logic as in sound.rs but without the state dependency
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("afplay")
+            .arg(&temp_path)
+            .output()
+            .map_err(|e| format!("Failed to execute afplay: {}", e))?;
+
+        if !output.status.success() {
+            let error_msg = format!("afplay failed: {}", String::from_utf8_lossy(&output.stderr));
+            return Err(error_msg);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let output = std::process::Command::new("aplay")
+            .arg(&temp_path)
+            .output()
+            .map_err(|e| format!("Failed to execute aplay: {}", e))?;
+
+        if !output.status.success() {
+            let error_msg = format!("aplay failed: {}", String::from_utf8_lossy(&output.stderr));
+            return Err(error_msg);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, we could use PowerShell or a media library
+        // For now, just return success as a placeholder
+        warn!("TTS audio playback on Windows not implemented in direct mode");
+        return Ok(());
+    }
+
+    info!("TTS audio played successfully");
+    Ok(())
+    // Temporary file is automatically cleaned up when it goes out of scope
 }
 
 // Function to stop speech playback
@@ -259,6 +265,7 @@ pub async fn invoke_tts(
     let app_handle_clone = app_handle.clone();
     let provider_clone = provider.clone();
     let filtered_text_clone = filtered_text.clone();
+    let state_clone = state.inner().clone(); // Pass state to async task
 
     tokio::spawn(async move {
         // Register escape key for TTS cancellation
@@ -278,8 +285,37 @@ pub async fn invoke_tts(
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     info!("TTS was stopped by user during execution");
+                } else if result == "TTS_DISABLED_BY_SETTING" {
+                    info!("TTS is disabled by setting");
+                } else if result == "TTS_CONTENT_FILTERED" {
+                    info!("TTS content was filtered out");
                 } else {
-                    info!("TTS completed successfully");
+                    // This should be base64 audio data - play it!
+                    info!("TTS audio generated, attempting playback...");
+
+                    // Check if stop was requested before playback
+                    if is_tts_stop_requested() {
+                        info!("TTS stop was requested before playback, aborting");
+                    } else {
+                        // Simple approach: Check if sound is enabled directly from state
+                        match state_clone.get_sound_enabled() {
+                            Ok(sound_enabled) => {
+                                if !sound_enabled {
+                                    info!("Sound is disabled, skipping TTS audio playback");
+                                } else {
+                                    // Decode and play the base64 audio directly
+                                    if let Err(e) = play_base64_audio_directly(&result).await {
+                                        warn!("TTS audio playback error: {}", e);
+                                    } else {
+                                        info!("TTS audio playback completed successfully");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to check sound enabled status: {}", e);
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {

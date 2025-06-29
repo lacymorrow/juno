@@ -1,179 +1,170 @@
-# TTS Race Condition Fix - Immediate Asynchronous TTS
+# TTS Race Condition Fix - Complete Resolution
 
 ## Problem Identified
 
-The TTS system had a critical race condition where legitimate user stop requests (escape key presses) were being lost due to:
+The TTS system had multiple critical issues:
 
-1. **50ms cleanup pause** followed by `reset_tts_stop_flag()` clearing user stop requests
-2. **Blocking TTS execution** preventing immediate escape key response
-3. **Duplicate TTS systems** - both streaming system and regex-based fallback causing conflicts
+1. **Race condition**: 50ms cleanup pause followed by `reset_tts_stop_flag()` clearing user stop requests
+2. **Blocking execution**: TTS execution preventing immediate escape key response
+3. **Duplicate TTS systems**: Both streaming system and regex-based fallback causing conflicts
+4. **Architecture mismatch**: Status strings being decoded as base64 audio data
 
-## Root Cause
+## Root Cause Analysis
 
-Two competing TTS systems were running simultaneously:
+### Original Issues
 
 1. **Correct system**: `process_tts_content_immediately()` in `tool_logger.rs` that handles streaming TTS content immediately from XML tags during agent responses
-2. **Problematic system**: `invoke_tts()` in `mod.rs` with regex-based TTS extraction and race condition-prone cleanup mechanism
+2. **Problematic system**: `invoke_tts()` in `mod.rs` with regex-based TTS extraction and a race condition-prone cleanup mechanism
 
-## Solution Implemented
+### New Issue Discovered
 
-### Backend Fixes (Rust)
+3. **Base64 decoding error**: After fixing the race condition, `invoke_tts()` returns status strings like `"TTS_STARTED_ASYNC"` but the code was trying to decode these as base64 audio, causing "Invalid symbol 95, offset 3" errors
 
-#### 1. Made TTS Completely Asynchronous (`src-tauri/src/tts/mod.rs`)
+## Complete Solution Implemented
 
-**Before (Problematic):**
+### Phase 1: Race Condition Fix
 
-```rust
-pub async fn invoke_tts(...) -> Result<String, String> {
-    // CRITICAL ISSUE: Stop any existing TTS
-    stop_speech();
-    
-    // RACE CONDITION: 50ms pause loses user escape requests
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    
-    // PROBLEM: This clears legitimate user stop requests
-    reset_tts_stop_flag();
-    
-    // Blocking execution - escape key doesn't work immediately
-    execute_tts_with_fallback(filtered_text, &provider).await
-}
-```
+- **Eliminated 50ms cleanup pause** that was losing user escape requests
+- **Removed regex-based TTS extraction** competing with streaming system  
+- **Made TTS completely asynchronous** using `tokio::spawn()`
+- **Return immediately** with `TTS_STARTED_ASYNC` (no blocking)
 
-**After (Fixed):**
+### Phase 2: Architecture Fix (New)
+
+- **Fixed base64 decoding error** in `process_tts_content_immediately()`
+- **Corrected audio playback flow** in async TTS task within `invoke_tts()`
+- **Streamlined TTS filtering** by removing over-aggressive commented code
+
+## Technical Changes Made
+
+### 1. TTS Module (`src-tauri/src/tts/mod.rs`)
 
 ```rust
-pub async fn invoke_tts(...) -> Result<String, String> {
-    // CRITICAL FIX: Make TTS completely immediate and non-blocking
-    // Spawn async task so TTS doesn't block anything and escape key works immediately
-    let app_handle_clone = app_handle.clone();
-    let provider_clone = provider.clone();
-    let filtered_text_clone = filtered_text.clone();
+// OLD (problematic): Blocking execution with race condition
+let result = execute_tts_with_fallback(text, provider).await?;
+sleep(Duration::from_millis(50)).await; // RACE CONDITION!
+reset_tts_stop_flag(); // Lost user requests!
 
-    tokio::spawn(async move {
-        // Register escape key for TTS cancellation
-        register_tts_escape_key(&app_handle_clone).await;
-
-        // Check if stop was requested immediately
-        if is_tts_stop_requested() {
-            info!("TTS stop was requested immediately, aborting");
-            unregister_tts_escape_key(&app_handle_clone).await;
-            return;
-        }
-
-        info!("Starting IMMEDIATE TTS with provider: {}", provider_clone);
-
-        // Execute TTS with fallback logic but without blocking
-        match execute_tts_with_fallback(filtered_text_clone, &provider_clone).await {
-            Ok(result) => {
-                if result == "TTS_STOPPED_BY_USER" {
-                    info!("TTS was stopped by user during execution");
-                } else {
-                    info!("TTS completed successfully");
+// NEW (fixed): Immediate async execution with proper audio playback
+tokio::spawn(async move {
+    register_tts_escape_key(&app_handle_clone).await;
+    
+    match execute_tts_with_fallback(filtered_text_clone, &provider_clone).await {
+        Ok(result) => {
+            if result == "TTS_STOPPED_BY_USER" {
+                info!("TTS was stopped by user during execution");
+            } else if /* other status strings */ {
+                // Handle status appropriately
+            } else {
+                // This should be base64 audio data - play it!
+                match crate::commands::sound::play_tts_audio_backend(
+                    result.clone(),
+                    app_handle_clone.state()
+                ).await {
+                    // Proper audio playback handling
                 }
             }
-            Err(e) => {
-                error!("TTS failed: {}", e);
-            }
         }
+    }
+    
+    unregister_tts_escape_key(&app_handle_clone).await;
+});
 
-        // Always unregister escape key when done
-        unregister_tts_escape_key(&app_handle_clone).await;
-    });
-
-    // Return immediately - TTS is running asynchronously
-    info!("TTS started asynchronously for provider: {}", provider);
-    Ok("TTS_STARTED_ASYNC".to_string())
-}
+return Ok("TTS_STARTED_ASYNC".to_string()); // Return immediately
 ```
 
-#### 2. Removed Regex-Based TTS Extraction (`src-tauri/src/tts/mod.rs`)
-
-**Before (Problematic):**
+### 2. Tool Logger (`src-tauri/src/agent/tool_logger.rs`)
 
 ```rust
-pub fn filter_tts_content(text: &str) -> String {
-    // PROBLEM: Regex extraction competing with streaming system
-    let tts_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
-    if tts_regex.is_match(&filtered_text) {
-        let extracted_content: Vec<&str> = tts_regex
-            .captures_iter(&filtered_text)
-            .map(|cap| cap.get(1).unwrap().as_str())
-            .collect();
-        // This was mangling text like "It's 2:13 PM" -> "It's , June 29th"
+// OLD (problematic): Trying to play status strings as audio
+match crate::commands::sound::play_tts_audio_backend(
+    audio_result.clone(), // This was "TTS_STARTED_ASYNC"!
+    app_handle_for_playback.state()
+).await {
+    // Failed with base64 decode error
+}
+
+// NEW (fixed): Proper status handling
+match crate::tts::invoke_tts(filtered_text, app_handle.state(), app_handle.clone()).await {
+    Ok(status_result) => {
+        match status_result.as_str() {
+            "TTS_STARTED_ASYNC" => {
+                info!("TTS started successfully in async mode");
+                // Audio generation and playback happens inside invoke_tts
+            }
+            "TTS_DISABLED_BY_SETTING" => { /* handle */ }
+            // ... other status strings
+        }
     }
 }
 ```
 
-**After (Fixed):**
+### 3. Simplified Filtering (`src-tauri/src/tts/mod.rs`)
 
 ```rust
-/// Filter content to prevent code, emojis, and unwanted content from being spoken
-/// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
+// Cleaned up over-aggressive filtering that was commented out
 pub fn filter_tts_content(text: &str) -> String {
-    debug!("[TTS Filter] Original text length: {} chars", text.len());
-
     let mut filtered_text = text.to_string();
-
-    // Remove any TTS XML tags completely - content should have been processed by streaming system
+    
+    // Remove TTS XML tags
     let tts_tag_regex = Regex::new(r"</?TTS>").unwrap();
     filtered_text = tts_tag_regex.replace_all(&filtered_text, "").to_string();
 
-    // Only basic filtering remains - no more regex TTS extraction
-    // ... rest of filtering logic
+    // Remove code blocks and inline code only
+    // (Removed 50+ lines of commented aggressive filtering)
+    
+    // Normalize whitespace
+    let whitespace_regex = Regex::new(r"\s+").unwrap();
+    filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+    
+    filtered_text.trim().to_string()
 }
 ```
 
-## How The Fix Works
+## Results After Complete Fix
 
-### 1. **Immediate Asynchronous Execution**
+### ✅ **Race Condition Eliminated**
 
-- `tokio::spawn()` makes TTS completely non-blocking
-- Function returns immediately with `"TTS_STARTED_ASYNC"`
-- Escape key works instantly - no waiting for cleanup pauses
+- Escape key stops everything immediately
+- No more 50ms pause losing user requests  
+- Clean async architecture prevents blocking
 
-### 2. **No More Race Conditions**
+### ✅ **Base64 Decoding Fixed**
 
-- Eliminated the 50ms cleanup pause that was losing user stop requests
-- Removed `reset_tts_stop_flag()` logic that cleared legitimate user input
-- Escape key registration/unregistration happens within the async task context
+- Status strings no longer treated as audio data
+- Proper audio playback within async TTS tasks
+- Clean error handling for different result types
 
-### 3. **Single TTS System**
+### ✅ **Architecture Streamlined**
 
-- Only the streaming system (`process_tts_content_immediately()`) handles TTS extraction
-- Removed competing regex-based extraction that was mangling text
-- Clean separation: streaming processes `<TTS>` tags, filter only cleans up leftover tags
+- Single TTS system (no competing extraction)
+- Immediate async processing with proper audio output
+- Simplified filtering reduces complexity
 
-### 4. **Immediate User Response**
+### ✅ **Performance Optimized**
 
-- Escape key stops everything instantly - no delays or race conditions
-- TTS starts immediately when content is available
-- Non-blocking architecture prevents UI freezing
-
-## Expected Results
-
-✅ **Escape Key Works Immediately**: No more lost stop requests during cleanup  
-✅ **TTS Starts Immediately**: Asynchronous execution without blocking  
-✅ **No Text Mangling**: Streaming system handles XML extraction properly  
-✅ **Single TTS System**: No more competing extraction mechanisms  
-✅ **Better UX**: Users hear correct TTS content without delays
-
-## Testing
-
-To test the fix:
-
-1. **Race Condition Test**: Press escape during TTS - should stop immediately
-2. **Immediate TTS Test**: TTS should start as soon as content streams
-3. **Text Accuracy Test**: Should say full content like "It's 2:13 PM on Sunday, June 29th"
-4. **No Blocking Test**: UI should remain responsive during TTS
-
-## Files Modified
-
-1. `src-tauri/src/tts/mod.rs` - Asynchronous TTS execution and regex removal
-2. `TTS_TOKEN_WASTE_FIX.md` - Updated documentation to reflect actual fix
+- Non-blocking execution prevents UI freezing
+- Proper escape key registration/unregistration
+- Efficient audio generation and playback flow
 
 ## Compilation Status
 
-✅ **PASSED** - `cargo check` completed successfully with only warnings (no errors)  
-✅ **Race condition eliminated** - Async architecture prevents blocking  
-✅ **Single TTS system** - Streaming-only approach implemented  
-✅ **Immediate escape response** - User control restored
+✅ **PASSED** - `cargo check` completed successfully with no errors
+
+## Expected Behavior
+
+1. **TTS starts immediately** when XML tags are processed during streaming
+2. **Escape key stops all TTS instantly** without race conditions  
+3. **Audio plays correctly** from generated base64 data
+4. **No duplicate processing** from multiple systems
+5. **Clean, non-blocking architecture** with proper async handling
+6. **No base64 decoding errors** from status strings
+
+## Files Modified
+
+- `src-tauri/src/tts/mod.rs` - Race condition fix + audio playback fix + filtering cleanup
+- `src-tauri/src/agent/tool_logger.rs` - Architecture mismatch fix
+- `src-tauri/src/commands/stop_coordinator.rs` - Enhanced stop coordination
+- `TTS_TOKEN_WASTE_FIX.md` - Updated documentation
+
+This comprehensive fix resolves both the original race condition and the subsequent architecture mismatch that was discovered during testing.
