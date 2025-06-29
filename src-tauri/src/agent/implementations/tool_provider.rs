@@ -469,28 +469,30 @@ impl LocalToolProvider {
             debug!("Total definitions after insert: {}", definitions.len());
         }
 
-        // Automatically add tool to configuration manager if app handle is available
-        if let Some(ref app_handle) = self.app_handle {
-            let state = app_handle.state::<AppState>();
-            let config_manager = state.get_tool_config_manager().await;
-            let mut config_guard = config_manager.lock().await;
+            // Automatically add tool to configuration manager if app handle is available
+    if let Some(ref app_handle) = self.app_handle {
+        let state = app_handle.state::<AppState>();
+        let config_manager = state.get_tool_config_manager().await;
+        let mut config_guard = config_manager.lock().await;
 
-            // Only add if the tool doesn't already exist in configuration
-            if config_guard.get_tool_config(&tool_name).is_none() {
-                // Automatically determine category from tool name and metadata
-                let category = Self::infer_tool_category(&tool_name, &definition.description);
+        // Only add if the tool doesn't already exist in configuration
+        if config_guard.get_tool_config(&tool_name).is_none() {
+            // Automatically determine category from tool name and metadata
+            let category = Self::infer_tool_category(&tool_name, &definition.description);
 
-                let tool_config = crate::agent::tools::tool_config::ToolConfig::new(
-                    tool_name.clone(),
-                    category.clone(),
-                    true, // Enable by default
-                ).with_description(definition.description.clone());
+            let tool_config = crate::agent::tools::tool_config::ToolConfig::new(
+                tool_name.clone(),
+                category.clone(),
+                true, // Enable by default
+            ).with_description(definition.description.clone());
 
-                config_guard.add_tool_config(tool_config);
+            config_guard.add_tool_config(tool_config);
 
-                debug!("Auto-added tool configuration for: '{}' in category: {:?}", tool_name, category);
-            }
+            debug!("Auto-added tool configuration for: '{}' in category: {:?}", tool_name, category);
         }
+    } else {
+        warn!("Cannot auto-configure tool '{}' - no app handle available during registration", tool_name);
+    }
 
         // Wrap the executor with additional error handling for display-related operations
         let wrapped_executor: AsyncToolExecutor = Arc::new(move |input| {
@@ -1478,11 +1480,19 @@ impl ToolProvider for LocalToolProvider {
             let mut disabled_count = 0;
 
             for tool in all_tools {
-                if config_guard.is_tool_enabled(&tool.name) {
-                    enabled_tools.push(tool);
+                // Check if tool has any configuration at all
+                if let Some(_tool_config) = config_guard.get_tool_config(&tool.name) {
+                    // Tool is configured - check if enabled
+                    if config_guard.is_tool_enabled(&tool.name) {
+                        enabled_tools.push(tool);
+                    } else {
+                        disabled_count += 1;
+                        debug!("Tool '{}' is disabled, excluding from available tools", tool.name);
+                    }
                 } else {
-                    disabled_count += 1;
-                    debug!("Tool '{}' is disabled, excluding from available tools", tool.name);
+                    // Tool is unconfigured - treat as enabled by default
+                    enabled_tools.push(tool);
+                    debug!("Tool '{}' is unconfigured, including by default", tool.name);
                 }
             }
 
