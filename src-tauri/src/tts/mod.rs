@@ -8,8 +8,9 @@ use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
 use regex::Regex;
 
-// Global flag to indicate if TTS should be stopped
+// Global flags for TTS coordination
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
 
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
 /// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
@@ -156,12 +157,22 @@ pub fn is_tts_stop_requested() -> bool {
     TTS_STOP_REQUESTED.load(Ordering::SeqCst)
 }
 
-// Reset the stop flag
+// Reset the stop flag - CRITICAL: This fixes the permanent disablement bug
 pub fn reset_tts_stop_flag() {
     TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
 }
 
-// Register escape key for TTS cancellation
+// Check if TTS is currently playing
+pub fn is_tts_playing() -> bool {
+    TTS_PLAYING.load(Ordering::SeqCst)
+}
+
+// Set TTS playing state
+fn set_tts_playing(playing: bool) {
+    TTS_PLAYING.store(playing, Ordering::SeqCst);
+}
+
+// Register escape key for TTS cancellation - CENTRALIZED
 pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
         warn!("[TTS] Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
@@ -170,7 +181,7 @@ pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     }
 }
 
-// Unregister escape key after TTS completion
+// Unregister escape key after TTS completion - CENTRALIZED
 pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
         warn!("[TTS] Failed to unregister escape key after TTS: {} - continuing anyway", e);
@@ -238,13 +249,22 @@ pub async fn get_tts_provider_command(
     Ok(audio_settings.tts_provider)
 }
 
-// FIXED: Immediate, non-blocking TTS with proper escape key handling
+// FIXED: Proper concurrency control, stop flag lifecycle, and state access
 #[tauri::command]
 pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    // CRITICAL FIX 1: Prevent concurrent TTS playback
+    if is_tts_playing() {
+        info!("TTS is already playing, ignoring new request to prevent overlapping audio");
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+
+    // CRITICAL FIX 2: Reset stop flag at the start of each operation
+    reset_tts_stop_flag();
+
     let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
@@ -262,76 +282,85 @@ pub async fn invoke_tts(
         return Ok("TTS_CONTENT_FILTERED".to_string());
     }
 
-    // CRITICAL FIX: Make TTS completely immediate and non-blocking
-    // Spawn async task so TTS doesn't block anything and escape key works immediately
-    let app_handle_clone = app_handle.clone();
-    let provider_clone = provider.clone();
-    let filtered_text_clone = filtered_text.clone();
-    let state_clone = state.inner().clone(); // Pass state to async task
+    // Set TTS as playing to prevent concurrent operations
+    set_tts_playing(true);
 
-    tokio::spawn(async move {
-        // Register escape key for TTS cancellation
-        register_tts_escape_key(&app_handle_clone).await;
+    // CRITICAL FIX 3: Centralized escape key management - register once
+    register_tts_escape_key(&app_handle).await;
 
-        // Check if stop was requested immediately
-        if is_tts_stop_requested() {
-            info!("TTS stop was requested immediately, aborting");
-            unregister_tts_escape_key(&app_handle_clone).await;
-            return;
-        }
+    // Execute TTS synchronously to maintain proper control flow
+    let result = execute_tts_with_state_access(filtered_text, &provider, &state, &app_handle).await;
 
-        info!("Starting IMMEDIATE TTS with provider: {}", provider_clone);
+    // CRITICAL FIX 4: Always clean up after TTS completes
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
 
-        // Execute TTS with fallback logic but without blocking
-        match execute_tts_with_fallback(filtered_text_clone, &provider_clone).await {
-            Ok(result) => {
-                if result == "TTS_STOPPED_BY_USER" {
-                    info!("TTS was stopped by user during execution");
-                } else if result == "TTS_DISABLED_BY_SETTING" {
-                    info!("TTS is disabled by setting");
-                } else if result == "TTS_CONTENT_FILTERED" {
-                    info!("TTS content was filtered out");
-                } else {
-                    // This should be base64 audio data - play it!
-                    info!("TTS audio generated, attempting playback...");
+    result
+}
 
-                    // Check if stop was requested before playback
-                    if is_tts_stop_requested() {
-                        info!("TTS stop was requested before playback, aborting");
-                    } else {
-                        // Simple approach: Check if sound is enabled directly from state
-                        match state_clone.get_sound_enabled() {
-                            Ok(sound_enabled) => {
-                                if !sound_enabled {
-                                    info!("Sound is disabled, skipping TTS audio playback");
-                                } else {
-                                    // Decode and play the base64 audio directly
-                                    if let Err(e) = play_base64_audio_directly(&result).await {
-                                        warn!("TTS audio playback error: {}", e);
-                                    } else {
-                                        info!("TTS audio playback completed successfully");
-                                    }
+// Execute TTS with proper state access instead of cloning
+async fn execute_tts_with_state_access(
+    text: String,
+    primary_provider: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    info!("Starting TTS with provider: {}", primary_provider);
+
+    // Execute TTS with fallback logic
+    match execute_tts_with_fallback(text, primary_provider).await {
+        Ok(result) => {
+            if result == "TTS_STOPPED_BY_USER" {
+                info!("TTS was stopped by user during execution");
+                Ok(result)
+            } else if result == "TTS_DISABLED_BY_SETTING" {
+                info!("TTS is disabled by setting");
+                Ok(result)
+            } else if result == "TTS_CONTENT_FILTERED" {
+                info!("TTS content was filtered out");
+                Ok(result)
+            } else {
+                // This should be base64 audio data - play it!
+                info!("TTS audio generated, attempting playback...");
+
+                // Check if stop was requested before playback
+                if is_tts_stop_requested() {
+                    info!("TTS stop was requested before playback, aborting");
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
+                // CRITICAL FIX 4: Access current state instead of using cloned/stale state
+                match state.get_sound_enabled() {
+                    Ok(sound_enabled) => {
+                        if !sound_enabled {
+                            info!("Sound is disabled, skipping TTS audio playback");
+                            Ok("TTS_SOUND_DISABLED".to_string())
+                        } else {
+                            // Decode and play the base64 audio directly
+                            match play_base64_audio_directly(&result).await {
+                                Ok(_) => {
+                                    info!("TTS audio playback completed successfully");
+                                    Ok("TTS_COMPLETED".to_string())
                                 }
-                            }
-                            Err(e) => {
-                                warn!("Failed to check sound enabled status: {}", e);
+                                Err(e) => {
+                                    warn!("TTS audio playback error: {}", e);
+                                    Err(format!("TTS playback failed: {}", e))
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        warn!("Failed to check sound enabled status: {}", e);
+                        Err(format!("Failed to access sound settings: {}", e))
+                    }
                 }
             }
-            Err(e) => {
-                error!("TTS failed: {}", e);
-            }
         }
-
-        // Always unregister escape key when done
-        unregister_tts_escape_key(&app_handle_clone).await;
-    });
-
-    // Return immediately - TTS is running asynchronously
-    info!("TTS started asynchronously for provider: {}", provider);
-    Ok("TTS_STARTED_ASYNC".to_string())
+        Err(e) => {
+            error!("TTS failed: {}", e);
+            Err(e)
+        }
+    }
 }
 
 // Execute TTS with fallback logic (no blocking, no race conditions)
