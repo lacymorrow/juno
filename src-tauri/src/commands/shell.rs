@@ -464,16 +464,69 @@ impl ShellSession {
 
 impl Drop for ShellSession {
     fn drop(&mut self) {
-        // Kill the persistent bash process
-        if let Ok(mut process_guard) = self.process.lock() {
-            if let Some(mut child) = process_guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+        use tracing::{error, warn, debug};
+
+        debug!("Cleaning up shell session: {}", self._session_id);
+
+        // Kill the persistent bash process with proper error handling
+        match self.process.lock() {
+            Ok(mut process_guard) => {
+                if let Some(mut child) = process_guard.take() {
+                    // Attempt to kill the process gracefully
+                    match child.kill() {
+                        Ok(_) => {
+                            debug!("Successfully sent kill signal to bash process");
+
+                            // Wait for process to actually exit
+                            match child.wait() {
+                                Ok(exit_status) => {
+                                    debug!("Bash process exited with status: {:?}", exit_status);
+                                }
+                                Err(e) => {
+                                    warn!("Failed to wait for bash process exit: {}. Process may become zombie.", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to kill bash process: {}. Process may continue running and become orphaned.", e);
+
+                            // Still attempt to wait in case the process exits naturally
+                            if let Err(wait_err) = child.wait() {
+                                error!("Also failed to wait for bash process after kill failure: {}", wait_err);
+                            }
+                        }
+                    }
+                } else {
+                    debug!("No bash process to clean up");
+                }
+            }
+            Err(e) => {
+                error!("Failed to acquire process lock during cleanup: {}. Cannot ensure bash process is terminated.", e);
             }
         }
 
-        // Clean up session directory
-        let _ = std::fs::remove_dir_all(&self.session_dir);
+        // Clean up session directory with proper error handling
+        match std::fs::remove_dir_all(&self.session_dir) {
+            Ok(_) => {
+                debug!("Successfully cleaned up session directory: {:?}", self.session_dir);
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to remove session directory {:?}: {}. Temporary files may accumulate.",
+                    self.session_dir, e
+                );
+
+                // Log directory contents for debugging if possible
+                if let Ok(entries) = std::fs::read_dir(&self.session_dir) {
+                    let file_count = entries.count();
+                    warn!("Session directory contains {} entries that were not cleaned up", file_count);
+                } else {
+                    warn!("Could not read session directory contents for cleanup verification");
+                }
+            }
+        }
+
+        debug!("Shell session cleanup completed: {}", self._session_id);
     }
 }
 
