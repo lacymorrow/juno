@@ -492,8 +492,8 @@ async fn execute_agent_internal(
         agent::config::MAX_ITERATIONS
     );
 
-    // --- Update Floating Bar Manager for Agent Start ---
-    // Notify the floating bar that an agent has started from the main chat interface
+    // --- FIXED: Notify Floating Bar Manager that Agent Started ---
+    // This ensures the floating bar shows agent activity regardless of trigger source
     let app_handle_for_bar_start = app_handle.clone();
     tauri::async_runtime::spawn(async move {
         crate::commands::floating_bar::handle_agent_started(&app_handle_for_bar_start).await;
@@ -1003,7 +1003,14 @@ async fn execute_agent_internal(
         final_response.agent_state
     );
 
-    // --- Update Floating Bar Manager ---
+    // --- FIXED: Notify Floating Bar Manager that Agent Stopped ---
+    // First notify that the agent has stopped working
+    let app_handle_for_bar_stop = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::commands::floating_bar::handle_agent_stopped(&app_handle_for_bar_stop).await;
+    });
+
+    // --- Update Floating Bar Manager with Completion Details ---
     let app_handle_for_bar = app_handle.clone();
     let agent_state_for_bar = final_response.agent_state.clone();
     let text_for_bar = final_response.text.clone();

@@ -44,7 +44,112 @@ const DEFAULT_HEIGHT =
 const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
 const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
-// Types are now imported from shared types
+// Get main icon based on enhanced state
+const getMainIcon = (barState: BarState) => {
+  switch (barState) {
+    case "default":
+      return <Sparkles className="h-4 w-4 text-emerald-400" />;
+    case "dictation_ready":
+      return <MicOff className="h-4 w-4 text-muted-foreground" />;
+    case "dictating":
+      return <Type className="h-4 w-4 text-orange-500" />;
+    case "transcribing":
+      return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
+    case "listening":
+      return <Brain className="h-4 w-4 text-blue-500" />;
+    case "submitting":
+      return <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />;
+    case "loading":
+      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+    case "agent_responding":
+      return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
+    case "always-listening":
+      return <Mic className="h-4 w-4 text-blue-400" />;
+    case "speaking":
+      return <Volume2 className="h-4 w-4 text-purple-500" />;
+    case "success":
+      return <Check className="h-4 w-4 text-emerald-500" />;
+    case "error":
+      return <AlertCircle className="h-4 w-4 text-red-500" />;
+    default:
+      return <Mic className="h-4 w-4 text-blue-500" />;
+  }
+};
+
+// Get enhanced status text for tooltip
+const getStatusText = (
+  barState: BarState,
+  currentError: string | null,
+  agentState?: string | null
+) => {
+  switch (barState) {
+    case "dictation_ready":
+      return "Hold Option+Space to start dictating";
+    case "dictating":
+      return "Dictating... Release key to finish";
+    case "transcribing":
+      return "Processing dictation...";
+    case "listening":
+      return "Listening for voice command...";
+    case "submitting":
+      return "Submitting query...";
+    case "loading":
+      return "AI is processing...";
+    case "agent_responding":
+      return "AI is responding...";
+    case "speaking":
+      return "Playing AI response";
+    case "success":
+      // Check agent state to determine if it was actually successful
+      if (agentState === "Failed") {
+        return "Task failed";
+      } else if (agentState === "Cancelled") {
+        return "Task cancelled";
+      } else if (agentState === "Offline") {
+        return "Connection unavailable";
+      } else {
+        return "Task completed successfully";
+      }
+    case "error":
+      return currentError || "An error occurred";
+    case "always-listening":
+      return "Always listening for wake words";
+    default:
+      return "Voice assistant ready";
+  }
+};
+
+// Audio level visualization component
+const AudioLevelIndicator = ({
+  barState,
+  audioLevel,
+}: {
+  barState: BarState;
+  audioLevel: number;
+}) => {
+  if (
+    !["dictating", "listening"].includes(barState)
+  )
+    return null;
+
+  return (
+    <div
+      className="flex items-center gap-1 ml-2 cursor-move"
+      data-tauri-drag-region
+    >
+      {[...Array(5)].map((_, i) => (
+        <div
+          key={i}
+          data-tauri-drag-region
+          className={cn(
+            "w-1 rounded-full transition-all duration-150",
+            audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
+          )}
+        />
+      ))}
+    </div>
+  );
+};
 
 export function FloatingBar() {
   // Enhanced state management - mirrors backend state exactly
@@ -243,83 +348,6 @@ export function FloatingBar() {
     [inputValue, invokeCommand]
   );
 
-  // Get main icon based on enhanced state
-  const getMainIcon = () => {
-    switch (barState) {
-      case "default":
-        return <Sparkles className="h-4 w-4 text-emerald-400" />;
-      case "dictation_ready":
-        return <MicOff className="h-4 w-4 text-muted-foreground" />;
-      case "dictation_active":
-      case "dictating":
-        return <Type className="h-4 w-4 text-orange-500" />;
-      case "dictation_processing":
-      case "transcribing":
-        return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
-      case "agent_listening":
-      case "listening":
-        return <Brain className="h-4 w-4 text-blue-500" />;
-      case "agent_thinking":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "agent_responding":
-        return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
-      case "always-listening":
-        return <Mic className="h-4 w-4 text-blue-400" />;
-      case "speaking":
-        return <Volume2 className="h-4 w-4 text-purple-500" />;
-      case "loading":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "success":
-        return <Check className="h-4 w-4 text-emerald-500" />;
-      case "error":
-        return <AlertCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <Mic className="h-4 w-4 text-blue-500" />;
-    }
-  };
-
-  // Get enhanced status text for tooltip
-  const getStatusText = () => {
-    switch (barState) {
-      case "dictation_ready":
-        return "Hold Option+Space to start dictating";
-      case "dictation_active":
-      case "dictating":
-        return "Dictating... Release key to finish";
-      case "dictation_processing":
-      case "transcribing":
-        return "Processing dictation...";
-      case "agent_listening":
-      case "listening":
-        return "Listening for voice command...";
-      case "agent_thinking":
-        return "AI is thinking...";
-      case "agent_responding":
-        return "AI is responding...";
-      case "speaking":
-        return "Playing AI response";
-      case "loading":
-        return "Processing request...";
-      case "success":
-        // Check agent state to determine if it was actually successful
-        if (agentState === "Failed") {
-          return "Task failed";
-        } else if (agentState === "Cancelled") {
-          return "Task cancelled";
-        } else if (agentState === "Offline") {
-          return "Connection unavailable";
-        } else {
-          return "Task completed successfully";
-        }
-      case "error":
-        return currentError || "An error occurred";
-      case "always-listening":
-        return "Always listening for wake words";
-      default:
-        return "Voice assistant ready";
-    }
-  };
-
   // Get enhanced container styles with voice mode awareness
   const getContainerStyles = () => {
     const baseStyles = `
@@ -383,37 +411,6 @@ export function FloatingBar() {
     );
   };
 
-  // Audio level visualization component
-  const AudioLevelIndicator = () => {
-    if (
-      ![
-        "dictation_active",
-        "dictating",
-        "agent_listening",
-        "listening",
-      ].includes(barState)
-    )
-      return null;
-
-    return (
-      <div
-        className="flex items-center gap-1 ml-2 cursor-move"
-        data-tauri-drag-region
-      >
-        {[...Array(5)].map((_, i) => (
-          <div
-            key={i}
-            data-tauri-drag-region
-            className={cn(
-              "w-1 rounded-full transition-all duration-150",
-              audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
-            )}
-          />
-        ))}
-      </div>
-    );
-  };
-
   return (
     <div
       data-tauri-drag-region
@@ -429,7 +426,7 @@ export function FloatingBar() {
             className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs cursor-move"
             data-tauri-drag-region
           >
-            {getStatusText()}
+            {getStatusText(barState, currentError, agentState)}
           </div>
         </div>
       )} */}
@@ -450,7 +447,7 @@ export function FloatingBar() {
             barState === "dictation_ready" ||
             barState === "finishing") && (
             <div className="flex items-center gap-2" data-tauri-drag-region>
-              {getMainIcon()}
+              {getMainIcon(barState)}
               {config.showVoiceIndicator &&
                 (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
@@ -479,7 +476,7 @@ export function FloatingBar() {
                 className="flex items-center gap-2 flex-1"
                 data-tauri-drag-region
               >
-                {getMainIcon()}
+                {getMainIcon(barState)}
                 <input
                   ref={inputRef}
                   type="text"
@@ -504,12 +501,8 @@ export function FloatingBar() {
 
           {/* Enhanced Voice States */}
           {[
-            "dictation_active",
-            "dictation_processing",
             "dictating",
             "transcribing",
-            "agent_listening",
-            "agent_thinking",
             "agent_responding",
             "listening",
           ].includes(barState) && (
@@ -521,13 +514,13 @@ export function FloatingBar() {
                 className="flex items-center gap-3 flex-1 min-w-0"
                 data-tauri-drag-region
               >
-                {getMainIcon()}
+                {getMainIcon(barState)}
                 <div className="flex-1 min-w-0" data-tauri-drag-region>
                   <div
                     className="text-sm font-medium truncate"
                     data-tauri-drag-region
                   >
-                    {getStatusText()}
+                    {getStatusText(barState, currentError, agentState)}
                   </div>
                   {transcriptionText && (
                     <div
@@ -539,7 +532,7 @@ export function FloatingBar() {
                   )}
                 </div>
               </div>
-              <AudioLevelIndicator />
+              <AudioLevelIndicator barState={barState} audioLevel={audioLevel} />
             </div>
           )}
 
@@ -604,6 +597,29 @@ export function FloatingBar() {
             </div>
           )}
 
+          {/* Submitting State */}
+          {barState === "submitting" && (
+            <div
+              className="flex flex-col items-center justify-center w-full h-full gap-2"
+              data-tauri-drag-region
+            >
+              <div className="flex items-center gap-2" data-tauri-drag-region>
+                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                <span className="text-sm font-medium" data-tauri-drag-region>
+                  Submitting
+                </span>
+              </div>
+              {lastSubmittedValue && (
+                <div
+                  className="text-xs text-white/70 truncate w-full text-center"
+                  data-tauri-drag-region
+                >
+                  {lastSubmittedValue}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Loading State */}
           {barState === "loading" && (
             <div
@@ -659,7 +675,7 @@ export function FloatingBar() {
                   )}
                   data-tauri-drag-region
                 >
-                  {getStatusText()}
+                  {getStatusText(barState, currentError, agentState)}
                 </span>
               </div>
               <div
