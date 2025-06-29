@@ -1371,51 +1371,38 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
         info!("Starting ASYNC TTS generation (non-blocking)...");
 
-        // Generate TTS audio asynchronously
+        // ARCHITECTURE FIX: invoke_tts now returns status strings, not audio data
+        // The actual TTS generation and playback happens entirely within invoke_tts
         match crate::tts::invoke_tts(filtered_text, app_handle.state(), app_handle.clone()).await {
-            Ok(audio_result) => {
-                if audio_result != "TTS_DISABLED_BY_SETTING"
-                    && audio_result != "TTS_CONTENT_FILTERED"
-                    && audio_result != "TTS_STOPPED_BY_USER"
-                {
-                    info!("ASYNC TTS audio generated successfully, starting playback...");
+            Ok(status_result) => {
+                info!("TTS processing status: {}", status_result);
 
-                    // ARCHITECTURE CHANGE: Use backend audio playback instead of frontend events
-                    // Spawn another async task for audio playback so it doesn't block
-                    let app_handle_for_playback = app_handle.clone();
-                    tokio::spawn(async move {
-                        match crate::commands::sound::play_tts_audio_backend(
-                            audio_result.clone(),
-                            app_handle_for_playback.state::<crate::state::AppState>()
-                        ).await {
-                            Ok(_) => {
-                                info!("ASYNC TTS playback completed successfully");
+                match status_result.as_str() {
+                    "TTS_STARTED_ASYNC" => {
+                        info!("TTS started successfully in async mode");
+                        // Audio generation and playback happens inside invoke_tts - no need to do anything
+                    }
+                    "TTS_DISABLED_BY_SETTING" => {
+                        info!("TTS is disabled by user setting");
+                    }
+                    "TTS_CONTENT_FILTERED" => {
+                        info!("TTS content was filtered out");
+                    }
+                    "TTS_STOPPED_BY_USER" => {
+                        info!("TTS was stopped by user before completion");
+                    }
+                    _ => {
+                        // This might be actual base64 audio data from older TTS providers
+                        // but since we're using the async system, this shouldn't happen
+                        warn!("Unexpected TTS result format: '{}'. Expected status string.",
+                              status_result.chars().take(50).collect::<String>());
 
-                                // Notify TTS completion to trigger success sound
-                                if let Err(e) = crate::anthropic::handle_tts_completion(
-                                    app_handle_for_playback.clone(),
-                                    app_handle_for_playback.state::<crate::state::AppState>()
-                                ).await {
-                                    warn!("Failed to handle TTS completion: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Backend TTS audio playback failed: {}. Falling back to frontend.", e);
-
-                                // Fallback to frontend event emission if backend fails
-                                if let Err(e) = app_handle_for_playback.emit(
-                                    "tts-audio-ready",
-                                    serde_json::json!({
-                                        "audio_base64": audio_result
-                                    }),
-                                ) {
-                                    warn!("Failed to emit fallback TTS audio event: {}", e);
-                                }
-                            }
+                        // For safety, check if it looks like base64 before trying to play
+                        if status_result.len() > 100 && !status_result.contains('_') && !status_result.contains('-') {
+                            warn!("Result might be base64 audio data - this suggests TTS architecture mismatch");
+                            // Could attempt playback here, but it's better to fix the architecture
                         }
-                    });
-                } else {
-                    info!("TTS processing completed: {}", audio_result);
+                    }
                 }
             }
             Err(e) => {
