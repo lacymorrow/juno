@@ -155,7 +155,7 @@ pub mod defaults {
             true, // enable_screenshot_compression (but not immediate)
             DEFAULT_SCREENSHOT_RETENTION_SECONDS,
             false, // immediate_compression - FIXED: Don't compress screenshots immediately!
-            DEFAULT_MAX_BASE64_SCREENSHOTS, // FIXED: Allows 4 real screenshots (not 8 as incorrectly documented)
+            DEFAULT_MAX_BASE64_SCREENSHOTS, // Now allows 8 real screenshots
             true, // fallback_to_generic_description
         )
     }
