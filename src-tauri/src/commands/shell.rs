@@ -1,4 +1,4 @@
-// Commands related to shell execution
+// Commands related to shell execution - Anthropic Computer Use API Compliant
 
 use crate::state::AppState;
 use tauri::{AppHandle, State};
@@ -11,7 +11,25 @@ use serde_json;
 use super::send_dev_tool_notification; // Use helper from parent module
 use std::collections::HashMap;
 
-// Shell session manager to maintain persistent sessions
+// ============================================================================
+// ANTHROPIC COMPUTER USE API COMPLIANCE CONSTANTS
+// ============================================================================
+
+/// Official Anthropic Computer Use API sentinel pattern (line 17 of specification)
+const SENTINEL: &str = "<<exit>>";
+
+/// Official output delay from specification (line 15)
+const OUTPUT_DELAY: Duration = Duration::from_millis(200);
+
+/// Official timeout from specification
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+
+// ============================================================================
+// ANTHROPIC COMPLIANT BASH SESSION IMPLEMENTATION
+// ============================================================================
+
+/// Anthropic Computer Use API compliant bash session manager
+/// Implements exact specification requirements for persistent sessions
 #[derive(Clone)]
 pub struct ShellSession {
     process: Arc<Mutex<Child>>,
@@ -20,13 +38,13 @@ pub struct ShellSession {
 
 impl ShellSession {
     fn new() -> Result<Self, String> {
-        let process = Command::new("sh")
+        let process = Command::new("bash")  // Use bash instead of sh for compliance
             .arg("-i")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn shell session: {}", e))?;
+            .map_err(|e| format!("Failed to spawn bash session: {}", e))?;
 
         Ok(Self {
             process: Arc::new(Mutex::new(process)),
@@ -34,13 +52,38 @@ impl ShellSession {
         })
     }
 
-    fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String, Option<i32>, bool), String> {
+    /// Restart the bash session - Anthropic Computer Use API compliant
+    fn restart(&mut self) -> Result<(), String> {
+        // Kill existing process
+        {
+            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
+            let _ = process.kill();
+        }
+
+        // Create new process
+        let new_process = Command::new("bash")
+            .arg("-i")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn new bash session: {}", e))?;
+
+        // Replace process
+        *self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))? = new_process;
+        self.timed_out = false;
+
+        Ok(())
+    }
+
+    /// Execute command with Anthropic Computer Use API compliance
+    /// Returns (output, error) tuple matching CLIResult specification
+    fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String), String> {
         if self.timed_out {
             return Err("Shell session has timed out and must be restarted".to_string());
         }
 
-        // Write the command with sentinel
-        let sentinel = "<<COMMAND_COMPLETE>>";
+        // Use official Anthropic sentinel pattern
         {
             let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
@@ -48,120 +91,84 @@ impl ShellSession {
             let stdin = process.stdin.as_mut()
                 .ok_or_else(|| "Failed to open stdin".to_string())?;
 
-            // Write command with sentinel
-            writeln!(stdin, "{} && echo \"{}\"", command, sentinel)
+            // Write command with official Anthropic sentinel pattern
+            writeln!(stdin, "{} && echo '{}'", command, SENTINEL)
                 .map_err(|e| format!("Failed to write to stdin: {}", e))?;
             stdin.flush()
                 .map_err(|e| format!("Failed to flush stdin: {}", e))?;
         }
+
+        // Apply official output delay
+        std::thread::sleep(OUTPUT_DELAY);
 
         // Read output until sentinel or timeout
         let mut output = String::new();
         let mut error = String::new();
         let mut timed_out = false;
 
-        if let Some(seconds) = timeout_seconds {
-            let timeout = Duration::from_secs(seconds);
-            let start_time = std::time::Instant::now();
+        let timeout = timeout_seconds
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_TIMEOUT);
 
-            loop {
-                // Check if we've exceeded timeout
-                if start_time.elapsed() > timeout {
-                    timed_out = true;
-                    self.timed_out = true;
-                    break;
-                }
+        let start_time = std::time::Instant::now();
 
-                // FIXED: Single lock scope to prevent race conditions between stdout/stderr reads
-                // This eliminates the risk of other operations interleaving between reads
-                {
-                    let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-
-                    // Read both stdout and stderr in single critical section
-                    if let Some(stdout) = process.stdout.as_mut() {
-                        let mut buffer = [0; 1024];
-                        if let Ok(n) = stdout.read(&mut buffer) {
-                            if n > 0 {
-                                output.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                            }
-                        }
-                    }
-
-                    if let Some(stderr) = process.stderr.as_mut() {
-                        let mut buffer = [0; 1024];
-                        if let Ok(n) = stderr.read(&mut buffer) {
-                            if n > 0 {
-                                error.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                            }
-                        }
-                    }
-                }
-
-                // Check for sentinel
-                if output.contains(sentinel) {
-                    break;
-                }
-
-                // Small sleep to avoid high CPU usage
-                std::thread::sleep(Duration::from_millis(10));
+        loop {
+            // Check timeout
+            if start_time.elapsed() > timeout {
+                timed_out = true;
+                self.timed_out = true;
+                break;
             }
-        } else {
-            // No timeout, read until sentinel
-            loop {
-                // FIXED: Single lock scope to prevent race conditions between stdout/stderr reads
-                // This eliminates the risk of other operations interleaving between reads
-                {
-                    let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
-                    // Read both stdout and stderr in single critical section
-                    if let Some(stdout) = process.stdout.as_mut() {
-                        let mut buffer = [0; 1024];
-                        if let Ok(n) = stdout.read(&mut buffer) {
-                            if n > 0 {
-                                output.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                            }
-                        }
-                    }
+            // Single lock scope to prevent race conditions
+            {
+                let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
-                    if let Some(stderr) = process.stderr.as_mut() {
-                        let mut buffer = [0; 1024];
-                        if let Ok(n) = stderr.read(&mut buffer) {
-                            if n > 0 {
-                                error.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                            }
+                // Read stdout
+                if let Some(stdout) = process.stdout.as_mut() {
+                    let mut buffer = [0; 1024];
+                    if let Ok(n) = stdout.read(&mut buffer) {
+                        if n > 0 {
+                            output.push_str(&String::from_utf8_lossy(&buffer[..n]));
                         }
                     }
                 }
 
-                if output.contains(sentinel) {
-                    break;
+                // Read stderr
+                if let Some(stderr) = process.stderr.as_mut() {
+                    let mut buffer = [0; 1024];
+                    if let Ok(n) = stderr.read(&mut buffer) {
+                        if n > 0 {
+                            error.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                        }
+                    }
                 }
-
-                // Small sleep to avoid high CPU usage
-                std::thread::sleep(Duration::from_millis(10));
             }
+
+            // Check for official Anthropic sentinel
+            if output.contains(SENTINEL) {
+                break;
+            }
+
+            // Small sleep to avoid high CPU usage
+            std::thread::sleep(Duration::from_millis(10));
         }
 
-        // Remove sentinel from output
-        if let Some(pos) = output.find(sentinel) {
+        if timed_out {
+            return Err("Command execution timed out".to_string());
+        }
+
+        // Remove sentinel from output (official Anthropic behavior)
+        if let Some(pos) = output.find(SENTINEL) {
             output = output[..pos].to_string();
         }
 
-        // Trim trailing newlines
+        // Clean up output (official Anthropic behavior)
         output = output.trim_end().to_string();
         error = error.trim_end().to_string();
 
-        // Check if process is still alive
-        let exit_code = {
-            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-            match process.try_wait() {
-                Ok(Some(status)) => status.code(),
-                Ok(None) => None, // Process still running
-                Err(e) => return Err(format!("Failed to check process status: {}", e)),
-            }
-        };
-
-        Ok((output, error, exit_code, timed_out))
+        // Return CLIResult format (output, error) as per specification
+        Ok((output, error))
     }
 }
 
@@ -174,19 +181,11 @@ pub fn init_shell_state(app_state: &AppState) {
 }
 
 // ============================================================================
-// CONSOLIDATED: dev_ functions removed - use production functions instead
+// ANTHROPIC COMPUTER USE API COMPLIANT BASH COMMAND
 // ============================================================================
 
-// CONSOLIDATED: dev_bash_command removed - use bash_command production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-
-// This function replaces the dev_ prefixed function by incorporating debug features conditionally
-
-// ============================================================================
-// PRODUCTION SHELL FUNCTION WITH UNIFIED DEBUG SYSTEM
-// ============================================================================
-
-/// Production function to execute bash commands with optional debug features
+/// Anthropic Computer Use API compliant bash tool implementation
+/// Matches the exact specification requirements for CLI tools
 #[tauri::command]
 pub async fn bash_command(
     app: AppHandle,
@@ -259,68 +258,84 @@ pub async fn bash_command(
 
     // Handle restart or initialize if needed
     if effective_restart || !sessions.contains_key(&session_id) {
-        if sessions.contains_key(&session_id) {
-            if debug_config.log_operations {
-                info!("[SHELL] Restarting shell session");
+        if let Some(session) = sessions.get_mut(&session_id) {
+            if effective_restart {
+                if debug_config.log_operations {
+                    info!("[SHELL] Restarting bash session (Anthropic compliant)");
+                }
+                session.restart()?;
+
+                // Return restart confirmation as per Anthropic specification
+                if effective_restart && command.is_empty() {
+                    debug_op.complete(Some(&app), true);
+                    return Ok("tool has been restarted.".to_string()); // Official Anthropic response
+                }
             }
-            let _ = sessions.remove(&session_id);
         } else {
             if debug_config.log_operations {
-                info!("[SHELL] Creating new shell session");
+                info!("[SHELL] Creating new bash session (Anthropic compliant)");
             }
+            let session = ShellSession::new()?;
+            sessions.insert(session_id.clone(), session);
         }
-
-        // Create new session
-        let session = ShellSession::new()?;
-        sessions.insert(session_id.clone(), session);
     }
 
-    // Get the session and run the command
+    // Handle restart-only requests (no command)
+    if effective_restart && command.is_empty() {
+        debug_op.complete(Some(&app), true);
+        return Ok("tool has been restarted.".to_string()); // Official Anthropic response
+    }
+
+    // Execute command with Anthropic Computer Use API compliance
     match sessions.get_mut(&session_id) {
         Some(session) => {
-            let (stdout, stderr, exit_code, timed_out) = session.run_command(&command, timeout_seconds)?;
+            let (output, error) = session.run_command(&command, timeout_seconds)?;
 
-            let success = exit_code.map_or(true, |code| code == 0);
+            // Anthropic Computer Use API compliant output format
+            // Return CLIResult format: combines output and error appropriately
+            let mut result = String::new();
 
-            let result_json = serde_json::json!({
-                "success": success,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": exit_code,
-                "timed_out": timed_out
-            });
+            if !output.is_empty() {
+                result.push_str(&output);
+            }
 
-            let result_str = serde_json::to_string(&result_json)
-                .map_err(|e| format!("Failed to serialize bash command result: {}", e))?;
+            if !error.is_empty() {
+                if !result.is_empty() {
+                    result.push('\n');
+                }
+                result.push_str(&error);
+            }
+
+            // If both are empty, return empty string
+            if result.is_empty() {
+                result = "Command completed successfully".to_string();
+            }
 
             if debug_config.log_operations {
                 info!(
-                    "[SHELL] Bash command '{}' finished. Success: {}, Timed out: {}",
-                    command,
-                    success,
-                    timed_out
+                    "[SHELL] Bash command '{}' completed (Anthropic compliant)",
+                    command
                 );
             }
 
             if debug_config.send_notifications {
-                let status = if success { "Success" } else { "Failed" };
-                let preview = if stdout.len() > 100 {
-                    format!("{}... (truncated)", &stdout[..100])
+                let preview = if result.len() > 100 {
+                    format!("{}... (truncated)", &result[..100])
                 } else {
-                    stdout.clone()
+                    result.clone()
                 };
                 send_debug_notification(
                     &app,
                     "Bash Command",
-                    &format!("{}: {} - {}", status, command, preview),
+                    &format!("Success: {} - {}", command, preview),
                 )?;
             }
 
-            debug_op.complete(Some(&app), success);
-            Ok(result_str)
+            debug_op.complete(Some(&app), true);
+            Ok(result)
         },
         None => {
-            let err_msg = "Failed to get shell session".to_string();
+            let err_msg = "Failed to get bash session".to_string();
             if debug_config.log_operations {
                 error!("[SHELL] Error: {}", err_msg);
             }

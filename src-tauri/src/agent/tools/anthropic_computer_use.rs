@@ -719,7 +719,7 @@ pub async fn execute_computer_tool(
     result
 }
 
-/// Execute bash tool
+/// Execute bash tool - Anthropic Computer Use API compliant
 pub async fn execute_bash_tool(
     app_handle: &tauri::AppHandle,
     input: Value,
@@ -727,61 +727,38 @@ pub async fn execute_bash_tool(
     let command = input["command"].as_str()
         .ok_or_else(|| "Missing 'command' parameter".to_string())?;
 
+    // Handle restart parameter if provided (Anthropic Computer Use API requirement)
+    let restart = input["restart"].as_bool().unwrap_or(false);
+
     let state_manager = app_handle.state::<AppState>();
 
-    // Use the bash command execution
+    // Use the Anthropic-compliant bash command execution
     let result = crate::commands::shell::bash_command(
         app_handle.clone(),
         state_manager,
         command.to_string(),
-        None, // timeout_seconds
-        None, // restart
+        None, // timeout_seconds (uses default 120s per specification)
+        Some(restart), // restart parameter
         None, // debug_mode
     ).await.map_err(|e| format!("Bash command failed: {}", e))?;
 
-    // Log the raw result for debugging
-    info!("Raw bash_command result: {}", result);
+    // Log the result for debugging
+    info!("Anthropic compliant bash result: {}", result);
 
-    // The bash_command function returns a JSON string containing stdout, stderr, exit_code, etc.
-    // We need to parse this JSON to extract the specific fields we want to return
-    let result_json: Value = serde_json::from_str(&result)
-        .map_err(|e| {
-            // If JSON parsing fails, provide detailed error information
-            error!("Failed to parse bash_command result as JSON. Error: {}, Raw result: '{}'", e, result);
-            format!("Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'", e, result)
-        })?;
+    // The bash_command function now returns CLIResult format (simple string output)
+    // as per the official Anthropic Computer Use specification
 
-    // Extract stdout and exit_code from the parsed JSON with better error handling
-    let stdout = result_json.get("stdout")
-        .and_then(|v| v.as_str())
-        .unwrap_or_else(|| {
-            warn!("Missing or invalid 'stdout' field in bash command result: {}", result_json);
-            ""
-        });
-
-    let exit_code = result_json.get("exit_code")
-        .and_then(|v| v.as_i64())
-        .unwrap_or_else(|| {
-            warn!("Missing or invalid 'exit_code' field in bash command result: {}", result_json);
-            -1
-        });
-
-    // Also extract stderr for completeness (even though we don't return it in the final result)
-    let stderr = result_json.get("stderr")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let success = result_json.get("success")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(exit_code == 0);
-
-    info!("Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}",
-          stdout, stderr, exit_code, success);
+    // Check if it's a restart confirmation message
+    if restart && result == "tool has been restarted." {
+        return Ok(json!({
+            "output": result
+        }));
+    }
 
     // Return the result in the format expected by the Anthropic Computer Use API
+    // The result is already in CLIResult format (combined output and error)
     Ok(json!({
-        "output": stdout,
-        "exit_code": exit_code
+        "output": result
     }))
 }
 
