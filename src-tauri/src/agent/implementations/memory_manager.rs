@@ -182,64 +182,23 @@ impl AdvancedMemoryManager {
 
     /// Estimate token count for a message with proper base64 image handling
     pub fn estimate_message_tokens(message: &Message) -> usize {
-        // Enhanced token estimation that properly handles base64 images and mixed content
+        // Enhanced token estimation that properly handles base64 images
         let mut total_tokens = 0;
 
         // Estimate text content tokens
         let content = &message.content;
 
-        // FIXED: Handle mixed content properly - check if ENTIRE content is base64 or just contains base64
-        let is_pure_base64 = content.len() > visual::MIN_BASE64_CONTENT_LENGTH &&
-            content.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').count() >
-            content.len() * visual::BASE64_CHAR_THRESHOLD_PERCENT / 100;
+        // Check if content contains base64 images (common patterns)
+        if content.contains(patterns::GENERIC_IMAGE_DATA_PREFIX) || content.contains(patterns::BASE64_IDENTIFIER) ||
+           (content.len() > visual::MIN_BASE64_CONTENT_LENGTH && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
+            // This looks like base64 image data - use more accurate estimation
+            // Base64 images typically use ~1 token per 15-20 characters (more aggressive estimate)
+            total_tokens += content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
 
-        let contains_base64_images = content.contains(patterns::PNG_DATA_URL_PREFIX) ||
-            content.contains(patterns::JPEG_DATA_URL_PREFIX) ||
-            content.contains(patterns::WEBP_DATA_URL_PREFIX);
-
-        if is_pure_base64 || contains_base64_images {
-            if contains_base64_images {
-                // Mixed content: separate base64 from text
-                let mut remaining_content = content.as_str();
-                let mut text_chars = 0;
-                let mut base64_chars = 0;
-
-                // Find all base64 data URLs and estimate separately
-                for prefix in &[patterns::PNG_DATA_URL_PREFIX, patterns::JPEG_DATA_URL_PREFIX, patterns::WEBP_DATA_URL_PREFIX] {
-                    while let Some(start_pos) = remaining_content.find(prefix) {
-                        // Add text before the base64 as regular text
-                        text_chars += start_pos;
-
-                        // Find the end of the base64 data (next whitespace or quote)
-                        let base64_start = start_pos + prefix.len();
-                        let base64_end = remaining_content[base64_start..]
-                            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ')')
-                            .map(|pos| base64_start + pos)
-                            .unwrap_or(remaining_content.len());
-
-                        base64_chars += base64_end - start_pos;
-                        remaining_content = &remaining_content[base64_end..];
-                    }
-                }
-                // Add any remaining text
-                text_chars += remaining_content.len();
-
-                // Calculate tokens for each type
-                total_tokens += text_chars / tokens::CHARS_PER_TOKEN_TEXT;
-                total_tokens += base64_chars / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
-
-                log::debug!("Mixed content: {} text chars ({} tokens) + {} base64 chars ({} tokens)",
-                    text_chars, text_chars / tokens::CHARS_PER_TOKEN_TEXT,
-                    base64_chars, base64_chars / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
-            } else {
-                // Pure base64 content
-                total_tokens += content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
-                log::debug!("Pure base64 content: {} chars = ~{} tokens", content.len(), total_tokens);
-            }
-
-            // Log warning for high token usage
-            if total_tokens > limits::CRITICAL_SINGLE_MESSAGE_TOKENS {
-                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", total_tokens);
+            // If this single message has excessive tokens, mark it for immediate attention
+            if content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE > limits::CRITICAL_SINGLE_MESSAGE_TOKENS {
+                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
             }
         } else {
             // Regular text content - use standard 4 chars per token
@@ -282,67 +241,34 @@ impl AdvancedMemoryManager {
             .sum()
     }
 
-    /// Update memory metrics after operations - FIXED: Safer implementation
+    /// Update memory metrics after operations
     async fn update_metrics(&self, operation_start: Instant) -> Result<(), AgentError> {
         let config = self.config.read().await;
         if !config.enable_metrics {
             return Ok(());
         }
-        drop(config); // Release config lock early
 
-        // FIXED: Use try_write to avoid blocking/deadlocks, and handle metrics updates safely
-        match self.metrics.try_write() {
-            Ok(mut metrics) => {
-                // Get current message count and token estimate safely
-                let (message_count, estimated_tokens) = {
-                    match self.messages.try_read() {
-                        Ok(messages) => {
-                            let count = messages.len();
-                            let tokens = messages.iter()
-                                .map(Self::estimate_message_tokens)
-                                .sum();
-                            (count, tokens)
-                        }
-                        Err(_) => {
-                            // If we can't get messages lock, just update timing
-                            log::debug!("Could not acquire messages lock for metrics update");
-                            (metrics.total_messages, metrics.estimated_tokens)
-                        }
-                    }
-                };
+        let mut metrics = self.metrics.write().await;
+        let messages = self.messages.read().await;
 
-                metrics.total_messages = message_count;
-                metrics.estimated_tokens = estimated_tokens;
+        metrics.total_messages = messages.len();
+        metrics.estimated_tokens = messages.iter()
+            .map(Self::estimate_message_tokens)
+            .sum();
 
-                let operation_time = operation_start.elapsed().as_millis() as f64;
+        let operation_time = operation_start.elapsed().as_millis() as f64;
+        metrics.average_response_time_ms =
+            (metrics.average_response_time_ms + operation_time) / 2.0;
 
-                // FIXED: Safer average calculation to prevent overflow/underflow
-                if metrics.average_response_time_ms == 0.0 {
-                    metrics.average_response_time_ms = operation_time;
-                } else {
-                    // Use exponential moving average instead of simple average
-                    metrics.average_response_time_ms =
-                        (metrics.average_response_time_ms * 0.9) + (operation_time * 0.1);
-                }
-
-                // Calculate efficiency ratio safely
-                if message_count > 0 {
-                    // This would need access to messages, so skip if we couldn't get the lock above
-                    if let Ok(messages) = self.messages.try_read() {
-                        let useful_messages = messages.iter()
-                            .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-                            .count();
-                        metrics.memory_efficiency_ratio = useful_messages as f64 / message_count as f64;
-                    }
-                } else {
-                    metrics.memory_efficiency_ratio = 1.0;
-                }
-            }
-            Err(_) => {
-                // If we can't get metrics lock, just log and continue
-                log::debug!("Could not acquire metrics lock for update - skipping metrics update");
-            }
-        }
+        // Calculate efficiency ratio
+        let useful_messages = messages.iter()
+            .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
+            .count();
+        metrics.memory_efficiency_ratio = if messages.len() > 0 {
+            useful_messages as f64 / messages.len() as f64
+        } else {
+            1.0
+        };
 
         Ok(())
     }
@@ -944,26 +870,14 @@ impl AdvancedMemoryManager {
         // Create comprehensive summary with enhanced analysis
         let summary = if self.visual_config.read().await.fallback_to_generic_description {
             let timestamp = SystemTime::now();
-            // FIXED: Safe timestamp handling without unwrap
-            let time_str = timestamp.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|duration| duration.as_secs().to_string())
-                .unwrap_or_else(|_| "unknown".to_string());
-
-            // FIXED: Safe timestamp formatting
-            let formatted_time = timestamp.duration_since(SystemTime::UNIX_EPOCH)
-                .ok()
-                .and_then(|duration| {
-                    chrono::DateTime::<chrono::Utc>::from_timestamp(duration.as_secs() as i64, 0)
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-                })
-                .unwrap_or_else(|| "unknown time".to_string());
+            let time_str = format!("{:?}", timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
 
             format!(
                 "Screenshot captured at {} ({}). {}. {}. \
                 Content analysis: {} (complexity: {:.1}/1.0). \
                 Original size: ~{} tokens compressed to text summary for memory efficiency.",
                 time_str,
-                formatted_time,
+                chrono::DateTime::<chrono::Utc>::from(timestamp).format("%Y-%m-%d %H:%M:%S UTC"),
                 analysis.content_type,
                 analysis.visual_context,
                 analysis.estimated_text_content.as_deref().unwrap_or("No text analysis available"),
@@ -1019,16 +933,12 @@ impl AdvancedMemoryManager {
         if Self::is_screenshot_content(&message.content) {
             log::info!("Detected screenshot in message ({}+ chars), processing for compression...", message.content.len());
 
-            // FIXED: Count actual base64 screenshots in current messages, not visual summaries
-            let messages = self.messages.read().await;
-            let current_base64_count = messages.iter()
-                .filter(|m| Self::is_screenshot_content(&m.content))
-                .count();
-            drop(messages); // Release lock immediately
-
+            // Get current visual summaries to check retention limits
             let mut visual_summaries = self.visual_summaries.write().await;
+            let current_base64_count = visual_summaries.len();
 
             // ALWAYS compress if immediate_compression is enabled OR we've exceeded the limit
+            // With max_base64_screenshots set to 0, this should always compress
             if visual_config.immediate_compression || current_base64_count >= visual_config.max_base64_screenshots {
                 log::info!("Compressing screenshot: immediate_compression={}, count={}/{}",
                           visual_config.immediate_compression, current_base64_count, visual_config.max_base64_screenshots);
@@ -1050,15 +960,6 @@ impl AdvancedMemoryManager {
 
                         visual_summaries.push(summary);
                         was_compressed = true;
-
-                        // FIXED: Prevent unbounded growth of visual summaries
-                        const MAX_VISUAL_SUMMARIES: usize = 50; // Reasonable limit
-                        if visual_summaries.len() > MAX_VISUAL_SUMMARIES {
-                            // Remove oldest summaries to prevent memory leak
-                            let excess = visual_summaries.len() - MAX_VISUAL_SUMMARIES;
-                            visual_summaries.drain(0..excess);
-                            log::info!("Cleaned up {} old visual summaries to prevent memory leak", excess);
-                        }
 
                         log::info!("Successfully compressed screenshot to text summary");
                     }
