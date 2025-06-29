@@ -700,13 +700,15 @@ pub async fn register_desktop_tools(
             ).await;
 
             match result {
-                Ok(output) => {
+                Ok(bash_result) => {
+                    let output = bash_result.get_output();
                     info!("Command executed successfully: {}", args.command);
                     Ok(json!({
                         "success": true,
                         "command": args.command,
                         "output": output,
-                        "exit_code": 0
+                        "exit_code": 0,
+                        "is_restart": bash_result.is_restart()
                     }))
                 }
                 Err(e) => {
