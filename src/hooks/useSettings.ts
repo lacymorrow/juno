@@ -367,112 +367,64 @@ export function useSettings() {
 	const loadToolConfigurations = useCallback(async () => {
 		setToolConfigLoading(true);
 		try {
-			// Use our new dynamic approach - get all registered tools and their states
 			const configs = await getCachedOrFetch('toolConfigurations', async () => {
-				console.log("🔄 Loading tool configurations dynamically...");
+				console.log("🔄 Loading tool configurations from backend...");
 
-				// Step 1: Get all currently registered tools
-				const registeredToolsResponse = await invokeCommand<{
+				// Use the batch API endpoint to get all tool configurations in a single call
+				const toolConfigsResponse = await invokeCommand<Record<string, {
+					name: string;
+					description: string;
+					enabled: boolean;
 					tools: Array<{
 						name: string;
+						category: string;
+						enabled: boolean;
 						description: string;
-						input_schema: any;
-						api_type: string;
-						beta_flag: boolean;
+						required: boolean;
+						server_id?: string;
 					}>;
-					total_count: number;
-				}>("get_registered_tools");
+				}>>("get_tool_configurations");
 
-				console.log(`📊 Found ${registeredToolsResponse.total_count} registered tools`);
+				console.log(`📊 Loaded ${Object.keys(toolConfigsResponse).length} tool categories from backend`);
 
-				// Step 2: Get configuration state for each tool
-				const toolConfigs: Record<string, ToolCategory> = {};
-				const categoryTools: Record<string, any[]> = {};
+				// Transform the response to match our TypeScript ToolCategory interface
+				const transformedConfigs: Record<string, ToolCategory> = {};
 
-				// Process each registered tool
-				for (const tool of registeredToolsResponse.tools) {
-					try {
-						// Get the tool's configuration (includes category and enabled state)
-						const toolConfigResponse = await invokeCommand<{
-							name: string;
-							category: string;
-							enabled: boolean;
-							description: string;
-							required: boolean;
-							server_id?: string;
-						}>("get_tool_config", { tool_name: tool.name });
+				for (const [categoryKey, categoryData] of Object.entries(toolConfigsResponse)) {
+					// Transform tools to match ToolConfig interface
+					const transformedTools = categoryData.tools.map(tool => ({
+						name: tool.name,
+						category: tool.category,
+						enabled: tool.enabled,
+						description: tool.description,
+						required: tool.required,
+					}));
 
-						const categoryName = toolConfigResponse.category;
-
-						// Initialize category if not exists
-						if (!categoryTools[categoryName]) {
-							categoryTools[categoryName] = [];
-						}
-
-						// Add tool to category
-						categoryTools[categoryName].push({
-							name: tool.name,
-							category: categoryName,
-							enabled: toolConfigResponse.enabled,
-							description: tool.description || toolConfigResponse.description || "",
-							required: toolConfigResponse.required || false,
-						});
-
-					} catch (toolError) {
-						console.warn(`⚠️  Failed to get config for tool '${tool.name}':`, toolError);
-
-						// Fallback: Add to "Basic" category with default settings
-						if (!categoryTools["Basic"]) {
-							categoryTools["Basic"] = [];
-						}
-						categoryTools["Basic"].push({
-							name: tool.name,
-							category: "Basic",
-							enabled: true, // Default enabled for unknown tools
-							description: tool.description || "",
-							required: false,
-						});
-					}
-				}
-
-				// Step 3: Build final category structure
-				for (const [categoryName, tools] of Object.entries(categoryTools)) {
-					// Check if category is enabled (use the first tool's state for category state)
-					const categoryEnabled = tools.length > 0 ? tools.some(t => t.enabled) : true;
-
-					toolConfigs[categoryName] = {
-						name: categoryName,
-						description: getCategoryDescription(categoryName),
-						enabled: categoryEnabled,
-						tools: tools,
+					transformedConfigs[categoryKey] = {
+						name: categoryData.name,
+						description: categoryData.description,
+						enabled: categoryData.enabled,
+						tools: transformedTools,
 					};
 				}
 
-				console.log(`✅ Built ${Object.keys(toolConfigs).length} tool categories:`, Object.keys(toolConfigs));
-				return toolConfigs;
+				console.log(`✅ Transformed ${Object.keys(transformedConfigs).length} tool categories for frontend`);
+				return transformedConfigs;
 			});
 
 			setToolConfigurations(configs);
 		} catch (error) {
 			console.error("Error loading tool configurations:", error);
-			toast.error("Failed to load tool configurations");
+			toast.error(`Failed to load tool configurations: ${error}`);
+
+			// Set empty configurations on error to prevent UI issues
+			setToolConfigurations({});
 		} finally {
 			setToolConfigLoading(false);
 		}
 	}, [invokeCommand]);
 
-	// Helper function to get category descriptions
-	const getCategoryDescription = (categoryName: string): string => {
-		const descriptions: Record<string, string> = {
-			"AnthropicComputerUse": "Core computer interaction tools for screen, keyboard, and mouse control",
-			"Browser": "Web browser automation and navigation tools",
-			"Desktop": "Desktop application and window management tools",
-			"Timer": "Scheduling and monitoring tools for time-based operations",
-			"Basic": "File operations, commands, and basic system tools",
-			"MCP": "External tools provided by MCP (Model Context Protocol) servers",
-		};
-		return descriptions[categoryName] || `${categoryName} tools for specialized operations`;
-	};
+
 
 	const loadMcpServers = useCallback(async () => {
 		setMcpLoading(true);
