@@ -298,6 +298,7 @@ impl AdvancedMemoryManager {
 
     /// Detect and process pure base64 content without data URL prefixes
     /// Returns true if pure base64 content was detected and processed
+    /// Only modifies total_tokens when returning true to prevent double-counting
     fn detect_and_process_pure_base64(content: &str, total_tokens: &mut usize) -> bool {
         // Check for large base64 content using the same logic as is_screenshot_content
         if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH {
@@ -323,6 +324,7 @@ impl AdvancedMemoryManager {
         // Look for continuous base64 sequences of significant length
         let mut pos = 0;
         let mut found_any_base64 = false;
+        let mut temp_tokens = 0; // Track tokens separately to avoid double-counting
 
         while pos < content.len() {
             // Find start of potential base64 sequence using byte-based search
@@ -359,12 +361,12 @@ impl AdvancedMemoryManager {
                         // Count text before this base64 segment as regular text
                         if start > pos {
                             let text_before = &content[pos..start];
-                            *total_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                            temp_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
                         }
 
                         // Count the base64 segment as image tokens
                         let segment_tokens = clean_segment.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
-                        *total_tokens += segment_tokens;
+                        temp_tokens += segment_tokens;
 
                         log::info!("Pure base64 segment detected: {} chars = ~{} tokens",
                                   clean_segment.len(), segment_tokens);
@@ -375,27 +377,29 @@ impl AdvancedMemoryManager {
                     }
                 }
 
-                // CRITICAL FIX: Count segments that don't qualify as base64 as regular text
-                // This fixes the token undercounting bug
+                // For segments that don't qualify as base64, count as regular text
                 if start > pos {
                     let text_before = &content[pos..start];
-                    *total_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                    temp_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
                 }
 
                 // Count the failed base64 segment as regular text
-                *total_tokens += segment.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                temp_tokens += segment.len() / tokens::CHARS_PER_TOKEN_TEXT;
 
                 pos = end;
             } else {
                 // No more base64 characters found - count remaining content as regular text
                 let remaining_text = &content[pos..];
-                *total_tokens += remaining_text.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                temp_tokens += remaining_text.len() / tokens::CHARS_PER_TOKEN_TEXT;
                 break;
             }
         }
 
-        // If we found base64 content, any remaining text after the last segment was already counted
-        // If we didn't find any base64 content, all text was counted as regular text above
+        // CRITICAL FIX: Only update total_tokens if we found qualifying base64 content
+        // This prevents double-counting when caller counts content as regular text
+        if found_any_base64 {
+            *total_tokens += temp_tokens;
+        }
 
         found_any_base64
     }
