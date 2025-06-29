@@ -104,22 +104,18 @@ pub enum BarState {
     Expanding,
     Input,
     Shrinking,
-    Loading,
+    Loading,        // Universal processing state (replaces AgentListening, AgentThinking)
     Finishing,
     Success,
-    Listening,
+    Listening,      // Universal voice listening state
     Error,
-    Transcribing,
+    Transcribing,   // Universal transcription state (replaces DictationProcessing)
     Speaking,
-    Dictating,
+    Dictating,      // Universal dictation state (replaces DictationActive)
     AlwaysListening,
-    // New agent-specific states
-    AgentListening,
-    AgentThinking,
-    AgentResponding,
-    DictationReady,
-    DictationActive,
-    DictationProcessing,
+    // Consolidated agent-specific states
+    AgentResponding, // Only keep this unique agent state
+    DictationReady,  // Keep this as it's a distinct ready state
 }
 
 impl BarState {
@@ -138,13 +134,9 @@ impl BarState {
             BarState::Speaking => "speaking",
             BarState::Dictating => "dictating",
             BarState::AlwaysListening => "always-listening",
-            // New agent-specific states
-            BarState::AgentListening => "agent_listening",
-            BarState::AgentThinking => "agent_thinking",
+            // Consolidated agent-specific states
             BarState::AgentResponding => "agent_responding",
             BarState::DictationReady => "dictation_ready",
-            BarState::DictationActive => "dictation_active",
-            BarState::DictationProcessing => "dictation_processing",
         }
     }
 }
@@ -464,11 +456,11 @@ impl FloatingBarManager {
         // Otherwise, go to Listening (blue) for agent mode
         if self.is_dictation_mode {
             self.voice_mode = "dictation".to_string();
-            self.set_state(BarState::DictationActive).await;
+            self.set_state(BarState::Dictating).await;
         } else {
             self.voice_mode = "agent".to_string();
             self.is_agent_working = true;
-            self.set_state(BarState::AgentListening).await;
+            self.set_state(BarState::Listening).await;
         }
 
         Ok(())
@@ -478,8 +470,8 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling dictation partial: '{}'", partial_text);
         self.transcription_text = partial_text;
 
-        if self.current_state == BarState::AgentListening {
-            self.set_state(if self.is_dictation_mode { BarState::DictationProcessing } else { BarState::Transcribing }).await;
+        if self.current_state == BarState::Listening {
+            self.set_state(BarState::Transcribing).await;
         }
 
         self.emit_state_update().await;
@@ -501,7 +493,7 @@ impl FloatingBarManager {
                 // In agent mode, continue with agent processing
                 self.voice_mode = "agent".to_string();
                 self.is_agent_working = true;
-                self.set_state(BarState::AgentThinking).await;
+                self.set_state(BarState::Loading).await;
             }
         } else {
             // No query, return to default
@@ -567,7 +559,8 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling agent started");
         self.is_agent_working = true;
         self.voice_mode = "agent".to_string();
-        self.set_state(BarState::AgentListening).await;
+        // Use universal Loading state for all agent processing
+        self.set_state(BarState::Loading).await;
         Ok(())
     }
 
@@ -576,7 +569,7 @@ impl FloatingBarManager {
         self.is_agent_working = false;
         self.voice_mode = "idle".to_string();
         // Return to default state unless we're in a specific state that should be preserved
-        if matches!(self.current_state, BarState::AgentListening | BarState::AgentThinking | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
+        if matches!(self.current_state, BarState::Loading | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
             self.set_state(BarState::Default).await;
         }
         Ok(())
@@ -602,8 +595,7 @@ impl FloatingBarManager {
             BarState::Loading | BarState::Finishing | BarState::Success |
             BarState::Speaking | BarState::Listening | BarState::Transcribing |
             BarState::Dictating | BarState::AlwaysListening | BarState::Error |
-            BarState::AgentListening | BarState::AgentThinking | BarState::AgentResponding |
-            BarState::DictationReady | BarState::DictationActive | BarState::DictationProcessing
+            BarState::AgentResponding | BarState::DictationReady
         ) || self.is_agent_working
     }
 }
@@ -660,6 +652,21 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
                 if manager.current_transition_id.as_ref() == transition_id.as_ref() {
                     manager.set_state(BarState::Input).await;
                 }
+            }
+        });
+    });
+
+    // Listen for agent-stream-start to transition to AgentResponding
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-stream-start", move |_event| {
+        let manager = manager_clone.clone();
+
+        safe_spawn_async_task(move || async move {
+            let mut manager = manager.lock().await;
+
+            // Transition to AgentResponding when streaming starts
+            if manager.is_agent_working {
+                manager.set_state(BarState::AgentResponding).await;
             }
         });
     });

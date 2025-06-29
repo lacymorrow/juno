@@ -51,16 +51,13 @@ const getMainIcon = (barState: BarState) => {
       return <Sparkles className="h-4 w-4 text-emerald-400" />;
     case "dictation_ready":
       return <MicOff className="h-4 w-4 text-muted-foreground" />;
-    case "dictation_active":
     case "dictating":
       return <Type className="h-4 w-4 text-orange-500" />;
-    case "dictation_processing":
     case "transcribing":
       return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
-    case "agent_listening":
     case "listening":
       return <Brain className="h-4 w-4 text-blue-500" />;
-    case "agent_thinking":
+    case "loading":
       return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
     case "agent_responding":
       return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
@@ -68,8 +65,6 @@ const getMainIcon = (barState: BarState) => {
       return <Mic className="h-4 w-4 text-blue-400" />;
     case "speaking":
       return <Volume2 className="h-4 w-4 text-purple-500" />;
-    case "loading":
-      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
     case "success":
       return <Check className="h-4 w-4 text-emerald-500" />;
     case "error":
@@ -88,23 +83,18 @@ const getStatusText = (
   switch (barState) {
     case "dictation_ready":
       return "Hold Option+Space to start dictating";
-    case "dictation_active":
     case "dictating":
       return "Dictating... Release key to finish";
-    case "dictation_processing":
     case "transcribing":
       return "Processing dictation...";
-    case "agent_listening":
     case "listening":
       return "Listening for voice command...";
-    case "agent_thinking":
-      return "AI is thinking...";
+    case "loading":
+      return "AI is processing...";
     case "agent_responding":
       return "AI is responding...";
     case "speaking":
       return "Playing AI response";
-    case "loading":
-      return "Processing request...";
     case "success":
       // Check agent state to determine if it was actually successful
       if (agentState === "Failed") {
@@ -134,9 +124,7 @@ const AudioLevelIndicator = ({
   audioLevel: number;
 }) => {
   if (
-    !["dictation_active", "dictating", "agent_listening", "listening"].includes(
-      barState
-    )
+    !["dictating", "listening"].includes(barState)
   )
     return null;
 
@@ -509,12 +497,8 @@ export function FloatingBar() {
 
           {/* Enhanced Voice States */}
           {[
-            "dictation_active",
-            "dictation_processing",
             "dictating",
             "transcribing",
-            "agent_listening",
-            "agent_thinking",
             "agent_responding",
             "listening",
           ].includes(barState) && (
