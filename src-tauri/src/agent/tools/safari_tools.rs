@@ -676,6 +676,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {},
                 "required": []
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_click_element".to_string(),
@@ -690,6 +692,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["element_id"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_type_text".to_string(),
@@ -708,6 +712,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["element_id", "text"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_get_url".to_string(),
@@ -717,6 +723,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {},
                 "required": []
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_navigate".to_string(),
@@ -731,6 +739,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["url"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_list_clickable_elements".to_string(),
@@ -740,6 +750,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {},
                 "required": []
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_execute_javascript".to_string(),
@@ -754,6 +766,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["javascript"]
             }),
+            api_type: None,
+            beta_flag: None,
         },
         ToolDefinition {
             name: "safari_clear_cache".to_string(),
@@ -763,6 +777,8 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {},
                 "required": []
             }),
+            api_type: None,
+            beta_flag: None,
         },
     ]
 }
