@@ -170,6 +170,8 @@ macro_rules! generate_invoke_handler {
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
+            get_registered_tools,
+            test_dynamic_tool_categorization,
             set_tool_enabled,
             set_tool_category_enabled,
             get_enabled_tools,

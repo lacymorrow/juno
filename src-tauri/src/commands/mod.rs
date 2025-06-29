@@ -118,8 +118,8 @@ pub use self::ui_token_selection::*; // Re-export tool choice intelligence comma
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
-    get_enabled_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
-    is_tool_enabled, reset_tool_configuration, set_tool_category_enabled, set_tool_enabled,
+    get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
+    is_tool_enabled, reset_tool_configuration, set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
 };
 
 // Shared helper function for sending notifications from dev tools
