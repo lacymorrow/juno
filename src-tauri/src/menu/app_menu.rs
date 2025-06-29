@@ -2,7 +2,7 @@ use tauri::{
     AppHandle,
     Emitter,
     Manager,
-    menu::{Menu, PredefinedMenuItem, SubmenuBuilder, MenuItemBuilder}
+    menu::{Menu, SubmenuBuilder, MenuItemBuilder}
 };
 use tracing::{info, error};
 use crate::constants;
@@ -70,47 +70,16 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .item(&export_chat_menu_item)
         .build()?;
 
-    // Edit Menu with standard keyboard shortcuts
-    // Create custom menu items with proper labels and IDs for web content compatibility
-    let undo_item = MenuItemBuilder::new("Undo")
-        .id("edit-undo")
-        .accelerator("CmdOrCtrl+Z")
-        .build(app)?;
-
-    let redo_item = MenuItemBuilder::new("Redo")
-        .id("edit-redo")
-        .accelerator("CmdOrCtrl+Shift+Z")
-        .build(app)?;
-
-    let cut_item = MenuItemBuilder::new("Cut")
-        .id("edit-cut")
-        .accelerator("CmdOrCtrl+X")
-        .build(app)?;
-
-    let copy_item = MenuItemBuilder::new("Copy")
-        .id("edit-copy")
-        .accelerator("CmdOrCtrl+C")
-        .build(app)?;
-
-    let paste_item = MenuItemBuilder::new("Paste")
-        .id("edit-paste")
-        .accelerator("CmdOrCtrl+V")
-        .build(app)?;
-
-    let select_all_item = MenuItemBuilder::new("Select All")
-        .id("edit-select-all")
-        .accelerator("CmdOrCtrl+A")
-        .build(app)?;
-
+    // Edit Menu with native Tauri predefined items for proper keyboard shortcut handling
     let edit_submenu = SubmenuBuilder::new(app, "Edit")
-        .item(&undo_item)
-        .item(&redo_item)
+        .undo()
+        .redo()
         .separator()
-        .item(&cut_item)
-        .item(&copy_item)
-        .item(&paste_item)
+        .cut()
+        .copy()
+        .paste()
         .separator()
-        .item(&select_all_item)
+        .select_all()
         .build()?;
 
     // View Menu
@@ -237,43 +206,8 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             });
         }
 
-        // Edit Menu - Handle predefined menu items explicitly for web content
-        "edit-undo" => {
-            info!("[Menu] Undo menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_UNDO, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "undo", e));
-            }
-        }
-        "edit-redo" => {
-            info!("[Menu] Redo menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_REDO, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "redo", e));
-            }
-        }
-        "edit-cut" => {
-            info!("[Menu] Cut menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_CUT, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "cut", e));
-            }
-        }
-        "edit-copy" => {
-            info!("[Menu] Copy menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_COPY, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "copy", e));
-            }
-        }
-        "edit-paste" => {
-            info!("[Menu] Paste menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_PASTE, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "paste", e));
-            }
-        }
-        "edit-select-all" => {
-            info!("[Menu] Select All menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::EDIT_SELECT_ALL, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "select all", e));
-            }
-        }
+        // Edit Menu operations are now handled natively by PredefinedMenuItem
+        // No custom event handling needed for edit operations
 
         // File Menu
         constants::app_menu_ids::NEW_CHAT => {
