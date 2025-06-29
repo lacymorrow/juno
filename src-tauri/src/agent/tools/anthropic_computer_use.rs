@@ -735,7 +735,7 @@ pub async fn execute_bash_tool(
         app_handle.clone(),
         state_manager,
         command.to_string(),
-        None, // timeout_seconds (uses default 120s per specification)
+        None, // timeout_seconds
         Some(restart), // restart parameter
         None, // debug_mode
     ).await.map_err(|e| format!("Bash command failed: {}", e))?;
