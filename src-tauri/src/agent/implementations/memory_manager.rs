@@ -4,7 +4,6 @@ use crate::agent::core::{
     Role,
 };
 use crate::agent::traits::MemoryManager;
-use crate::constants::errors::templates;
 use crate::constants::memory::{limits, tokens, visual, summary, patterns, performance, COMMON_WORDS};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -180,30 +179,13 @@ impl AdvancedMemoryManager {
         self
     }
 
-    /// Estimate token count for a message with proper base64 image handling
+    /// Estimate token count for a message with proper mixed content parsing
     pub fn estimate_message_tokens(message: &Message) -> usize {
-        // Enhanced token estimation that properly handles base64 images
         let mut total_tokens = 0;
-
-        // Estimate text content tokens
         let content = &message.content;
 
-        // Check if content contains base64 images (common patterns)
-        if content.contains(patterns::GENERIC_IMAGE_DATA_PREFIX) || content.contains(patterns::BASE64_IDENTIFIER) ||
-           (content.len() > visual::MIN_BASE64_CONTENT_LENGTH && content.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')) {
-            // This looks like base64 image data - use more accurate estimation
-            // Base64 images typically use ~1 token per 15-20 characters (more aggressive estimate)
-            total_tokens += content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
-            log::warn!("Detected base64 image content: {} chars = ~{} tokens (HIGH TOKEN USAGE)", content.len(), content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
-
-            // If this single message has excessive tokens, mark it for immediate attention
-            if content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE > limits::CRITICAL_SINGLE_MESSAGE_TOKENS {
-                log::error!("CRITICAL: Single message with excessive token count (~{}), this will cause API failures", content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE);
-            }
-        } else {
-            // Regular text content - use standard 4 chars per token
-            total_tokens += content.len() / tokens::CHARS_PER_TOKEN_TEXT;
-        }
+        // Parse content to separate text from base64 images in document order
+        total_tokens += Self::estimate_content_tokens(content);
 
         // Add tool call tokens
         let tool_call_tokens = message.tool_calls.as_ref()
@@ -211,14 +193,11 @@ impl AdvancedMemoryManager {
                 calls.iter().map(|call| {
                     let base_tokens = call.name.len() / tokens::CHARS_PER_TOKEN_TEXT + tokens::BASE_TOOL_CALL_TOKENS;
 
-                    // Check if tool call input contains base64 images
+                    // Estimate tool call input tokens with mixed content parsing
                     let input_str = call.input.to_string();
-                    if input_str.contains(patterns::GENERIC_IMAGE_DATA_PREFIX) || input_str.contains(patterns::BASE64_IDENTIFIER) {
-                        // Tool call with image - much higher token count
-                        base_tokens + (input_str.len() / tokens::CHARS_PER_TOKEN_TOOL_INPUT_IMAGE)
-                    } else {
-                        base_tokens + (input_str.len() / tokens::CHARS_PER_TOKEN_TEXT)
-                    }
+                    let input_tokens = Self::estimate_content_tokens(&input_str);
+
+                    base_tokens + input_tokens
                 }).sum()
             })
             .unwrap_or(0);
@@ -231,6 +210,198 @@ impl AdvancedMemoryManager {
         }
 
         total_tokens
+    }
+
+    /// Estimate tokens for content with mixed text and base64 images
+    fn estimate_content_tokens(content: &str) -> usize {
+        let mut total_tokens = 0;
+        let mut remaining_content = content;
+
+        // Define base64 image prefixes in order of specificity
+        let image_prefixes = [
+            patterns::PNG_DATA_URL_PREFIX,
+            patterns::JPEG_DATA_URL_PREFIX,
+            patterns::WEBP_DATA_URL_PREFIX,
+            patterns::GENERIC_IMAGE_DATA_PREFIX,
+        ];
+
+        while !remaining_content.is_empty() {
+            let mut found_image = false;
+            let mut earliest_pos = remaining_content.len();
+            let mut matched_prefix = "";
+
+            // Find the earliest occurring image prefix in document order
+            for prefix in &image_prefixes {
+                if let Some(pos) = remaining_content.find(prefix) {
+                    if pos < earliest_pos {
+                        earliest_pos = pos;
+                        matched_prefix = prefix;
+                        found_image = true;
+                    }
+                }
+            }
+
+            if found_image {
+                // Count text before the image as regular text
+                if earliest_pos > 0 {
+                    let text_part = &remaining_content[..earliest_pos];
+                    total_tokens += text_part.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                }
+
+                // Count the data URL prefix as regular text (not base64)
+                total_tokens += matched_prefix.len() / tokens::CHARS_PER_TOKEN_TEXT;
+
+                // Find the start of actual base64 data (after the prefix)
+                let base64_start_pos = earliest_pos + matched_prefix.len();
+
+                // Find where base64 ends (non-base64 character or end of string)
+                let mut base64_end_pos = base64_start_pos;
+                let remaining_after_prefix = &remaining_content[base64_start_pos..];
+
+                for (i, ch) in remaining_after_prefix.char_indices() {
+                    if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' {
+                        base64_end_pos = base64_start_pos + i + ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Count only the actual base64 data with image token rate
+                let base64_length = base64_end_pos - base64_start_pos;
+                if base64_length > 0 {
+                    let base64_tokens = base64_length / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+                    total_tokens += base64_tokens;
+
+                    // Log significant base64 content
+                    if base64_tokens > limits::LARGE_MESSAGE_WARNING_TOKENS / 2 {
+                        log::warn!("Large base64 content detected: {} chars = ~{} tokens", base64_length, base64_tokens);
+                    }
+                }
+
+                // Update remaining content to continue parsing
+                remaining_content = &remaining_content[base64_end_pos..];
+            } else {
+                // No prefixed images found - check for pure base64 content without prefixes
+                // This handles the critical case where base64 data lacks data URL prefixes
+                let pure_base64_detected = Self::detect_and_process_pure_base64(remaining_content, &mut total_tokens);
+
+                if !pure_base64_detected {
+                    // No base64 content found, count remaining as text
+                    total_tokens += remaining_content.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                }
+                break;
+            }
+        }
+
+        total_tokens
+    }
+
+    /// Detect and process pure base64 content without data URL prefixes
+    /// Returns true if pure base64 content was detected and processed
+    /// Only modifies total_tokens when returning true to prevent double-counting
+    fn detect_and_process_pure_base64(content: &str, total_tokens: &mut usize) -> bool {
+        // Check for large base64 content using the same logic as is_screenshot_content
+        if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH {
+            let base64_char_count = content.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+                .count();
+
+            let base64_char_percentage = (base64_char_count * 100) / content.len();
+
+            if base64_char_percentage >= visual::BASE64_CHAR_THRESHOLD_PERCENT {
+                // This looks like pure base64 content - treat as high-cost image tokens
+                let base64_tokens = content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+                *total_tokens += base64_tokens;
+
+                log::warn!("Pure base64 content detected (no prefix): {} chars = ~{} tokens ({}% base64 chars)",
+                          content.len(), base64_tokens, base64_char_percentage);
+
+                return true;
+            }
+        }
+
+        // Also check for smaller chunks that might be pure base64
+        // Look for continuous base64 sequences of significant length
+        let mut pos = 0;
+        let mut found_any_base64 = false;
+        let mut temp_tokens = 0; // Track tokens separately to avoid double-counting
+
+        while pos < content.len() {
+            // Find start of potential base64 sequence using byte-based search
+            let remaining_slice = &content[pos..];
+            let base64_char_start = remaining_slice.find(|c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
+
+            if let Some(start_offset) = base64_char_start {
+                let start = pos + start_offset;
+
+                // Find end of base64 sequence using safe UTF-8 character iteration
+                let mut end = start;
+                let remaining_from_start = &content[start..];
+
+                for (byte_offset, ch) in remaining_from_start.char_indices() {
+                    if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' || ch.is_ascii_whitespace() {
+                        end = start + byte_offset + ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+
+                let segment = &content[start..end];
+                let clean_segment = segment.chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect::<String>();
+
+                // Check if this segment is likely base64 (minimum length and high base64 char percentage)
+                if clean_segment.len() > 1000 { // Minimum reasonable base64 chunk size
+                    let base64_chars = clean_segment.chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+                        .count();
+
+                    if base64_chars >= clean_segment.len() * 90 / 100 { // 90% threshold for segments
+                        // Count text before this base64 segment as regular text
+                        if start > pos {
+                            let text_before = &content[pos..start];
+                            temp_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                        }
+
+                        // Count the base64 segment as image tokens
+                        let segment_tokens = clean_segment.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+                        temp_tokens += segment_tokens;
+
+                        log::info!("Pure base64 segment detected: {} chars = ~{} tokens",
+                                  clean_segment.len(), segment_tokens);
+
+                        found_any_base64 = true;
+                        pos = end;
+                        continue;
+                    }
+                }
+
+                // For segments that don't qualify as base64, count as regular text
+                if start > pos {
+                    let text_before = &content[pos..start];
+                    temp_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                }
+
+                // Count the failed base64 segment as regular text
+                temp_tokens += segment.len() / tokens::CHARS_PER_TOKEN_TEXT;
+
+                pos = end;
+            } else {
+                // No more base64 characters found - count remaining content as regular text
+                let remaining_text = &content[pos..];
+                temp_tokens += remaining_text.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                break;
+            }
+        }
+
+        // CRITICAL FIX: Only update total_tokens if we found qualifying base64 content
+        // This prevents double-counting when caller counts content as regular text
+        if found_any_base64 {
+            *total_tokens += temp_tokens;
+        }
+
+        found_any_base64
     }
 
     /// Estimate total token count for all messages
