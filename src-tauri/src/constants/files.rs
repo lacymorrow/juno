@@ -145,7 +145,6 @@ pub mod parameters {
     pub const DURATION_MS: &str = "duration_ms";
     pub const DURATION: &str = "duration";
     pub const SCROLL_DIRECTION: &str = "scroll_direction";
-    pub const SCROLL_CLICKS: &str = "scroll_clicks";
     pub const SECONDS: &str = "seconds";
 
     // Bash tool parameters
