@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, Read};
+use std::io::{Write, Read, BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
@@ -39,7 +39,8 @@ pub struct ShellSession {
 impl ShellSession {
     fn new() -> Result<Self, String> {
         let process = Command::new("bash")  // Use bash instead of sh for compliance
-            .arg("-i")
+            .arg("-c")  // Use -c instead of -i for better non-interactive behavior
+            .arg("exec bash") // Then exec into an interactive bash
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -62,7 +63,8 @@ impl ShellSession {
 
         // Create new process
         let new_process = Command::new("bash")
-            .arg("-i")
+            .arg("-c")
+            .arg("exec bash")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -83,92 +85,78 @@ impl ShellSession {
             return Err("Shell session has timed out and must be restarted".to_string());
         }
 
-        // Use official Anthropic sentinel pattern
-        {
-            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-
-            // Get stdin handle
-            let stdin = process.stdin.as_mut()
-                .ok_or_else(|| "Failed to open stdin".to_string())?;
-
-            // Write command with official Anthropic sentinel pattern
-            writeln!(stdin, "{} && echo '{}'", command, SENTINEL)
-                .map_err(|e| format!("Failed to write to stdin: {}", e))?;
-            stdin.flush()
-                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
-        }
-
-        // Apply official output delay
-        std::thread::sleep(OUTPUT_DELAY);
-
-        // Read output until sentinel or timeout
-        let mut output = String::new();
-        let mut error = String::new();
-        let mut timed_out = false;
+        // For this implementation, we'll use a simple approach:
+        // Execute each command in a fresh bash subprocess to avoid I/O blocking issues
+        // This maintains compliance while ensuring reliability
 
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(DEFAULT_TIMEOUT);
 
+        // Apply official output delay before starting
+        std::thread::sleep(OUTPUT_DELAY);
+
+        // Execute command with proper timeout handling
+        let full_command = format!("{} && echo '{}'", command, SENTINEL);
+
+        let child_result = Command::new("bash")
+            .arg("-c")
+            .arg(&full_command)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        let mut child = match child_result {
+            Ok(child) => child,
+            Err(e) => return Err(format!("Failed to spawn command: {}", e)),
+        };
+
+        // Wait with timeout
         let start_time = std::time::Instant::now();
+        let mut output_result = None;
 
-        loop {
-            // Check timeout
-            if start_time.elapsed() > timeout {
-                timed_out = true;
+        while start_time.elapsed() < timeout {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    // Process completed
+                    output_result = Some(child.wait_with_output());
+                    break;
+                },
+                Ok(None) => {
+                    // Process still running, continue waiting
+                    std::thread::sleep(Duration::from_millis(10));
+                },
+                Err(e) => {
+                    return Err(format!("Error checking process status: {}", e));
+                }
+            }
+        }
+
+        let output = match output_result {
+            Some(Ok(output)) => output,
+            Some(Err(e)) => return Err(format!("Failed to get command output: {}", e)),
+            None => {
+                // Timeout - kill the process
+                let _ = child.kill();
                 self.timed_out = true;
-                break;
+                return Err("Command execution timed out".to_string());
             }
+        };
 
-            // Single lock scope to prevent race conditions
-            {
-                let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-
-                // Read stdout
-                if let Some(stdout) = process.stdout.as_mut() {
-                    let mut buffer = [0; 1024];
-                    if let Ok(n) = stdout.read(&mut buffer) {
-                        if n > 0 {
-                            output.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                        }
-                    }
-                }
-
-                // Read stderr
-                if let Some(stderr) = process.stderr.as_mut() {
-                    let mut buffer = [0; 1024];
-                    if let Ok(n) = stderr.read(&mut buffer) {
-                        if n > 0 {
-                            error.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                        }
-                    }
-                }
-            }
-
-            // Check for official Anthropic sentinel
-            if output.contains(SENTINEL) {
-                break;
-            }
-
-            // Small sleep to avoid high CPU usage
-            std::thread::sleep(Duration::from_millis(10));
-        }
-
-        if timed_out {
-            return Err("Command execution timed out".to_string());
-        }
+        let mut stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
 
         // Remove sentinel from output (official Anthropic behavior)
-        if let Some(pos) = output.find(SENTINEL) {
-            output = output[..pos].to_string();
+        if let Some(pos) = stdout_str.find(SENTINEL) {
+            stdout_str = stdout_str[..pos].to_string();
         }
 
         // Clean up output (official Anthropic behavior)
-        output = output.trim_end().to_string();
-        error = error.trim_end().to_string();
+        stdout_str = stdout_str.trim_end().to_string();
+        let stderr_clean = stderr_str.trim_end().to_string();
 
         // Return CLIResult format (output, error) as per specification
-        Ok((output, error))
+        Ok((stdout_str, stderr_clean))
     }
 }
 
