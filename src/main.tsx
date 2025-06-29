@@ -10,6 +10,7 @@ import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
 import "./styles/globals.css";
+import { AppBar } from "./components/AppBar";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/settings" element={<ModularSettingsWindow />} />
+          <Route path="/app-bar" element={<AppBar />} />
           <Route path="/floating-bar" element={<FloatingBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
