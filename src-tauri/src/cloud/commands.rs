@@ -496,7 +496,8 @@ impl CloudCommandProcessor {
 
         // Use the existing shell command functionality
         match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
-            Ok(output) => {
+            Ok(bash_result) => {
+                let output = bash_result.get_output();
                 Ok(CommandResult {
                     success: true,
                     data: Some(output.clone()),
@@ -505,6 +506,7 @@ impl CloudCommandProcessor {
                         let mut metadata = HashMap::new();
                         metadata.insert("command".to_string(), serde_json::json!(command));
                         metadata.insert("output_length".to_string(), serde_json::json!(output.len()));
+                        metadata.insert("is_restart".to_string(), serde_json::json!(bash_result.is_restart()));
                         metadata
                     }),
                     screenshot_base64: None,
