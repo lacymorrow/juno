@@ -9,8 +9,46 @@ use std::time::{Duration, Instant};
 use std::thread;
 use tracing::{info, error};
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
+// ============================================================================
+// STRUCTURED RESULT TYPES - NO STRING COMPARISONS
+// ============================================================================
 
+/// Structured result type for bash operations - eliminates string comparisons
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BashResult {
+    /// Regular command output
+    Output(String),
+    /// Tool was restarted - follows Anthropic Computer Use API specification
+    Restarted,
+    /// Command execution with both stdout and stderr
+    CommandResult {
+        output: String,
+        success: bool,
+    },
+}
+
+impl BashResult {
+    /// Convert to string for legacy compatibility
+    pub fn to_output_string(&self) -> String {
+        match self {
+            BashResult::Output(output) => output.clone(),
+            BashResult::Restarted => "tool has been restarted.".to_string(),
+            BashResult::CommandResult { output, .. } => output.clone(),
+        }
+    }
+
+    /// Check if this result represents a restart
+    pub fn is_restart(&self) -> bool {
+        matches!(self, BashResult::Restarted)
+    }
+
+    /// Get the output content regardless of result type
+    pub fn get_output(&self) -> String {
+        self.to_output_string()
+    }
+}
 
 // ============================================================================
 // ANTHROPIC COMPUTER USE API COMPLIANCE CONSTANTS
@@ -404,6 +442,7 @@ pub fn init_shell_state(app_state: &AppState) {
 // ============================================================================
 
 /// Anthropic Computer Use API compliant bash tool implementation
+/// Returns structured BashResult - eliminates string comparison anti-patterns
 /// Fixed: Secure implementation following official specification
 #[tauri::command]
 pub async fn bash_command(
@@ -413,7 +452,7 @@ pub async fn bash_command(
     timeout_seconds: Option<u64>,
     restart: Option<bool>,
     debug_mode: Option<bool>,
-) -> Result<String, String> {
+) -> Result<BashResult, String> {
     use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
     use tracing::{info, error};
 
@@ -487,7 +526,7 @@ pub async fn bash_command(
                 // Return restart confirmation as per Anthropic specification
                 if effective_restart && command.is_empty() {
                     debug_op.complete(Some(&app), true);
-                    return Ok("tool has been restarted.".to_string());
+                    return Ok(BashResult::Restarted);
                 }
             }
         } else {
@@ -502,7 +541,7 @@ pub async fn bash_command(
     // Handle restart-only requests (no command)
     if effective_restart && command.is_empty() {
         debug_op.complete(Some(&app), true);
-        return Ok("tool has been restarted.".to_string());
+        return Ok(BashResult::Restarted);
     }
 
     // Execute command with Anthropic Computer Use API compliance
@@ -553,7 +592,10 @@ pub async fn bash_command(
             }
 
             debug_op.complete(Some(&app), true);
-            Ok(result)
+            Ok(BashResult::CommandResult {
+                output: result,
+                success: true,
+            })
         },
         None => {
             let err_msg = "Failed to get bash session".to_string();
