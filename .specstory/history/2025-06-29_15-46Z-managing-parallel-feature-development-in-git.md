@@ -19,6 +19,7 @@ Let me help them understand the problem and provide solutions:
 3. They mention using rebase on pulls but ask if that affects merges
 
 Key points to address:
+
 - Git rebase vs merge strategies
 - How to handle parallel development safely
 - Proper merge strategies for parallel features
@@ -35,7 +36,7 @@ Here's what's happening and how to fix it:
 
 ## The Problem
 
-1. **Feature A** modifies `file.js` 
+1. **Feature A** modifies `file.js`
 2. **Feature B** also modifies `file.js` (developed in parallel)
 3. You merge Feature A → main
 4. You merge Feature B → main, but Feature B's version of `file.js` overwrites Feature A's changes
@@ -79,6 +80,7 @@ comm -12 <(git diff --name-only $MAIN_BRANCH..$FEATURE_BRANCH | sort) \
 ```
 
 Usage:
+
 ```bash
 # Before merging feature-xyz
 ./scripts/check-merge-conflicts.sh feature-xyz
@@ -99,11 +101,6 @@ git config merge.conflictstyle diff3
 
 ---
 
-
-
 ---
 
-
-
 ---
-
