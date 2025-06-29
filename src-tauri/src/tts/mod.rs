@@ -20,14 +20,16 @@ static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
 // Structure to track audio playback completion
 #[derive(Debug)]
 struct AudioPlaybackHandle {
-    _temp_file: tempfile::NamedTempFile,
     completion_notify: Arc<tokio::sync::Notify>,
     start_time: std::time::Instant,
     playback_started: Arc<AtomicBool>,
+    // Keep the spawn handle alive to prevent task cancellation
+    _task_handle: tokio::task::JoinHandle<()>,
 }
 
 impl AudioPlaybackHandle {
     async fn wait_for_completion(&self) {
+        // Wait for completion notification from the background task
         self.completion_notify.notified().await;
 
         let elapsed = self.start_time.elapsed();
@@ -151,178 +153,173 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
     // Platform-specific audio playback with proper completion tracking
-    #[cfg(target_os = "macos")]
-    {
-        let mut child = tokio::process::Command::new("afplay")
-            .arg(&temp_path)
-            .spawn()
-            .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
+    let task_handle = {
+        #[cfg(target_os = "macos")]
+        {
+            let mut child = tokio::process::Command::new("afplay")
+                .arg(&temp_path)
+                .spawn()
+                .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
-        let playback_started_clone = playback_started.clone();
+            let playback_started_clone = playback_started.clone();
 
-                // FIXED: Handle spawn failure and move temp file ownership to task to prevent race condition
-        let _spawn_handle = tokio::spawn(async move {
-            // Add a small delay to ensure afplay has time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            playback_started_clone.store(true, Ordering::SeqCst);
+            // FIXED: Store task handle to prevent premature cancellation
+            tokio::spawn(async move {
+                // Add a small delay to ensure afplay has time to start
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                playback_started_clone.store(true, Ordering::SeqCst);
 
-            let result = child.wait().await;
+                let result = child.wait().await;
 
-            match result {
-                Ok(status) => {
-                    if status.success() {
-                        info!("macOS afplay completed successfully");
-                    } else {
-                        error!("macOS afplay exited with non-zero status: {}", status);
-                        // Check if it failed immediately (before actually playing audio)
-                        let pid_check = std::process::Command::new("pgrep")
-                            .arg("afplay")
-                            .output();
+                match result {
+                    Ok(status) => {
+                        if status.success() {
+                            info!("macOS afplay completed successfully");
+                        } else {
+                            error!("macOS afplay exited with non-zero status: {}", status);
+                            // Check if it failed immediately (before actually playing audio)
+                            let pid_check = std::process::Command::new("pgrep")
+                                .arg("afplay")
+                                .output();
 
-                        if let Ok(output) = pid_check {
-                            if output.stdout.is_empty() {
-                                warn!("afplay process not found - audio may have failed to start");
+                            if let Ok(output) = pid_check {
+                                if output.stdout.is_empty() {
+                                    warn!("afplay process not found - audio may have failed to start");
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to wait for macOS afplay process: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to wait for macOS afplay process: {}", e);
-                }
-            }
 
-            // Notify completion regardless of success/failure
-            completion_notify_clone.notify_one();
-            debug!("macOS afplay task completed and notified");
+                // Notify completion regardless of success/failure
+                completion_notify_clone.notify_one();
+                debug!("macOS afplay task completed and notified");
 
-            // Keep temp file alive until task completes - prevents race condition
-            drop(temp_file);
-        });
-    }
+                // Keep temp file alive until task completes - prevents race condition
+                drop(temp_file);
+            })
+        }
 
-    #[cfg(target_os = "linux")]
-    {
-        let mut child = tokio::process::Command::new("aplay")
-            .arg(&temp_path)
-            .spawn()
-            .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
+        #[cfg(target_os = "linux")]
+        {
+            let mut child = tokio::process::Command::new("aplay")
+                .arg(&temp_path)
+                .spawn()
+                .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
 
-        let playback_started_clone = playback_started.clone();
+            let playback_started_clone = playback_started.clone();
 
-                let _spawn_handle = tokio::spawn(async move {
-            // Add a small delay to ensure aplay has time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            playback_started_clone.store(true, Ordering::SeqCst);
+            tokio::spawn(async move {
+                // Add a small delay to ensure aplay has time to start
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                playback_started_clone.store(true, Ordering::SeqCst);
 
-            let result = child.wait().await;
+                let result = child.wait().await;
 
-            match result {
-                Ok(status) => {
-                    if status.success() {
-                        info!("Linux aplay completed successfully");
-                    } else {
-                        error!("Linux aplay exited with non-zero status: {}", status);
-                        // Check if it failed immediately
-                        let pid_check = std::process::Command::new("pgrep")
-                            .arg("aplay")
-                            .output();
+                match result {
+                    Ok(status) => {
+                        if status.success() {
+                            info!("Linux aplay completed successfully");
+                        } else {
+                            error!("Linux aplay exited with non-zero status: {}", status);
+                            // Check if it failed immediately
+                            let pid_check = std::process::Command::new("pgrep")
+                                .arg("aplay")
+                                .output();
 
-                        if let Ok(output) = pid_check {
-                            if output.stdout.is_empty() {
-                                warn!("aplay process not found - audio may have failed to start");
+                            if let Ok(output) = pid_check {
+                                if output.stdout.is_empty() {
+                                    warn!("aplay process not found - audio may have failed to start");
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to wait for Linux aplay process: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to wait for Linux aplay process: {}", e);
-                }
-            }
 
-            completion_notify_clone.notify_one();
-            debug!("Linux aplay task completed and notified");
+                completion_notify_clone.notify_one();
+                debug!("Linux aplay task completed and notified");
 
-            // Keep temp file alive until task completes - prevents race condition
-            drop(temp_file);
-        });
-    }
+                // Keep temp file alive until task completes - prevents race condition
+                drop(temp_file);
+            })
+        }
 
-    #[cfg(target_os = "windows")]
-    {
-        // FIXED: Properly escape path to prevent PowerShell injection
-        let escaped_path = temp_path.to_string_lossy().replace("'", "''");
-        let powershell_script = format!(
-            r#"Add-Type -AssemblyName presentationCore;
-               $mediaPlayer = New-Object system.windows.media.mediaplayer;
-               $mediaPlayer.open('{}');
-               $mediaPlayer.Play();
-               while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 50 }};
-               $duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds;
-               Start-Sleep -Milliseconds $duration;
-               $mediaPlayer.Stop();
-               $mediaPlayer.Close()"#,
-            escaped_path
-        );
+        #[cfg(target_os = "windows")]
+        {
+            // FIXED: Properly escape path to prevent PowerShell injection
+            let escaped_path = temp_path.to_string_lossy().replace("'", "''");
+            let powershell_script = format!(
+                r#"Add-Type -AssemblyName presentationCore;
+                   $mediaPlayer = New-Object system.windows.media.mediaplayer;
+                   $mediaPlayer.open('{}');
+                   $mediaPlayer.Play();
+                   while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 50 }};
+                   $duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds;
+                   Start-Sleep -Milliseconds $duration;
+                   $mediaPlayer.Stop();
+                   $mediaPlayer.Close()"#,
+                escaped_path
+            );
 
-        let mut child = tokio::process::Command::new("powershell")
-            .args(["-Command", &powershell_script])
-            .spawn()
-            .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
+            let mut child = tokio::process::Command::new("powershell")
+                .args(["-Command", &powershell_script])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
 
-        let playback_started_clone = playback_started.clone();
+            let playback_started_clone = playback_started.clone();
 
-                let _spawn_handle = tokio::spawn(async move {
-            // Add a small delay to ensure PowerShell has time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            playback_started_clone.store(true, Ordering::SeqCst);
+            tokio::spawn(async move {
+                // Add a small delay to ensure PowerShell has time to start
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                playback_started_clone.store(true, Ordering::SeqCst);
 
-            let result = child.wait().await;
+                let result = child.wait().await;
 
-            match result {
-                Ok(status) => {
-                    if status.success() {
-                        info!("Windows PowerShell audio playback completed successfully");
-                    } else {
-                        error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
-                        // Check if PowerShell is still running
-                        let ps_check = std::process::Command::new("tasklist")
-                            .args(["/FI", "IMAGENAME eq powershell.exe"])
-                            .output();
+                match result {
+                    Ok(status) => {
+                        if status.success() {
+                            info!("Windows PowerShell audio playback completed successfully");
+                        } else {
+                            error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
+                            // Check if PowerShell is still running
+                            let ps_check = std::process::Command::new("tasklist")
+                                .args(["/FI", "IMAGENAME eq powershell.exe"])
+                                .output();
 
-                        if let Ok(output) = ps_check {
-                            let output_str = String::from_utf8_lossy(&output.stdout);
-                            if !output_str.contains("powershell.exe") {
-                                warn!("PowerShell process not found - audio may have failed to start");
+                            if let Ok(output) = ps_check {
+                                let output_str = String::from_utf8_lossy(&output.stdout);
+                                if !output_str.contains("powershell.exe") {
+                                    warn!("PowerShell process not found - audio may have failed to start");
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        error!("Failed to wait for Windows PowerShell audio process: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to wait for Windows PowerShell audio process: {}", e);
-                }
-            }
 
-            completion_notify_clone.notify_one();
-            debug!("Windows PowerShell audio task completed and notified");
+                completion_notify_clone.notify_one();
+                debug!("Windows PowerShell audio task completed and notified");
 
-            // Keep temp file alive until task completes - prevents race condition
-            drop(temp_file);
-        });
-    }
+                // Keep temp file alive until task completes - prevents race condition
+                drop(temp_file);
+            })
+        }
+    };
 
-    // FIXED: Return handle without temp file ownership since it's now owned by the task
-    // Create a placeholder temp file to maintain the struct interface
-    let placeholder_temp_file = TempFileBuilder::new()
-        .prefix("tts_placeholder_")
-        .suffix(".tmp")
-        .tempfile()
-        .map_err(|e| format!("Failed to create placeholder temp file: {}", e))?;
-
+    // FIXED: Return handle with actual task handle to prevent premature task cancellation
     Ok(AudioPlaybackHandle {
-        _temp_file: placeholder_temp_file,
         completion_notify,
         start_time: std::time::Instant::now(),
         playback_started,
+        _task_handle: task_handle,
     })
 }
 
