@@ -1154,6 +1154,5 @@ Can we not dynamically add the tools to the front end? Does it have to be mapped
 _**Assistant**_
 
 
-
 ---
 
