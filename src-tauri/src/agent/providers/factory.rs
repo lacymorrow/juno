@@ -867,6 +867,8 @@ impl BrainFactory {
                 name: tool_name.clone(),
                 description,
                 input_schema,
+                api_type: None,
+                beta_flag: None,
             };
 
             // Create tool executor
