@@ -1,13 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 use std::env;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use crate::agent::core::AgentError;
 use crate::agent::prompts::manager::PromptManager;
 use crate::agent::providers::factory::model_ids;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 // Add centralized settings support
 use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
+
+// Configuration cache to prevent redundant loading
+static CONFIG_CACHE: std::sync::LazyLock<Arc<Mutex<HashMap<String, (ProviderConfig, Instant)>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+const CACHE_DURATION: Duration = Duration::from_secs(5); // 5 second cache
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -97,25 +106,51 @@ impl Default for ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// Load configuration from centralized settings manager.
+    /// Load configuration from centralized settings manager with caching.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Application startup for configuration initialization.
     pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
+        // Create a cache key based on settings manager identifier
+        let cache_key = "provider_config".to_string();
+
+        // Check cache first
+        if let Ok(cache) = CONFIG_CACHE.lock() {
+            if let Some((config, timestamp)) = cache.get(&cache_key) {
+                if timestamp.elapsed() < CACHE_DURATION {
+                    debug!("Using cached provider configuration (age: {:?})", timestamp.elapsed());
+                    return Ok(config.clone());
+                }
+            }
+        }
+
         let provider_settings = settings_manager.get_provider_settings().await
             .map_err(|e| AgentError::ConfigurationError(format!("Failed to load provider settings: {}", e)))?;
 
         let config = Self::from_centralized_settings(&provider_settings)?;
+
+        // Update cache
+        if let Ok(mut cache) = CONFIG_CACHE.lock() {
+            cache.insert(cache_key, (config.clone(), Instant::now()));
+        }
+
         info!("Loaded provider configuration from centralized settings");
         Ok(config)
     }
 
-    /// Save configuration to centralized settings manager.
+    /// Save configuration to centralized settings manager and invalidate cache.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and provider configuration updates.
     pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
         let provider_settings = self.to_centralized_settings()?;
         settings_manager.set_provider_settings(&provider_settings).await
             .map_err(|e| AgentError::ConfigurationError(format!("Failed to save provider settings: {}", e)))?;
+
+        // Invalidate cache after saving
+        if let Ok(mut cache) = CONFIG_CACHE.lock() {
+            cache.clear();
+            debug!("Cleared provider configuration cache after save");
+        }
+
         info!("Saved provider configuration to centralized settings");
         Ok(())
     }
