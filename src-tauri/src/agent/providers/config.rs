@@ -110,13 +110,13 @@ impl ProviderConfig {
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Application startup for configuration initialization.
     pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
-        // Create a unique cache key based on the settings manager's AppHandle memory address
-        // This ensures each SettingsManager instance has its own cache entry
-        let cache_key = format!("provider_config_{:p}", settings_manager.app_handle());
+        // Use a static cache key since all SettingsManager instances share the same AppHandle
+        // There's only one application instance, so per-instance caching is unnecessary
+        let cache_key = "provider_config";
 
         // Check cache first
         if let Ok(cache) = CONFIG_CACHE.lock() {
-            if let Some((config, timestamp)) = cache.get(&cache_key) {
+            if let Some((config, timestamp)) = cache.get(cache_key) {
                 if timestamp.elapsed() < CACHE_DURATION {
                     debug!("Using cached provider configuration (age: {:?})", timestamp.elapsed());
                     return Ok(config.clone());
@@ -131,7 +131,7 @@ impl ProviderConfig {
 
         // Update cache
         if let Ok(mut cache) = CONFIG_CACHE.lock() {
-            cache.insert(cache_key, (config.clone(), Instant::now()));
+            cache.insert(cache_key.to_string(), (config.clone(), Instant::now()));
         }
 
         info!("Loaded provider configuration from centralized settings");
