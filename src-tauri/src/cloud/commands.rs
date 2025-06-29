@@ -16,6 +16,7 @@ use super::security::CloudSecurity;
 use crate::state::AppState;
 use crate::constants::permissions;
 use crate::constants::errors::templates;
+use crate::commands::shell::BashResult;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -498,15 +499,24 @@ impl CloudCommandProcessor {
         match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
             Ok(bash_result) => {
                 let output = bash_result.get_output();
+
+                // Properly check the actual command success status
+                let command_success = match &bash_result {
+                    BashResult::Output(_) => true,
+                    BashResult::Restarted => true,
+                    BashResult::CommandResult { success, .. } => *success,
+                };
+
                 Ok(CommandResult {
-                    success: true,
+                    success: command_success,
                     data: Some(output.clone()),
-                    error: None,
+                    error: if command_success { None } else { Some("Command execution failed".to_string()) },
                     metadata: Some({
                         let mut metadata = HashMap::new();
                         metadata.insert("command".to_string(), serde_json::json!(command));
                         metadata.insert("output_length".to_string(), serde_json::json!(output.len()));
                         metadata.insert("is_restart".to_string(), serde_json::json!(bash_result.is_restart()));
+                        metadata.insert("command_success".to_string(), serde_json::json!(command_success));
                         metadata
                     }),
                     screenshot_base64: None,
