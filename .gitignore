@@ -3,6 +3,8 @@
 # Tauri + Vite + TypeScript + Rust + Bun project
 # =============================================================================
 
+.specstory
+
 # Audio files (project-specific)
 debug_live_audio.wav
 *.wav
