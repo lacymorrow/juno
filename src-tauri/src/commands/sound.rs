@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tracing::{error, info};
+// Add base64 import for TTS audio playback
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use tempfile::Builder as TempFileBuilder;
+use std::io::Write;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SoundPlayResult {
@@ -541,6 +545,113 @@ pub async fn play_disconnection_sound(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
     play_sound_by_type(app, SoundType::AlarmGentle, state).await // Gentle disconnection warning
+}
+
+// --- TTS Audio Playback Commands ---
+// All TTS audio playback handled entirely in Rust backend
+
+/// Play TTS audio directly in backend from base64 data
+/// This ensures all audio playback happens in Rust, not frontend
+#[tauri::command]
+pub async fn play_tts_audio_backend(
+    base64_audio: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    info!("Playing TTS audio in backend from base64 data ({} bytes)", base64_audio.len());
+
+    // Check if sound is enabled
+    let sound_enabled = state.get_sound_enabled()
+        .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
+
+    if !sound_enabled {
+        info!("Sound is disabled, skipping TTS audio playback");
+        return Ok(SoundPlayResult {
+            success: true,
+            message: "Sound is disabled".to_string(),
+            file_path: None,
+        });
+    }
+
+    // Decode base64 audio data
+    let audio_bytes = match BASE64_STANDARD.decode(&base64_audio) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let error_msg = format!("Failed to decode base64 TTS audio: {}", e);
+            error!("{}", error_msg);
+            return Ok(SoundPlayResult {
+                success: false,
+                message: error_msg,
+                file_path: None,
+            });
+        }
+    };
+
+    // Create temporary file for audio playback
+    let temp_file_result = TempFileBuilder::new()
+        .prefix("tts_audio_")
+        .suffix(".m4a") // Use .m4a for compatibility
+        .tempfile();
+
+    let mut temp_file = match temp_file_result {
+        Ok(file) => file,
+        Err(e) => {
+            let error_msg = format!("Failed to create temporary file for TTS audio: {}", e);
+            error!("{}", error_msg);
+            return Ok(SoundPlayResult {
+                success: false,
+                message: error_msg,
+                file_path: None,
+            });
+        }
+    };
+
+    // Write audio data to temporary file
+    if let Err(e) = temp_file.write_all(&audio_bytes) {
+        let error_msg = format!("Failed to write TTS audio to temporary file: {}", e);
+        error!("{}", error_msg);
+        return Ok(SoundPlayResult {
+            success: false,
+            message: error_msg,
+            file_path: None,
+        });
+    }
+
+    if let Err(e) = temp_file.flush() {
+        let error_msg = format!("Failed to flush TTS audio to temporary file: {}", e);
+        error!("{}", error_msg);
+        return Ok(SoundPlayResult {
+            success: false,
+            message: error_msg,
+            file_path: None,
+        });
+    }
+
+    let temp_path = temp_file.path().to_path_buf();
+
+    info!("Playing TTS audio from temporary file: {:?}", temp_path);
+
+    // Play the audio file using the existing platform-specific playback
+    match play_audio_file(&temp_path) {
+        Ok(_) => {
+            let success_msg = "TTS audio played successfully in backend".to_string();
+            info!("{}", success_msg);
+            Ok(SoundPlayResult {
+                success: true,
+                message: success_msg,
+                file_path: Some(temp_path.to_string_lossy().to_string()),
+            })
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to play TTS audio in backend: {}", e);
+            error!("{}", error_msg);
+            Ok(SoundPlayResult {
+                success: false,
+                message: error_msg,
+                file_path: Some(temp_path.to_string_lossy().to_string()),
+            })
+        }
+    }
+    // Temporary file is automatically cleaned up when it goes out of scope
 }
 
 #[cfg(test)]

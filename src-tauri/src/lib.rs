@@ -239,7 +239,7 @@ use crate::commands::sound::{
     play_agent_attention_sound, play_agent_error_sound, play_agent_start_sound,
     play_agent_success_sound, play_boot_sound, play_connection_sound, play_dictation_end_sound,
     play_dictation_start_sound, play_disconnection_sound, play_system_ready_sound,
-    play_voice_end_sound, play_voice_error_sound, play_voice_start_sound,
+    play_tts_audio_backend, play_voice_end_sound, play_voice_error_sound, play_voice_start_sound,
 };
 pub use anthropic::submit_query; // Re-export the submit_query command
 
@@ -608,6 +608,8 @@ pub fn run() {
             play_system_ready_sound,
             play_connection_sound,
             play_disconnection_sound,
+            // TTS Backend Audio Playback Command
+            play_tts_audio_backend,
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
