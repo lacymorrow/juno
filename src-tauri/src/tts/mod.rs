@@ -250,67 +250,9 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             })
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
-            // FIXED: Properly escape path to prevent PowerShell injection
-            let escaped_path = temp_path.to_string_lossy().replace("'", "''");
-            let powershell_script = format!(
-                r#"Add-Type -AssemblyName presentationCore;
-                   $mediaPlayer = New-Object system.windows.media.mediaplayer;
-                   $mediaPlayer.open('{}');
-                   $mediaPlayer.Play();
-                   while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 50 }};
-                   $duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds;
-                   Start-Sleep -Milliseconds $duration;
-                   $mediaPlayer.Stop();
-                   $mediaPlayer.Close()"#,
-                escaped_path
-            );
-
-            let mut child = tokio::process::Command::new("powershell")
-                .args(["-Command", &powershell_script])
-                .spawn()
-                .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
-
-            let playback_started_clone = playback_started.clone();
-
-            tokio::spawn(async move {
-                // Add a small delay to ensure PowerShell has time to start
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                playback_started_clone.store(true, Ordering::SeqCst);
-
-                let result = child.wait().await;
-
-                match result {
-                    Ok(status) => {
-                        if status.success() {
-                            info!("Windows PowerShell audio playback completed successfully");
-                        } else {
-                            error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
-                            // Check if PowerShell is still running
-                            let ps_check = std::process::Command::new("tasklist")
-                                .args(["/FI", "IMAGENAME eq powershell.exe"])
-                                .output();
-
-                            if let Ok(output) = ps_check {
-                                let output_str = String::from_utf8_lossy(&output.stdout);
-                                if !output_str.contains("powershell.exe") {
-                                    warn!("PowerShell process not found - audio may have failed to start");
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to wait for Windows PowerShell audio process: {}", e);
-                    }
-                }
-
-                completion_notify_clone.notify_one();
-                debug!("Windows PowerShell audio task completed and notified");
-
-                // Keep temp file alive until task completes - prevents race condition
-                drop(temp_file);
-            })
+            return Err("Audio playback is only supported on macOS and Linux".to_string());
         }
     };
 
@@ -349,14 +291,7 @@ pub fn stop_speech() {
         debug!("Attempted to kill macOS audio processes (afplay, say)");
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        // Kill Windows PowerShell audio processes
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "powershell.exe", "/T"])
-            .output();
-        debug!("Attempted to kill Windows PowerShell audio processes");
-    }
+
 
     #[cfg(target_os = "linux")]
     {
