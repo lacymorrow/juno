@@ -80,9 +80,10 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
     // We'll use the same logic as in sound.rs but without the state dependency
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("afplay")
+        let output = tokio::process::Command::new("afplay")
             .arg(&temp_path)
             .output()
+            .await
             .map_err(|e| format!("Failed to execute afplay: {}", e))?;
 
         if !output.status.success() {
@@ -93,9 +94,10 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        let output = std::process::Command::new("aplay")
+        let output = tokio::process::Command::new("aplay")
             .arg(&temp_path)
             .output()
+            .await
             .map_err(|e| format!("Failed to execute aplay: {}", e))?;
 
         if !output.status.success() {
