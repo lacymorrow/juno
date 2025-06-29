@@ -6,11 +6,29 @@ use tauri::{State, AppHandle};
 use crate::state::AppState;
 use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use regex::Regex;
 
 // Global flags for TTS coordination
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
+
+// Global mutex for preventing concurrent TTS operations
+static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
+
+// Structure to track audio playback completion
+#[derive(Debug)]
+struct AudioPlaybackHandle {
+    _temp_file: tempfile::NamedTempFile,
+    completion_notify: Arc<tokio::sync::Notify>,
+}
+
+impl AudioPlaybackHandle {
+    async fn wait_for_completion(&self) {
+        self.completion_notify.notified().await;
+    }
+}
 
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
 /// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
@@ -31,7 +49,45 @@ pub fn filter_tts_content(text: &str) -> String {
     let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
     filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 3. Clean up whitespace and normalize
+    // 3. Remove HTML/JSX tags (including self-closing tags)
+    let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
+    filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 4. Remove function calls and method chaining (e.g., getData(), object.method())
+    let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
+    filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 5. Remove property access patterns (e.g., object.property, config.server.port)
+    let property_access_regex = Regex::new(r"\w+\.\w+(\.\w+)*").unwrap();
+    filtered_text = property_access_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 6. Remove URLs and file paths
+    let url_regex = Regex::new(r"https?://[^\s]+").unwrap();
+    filtered_text = url_regex.replace_all(&filtered_text, " ").to_string();
+    let path_regex = Regex::new(r"[/~][^\s]+").unwrap();
+    filtered_text = path_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 7. Remove programming keywords and operators
+    let programming_regex = Regex::new(r"\b(const|let|var|if|else|function|return|class|import|export|from|async|await|try|catch|throw|new|this|super|extends|implements|interface|type|enum|namespace|module|public|private|protected|static|abstract|override|readonly|keyof|typeof|instanceof|in|of|for|while|do|switch|case|default|break|continue|finally|with|debugger|delete|void|yield|get|set)\b").unwrap();
+    filtered_text = programming_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 8. Remove variable assignments and declarations
+    let assignment_regex = Regex::new(r"\w+\s*[=:]\s*").unwrap();
+    filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 9. Remove JSON structures
+    let json_regex = Regex::new(r"\{[^}]*\}|\[[^\]]*\]").unwrap();
+    filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 10. Remove CSS selectors and rules
+    let css_regex = Regex::new(r"\.[a-zA-Z-]+\s*\{[^}]*\}|#[a-zA-Z-]+\s*\{[^}]*\}|\w+\s*\{[^}]*\}").unwrap();
+    filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 11. Remove emojis (Unicode ranges for common emoji blocks)
+    let emoji_regex = Regex::new(r"[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]").unwrap();
+    filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 12. Clean up whitespace and normalize
     let whitespace_regex = Regex::new(r"\s+").unwrap();
     filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
     filtered_text = filtered_text.trim().to_string();
@@ -46,14 +102,14 @@ pub fn filter_tts_content(text: &str) -> String {
     filtered_text
 }
 
-/// Play base64 audio directly without requiring tauri::State
-/// This is a simplified version of play_tts_audio_backend for use in async contexts
-async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
+/// Play base64 audio with proper completion tracking and error handling
+/// Returns an AudioPlaybackHandle that can be awaited for completion
+async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlaybackHandle, String> {
     use base64::prelude::*;
     use std::io::Write;
     use tempfile::Builder as TempFileBuilder;
 
-    info!("Playing TTS audio directly from base64 data ({} bytes)", base64_audio.len());
+    info!("Playing TTS audio with completion tracking ({} bytes)", base64_audio.len());
 
     // Decode base64 audio data
     let audio_bytes = BASE64_STANDARD.decode(base64_audio)
@@ -74,11 +130,12 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
 
     let temp_path = temp_file.path().to_path_buf();
+    let completion_notify = Arc::new(tokio::sync::Notify::new());
+    let completion_notify_clone = completion_notify.clone();
 
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
-    // Play the audio file directly using non-blocking platform-specific playback
-    // Use spawn() instead of output().await to avoid blocking the async runtime
+    // Platform-specific audio playback with proper completion tracking
     #[cfg(target_os = "macos")]
     {
         let mut child = tokio::process::Command::new("afplay")
@@ -86,25 +143,26 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
-        // Spawn a background task to handle cleanup and error checking
-        // This ensures the temp file stays alive until playback completes
-        let temp_path_clone = temp_path.clone();
+        // Spawn a background task to wait for completion and handle errors
         tokio::spawn(async move {
-            match child.wait().await {
+            let result = child.wait().await;
+
+            match result {
                 Ok(status) => {
                     if status.success() {
-                        debug!("afplay completed successfully");
+                        info!("macOS afplay completed successfully");
                     } else {
-                        warn!("afplay exited with non-zero status: {}", status);
+                        error!("macOS afplay exited with non-zero status: {}", status);
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to wait for afplay process: {}", e);
+                    error!("Failed to wait for macOS afplay process: {}", e);
                 }
             }
-            // Temp file cleanup happens automatically when temp_file goes out of scope
-            // but we log that the background task is complete
-            debug!("Background afplay task completed for: {:?}", temp_path_clone);
+
+            // Notify completion regardless of success/failure
+            completion_notify_clone.notify_one();
+            debug!("macOS afplay task completed and notified");
         });
     }
 
@@ -115,67 +173,124 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
 
-        // Spawn a background task to handle cleanup and error checking
-        let temp_path_clone = temp_path.clone();
         tokio::spawn(async move {
-            match child.wait().await {
+            let result = child.wait().await;
+
+            match result {
                 Ok(status) => {
                     if status.success() {
-                        debug!("aplay completed successfully");
+                        info!("Linux aplay completed successfully");
                     } else {
-                        warn!("aplay exited with non-zero status: {}", status);
+                        error!("Linux aplay exited with non-zero status: {}", status);
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to wait for aplay process: {}", e);
+                    error!("Failed to wait for Linux aplay process: {}", e);
                 }
             }
-            debug!("Background aplay task completed for: {:?}", temp_path_clone);
+
+            completion_notify_clone.notify_one();
+            debug!("Linux aplay task completed and notified");
         });
     }
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, we could use PowerShell or a media library
-        // For now, just return success as a placeholder
-        warn!("TTS audio playback on Windows not implemented in direct mode");
-        return Ok(());
+        // Implement Windows audio playback using PowerShell
+        let powershell_script = format!(
+            r#"Add-Type -AssemblyName presentationCore;
+               $mediaPlayer = New-Object system.windows.media.mediaplayer;
+               $mediaPlayer.open('{}');
+               $mediaPlayer.Play();
+               while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 50 }};
+               $duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds;
+               Start-Sleep -Milliseconds $duration;
+               $mediaPlayer.Stop();
+               $mediaPlayer.Close()"#,
+            temp_path.to_string_lossy()
+        );
+
+        let mut child = tokio::process::Command::new("powershell")
+            .args(["-Command", &powershell_script])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
+
+        tokio::spawn(async move {
+            let result = child.wait().await;
+
+            match result {
+                Ok(status) => {
+                    if status.success() {
+                        info!("Windows PowerShell audio playback completed successfully");
+                    } else {
+                        error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to wait for Windows PowerShell audio process: {}", e);
+                }
+            }
+
+            completion_notify_clone.notify_one();
+            debug!("Windows PowerShell audio task completed and notified");
+        });
     }
 
-    info!("TTS audio played successfully");
-    Ok(())
-    // Temporary file is automatically cleaned up when it goes out of scope
+    // Return handle that keeps temp file alive and allows waiting for completion
+    Ok(AudioPlaybackHandle {
+        _temp_file: temp_file,
+        completion_notify,
+    })
 }
 
-// Function to stop speech playback
+/// Legacy wrapper for compatibility - now properly waits for completion
+async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
+    let handle = play_base64_audio_with_tracking(base64_audio).await?;
+    handle.wait_for_completion().await;
+    info!("TTS audio playback completed");
+    Ok(())
+}
+
+// Function to stop speech playback - Enhanced to handle all audio processes
 pub fn stop_speech() {
-    info!("[TTS] Stop speech requested");
+    info!("[TTS] Stop speech requested - killing all audio processes");
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
 
-    // For system TTS, we can try to stop speech synthesis
+    // Kill platform-specific audio processes
     #[cfg(target_os = "macos")]
     {
-        // On macOS, we can use the system say command to stop speech
+        // Kill macOS audio processes
+        let _ = std::process::Command::new("killall")
+            .arg("afplay")
+            .output();
         let _ = std::process::Command::new("killall")
             .arg("say")
             .output();
+        debug!("Attempted to kill macOS audio processes (afplay, say)");
     }
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, we would need to implement SAPI stop functionality
-        // For now, just set the flag
+        // Kill Windows PowerShell audio processes
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "powershell.exe", "/T"])
+            .output();
+        debug!("Attempted to kill Windows PowerShell audio processes");
     }
 
     #[cfg(target_os = "linux")]
     {
-        // On Linux, stop espeak or festival
+        // Kill Linux audio processes
+        let _ = std::process::Command::new("killall")
+            .arg("aplay")
+            .output();
         let _ = std::process::Command::new("killall")
             .arg("espeak")
             .output();
         let _ = std::process::Command::new("killall")
             .arg("festival")
             .output();
+        debug!("Attempted to kill Linux audio processes (aplay, espeak, festival)");
     }
 }
 
@@ -283,13 +398,16 @@ pub async fn invoke_tts(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // CRITICAL FIX 1: Prevent concurrent TTS playback
+    // CRITICAL FIX 1: Use mutex to prevent any race conditions in concurrent access
+    let _guard = TTS_MUTEX.lock().await;
+
+    // CRITICAL FIX 2: Double-check TTS playing state after acquiring mutex
     if is_tts_playing() {
         info!("TTS is already playing, ignoring new request to prevent overlapping audio");
         return Ok("TTS_ALREADY_PLAYING".to_string());
     }
 
-    // CRITICAL FIX 2: Reset stop flag at the start of each operation
+    // CRITICAL FIX 3: Reset stop flag at the start of each operation
     reset_tts_stop_flag();
 
     let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
@@ -309,24 +427,21 @@ pub async fn invoke_tts(
         return Ok("TTS_CONTENT_FILTERED".to_string());
     }
 
-    // Set TTS as playing to prevent concurrent operations
+    // CRITICAL FIX 4: Set TTS as playing AFTER acquiring mutex to prevent race conditions
     set_tts_playing(true);
 
-    // CRITICAL FIX 3: Centralized escape key management - register once
+    // CRITICAL FIX 5: Register escape key management
     register_tts_escape_key(&app_handle).await;
 
-    // Execute TTS synchronously to maintain proper control flow
-    let result = execute_tts_with_state_access(filtered_text, &provider, &state, &app_handle).await;
+    // Execute TTS with proper completion tracking
+    let result = execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
-    // CRITICAL FIX 4: Always clean up after TTS completes
-    set_tts_playing(false);
-    unregister_tts_escape_key(&app_handle).await;
-
+    // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
     result
 }
 
-// Execute TTS with proper state access instead of cloning
-async fn execute_tts_with_state_access(
+// Execute TTS with proper completion tracking and cleanup
+async fn execute_tts_with_completion_tracking(
     text: String,
     primary_provider: &str,
     state: &State<'_, AppState>,
@@ -335,7 +450,7 @@ async fn execute_tts_with_state_access(
     info!("Starting TTS with provider: {}", primary_provider);
 
     // Execute TTS with fallback logic
-    match execute_tts_with_fallback(text, primary_provider).await {
+    let result = match execute_tts_with_fallback(text, primary_provider).await {
         Ok(result) => {
             if result == "TTS_STOPPED_BY_USER" {
                 info!("TTS was stopped by user during execution");
@@ -347,8 +462,8 @@ async fn execute_tts_with_state_access(
                 info!("TTS content was filtered out");
                 Ok(result)
             } else {
-                // This should be base64 audio data - play it!
-                info!("TTS audio generated, attempting playback...");
+                // This should be base64 audio data - play it with completion tracking!
+                info!("TTS audio generated, attempting playback with completion tracking...");
 
                 // Check if stop was requested before playback
                 if is_tts_stop_requested() {
@@ -356,18 +471,39 @@ async fn execute_tts_with_state_access(
                     return Ok("TTS_STOPPED_BY_USER".to_string());
                 }
 
-                // CRITICAL FIX 4: Access current state instead of using cloned/stale state
+                // Access current state instead of using cloned/stale state
                 match state.get_sound_enabled() {
                     Ok(sound_enabled) => {
                         if !sound_enabled {
                             info!("Sound is disabled, skipping TTS audio playback");
                             Ok("TTS_SOUND_DISABLED".to_string())
                         } else {
-                            // Decode and play the base64 audio directly
-                            match play_base64_audio_directly(&result).await {
-                                Ok(_) => {
-                                    info!("TTS audio playback completed successfully");
-                                    Ok("TTS_COMPLETED".to_string())
+                            // CRITICAL FIX: Use completion tracking instead of fire-and-forget
+                            match play_base64_audio_with_tracking(&result).await {
+                                Ok(handle) => {
+                                    info!("TTS audio playback started, waiting for completion...");
+
+                                    // Wait for actual audio completion or stop signal
+                                    tokio::select! {
+                                        _ = handle.wait_for_completion() => {
+                                            info!("TTS audio playback completed successfully");
+                                            Ok("TTS_COMPLETED".to_string())
+                                        }
+                                        _ = async {
+                                            // Poll for stop signal every 100ms
+                                            loop {
+                                                if is_tts_stop_requested() {
+                                                    info!("TTS stop requested during playback");
+                                                    stop_speech(); // Kill any running audio processes
+                                                    break;
+                                                }
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                            }
+                                        } => {
+                                            info!("TTS playback was stopped by user");
+                                            Ok("TTS_STOPPED_BY_USER".to_string())
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     warn!("TTS audio playback error: {}", e);
@@ -387,7 +523,25 @@ async fn execute_tts_with_state_access(
             error!("TTS failed: {}", e);
             Err(e)
         }
-    }
+    };
+
+    // CRITICAL FIX: Always clean up after actual completion (not just function completion)
+    set_tts_playing(false);
+    unregister_tts_escape_key(app_handle).await;
+    info!("TTS operation completed, flags and escape key cleaned up");
+
+    result
+}
+
+// Legacy function kept for backward compatibility - DEPRECATED
+async fn execute_tts_with_state_access(
+    text: String,
+    primary_provider: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    warn!("execute_tts_with_state_access is deprecated, use execute_tts_with_completion_tracking instead");
+    execute_tts_with_completion_tracking(text, primary_provider, state, app_handle).await
 }
 
 // Execute TTS with fallback logic (no blocking, no race conditions)
