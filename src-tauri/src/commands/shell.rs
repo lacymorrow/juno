@@ -487,7 +487,7 @@ pub async fn bash_command(
                 // Return restart confirmation as per Anthropic specification
                 if effective_restart && command.is_empty() {
                     debug_op.complete(Some(&app), true);
-                    return Ok("Bash session restarted successfully".to_string());
+                    return Ok("tool has been restarted.".to_string());
                 }
             }
         } else {
@@ -502,7 +502,7 @@ pub async fn bash_command(
     // Handle restart-only requests (no command)
     if effective_restart && command.is_empty() {
         debug_op.complete(Some(&app), true);
-        return Ok("Bash session restarted successfully".to_string());
+        return Ok("tool has been restarted.".to_string());
     }
 
     // Execute command with Anthropic Computer Use API compliance
