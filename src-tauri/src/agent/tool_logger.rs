@@ -1366,9 +1366,6 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     let content_clone = trimmed_content.to_string();
 
     tauri::async_runtime::spawn(async move {
-        // Clone app handle for emit call
-        let app_handle_for_emit = app_handle.clone();
-
         // Filter TTS content to prevent code/unwanted content from being spoken
         let filtered_text = crate::tts::filter_tts_content(&content_clone);
         if filtered_text.is_empty() {
@@ -1387,16 +1384,29 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
                 if audio_result != "TTS_DISABLED_BY_SETTING"
                     && audio_result != "TTS_CONTENT_FILTERED"
                 {
-                    info!("Immediate TTS audio generated successfully");
+                    info!("Immediate TTS audio generated successfully, playing via backend");
 
-                    // Emit TTS audio event for frontend to play
-                    if let Err(e) = app_handle_for_emit.emit(
-                        "tts-audio-ready",
-                        serde_json::json!({
-                            "audio_base64": audio_result
-                        }),
-                    ) {
-                        warn!("Failed to emit immediate TTS audio event: {}", e);
+                    // ARCHITECTURE CHANGE: Use backend audio playback instead of frontend events
+                    match crate::commands::sound::play_tts_audio_backend(
+                        audio_result.clone(),
+                        app_handle.state::<crate::state::AppState>()
+                    ).await {
+                        Ok(_) => {
+                            info!("Backend TTS audio playback completed successfully");
+                        }
+                        Err(e) => {
+                            warn!("Backend TTS audio playback failed: {}. Falling back to frontend.", e);
+
+                            // Fallback to frontend event emission if backend fails
+                            if let Err(e) = app_handle.emit(
+                                "tts-audio-ready",
+                                serde_json::json!({
+                                    "audio_base64": audio_result
+                                }),
+                            ) {
+                                warn!("Failed to emit fallback TTS audio event: {}", e);
+                            }
+                        }
                     }
                 } else {
                     info!("TTS processing completed: {}", audio_result);
