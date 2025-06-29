@@ -1480,19 +1480,20 @@ impl ToolProvider for LocalToolProvider {
             let mut disabled_count = 0;
 
             for tool in all_tools {
+                let tool_name = tool.name.clone();
                 // Check if tool has any configuration at all
-                if let Some(_tool_config) = config_guard.get_tool_config(&tool.name) {
+                if let Some(_tool_config) = config_guard.get_tool_config(&tool_name) {
                     // Tool is configured - check if enabled
-                    if config_guard.is_tool_enabled(&tool.name) {
+                    if config_guard.is_tool_enabled(&tool_name) {
                         enabled_tools.push(tool);
                     } else {
                         disabled_count += 1;
-                        debug!("Tool '{}' is disabled, excluding from available tools", tool.name);
+                        debug!("Tool '{}' is disabled, excluding from available tools", tool_name);
                     }
                 } else {
                     // Tool is unconfigured - treat as enabled by default
+                    debug!("Tool '{}' is unconfigured, including by default", tool_name);
                     enabled_tools.push(tool);
-                    debug!("Tool '{}' is unconfigured, including by default", tool.name);
                 }
             }
 
