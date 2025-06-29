@@ -1378,7 +1378,7 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
         // - Escape key management throughout audio lifecycle
         // - Enhanced audio generation and playback tracking
         // - Proper cleanup only after actual audio completion
-        match crate::tts::invoke_tts(tts_content, app_state, app_handle).await {
+        match crate::tts::invoke_tts(tts_content, app_state, app_handle.clone()).await {
             Ok(status_result) => {
                 info!("TTS processing completed with status: {}", status_result);
 
