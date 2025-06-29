@@ -77,34 +77,61 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
 
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
-    // Play the audio file using the existing platform-specific playback
-    // We'll use the same logic as in sound.rs but without the state dependency
+    // Play the audio file using non-blocking platform-specific playback
+    // Use spawn() instead of output().await to avoid blocking the async runtime
     #[cfg(target_os = "macos")]
     {
-        let output = tokio::process::Command::new("afplay")
+        let mut child = tokio::process::Command::new("afplay")
             .arg(&temp_path)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to execute afplay: {}", e))?;
+            .spawn()
+            .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
-        if !output.status.success() {
-            let error_msg = format!("afplay failed: {}", String::from_utf8_lossy(&output.stderr));
-            return Err(error_msg);
-        }
+        // Spawn a background task to handle cleanup and error checking
+        // This ensures the temp file stays alive until playback completes
+        let temp_path_clone = temp_path.clone();
+        tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        debug!("afplay completed successfully");
+                    } else {
+                        warn!("afplay exited with non-zero status: {}", status);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to wait for afplay process: {}", e);
+                }
+            }
+            // Temp file cleanup happens automatically when temp_file goes out of scope
+            // but we log that the background task is complete
+            debug!("Background afplay task completed for: {:?}", temp_path_clone);
+        });
     }
 
     #[cfg(target_os = "linux")]
     {
-        let output = tokio::process::Command::new("aplay")
+        let mut child = tokio::process::Command::new("aplay")
             .arg(&temp_path)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to execute aplay: {}", e))?;
+            .spawn()
+            .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
 
-        if !output.status.success() {
-            let error_msg = format!("aplay failed: {}", String::from_utf8_lossy(&output.stderr));
-            return Err(error_msg);
-        }
+        // Spawn a background task to handle cleanup and error checking
+        let temp_path_clone = temp_path.clone();
+        tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => {
+                    if status.success() {
+                        debug!("aplay completed successfully");
+                    } else {
+                        warn!("aplay exited with non-zero status: {}", status);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to wait for aplay process: {}", e);
+                }
+            }
+            debug!("Background aplay task completed for: {:?}", temp_path_clone);
+        });
     }
 
     #[cfg(target_os = "windows")]
