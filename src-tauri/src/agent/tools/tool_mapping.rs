@@ -82,6 +82,23 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::GET_SYSTEM_INFO, ToolCategory::Desktop);
     map.insert(tool_names::MANAGE_AUDIO, ToolCategory::Desktop);
 
+    // Additional desktop tools that are actually registered
+    map.insert("scroll", ToolCategory::Desktop);
+    map.insert("wait", ToolCategory::Desktop);
+    map.insert("release_key", ToolCategory::Desktop);
+    map.insert("get_focused_element_info", ToolCategory::Desktop);
+    map.insert("capture_screenshot", ToolCategory::Desktop);
+    map.insert("capture_element_screenshot", ToolCategory::Desktop);
+    map.insert("get_clipboard", ToolCategory::Desktop);
+    map.insert("set_clipboard", ToolCategory::Desktop);
+    map.insert("cursor_position", ToolCategory::Desktop);
+    map.insert("list_windows", ToolCategory::Desktop);
+    map.insert("get_window_info", ToolCategory::Desktop);
+    map.insert("execute_command", ToolCategory::Desktop);
+    map.insert("open_file_and_type", ToolCategory::Desktop);
+    map.insert("save_and_close_file", ToolCategory::Desktop);
+    map.insert("copy_to_clipboard_and_paste", ToolCategory::Desktop);
+
     // Accessibility tools (native macOS element interaction)
     map.insert(tool_names::ACCESSIBILITY_SCAN, ToolCategory::Desktop);
     map.insert(tool_names::ACCESSIBILITY_CLICK, ToolCategory::Desktop);
@@ -109,6 +126,10 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::SHELL_EXECUTE, ToolCategory::Basic);
     map.insert(tool_names::BASH_EXECUTE, ToolCategory::Basic);
 
+    // Additional basic tools that are actually registered
+    map.insert("read_file", ToolCategory::Basic);
+    map.insert("run_terminal_command", ToolCategory::Basic);
+
     // Timer tools
     map.insert(tool_names::TIMER_CREATE, ToolCategory::Timer);
     map.insert(tool_names::TIMER_START, ToolCategory::Timer);
@@ -118,6 +139,25 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::TIMER_GET_STATUS, ToolCategory::Timer);
     map.insert(tool_names::TIMER_LIST, ToolCategory::Timer);
     map.insert(tool_names::TIMER_DELETE, ToolCategory::Timer);
+
+    // Additional timer tools that are actually registered
+    map.insert("set_timer", ToolCategory::Timer);
+    map.insert("set_screen_monitor", ToolCategory::Timer);
+    map.insert("set_file_monitor", ToolCategory::Timer);
+    map.insert("cancel_timer", ToolCategory::Timer);
+    map.insert("list_timers", ToolCategory::Timer);
+    map.insert("check_expired_timers", ToolCategory::Timer);
+
+    // Self-awareness tools (development only)
+    map.insert("build_self", ToolCategory::Desktop); // Development build tool
+    map.insert("analyze_source_structure", ToolCategory::Desktop); // Code analysis tool
+    map.insert("inspect_prompt_system", ToolCategory::Desktop); // Prompt inspection tool
+    map.insert("get_system_info", ToolCategory::Desktop); // System information tool
+
+    // Delegation tools
+    map.insert(tool_names::DELEGATE_TO_BROWSER_AGENT, ToolCategory::Desktop);
+    map.insert(tool_names::DELEGATE_TO_DESKTOP_AGENT, ToolCategory::Desktop);
+    map.insert(tool_names::DELEGATE_TO_FILE_AGENT, ToolCategory::Desktop);
 
     map
 });
