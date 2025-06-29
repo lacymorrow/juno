@@ -97,6 +97,8 @@ which = "6.0"
 # Additional dependencies for UI Token Selection
 lru = "0.12"
 walkdir = "2.4"
+# System-level utilities for shell session management
+libc = "0.2"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

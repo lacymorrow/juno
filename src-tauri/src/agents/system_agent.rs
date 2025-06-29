@@ -72,14 +72,18 @@ impl SystemAgent {
                 .await;
 
                 match result {
-                    Ok(output) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({
-                            "success": true,
-                            "output": output,
-                            "command": command
-                        }),
-                    }),
+                    Ok(bash_result) => {
+                        let output = bash_result.get_output();
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output: serde_json::json!({
+                                "success": true,
+                                "output": output,
+                                "command": command,
+                                "is_restart": bash_result.is_restart()
+                            }),
+                        })
+                    }
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
