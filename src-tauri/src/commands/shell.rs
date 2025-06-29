@@ -113,50 +113,48 @@ impl ShellSession {
 
         // Wait with timeout
         let start_time = std::time::Instant::now();
-        let mut output_result = None;
 
-        while start_time.elapsed() < timeout {
+        loop {
+            if start_time.elapsed() >= timeout {
+                // Timeout - kill the process
+                let _ = child.kill();
+                let _ = child.wait(); // Clean up zombie process
+                self.timed_out = true;
+                return Err("Command execution timed out".to_string());
+            }
+
             match child.try_wait() {
                 Ok(Some(_status)) => {
-                    // Process completed
-                    output_result = Some(child.wait_with_output());
-                    break;
+                    // Process completed - get output
+                    let output = child.wait_with_output()
+                        .map_err(|e| format!("Failed to get command output: {}", e))?;
+
+                    let mut stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+                    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+
+                    // Remove sentinel from output (official Anthropic behavior)
+                    if let Some(pos) = stdout_str.find(SENTINEL) {
+                        stdout_str = stdout_str[..pos].to_string();
+                    }
+
+                    // Clean up output (official Anthropic behavior)
+                    stdout_str = stdout_str.trim_end().to_string();
+                    let stderr_clean = stderr_str.trim_end().to_string();
+
+                    // Return CLIResult format (output, error) as per specification
+                    return Ok((stdout_str, stderr_clean));
                 },
                 Ok(None) => {
                     // Process still running, continue waiting
                     std::thread::sleep(Duration::from_millis(10));
                 },
                 Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
                     return Err(format!("Error checking process status: {}", e));
                 }
             }
         }
-
-        let output = match output_result {
-            Some(Ok(output)) => output,
-            Some(Err(e)) => return Err(format!("Failed to get command output: {}", e)),
-            None => {
-                // Timeout - kill the process
-                let _ = child.kill();
-                self.timed_out = true;
-                return Err("Command execution timed out".to_string());
-            }
-        };
-
-        let mut stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-
-        // Remove sentinel from output (official Anthropic behavior)
-        if let Some(pos) = stdout_str.find(SENTINEL) {
-            stdout_str = stdout_str[..pos].to_string();
-        }
-
-        // Clean up output (official Anthropic behavior)
-        stdout_str = stdout_str.trim_end().to_string();
-        let stderr_clean = stderr_str.trim_end().to_string();
-
-        // Return CLIResult format (output, error) as per specification
-        Ok((stdout_str, stderr_clean))
     }
 }
 
