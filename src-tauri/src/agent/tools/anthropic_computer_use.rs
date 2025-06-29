@@ -6,7 +6,7 @@ use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
-use crate::commands::shell::BashResult;
+// Removed unused import - BashResult is handled differently now
 // Keep the tool versioning from errors branch (enhanced functionality)
 use super::tool_versioning::{ToolVersionManager, ToolVersionConfig};
 // Keep the mouse command imports from main branch (proper command usage)

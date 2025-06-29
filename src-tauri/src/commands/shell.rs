@@ -194,7 +194,8 @@ impl ShellSession {
 
     /// Execute command with Anthropic Computer Use API compliance
     /// Fixed: Direct pipe communication with proper escaping and session persistence
-    fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String), String> {
+    /// Fixed: Returns exit code for proper success/failure reporting
+    fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String, i32), String> {
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(DEFAULT_TIMEOUT);
@@ -245,17 +246,18 @@ impl ShellSession {
 
     /// Execute command directly via stdin/stdout with proper timeout handling
     /// Fixed: Maintains process lock throughout execution to prevent race conditions
-    fn execute_command_direct(&mut self, command: &str, cmd_id: u64, timeout: Duration) -> Result<(String, String), String> {
+    /// Fixed: Captures exit code for proper success/failure reporting
+    fn execute_command_direct(&mut self, command: &str, cmd_id: u64, timeout: Duration) -> Result<(String, String, i32), String> {
         let mut process_guard = self.process.lock()
             .map_err(|e| format!("Failed to lock process: {}", e))?;
 
         let child = process_guard.as_mut()
             .ok_or_else(|| "No bash process available".to_string())?;
 
-        // Prepare command with completion marker
+        // Prepare command with exit code capture and completion marker
         // Use printf to avoid issues with echo implementations
         let safe_command = format!(
-            "{}\nprintf '\\n{}{}\\n'\n",
+            "{}\necho \"EXIT_CODE:$?\"\nprintf '\\n{}{}\\n'\n",
             command,
             COMMAND_SEPARATOR,
             cmd_id
@@ -278,9 +280,12 @@ impl ShellSession {
             child, &completion_marker, timeout, start_time
         )?;
 
+        // Extract exit code from stdout
+        let (cleaned_stdout, exit_code) = self.extract_exit_code(&stdout_result);
+
         // Process lock is maintained throughout execution - no need to restart process
 
-        Ok((stdout_result, stderr_result))
+        Ok((cleaned_stdout, stderr_result, exit_code))
     }
 
     /// Read output from stdout/stderr with timeout and completion detection
@@ -426,6 +431,34 @@ impl ShellSession {
         Ok(())
     }
 
+    /// Extract exit code from command output and return cleaned output
+    /// Fixed: Properly parses exit code for success/failure reporting
+    fn extract_exit_code(&self, output: &str) -> (String, i32) {
+        // Look for our exit code marker
+        if let Some(exit_pos) = output.rfind("EXIT_CODE:") {
+            let exit_part = &output[exit_pos..];
+
+            // Extract the exit code number
+            if let Some(code_start) = exit_part.find(':') {
+                let code_str = &exit_part[code_start + 1..];
+
+                // Find the end of the exit code (next newline or end of string)
+                let code_end = code_str.find('\n').unwrap_or(code_str.len());
+                let exit_code_str = code_str[..code_end].trim();
+
+                // Parse the exit code
+                let exit_code = exit_code_str.parse::<i32>().unwrap_or(-1);
+
+                // Return cleaned output (everything before EXIT_CODE:)
+                let cleaned_output = output[..exit_pos].trim_end().to_string();
+
+                return (cleaned_output, exit_code);
+            }
+        }
+
+        // If we can't find/parse exit code, assume error (-1)
+        (output.to_string(), -1)
+    }
 
 }
 
@@ -562,7 +595,10 @@ pub async fn bash_command(
     // Execute command with Anthropic Computer Use API compliance
     match sessions.get_mut(&session_id) {
         Some(session) => {
-            let (output, error) = session.run_command(&command, timeout_seconds)?;
+            let (output, error, exit_code) = session.run_command(&command, timeout_seconds)?;
+
+            // Determine success based on exit code (0 = success, non-zero = failure)
+            let success = exit_code == 0;
 
             // Anthropic Computer Use API compliant output format
             // Combine output and error appropriately
@@ -581,16 +617,27 @@ pub async fn bash_command(
                 result.push_str(&error);
             }
 
-            // If both are empty, indicate success
+            // If both are empty, indicate completion status
             if result.is_empty() {
-                result = "Command completed successfully (no output)".to_string();
+                result = if success {
+                    "Command completed successfully (no output)".to_string()
+                } else {
+                    format!("Command completed with exit code {} (no output)", exit_code)
+                };
             }
 
             if debug_config.log_operations {
-                info!(
-                    "[SHELL] Bash command '{}' completed successfully",
-                    command
-                );
+                if success {
+                    info!(
+                        "[SHELL] Bash command '{}' completed successfully (exit code: {})",
+                        command, exit_code
+                    );
+                } else {
+                    info!(
+                        "[SHELL] Bash command '{}' failed with exit code: {}",
+                        command, exit_code
+                    );
+                }
             }
 
             if debug_config.send_notifications {
@@ -599,17 +646,18 @@ pub async fn bash_command(
                 } else {
                     result.clone()
                 };
+                let status = if success { "Success" } else { "Failed" };
                 send_debug_notification(
                     &app,
-                    "Bash Command Success",
-                    &format!("Command: {} - Result: {}", command, preview),
+                    &format!("Bash Command {}", status),
+                    &format!("Command: {} - Exit Code: {} - Result: {}", command, exit_code, preview),
                 )?;
             }
 
-            debug_op.complete(Some(&app), true);
+            debug_op.complete(Some(&app), success);
             Ok(BashResult::CommandResult {
                 output: result,
-                success: true,
+                success,
             })
         },
         None => {
