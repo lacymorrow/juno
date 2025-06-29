@@ -103,6 +103,8 @@ async fn register_additional_computer_use_tools(
             },
             "required": ["direction", "amount"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -145,6 +147,8 @@ async fn register_additional_computer_use_tools(
             },
             "required": ["duration_ms"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -190,6 +194,8 @@ async fn register_additional_computer_use_tools(
             },
             "required": ["key"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone(); // Keep pattern
@@ -275,6 +281,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -311,6 +319,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -350,6 +360,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -391,6 +403,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -424,6 +438,8 @@ pub async fn register_desktop_tools(
             },
             "required": ["content"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     #[derive(serde::Deserialize)]
@@ -520,6 +536,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
     let app_handle_clone = app_handle.clone();
     let cursor_position_exec = move |_input: Value| {
@@ -559,6 +577,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -596,6 +616,8 @@ pub async fn register_desktop_tools(
             },
             "required": ["window_id"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -655,6 +677,8 @@ pub async fn register_desktop_tools(
             },
             "required": ["command"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -730,6 +754,8 @@ pub async fn register_desktop_tools(
             },
             "required": ["file_path", "content"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -910,6 +936,8 @@ pub async fn register_desktop_tools(
             "properties": {},
             "required": []
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
@@ -986,6 +1014,8 @@ pub async fn register_desktop_tools(
             },
             "required": ["text"]
         }),
+        api_type: None,
+        beta_flag: None,
     };
 
     let app_handle_clone = app_handle.clone();
