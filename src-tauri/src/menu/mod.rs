@@ -84,15 +84,11 @@ fn is_app_menu_event(event_id: &str) -> bool {
 }
 
 /// Check if an event ID belongs to the Edit menu
+/// Note: Edit operations (undo, redo, cut, copy, paste, select all) are now handled
+/// natively by Tauri's PredefinedMenuItem and don't generate custom events
 fn is_edit_menu_event(event_id: &str) -> bool {
-    matches!(event_id,
-        "edit-undo" |
-        "edit-redo" |
-        "edit-cut" |
-        "edit-copy" |
-        "edit-paste" |
-        "edit-select-all"
-    )
+    // Edit operations are handled natively - no custom event handling needed
+    false
 }
 
 /// Check if an event ID belongs to the tray menu
