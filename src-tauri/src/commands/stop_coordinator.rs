@@ -152,8 +152,8 @@ impl StopCoordinator {
 
         // 1. Stop TTS immediately (highest priority)
         if let Some(tts_op_id) = self.try_register_operation("tts_stop").await {
-            info!("[StopCoordinator] Stopping TTS");
-            crate::tts::stop_speech();
+            info!("[StopCoordinator] Stopping TTS (user-initiated)");
+            crate::tts::stop_speech_by_user();
 
             // Emit TTS stop event once
             self.emit_tts_stop_event(app_handle);

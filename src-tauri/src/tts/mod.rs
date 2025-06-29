@@ -11,6 +11,9 @@ use regex::Regex;
 // Global flag to indicate if TTS should be stopped
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
+// Separate flag to track user-initiated stops (vs cleanup stops)
+static USER_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
 pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
@@ -133,14 +136,29 @@ pub fn filter_tts_content(text: &str) -> String {
 
 // Function to stop speech playback with deduplication
 pub fn stop_speech() {
+    stop_speech_internal(false)
+}
+
+// Function to stop speech when user requests it (e.g., escape key)
+pub fn stop_speech_by_user() {
+    stop_speech_internal(true)
+}
+
+// Internal function to stop speech with user flag tracking
+fn stop_speech_internal(is_user_initiated: bool) {
     // Check if already stopped to prevent redundant operations
     if TTS_STOP_REQUESTED.load(Ordering::SeqCst) {
         debug!("[TTS] Stop speech already requested, skipping redundant operation");
         return;
     }
 
-    info!("[TTS] Stop speech requested");
+    info!("[TTS] Stop speech requested (user initiated: {})", is_user_initiated);
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+
+    // Track user-initiated stops separately
+    if is_user_initiated {
+        USER_STOP_REQUESTED.store(true, Ordering::SeqCst);
+    }
 
     // For system TTS, we can try to stop speech synthesis
     #[cfg(target_os = "macos")]
@@ -174,9 +192,25 @@ pub fn is_tts_stop_requested() -> bool {
     TTS_STOP_REQUESTED.load(Ordering::SeqCst)
 }
 
+// Check if user specifically requested TTS stop (not just cleanup)
+pub fn is_user_stop_requested() -> bool {
+    USER_STOP_REQUESTED.load(Ordering::SeqCst)
+}
+
 // Reset the stop flag
 pub fn reset_tts_stop_flag() {
     TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+// Reset the user stop flag
+pub fn reset_user_stop_flag() {
+    USER_STOP_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+// Reset both flags
+pub fn reset_all_stop_flags() {
+    TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+    USER_STOP_REQUESTED.store(false, Ordering::SeqCst);
 }
 
 // Register escape key for TTS cancellation
@@ -200,8 +234,8 @@ pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
 // Tauri command to stop TTS from frontend
 #[tauri::command]
 pub async fn stop_tts() -> Result<(), String> {
-    info!("Stop TTS command received from frontend");
-    stop_speech();
+    info!("Stop TTS command received from frontend (user-initiated)");
+    stop_speech_by_user();
     Ok(())
 }
 
@@ -263,24 +297,28 @@ pub async fn invoke_tts(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
+        // FIRST: Check if user has already requested stop - if so, don't start ANY new TTS
+    if is_user_stop_requested() {
+        info!("User has requested TTS stop, aborting new TTS request immediately");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    // SECOND: Stop any existing TTS to prevent token waste (this is cleanup, not user-initiated)
     info!("New TTS request received, stopping any existing TTS to prevent token waste");
-    stop_speech();
+    stop_speech(); // This sets TTS_STOP_REQUESTED but NOT USER_STOP_REQUESTED
 
     // Brief pause to allow existing TTS operations to detect the stop signal
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // Reset stop flag for the new TTS request immediately after cleanup pause
-    // This prevents the race condition where we abort our own new request
-    reset_tts_stop_flag();
-
-    // Now check if user requested stop AFTER we reset the cleanup flag
-    // This way we only abort if the user pressed escape AFTER our cleanup
-    if is_tts_stop_requested() {
-        info!("TTS stop was requested by user after cleanup, aborting new TTS request");
-        unregister_tts_escape_key(&app_handle).await;
+    // THIRD: Check again if user requested stop during cleanup - if so, honor it immediately
+    if is_user_stop_requested() {
+        info!("User requested TTS stop during cleanup, aborting new TTS request");
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
+
+    // ONLY NOW reset the flags since we're certain the user hasn't requested a stop
+    // Reset both flags - the cleanup flag and start fresh for the new TTS
+    reset_all_stop_flags();
 
     let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
 
@@ -337,9 +375,9 @@ pub async fn invoke_tts(
     let mut last_error = String::new();
 
     for (index, fallback_provider) in fallback_providers.iter().enumerate() {
-        // Check if stop was requested before each attempt
-        if is_tts_stop_requested() {
-            info!("TTS stop was requested during fallback attempts, aborting");
+        // Check if user requested stop before each attempt
+        if is_user_stop_requested() {
+            info!("User requested TTS stop during fallback attempts, aborting");
             unregister_tts_escape_key(&app_handle).await;
             return Ok("TTS_STOPPED_BY_USER".to_string());
         }
@@ -410,9 +448,9 @@ pub async fn invoke_tts_for_provider(
 ) -> Result<String, String> {
     info!("Invoking TTS for provider: {}", provider);
 
-    // Check if stop was requested before starting
-    if is_tts_stop_requested() {
-        info!("TTS stop was requested before starting, aborting");
+    // Check if user requested stop before starting
+    if is_user_stop_requested() {
+        info!("User requested TTS stop before starting, aborting");
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
