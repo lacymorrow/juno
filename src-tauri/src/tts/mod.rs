@@ -2,124 +2,109 @@ pub mod elevenlabs;
 pub mod replicate;
 pub mod system;
 
-use tauri::{State, AppHandle};
+use tauri::{State, AppHandle, Emitter, Manager};
 use crate::state::AppState;
 use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use regex::Regex;
 
-// Global flag to indicate if TTS should be stopped
+// Global flags for TTS coordination
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
+
+// Global mutex for preventing concurrent TTS operations
+static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
+
+// Structure to track audio playback completion
+#[derive(Debug)]
+struct AudioPlaybackHandle {
+    _temp_file: tempfile::NamedTempFile,
+    completion_notify: Arc<tokio::sync::Notify>,
+    start_time: std::time::Instant,
+    playback_started: Arc<AtomicBool>,
+}
+
+impl AudioPlaybackHandle {
+    async fn wait_for_completion(&self) {
+        self.completion_notify.notified().await;
+
+        let elapsed = self.start_time.elapsed();
+        let minimum_playback_duration = std::time::Duration::from_millis(500);
+
+        if elapsed < minimum_playback_duration {
+            let remaining = minimum_playback_duration - elapsed;
+            info!("Audio completed very quickly ({}ms), waiting additional {}ms to prevent race condition",
+                  elapsed.as_millis(), remaining.as_millis());
+            tokio::time::sleep(remaining).await;
+        }
+
+        info!("Audio playback completion confirmed after {}ms", elapsed.as_millis());
+    }
+}
 
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
+/// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
 pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
 
     let mut filtered_text = text.to_string();
 
-    // 0. Extract TTS XML content first (this is for fallback cases where immediate TTS didn't work)
-    let tts_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
-    if tts_regex.is_match(&filtered_text) {
-        // CRITICAL FIX: If we have TTS tags, this means immediate TTS processing failed
-        // In most cases, immediate TTS should have already processed this content
-        warn!("[TTS Filter] Found TTS tags in final processing - this suggests immediate TTS didn't work properly");
+    // Remove any TTS XML tags completely - content should have been processed by streaming system
+    let tts_tag_regex = Regex::new(r"</?TTS>").unwrap();
+    filtered_text = tts_tag_regex.replace_all(&filtered_text, "").to_string();
 
-        // Extract only the content inside them as fallback
-        let extracted_content: Vec<&str> = tts_regex
-            .captures_iter(&filtered_text)
-            .map(|cap| cap.get(1).unwrap().as_str())
-            .collect();
-
-        if !extracted_content.is_empty() {
-            // Return only the TTS content, joined together
-            filtered_text = extracted_content.join(" ");
-            debug!("[TTS Filter] Extracted TTS content from XML tags (FALLBACK): '{}'", filtered_text);
-            return filtered_text;
-        }
-    }
-
-    // 1. Remove any remaining TTS XML tags that weren't processed (safety net)
-    let remaining_tts_regex = Regex::new(r"</?TTS>").unwrap();
-    filtered_text = remaining_tts_regex.replace_all(&filtered_text, "").to_string();
-
-    // 2. Remove code blocks (```...```)
+    // 1. Remove code blocks (```...```)
     let code_block_regex = Regex::new(r"```[\s\S]*?```").unwrap();
     filtered_text = code_block_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 3. Remove inline code (`...`)
+    // 2. Remove inline code (`...`)
     let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
     filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 4. Remove HTML/JSX tags (excluding TTS tags which were handled above)
+    // 3. Remove HTML/JSX tags (including self-closing tags)
     let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
     filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 5. Remove JSX/React component syntax
-    let jsx_component_regex = Regex::new(r"</?[A-Z][a-zA-Z0-9]*[^>]*>").unwrap();
-    filtered_text = jsx_component_regex.replace_all(&filtered_text, " ").to_string();
-
-    // 6. Remove code-like patterns (function calls, method chaining, etc.)
-    let function_call_regex = Regex::new(r"\w+\(\s*[^)]*\s*\)").unwrap();
+    // 4. Remove function calls and method chaining (e.g., getData(), object.method())
+    let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
     filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 7. Remove method chaining (e.g., object.method().anotherMethod())
-    let method_chain_regex = Regex::new(r"\w+(\.\w+)+\([^)]*\)").unwrap();
-    filtered_text = method_chain_regex.replace_all(&filtered_text, " ").to_string();
+    // 5. Remove property access patterns (e.g., object.property, config.server.port)
+    let property_access_regex = Regex::new(r"\w+\.\w+(\.\w+)*").unwrap();
+    filtered_text = property_access_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 8. Remove property access chains (e.g., object.property.subProperty)
-    let property_chain_regex = Regex::new(r"\w+(\.\w+){2,}").unwrap();
-    filtered_text = property_chain_regex.replace_all(&filtered_text, " ").to_string();
+    // 6. Remove URLs and file paths
+    let url_regex = Regex::new(r"https?://[^\s]+").unwrap();
+    filtered_text = url_regex.replace_all(&filtered_text, " ").to_string();
+    let path_regex = Regex::new(r"[/~][^\s]+").unwrap();
+    filtered_text = path_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 9. Remove file paths and URLs
-    let path_url_regex = Regex::new(r"(?:https?://|/|~/|\.\./)[\w\-_\./?=&%#]+").unwrap();
-    filtered_text = path_url_regex.replace_all(&filtered_text, " ").to_string();
+    // 7. Remove programming keywords and operators
+    let programming_regex = Regex::new(r"\b(const|let|var|if|else|function|return|class|import|export|from|async|await|try|catch|throw|new|this|super|extends|implements|interface|type|enum|namespace|module|public|private|protected|static|abstract|override|readonly|keyof|typeof|instanceof|in|of|for|while|do|switch|case|default|break|continue|finally|with|debugger|delete|void|yield|get|set)\b").unwrap();
+    filtered_text = programming_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 10. Remove common programming keywords and patterns
-    let programming_keywords = [
-        r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*=", r"\bvar\s+\w+\s*=",
-        r"\bfunction\s+\w+", r"\bclass\s+\w+", r"\binterface\s+\w+",
-        r"\bimport\s+", r"\bexport\s+", r"\breturn\s+", r"\bif\s*\(",
-        r"\bfor\s*\(", r"\bwhile\s*\(", r"\btry\s*\{", r"\bcatch\s*\(",
-        r"\basync\s+", r"\bawait\s+", r"\bnew\s+\w+", r"\bthis\.",
-        r"\bconsole\.", r"\bdocument\.", r"\bwindow\.", r"\bprocess\.",
-    ];
-
-    for keyword_pattern in &programming_keywords {
-        let keyword_regex = Regex::new(keyword_pattern).unwrap();
-        filtered_text = keyword_regex.replace_all(&filtered_text, " ").to_string();
-    }
-
-    // 11. Remove emojis (Unicode ranges for various emoji blocks)
-    let emoji_regex = Regex::new(r"[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}-\u{2454}]|[\u{20D0}-\u{20FF}]").unwrap();
-    filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
-
-    // 12. Remove mathematical expressions and formulas
-    let math_regex = Regex::new(r"\$[^$]+\$|\\[a-zA-Z]+\{[^}]*\}").unwrap();
-    filtered_text = math_regex.replace_all(&filtered_text, " ").to_string();
-
-    // 13. Remove JSON-like structures
-    let json_regex = Regex::new(r"\{[^{}]*:[^{}]*\}|\[[^\[\]]*\]").unwrap();
-    filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
-
-    // 14. Remove variable assignments and declarations
-    let assignment_regex = Regex::new(r"\w+\s*[:=]\s*[^,;\n]+").unwrap();
+    // 8. Remove variable assignments and declarations
+    let assignment_regex = Regex::new(r"\w+\s*[=:]\s*").unwrap();
     filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 15. Remove CSS selectors and properties
-    let css_regex = Regex::new(r"[.#][\w-]+\s*\{[^}]*\}|[\w-]+\s*:\s*[^;]+;").unwrap();
+    // 9. Remove JSON structures
+    let json_regex = Regex::new(r"\{[^}]*\}|\[[^\]]*\]").unwrap();
+    filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 10. Remove CSS selectors and rules
+    let css_regex = Regex::new(r"\.[a-zA-Z-]+\s*\{[^}]*\}|#[a-zA-Z-]+\s*\{[^}]*\}|\w+\s*\{[^}]*\}").unwrap();
     filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 16. Clean up whitespace and normalize
+    // 11. Remove emojis (Unicode ranges for common emoji blocks)
+    let emoji_regex = Regex::new(r"[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]").unwrap();
+    filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
+
+    // 12. Clean up whitespace and normalize
     let whitespace_regex = Regex::new(r"\s+").unwrap();
     filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
     filtered_text = filtered_text.trim().to_string();
-
-    // If after filtering we have very little meaningful content left,
-    // it was probably mostly code - return empty string to skip TTS
-    if filtered_text.len() < 10 || filtered_text.split_whitespace().count() < 3 {
-        debug!("[TTS Filter] Content appears to be mostly code, skipping TTS");
-        return String::new();
-    }
 
     debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());
     if filtered_text.len() != text.len() {
@@ -131,41 +116,247 @@ pub fn filter_tts_content(text: &str) -> String {
     filtered_text
 }
 
-// Function to stop speech playback with deduplication
-pub fn stop_speech() {
-    // Check if already stopped to prevent redundant operations
-    if TTS_STOP_REQUESTED.load(Ordering::SeqCst) {
-        debug!("[TTS] Stop speech already requested, skipping redundant operation");
-        return;
-    }
+/// Play base64 audio with proper completion tracking and error handling
+/// Returns an AudioPlaybackHandle that can be awaited for completion
+async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlaybackHandle, String> {
+    use base64::prelude::*;
+    use std::io::Write;
+    use tempfile::Builder as TempFileBuilder;
 
-    info!("[TTS] Stop speech requested");
-    TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+    info!("Playing TTS audio with completion tracking ({} bytes)", base64_audio.len());
 
-    // For system TTS, we can try to stop speech synthesis
+    // Decode base64 audio data
+    let audio_bytes = BASE64_STANDARD.decode(base64_audio)
+        .map_err(|e| format!("Failed to decode base64 TTS audio: {}", e))?;
+
+    // Create temporary file for audio playback
+    let mut temp_file = TempFileBuilder::new()
+        .prefix("tts_audio_")
+        .suffix(".m4a") // Use .m4a for compatibility
+        .tempfile()
+        .map_err(|e| format!("Failed to create temporary file for TTS audio: {}", e))?;
+
+    // Write audio data to temporary file
+    temp_file.write_all(&audio_bytes)
+        .map_err(|e| format!("Failed to write TTS audio to temporary file: {}", e))?;
+
+    temp_file.flush()
+        .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
+
+    let temp_path = temp_file.path().to_path_buf();
+    let completion_notify = Arc::new(tokio::sync::Notify::new());
+    let completion_notify_clone = completion_notify.clone();
+    let playback_started = Arc::new(AtomicBool::new(false));
+
+    info!("Playing TTS audio from temporary file: {:?}", temp_path);
+
+    // Platform-specific audio playback with proper completion tracking
     #[cfg(target_os = "macos")]
     {
-        // On macOS, we can use the system say command to stop speech
-        let _ = std::process::Command::new("killall")
-            .arg("say")
-            .output();
-    }
+        let mut child = tokio::process::Command::new("afplay")
+            .arg(&temp_path)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
-    #[cfg(target_os = "windows")]
-    {
-        // On Windows, we would need to implement SAPI stop functionality
-        // For now, just set the flag
+        let playback_started_clone = playback_started.clone();
+
+        // Spawn a background task to wait for completion and handle errors
+        tokio::spawn(async move {
+            // Add a small delay to ensure afplay has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
+            let result = child.wait().await;
+
+            match result {
+                Ok(status) => {
+                    if status.success() {
+                        info!("macOS afplay completed successfully");
+                    } else {
+                        error!("macOS afplay exited with non-zero status: {}", status);
+                        // Check if it failed immediately (before actually playing audio)
+                        let pid_check = std::process::Command::new("pgrep")
+                            .arg("afplay")
+                            .output();
+
+                        if let Ok(output) = pid_check {
+                            if output.stdout.is_empty() {
+                                warn!("afplay process not found - audio may have failed to start");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to wait for macOS afplay process: {}", e);
+                }
+            }
+
+            // Notify completion regardless of success/failure
+            completion_notify_clone.notify_one();
+            debug!("macOS afplay task completed and notified");
+        });
     }
 
     #[cfg(target_os = "linux")]
     {
-        // On Linux, stop espeak or festival
+        let mut child = tokio::process::Command::new("aplay")
+            .arg(&temp_path)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
+
+        let playback_started_clone = playback_started.clone();
+
+        tokio::spawn(async move {
+            // Add a small delay to ensure aplay has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
+            let result = child.wait().await;
+
+            match result {
+                Ok(status) => {
+                    if status.success() {
+                        info!("Linux aplay completed successfully");
+                    } else {
+                        error!("Linux aplay exited with non-zero status: {}", status);
+                        // Check if it failed immediately
+                        let pid_check = std::process::Command::new("pgrep")
+                            .arg("aplay")
+                            .output();
+
+                        if let Ok(output) = pid_check {
+                            if output.stdout.is_empty() {
+                                warn!("aplay process not found - audio may have failed to start");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to wait for Linux aplay process: {}", e);
+                }
+            }
+
+            completion_notify_clone.notify_one();
+            debug!("Linux aplay task completed and notified");
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Implement Windows audio playback using PowerShell
+        let powershell_script = format!(
+            r#"Add-Type -AssemblyName presentationCore;
+               $mediaPlayer = New-Object system.windows.media.mediaplayer;
+               $mediaPlayer.open('{}');
+               $mediaPlayer.Play();
+               while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 50 }};
+               $duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds;
+               Start-Sleep -Milliseconds $duration;
+               $mediaPlayer.Stop();
+               $mediaPlayer.Close()"#,
+            temp_path.to_string_lossy()
+        );
+
+        let mut child = tokio::process::Command::new("powershell")
+            .args(["-Command", &powershell_script])
+            .spawn()
+            .map_err(|e| format!("Failed to spawn PowerShell for Windows audio: {}", e))?;
+
+        let playback_started_clone = playback_started.clone();
+
+        tokio::spawn(async move {
+            // Add a small delay to ensure PowerShell has time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            playback_started_clone.store(true, Ordering::SeqCst);
+
+            let result = child.wait().await;
+
+            match result {
+                Ok(status) => {
+                    if status.success() {
+                        info!("Windows PowerShell audio playback completed successfully");
+                    } else {
+                        error!("Windows PowerShell audio playback exited with non-zero status: {}", status);
+                        // Check if PowerShell is still running
+                        let ps_check = std::process::Command::new("tasklist")
+                            .args(["/FI", "IMAGENAME eq powershell.exe"])
+                            .output();
+
+                        if let Ok(output) = ps_check {
+                            let output_str = String::from_utf8_lossy(&output.stdout);
+                            if !output_str.contains("powershell.exe") {
+                                warn!("PowerShell process not found - audio may have failed to start");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to wait for Windows PowerShell audio process: {}", e);
+                }
+            }
+
+            completion_notify_clone.notify_one();
+            debug!("Windows PowerShell audio task completed and notified");
+        });
+    }
+
+    // Return handle that keeps temp file alive and allows waiting for completion
+    Ok(AudioPlaybackHandle {
+        _temp_file: temp_file,
+        completion_notify,
+        start_time: std::time::Instant::now(),
+        playback_started,
+    })
+}
+
+/// Legacy wrapper for compatibility - now properly waits for completion
+async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
+    let handle = play_base64_audio_with_tracking(base64_audio).await?;
+    handle.wait_for_completion().await;
+    info!("TTS audio playback completed");
+    Ok(())
+}
+
+// Function to stop speech playback - Enhanced to handle all audio processes
+pub fn stop_speech() {
+    info!("[TTS] Stop speech requested - killing all audio processes");
+    TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+
+    // Kill platform-specific audio processes
+    #[cfg(target_os = "macos")]
+    {
+        // Kill macOS audio processes
+        let _ = std::process::Command::new("killall")
+            .arg("afplay")
+            .output();
+        let _ = std::process::Command::new("killall")
+            .arg("say")
+            .output();
+        debug!("Attempted to kill macOS audio processes (afplay, say)");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Kill Windows PowerShell audio processes
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "powershell.exe", "/T"])
+            .output();
+        debug!("Attempted to kill Windows PowerShell audio processes");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Kill Linux audio processes
+        let _ = std::process::Command::new("killall")
+            .arg("aplay")
+            .output();
         let _ = std::process::Command::new("killall")
             .arg("espeak")
             .output();
         let _ = std::process::Command::new("killall")
             .arg("festival")
             .output();
+        debug!("Attempted to kill Linux audio processes (aplay, espeak, festival)");
     }
 }
 
@@ -174,12 +365,22 @@ pub fn is_tts_stop_requested() -> bool {
     TTS_STOP_REQUESTED.load(Ordering::SeqCst)
 }
 
-// Reset the stop flag
+// Reset the stop flag - CRITICAL: This fixes the permanent disablement bug
 pub fn reset_tts_stop_flag() {
     TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
 }
 
-// Register escape key for TTS cancellation
+// Check if TTS is currently playing
+pub fn is_tts_playing() -> bool {
+    TTS_PLAYING.load(Ordering::SeqCst)
+}
+
+// Set TTS playing state
+fn set_tts_playing(playing: bool) {
+    TTS_PLAYING.store(playing, Ordering::SeqCst);
+}
+
+// Register escape key for TTS cancellation - CENTRALIZED
 pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
         warn!("[TTS] Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
@@ -188,7 +389,7 @@ pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     }
 }
 
-// Unregister escape key after TTS completion
+// Unregister escape key after TTS completion - CENTRALIZED
 pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
         warn!("[TTS] Failed to unregister escape key after TTS: {} - continuing anyway", e);
@@ -256,29 +457,23 @@ pub async fn get_tts_provider_command(
     Ok(audio_settings.tts_provider)
 }
 
-// Central TTS invocation function with escape key registration and fallback logic
+// FIXED: Proper concurrency control, stop flag lifecycle, and state access
 #[tauri::command]
 pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
-    info!("New TTS request received, stopping any existing TTS to prevent token waste");
-    stop_speech();
+    // CRITICAL FIX 1: Use mutex to prevent any race conditions in concurrent access
+    let _guard = TTS_MUTEX.lock().await;
 
-    // Brief pause to allow existing TTS operations to detect the stop signal
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    // Check if user requested stop during the pause - if so, honor it and abort
-    if is_tts_stop_requested() {
-        info!("TTS stop was requested during initialization pause, aborting new TTS request");
-        unregister_tts_escape_key(&app_handle).await;
-        return Ok("TTS_STOPPED_BY_USER".to_string());
+    // CRITICAL FIX 2: Double-check TTS playing state after acquiring mutex
+    if is_tts_playing() {
+        info!("TTS is already playing, ignoring new request to prevent overlapping audio");
+        return Ok("TTS_ALREADY_PLAYING".to_string());
     }
 
-    // Reset stop flag for the new TTS request only if no stop was requested during pause
-    // This ensures the new request won't be aborted by the stop flag we just set for cleanup
+    // CRITICAL FIX 3: Reset stop flag at the start of each operation
     reset_tts_stop_flag();
 
     let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
@@ -298,38 +493,180 @@ pub async fn invoke_tts(
         return Ok("TTS_CONTENT_FILTERED".to_string());
     }
 
-    // Register escape key for TTS cancellation
+    // CRITICAL FIX 4: Set TTS as playing AFTER acquiring mutex to prevent race conditions
+    set_tts_playing(true);
+
+    // CRITICAL FIX 5: Register escape key management
     register_tts_escape_key(&app_handle).await;
 
-    info!("Using TTS provider from state: {}", provider);
+    // Execute TTS with proper completion tracking
+    let result = execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
+    // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
+    result
+}
+
+// Execute TTS with proper completion tracking and cleanup
+async fn execute_tts_with_completion_tracking(
+    text: String,
+    primary_provider: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    info!("Starting TTS with provider: {}", primary_provider);
+
+    // Execute TTS with fallback logic
+    let result = match execute_tts_with_fallback(text, primary_provider).await {
+        Ok(result) => {
+            if result == "TTS_STOPPED_BY_USER" {
+                info!("TTS was stopped by user during execution");
+                Ok(result)
+            } else if result == "TTS_DISABLED_BY_SETTING" {
+                info!("TTS is disabled by setting");
+                Ok(result)
+            } else if result == "TTS_CONTENT_FILTERED" {
+                info!("TTS content was filtered out");
+                Ok(result)
+            } else {
+                // This should be base64 audio data - play it with completion tracking!
+                info!("TTS audio generated, attempting playback with completion tracking...");
+
+                // Check if stop was requested before playback
+                if is_tts_stop_requested() {
+                    info!("TTS stop was requested before playback, aborting");
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
+                // Access current state instead of using cloned/stale state
+                match state.get_sound_enabled() {
+                    Ok(sound_enabled) => {
+                        if !sound_enabled {
+                            info!("Sound is disabled, skipping TTS audio playback");
+                            Ok("TTS_SOUND_DISABLED".to_string())
+                        } else {
+                            // CRITICAL FIX: Use completion tracking with enhanced error detection
+                            match play_base64_audio_with_tracking(&result).await {
+                                Ok(handle) => {
+                                    info!("TTS audio playback started, waiting for completion...");
+
+                                    // Enhanced completion tracking with safeguards
+                                    let completion_start = std::time::Instant::now();
+
+                                    // Wait for actual audio completion or stop signal
+                                    let playback_result = tokio::select! {
+                                        _ = handle.wait_for_completion() => {
+                                            let total_duration = completion_start.elapsed();
+                                            info!("TTS audio playback completed successfully after {}ms", total_duration.as_millis());
+
+                                            // SAFEGUARD: If completion happened too quickly, check if audio actually played
+                                            if total_duration < std::time::Duration::from_millis(300) {
+                                                warn!("Audio completed very quickly ({}ms), verifying no audio processes are still running", total_duration.as_millis());
+
+                                                // Give any remaining audio processes time to complete
+                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                                                // Check for remaining audio processes
+                                                #[cfg(target_os = "macos")]
+                                                {
+                                                    let afplay_check = std::process::Command::new("pgrep")
+                                                        .arg("afplay")
+                                                        .output();
+
+                                                    if let Ok(output) = afplay_check {
+                                                        if !output.stdout.is_empty() {
+                                                            info!("Found running afplay processes, waiting for them to complete...");
+                                                            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Ok("TTS_COMPLETED".to_string())
+                                        }
+                                        _ = async {
+                                            // Poll for stop signal every 100ms
+                                            loop {
+                                                if is_tts_stop_requested() {
+                                                    info!("TTS stop requested during playback");
+                                                    stop_speech(); // Kill any running audio processes
+                                                    break;
+                                                }
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                            }
+                                        } => {
+                                            info!("TTS playback was stopped by user");
+                                            Ok("TTS_STOPPED_BY_USER".to_string())
+                                        }
+                                    };
+
+                                    playback_result
+                                }
+                                Err(e) => {
+                                    warn!("TTS audio playback error: {}", e);
+                                    Err(format!("TTS playback failed: {}", e))
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to check sound enabled status: {}", e);
+                        Err(format!("Failed to access sound settings: {}", e))
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("TTS failed: {}", e);
+            Err(e)
+        }
+    };
+
+    // CRITICAL FIX: Always clean up after actual completion (not just function completion)
+    set_tts_playing(false);
+    unregister_tts_escape_key(app_handle).await;
+    info!("TTS operation completed, flags and escape key cleaned up");
+
+    result
+}
+
+// Legacy function kept for backward compatibility - DEPRECATED
+async fn execute_tts_with_state_access(
+    text: String,
+    primary_provider: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    warn!("execute_tts_with_state_access is deprecated, use execute_tts_with_completion_tracking instead");
+    execute_tts_with_completion_tracking(text, primary_provider, state, app_handle).await
+}
+
+// Execute TTS with fallback logic (no blocking, no race conditions)
+async fn execute_tts_with_fallback(
+    text: String,
+    primary_provider: &str,
+) -> Result<String, String> {
     // Check network connectivity for cloud-based providers
-    let is_cloud_provider = matches!(provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
+    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
 
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
         let is_online = crate::utils::network::is_online().await;
         if !is_online {
-            warn!("Device appears offline, skipping cloud TTS providers and using system TTS directly");
-            let result = invoke_tts_for_provider(filtered_text, None, "system").await;
-            unregister_tts_escape_key(&app_handle).await;
-            return result;
+            warn!("Device appears offline, using system TTS directly");
+            return invoke_tts_for_provider(text, None, "system").await;
         }
     }
 
     // Define the provider fallback order based on the primary provider
-    let fallback_providers = match provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "system"], // Prioritize system over other cloud providers when offline
-        "elevenlabs" => vec!["elevenlabs", "system"], // Prioritize system over other cloud providers when offline
-        "system" => vec!["system"], // System only, no cloud fallbacks needed
-        "off" => {
-            unregister_tts_escape_key(&app_handle).await;
-            return Ok("TTS_DISABLED_BY_SETTING".to_string());
-        }
+    let fallback_providers = match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "system"],
+        "elevenlabs" => vec!["elevenlabs", "system"],
+        "system" => vec!["system"],
+        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
         _ => {
-            warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", provider);
-            vec!["system"] // Default to system for unknown providers
+            warn!("Unknown primary TTS provider: '{}'. Using system fallback only.", primary_provider);
+            vec!["system"]
         }
     };
 
@@ -339,25 +676,20 @@ pub async fn invoke_tts(
         // Check if stop was requested before each attempt
         if is_tts_stop_requested() {
             info!("TTS stop was requested during fallback attempts, aborting");
-            unregister_tts_escape_key(&app_handle).await;
             return Ok("TTS_STOPPED_BY_USER".to_string());
         }
 
         let is_primary = index == 0;
         info!("Attempting TTS with provider: {} ({})", fallback_provider, if is_primary { "primary" } else { "fallback" });
 
-        match invoke_tts_for_provider(filtered_text.clone(), None, fallback_provider).await {
+        match invoke_tts_for_provider(text.clone(), None, fallback_provider).await {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
-                    unregister_tts_escape_key(&app_handle).await;
                     return Ok(result);
                 }
                 if !is_primary {
-                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", provider, fallback_provider);
+                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", primary_provider, fallback_provider);
                 }
-
-                // Unregister escape key after successful TTS
-                unregister_tts_escape_key(&app_handle).await;
                 return Ok(result);
             }
             Err(e) => {
@@ -366,27 +698,21 @@ pub async fn invoke_tts(
                 // Check if this is a network-related error
                 let is_network_error = crate::utils::network::is_network_error(&e);
 
-                if is_primary {
-                    if is_network_error {
-                        warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
-                        // For network errors, skip other cloud providers and go straight to system
-                        match invoke_tts_for_provider(filtered_text.clone(), None, "system").await {
-                            Ok(system_result) => {
-                                warn!("Network error detected, successfully fell back to system TTS");
-                                unregister_tts_escape_key(&app_handle).await;
-                                return Ok(system_result);
-                            }
-                            Err(system_error) => {
-                                error!("Even system TTS failed: {}", system_error);
-                                unregister_tts_escape_key(&app_handle).await;
-                                return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
-                            }
+                if is_primary && is_network_error {
+                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
+                    // For network errors, skip other cloud providers and go straight to system
+                    match invoke_tts_for_provider(text.clone(), None, "system").await {
+                        Ok(system_result) => {
+                            warn!("Network error detected, successfully fell back to system TTS");
+                            return Ok(system_result);
                         }
-                    } else {
-                        warn!("Primary TTS provider '{}' failed: {}", fallback_provider, e);
+                        Err(system_error) => {
+                            error!("Even system TTS failed: {}", system_error);
+                            return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                        }
                     }
                 } else {
-                    warn!("Fallback TTS provider '{}' also failed: {}", fallback_provider, e);
+                    warn!("TTS provider '{}' failed: {}", fallback_provider, e);
                 }
             }
         }
@@ -394,10 +720,6 @@ pub async fn invoke_tts(
 
     let final_error = format!("All TTS providers failed. Last error: {}", last_error);
     error!("{}", final_error);
-
-    // Unregister escape key after TTS failure
-    unregister_tts_escape_key(&app_handle).await;
-
     Err(final_error)
 }
 
@@ -419,7 +741,7 @@ pub async fn invoke_tts_for_provider(
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "system" => system::invoke_system_tts(text).await,
-        "off" => { // Explicitly handle "off" here as well, though invoke_tts should catch it.
+        "off" => {
              warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
              Ok("TTS_DISABLED_BY_SETTING".to_string())
         }
