@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, BufReader, Read};
+use std::io::{Write, BufReader};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
@@ -33,7 +33,7 @@ const COMMAND_SEPARATOR: &str = "___JUNO_CMD_COMPLETE___";
 /// Fixed: Secure implementation with proper I/O handling and session persistence
 pub struct ShellSession {
     session_dir: std::path::PathBuf,
-    session_id: String,
+    _session_id: String,
     process: Arc<Mutex<Option<Child>>>,
     command_counter: Arc<Mutex<u64>>,
 }
@@ -62,7 +62,7 @@ impl ShellSession {
 
         Ok(Self {
             session_dir,
-            session_id,
+            _session_id: session_id,
             process: Arc::new(Mutex::new(None)),
             command_counter: Arc::new(Mutex::new(0)),
         })
@@ -245,7 +245,7 @@ impl ShellSession {
         Ok((stdout_result, stderr_result))
     }
 
-        /// Read output from stdout/stderr with timeout and completion detection
+    /// Read output from stdout/stderr with timeout and completion detection
     /// Fixed: Race-condition-free timeout handling using thread-based approach
     fn read_output_with_timeout_secure(
         &self,
@@ -256,12 +256,20 @@ impl ShellSession {
     ) -> Result<(String, String), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc;
+        use std::os::unix::io::AsRawFd;
+        use std::io::{Read, ErrorKind};
 
-        // Take ownership of stdout/stderr pipes but restore them later
-        let mut stdout = child.stdout.take()
-            .ok_or_else(|| "Process stdout not available".to_string())?;
-        let mut stderr = child.stderr.take()
-            .ok_or_else(|| "Process stderr not available".to_string())?;
+        // CRITICAL FIX: Use mutable references instead of taking ownership
+        // This preserves the pipes for future commands in the persistent session
+        let stdout_fd = match child.stdout.as_ref() {
+            Some(stdout) => stdout.as_raw_fd(),
+            None => return Err("Process stdout not available".to_string()),
+        };
+
+        let stderr_fd = match child.stderr.as_ref() {
+            Some(stderr) => stderr.as_raw_fd(),
+            None => return Err("Process stderr not available".to_string()),
+        };
 
         // Set up completion detection with atomic flag
         let completion_found = Arc::new(AtomicBool::new(false));
@@ -273,9 +281,20 @@ impl ShellSession {
 
         let completion_marker_owned = completion_marker.to_string();
 
-        // Spawn stdout reader thread with completion detection
+        // Spawn stdout reader thread with completion detection using file descriptor
         let stdout_handle = thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
+            use std::fs::File;
+            use std::os::unix::io::FromRawFd;
+
+            // Create a duplicate file descriptor to avoid conflicts
+            let dup_fd = unsafe { libc::dup(stdout_fd) };
+            if dup_fd == -1 {
+                let _ = stdout_tx.send(String::new());
+                return;
+            }
+
+            let mut file = unsafe { File::from_raw_fd(dup_fd) };
+            let mut reader = BufReader::new(&mut file);
             let mut output = String::new();
             let mut buffer = vec![0; BUFFER_SIZE];
 
@@ -301,6 +320,11 @@ impl ShellSession {
                             break;
                         }
                     }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                        // Non-blocking read returned no data, sleep briefly
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
                     Err(_) => break,
                 }
             }
@@ -308,9 +332,20 @@ impl ShellSession {
             let _ = stdout_tx.send(output);
         });
 
-        // Spawn stderr reader thread
+        // Spawn stderr reader thread using file descriptor
         let stderr_handle = thread::spawn(move || {
-            let mut reader = BufReader::new(stderr);
+            use std::fs::File;
+            use std::os::unix::io::FromRawFd;
+
+            // Create a duplicate file descriptor to avoid conflicts
+            let dup_fd = unsafe { libc::dup(stderr_fd) };
+            if dup_fd == -1 {
+                let _ = stderr_tx.send(String::new());
+                return;
+            }
+
+            let mut file = unsafe { File::from_raw_fd(dup_fd) };
+            let mut reader = BufReader::new(&mut file);
             let mut output = String::new();
             let mut buffer = vec![0; BUFFER_SIZE];
 
@@ -320,6 +355,11 @@ impl ShellSession {
                     Ok(n) => {
                         let chunk = String::from_utf8_lossy(&buffer[..n]);
                         output.push_str(&chunk);
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                        // Non-blocking read returned no data, sleep briefly
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
                     }
                     Err(_) => break,
                 }
@@ -368,9 +408,8 @@ impl ShellSession {
         let _ = stdout_handle.join();
         let _ = stderr_handle.join();
 
-        // Restore stdout/stderr to the child process by recreating them
-        // This is necessary to maintain the persistent session
-        self.restore_child_pipes(child)?;
+        // CRITICAL FIX: No need to restore pipes since we never took ownership
+        // The child process retains its stdout/stderr for future commands
 
         // Final timeout check - this prevents the race condition
         if !completion_found.load(Ordering::Relaxed) && start_time.elapsed() >= timeout {
@@ -384,16 +423,11 @@ impl ShellSession {
         Ok((stdout_clean, stderr_clean))
     }
 
-    /// Restore child process pipes after taking them for reading
-    /// This maintains the persistent session by reconnecting to the bash process
-    fn restore_child_pipes(&self, child: &mut Child) -> Result<(), String> {
-        // Since we took ownership of the pipes, we need to reconnect to the process
-        // The easiest way is to get new pipe references by restarting the connection
-        // But since the process is still running, we just need to get new pipe handles
-
-        // For a persistent bash session, the pipes should still be available
-        // If not, the next command will trigger a process restart via ensure_process()
-
+    /// No longer needed - pipes are preserved automatically
+    /// This method was the source of the bug as it couldn't actually restore the pipes
+    fn restore_child_pipes(&self, _child: &mut Child) -> Result<(), String> {
+        // FIXED: No action needed since we never take ownership of the pipes
+        // The persistent session is maintained automatically
         Ok(())
     }
 }
