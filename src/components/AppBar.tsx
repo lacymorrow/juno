@@ -186,6 +186,7 @@ export function AppBar() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
+  const resizeTimeoutRef = useRef<NodeJS.Timeout>();
 
   // Load configuration from backend
   useEffect(() => {
@@ -211,12 +212,24 @@ export function AppBar() {
       : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
 
     if (isCompact) {
-      setTimeout(() => {
+      // Clear any existing timeout
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
+      }
+
+      resizeTimeoutRef.current = setTimeout(() => {
         resizeWindow(targetSize);
       }, 1000);
     } else {
       resizeWindow(targetSize);
     }
+
+    // Cleanup function to clear timeout on unmount or re-run
+    return () => {
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
+      }
+    };
   }, [barState, resizeWindow]);
 
   // Handle animation state tracking
@@ -226,11 +239,14 @@ export function AppBar() {
     }
   }, [barState, config.enableAnimations]);
 
-  // Cleanup tooltip timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (tooltipTimeoutRef.current) {
         clearTimeout(tooltipTimeoutRef.current);
+      }
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
       }
     };
   }, []);
