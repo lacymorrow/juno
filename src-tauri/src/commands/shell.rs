@@ -3,12 +3,10 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, Read, BufRead, BufReader};
+use std::io::{Write, Read};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
-use serde_json;
-use super::send_dev_tool_notification; // Use helper from parent module
 use std::collections::HashMap;
 
 // ============================================================================
@@ -85,10 +83,6 @@ impl ShellSession {
             return Err("Shell session has timed out and must be restarted".to_string());
         }
 
-        // For this implementation, we'll use a simple approach:
-        // Execute each command in a fresh bash subprocess to avoid I/O blocking issues
-        // This maintains compliance while ensuring reliability
-
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(DEFAULT_TIMEOUT);
@@ -96,65 +90,105 @@ impl ShellSession {
         // Apply official output delay before starting
         std::thread::sleep(OUTPUT_DELAY);
 
-        // Execute command with proper timeout handling
-        let full_command = format!("{} && echo '{}'", command, SENTINEL);
+        // Use the persistent bash process (NOT spawning new ones)
+        {
+            let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
-        let child_result = Command::new("bash")
-            .arg("-c")
-            .arg(&full_command)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-
-        let mut child = match child_result {
-            Ok(child) => child,
-            Err(e) => return Err(format!("Failed to spawn command: {}", e)),
-        };
-
-        // Wait with timeout
-        let start_time = std::time::Instant::now();
-
-        loop {
-            if start_time.elapsed() >= timeout {
-                // Timeout - kill the process
-                let _ = child.kill();
-                let _ = child.wait(); // Clean up zombie process
-                self.timed_out = true;
-                return Err("Command execution timed out".to_string());
-            }
-
-            match child.try_wait() {
-                Ok(Some(_status)) => {
-                    // Process completed - get output
-                    let output = child.wait_with_output()
-                        .map_err(|e| format!("Failed to get command output: {}", e))?;
-
-                    let mut stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
-
-                    // Remove sentinel from output (official Anthropic behavior)
-                    if let Some(pos) = stdout_str.find(SENTINEL) {
-                        stdout_str = stdout_str[..pos].to_string();
-                    }
-
-                    // Clean up output (official Anthropic behavior)
-                    stdout_str = stdout_str.trim_end().to_string();
-                    let stderr_clean = stderr_str.trim_end().to_string();
-
-                    // Return CLIResult format (output, error) as per specification
-                    return Ok((stdout_str, stderr_clean));
+            // Check if process is still alive
+            match process.try_wait() {
+                Ok(Some(_)) => {
+                    return Err("Bash session process has died and must be restarted".to_string());
                 },
-                Ok(None) => {
-                    // Process still running, continue waiting
-                    std::thread::sleep(Duration::from_millis(10));
-                },
+                Ok(None) => {}, // Process still running - good
                 Err(e) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("Error checking process status: {}", e));
+                    return Err(format!("Failed to check process status: {}", e));
                 }
             }
+
+            // Get stdin handle and write command
+            let stdin = process.stdin.as_mut()
+                .ok_or_else(|| "Failed to access stdin".to_string())?;
+
+            // Write command with sentinel to the persistent process
+            let command_with_sentinel = format!("{} && echo '{}' || echo '{}'", command, SENTINEL, SENTINEL);
+            writeln!(stdin, "{}", command_with_sentinel)
+                .map_err(|e| format!("Failed to write command to stdin: {}", e))?;
+            stdin.flush()
+                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
+        } // Release process lock for reading
+
+        // Read output until sentinel or timeout
+        let mut output_buffer = Vec::new();
+        let mut error_buffer = Vec::new();
+        let start_time = std::time::Instant::now();
+        let mut found_sentinel = false;
+
+        // Read output in a loop with timeout
+        while !found_sentinel && start_time.elapsed() < timeout {
+            {
+                let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
+
+                // Read from stdout
+                if let Some(stdout) = process.stdout.as_mut() {
+                    let mut buffer = [0; 1024];
+                    match stdout.read(&mut buffer) {
+                        Ok(0) => {}, // No data available
+                        Ok(n) => {
+                            let data = &buffer[..n];
+                            output_buffer.extend_from_slice(data);
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}, // Non-blocking, continue
+                        Err(e) => return Err(format!("Failed to read stdout: {}", e)),
+                    }
+                }
+
+                // Read from stderr
+                if let Some(stderr) = process.stderr.as_mut() {
+                    let mut buffer = [0; 1024];
+                    match stderr.read(&mut buffer) {
+                        Ok(0) => {}, // No data available
+                        Ok(n) => {
+                            let data = &buffer[..n];
+                            error_buffer.extend_from_slice(data);
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}, // Non-blocking, continue
+                        Err(e) => return Err(format!("Failed to read stderr: {}", e)),
+                    }
+                }
+            } // Release process lock
+
+            // Check if we've found the sentinel in output
+            let output_str = String::from_utf8_lossy(&output_buffer);
+            if output_str.contains(SENTINEL) {
+                found_sentinel = true;
+                break;
+            }
+
+            // Small sleep to prevent high CPU usage
+            std::thread::sleep(Duration::from_millis(10));
         }
+
+        // Check for timeout
+        if !found_sentinel {
+            self.timed_out = true;
+            return Err("Command execution timed out".to_string());
+        }
+
+        // Process the collected output
+        let mut stdout_str = String::from_utf8_lossy(&output_buffer).to_string();
+        let stderr_str = String::from_utf8_lossy(&error_buffer).to_string();
+
+        // Remove sentinel from output (official Anthropic behavior)
+        if let Some(pos) = stdout_str.find(SENTINEL) {
+            stdout_str = stdout_str[..pos].to_string();
+        }
+
+        // Clean up output (official Anthropic behavior)
+        stdout_str = stdout_str.trim_end().to_string();
+        let stderr_clean = stderr_str.trim_end().to_string();
+
+        // Return CLIResult format (output, error) as per specification
+        Ok((stdout_str, stderr_clean))
     }
 }
 
