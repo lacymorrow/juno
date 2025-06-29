@@ -17,10 +17,12 @@ static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
 // Global mutex for preventing concurrent TTS operations
 static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
 
-// Structure to track audio playback completion
+// Structure to track audio playback completion with error propagation
 #[derive(Debug)]
 struct AudioPlaybackHandle {
     completion_notify: Arc<tokio::sync::Notify>,
+    error_notify: Arc<tokio::sync::Notify>,
+    playback_error: Arc<Mutex<Option<String>>>,
     start_time: std::time::Instant,
     playback_started: Arc<AtomicBool>,
     // Keep the spawn handle alive to prevent task cancellation
@@ -28,9 +30,24 @@ struct AudioPlaybackHandle {
 }
 
 impl AudioPlaybackHandle {
-    async fn wait_for_completion(&self) {
-        // Wait for completion notification from the background task
-        self.completion_notify.notified().await;
+    async fn wait_for_completion(&self) -> Result<(), String> {
+        // Wait for either completion or error notification from the background task
+        tokio::select! {
+            _ = self.completion_notify.notified() => {
+                // Check if there was an error even after completion
+                if let Some(error) = self.playback_error.lock().await.as_ref() {
+                    return Err(error.clone());
+                }
+            }
+            _ = self.error_notify.notified() => {
+                // Error occurred, propagate it
+                if let Some(error) = self.playback_error.lock().await.as_ref() {
+                    return Err(error.clone());
+                } else {
+                    return Err("Unknown audio playback error occurred".to_string());
+                }
+            }
+        }
 
         let elapsed = self.start_time.elapsed();
         let minimum_playback_duration = std::time::Duration::from_millis(500);
@@ -43,6 +60,7 @@ impl AudioPlaybackHandle {
         }
 
         info!("Audio playback completion confirmed after {}ms", elapsed.as_millis());
+        Ok(())
     }
 }
 
@@ -149,10 +167,14 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
     let completion_notify = Arc::new(tokio::sync::Notify::new());
     let completion_notify_clone = completion_notify.clone();
     let playback_started = Arc::new(AtomicBool::new(false));
+    let error_notify = Arc::new(tokio::sync::Notify::new());
+    let error_notify_clone = error_notify.clone();
+    let playback_error = Arc::new(Mutex::new(Option::<String>::None));
+    let playback_error_clone = playback_error.clone();
 
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
-    // Platform-specific audio playback with proper completion tracking
+    // Platform-specific audio playback with proper completion tracking and error propagation
     let task_handle = {
         #[cfg(target_os = "macos")]
         {
@@ -163,7 +185,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
             let playback_started_clone = playback_started.clone();
 
-            // FIXED: Store task handle to prevent premature cancellation
+            // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
             tokio::spawn(async move {
                 // Add a small delay to ensure afplay has time to start
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -176,7 +198,13 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("macOS afplay completed successfully");
                         } else {
-                            error!("macOS afplay exited with non-zero status: {}", status);
+                            let error_msg = format!("macOS afplay exited with non-zero status: {}", status);
+                            error!("{}", error_msg);
+
+                            // Store error for propagation
+                            *playback_error_clone.lock().await = Some(error_msg);
+                            error_notify_clone.notify_one();
+
                             // Check if it failed immediately (before actually playing audio)
                             let pid_check = std::process::Command::new("pgrep")
                                 .arg("afplay")
@@ -190,7 +218,12 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         }
                     }
                     Err(e) => {
-                        error!("Failed to wait for macOS afplay process: {}", e);
+                        let error_msg = format!("Failed to wait for macOS afplay process: {}", e);
+                        error!("{}", error_msg);
+
+                        // Store error for propagation
+                        *playback_error_clone.lock().await = Some(error_msg);
+                        error_notify_clone.notify_one();
                     }
                 }
 
@@ -198,7 +231,8 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                 completion_notify_clone.notify_one();
                 debug!("macOS afplay task completed and notified");
 
-                // Keep temp file alive until task completes - prevents race condition
+                // FIXED: Keep temp file alive until task completes - prevents race condition
+                // temp_file is now owned by this task and will be dropped here
                 drop(temp_file);
             })
         }
@@ -212,6 +246,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
             let playback_started_clone = playback_started.clone();
 
+            // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
             tokio::spawn(async move {
                 // Add a small delay to ensure aplay has time to start
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -224,7 +259,13 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("Linux aplay completed successfully");
                         } else {
-                            error!("Linux aplay exited with non-zero status: {}", status);
+                            let error_msg = format!("Linux aplay exited with non-zero status: {}", status);
+                            error!("{}", error_msg);
+
+                            // Store error for propagation
+                            *playback_error_clone.lock().await = Some(error_msg);
+                            error_notify_clone.notify_one();
+
                             // Check if it failed immediately
                             let pid_check = std::process::Command::new("pgrep")
                                 .arg("aplay")
@@ -238,14 +279,20 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         }
                     }
                     Err(e) => {
-                        error!("Failed to wait for Linux aplay process: {}", e);
+                        let error_msg = format!("Failed to wait for Linux aplay process: {}", e);
+                        error!("{}", error_msg);
+
+                        // Store error for propagation
+                        *playback_error_clone.lock().await = Some(error_msg);
+                        error_notify_clone.notify_one();
                     }
                 }
 
                 completion_notify_clone.notify_one();
                 debug!("Linux aplay task completed and notified");
 
-                // Keep temp file alive until task completes - prevents race condition
+                // FIXED: Keep temp file alive until task completes - prevents race condition
+                // temp_file is now owned by this task and will be dropped here
                 drop(temp_file);
             })
         }
@@ -256,19 +303,21 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
         }
     };
 
-    // FIXED: Return handle with actual task handle to prevent premature task cancellation
+    // FIXED: Return handle with actual task handle and error propagation support
     Ok(AudioPlaybackHandle {
         completion_notify,
+        error_notify,
+        playback_error,
         start_time: std::time::Instant::now(),
         playback_started,
         _task_handle: task_handle,
     })
 }
 
-/// Legacy wrapper for compatibility - now properly waits for completion
+/// Legacy wrapper for compatibility - now properly waits for completion with error propagation
 async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
     let handle = play_base64_audio_with_tracking(base64_audio).await?;
-    handle.wait_for_completion().await;
+    handle.wait_for_completion().await?;
     info!("TTS audio playback completed");
     Ok(())
 }
@@ -493,44 +542,52 @@ async fn execute_tts_with_completion_tracking(
                             info!("Sound is disabled, skipping TTS audio playback");
                             Ok("TTS_SOUND_DISABLED".to_string())
                         } else {
-                            // CRITICAL FIX: Use completion tracking with enhanced error detection
+                            // CRITICAL FIX: Use completion tracking with enhanced error detection and proper error propagation
                             match play_base64_audio_with_tracking(&result).await {
                                 Ok(handle) => {
                                     info!("TTS audio playback started, waiting for completion...");
 
-                                    // Enhanced completion tracking with safeguards
+                                    // Enhanced completion tracking with safeguards and error propagation
                                     let completion_start = std::time::Instant::now();
 
                                     // Wait for actual audio completion or stop signal
                                     let playback_result = tokio::select! {
-                                        _ = handle.wait_for_completion() => {
-                                            let total_duration = completion_start.elapsed();
-                                            info!("TTS audio playback completed successfully after {}ms", total_duration.as_millis());
+                                        completion_result = handle.wait_for_completion() => {
+                                            match completion_result {
+                                                Ok(()) => {
+                                                    let total_duration = completion_start.elapsed();
+                                                    info!("TTS audio playback completed successfully after {}ms", total_duration.as_millis());
 
-                                            // SAFEGUARD: If completion happened too quickly, check if audio actually played
-                                            if total_duration < std::time::Duration::from_millis(300) {
-                                                warn!("Audio completed very quickly ({}ms), verifying no audio processes are still running", total_duration.as_millis());
+                                                    // SAFEGUARD: If completion happened too quickly, check if audio actually played
+                                                    if total_duration < std::time::Duration::from_millis(300) {
+                                                        warn!("Audio completed very quickly ({}ms), verifying no audio processes are still running", total_duration.as_millis());
 
-                                                // Give any remaining audio processes time to complete
-                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                                        // Give any remaining audio processes time to complete
+                                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                                                // Check for remaining audio processes
-                                                #[cfg(target_os = "macos")]
-                                                {
-                                                    let afplay_check = std::process::Command::new("pgrep")
-                                                        .arg("afplay")
-                                                        .output();
+                                                        // Check for remaining audio processes
+                                                        #[cfg(target_os = "macos")]
+                                                        {
+                                                            let afplay_check = std::process::Command::new("pgrep")
+                                                                .arg("afplay")
+                                                                .output();
 
-                                                    if let Ok(output) = afplay_check {
-                                                        if !output.stdout.is_empty() {
-                                                            info!("Found running afplay processes, waiting for them to complete...");
-                                                            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                            if let Ok(output) = afplay_check {
+                                                                if !output.stdout.is_empty() {
+                                                                    info!("Found running afplay processes, waiting for them to complete...");
+                                                                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                                }
+                                                            }
                                                         }
                                                     }
+
+                                                    Ok("TTS_COMPLETED".to_string())
+                                                }
+                                                Err(playback_error) => {
+                                                    error!("TTS audio playback failed: {}", playback_error);
+                                                    Err(format!("Audio playback failed: {}", playback_error))
                                                 }
                                             }
-
-                                            Ok("TTS_COMPLETED".to_string())
                                         }
                                         _ = async {
                                             // Poll for stop signal every 100ms
