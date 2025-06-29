@@ -1355,74 +1355,83 @@ pub fn emit_streaming_text_chunk(
 pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: String) {
     info!("Processing TTS content immediately: '{}'", tts_content);
 
-    // CRITICAL FIX: Trim whitespace and validate content before processing
-    let trimmed_content = tts_content.trim();
-    if trimmed_content.is_empty() {
-        info!("TTS content is empty after trimming, skipping immediate processing");
-        return;
-    }
-
-    // Clone everything needed before the async task
-    let content_clone = trimmed_content.to_string();
-
-    tauri::async_runtime::spawn(async move {
-        // Filter TTS content to prevent code/unwanted content from being spoken
-        let filtered_text = crate::tts::filter_tts_content(&content_clone);
-        if filtered_text.is_empty() {
-            info!(
-                "TTS content was filtered out (appears to be code/unwanted content), skipping TTS"
-            );
-            return;
-        }
-
+    // CRITICAL FIX: Make TTS completely asynchronous and non-blocking
+    // This prevents TTS generation and playback from freezing agent execution
+    tokio::spawn(async move {
         // Register escape key for TTS cancellation
         crate::tts::register_tts_escape_key(&app_handle).await;
 
-        // Use invoke_tts to ensure reliability with automatic fallback
+        // Filter TTS content to remove unwanted elements
+        let filtered_text = crate::tts::filter_tts_content(&tts_content);
+        if filtered_text.is_empty() {
+            info!("TTS content filtered out completely, skipping");
+            crate::tts::unregister_tts_escape_key(&app_handle).await;
+            return;
+        }
+
+        info!("Starting ASYNC TTS generation (non-blocking)...");
+
+        // Generate TTS audio asynchronously
         match crate::tts::invoke_tts(filtered_text, app_handle.state(), app_handle.clone()).await {
             Ok(audio_result) => {
                 if audio_result != "TTS_DISABLED_BY_SETTING"
                     && audio_result != "TTS_CONTENT_FILTERED"
+                    && audio_result != "TTS_STOPPED_BY_USER"
                 {
-                    info!("Immediate TTS audio generated successfully, playing via backend");
+                    info!("ASYNC TTS audio generated successfully, starting playback...");
 
                     // ARCHITECTURE CHANGE: Use backend audio playback instead of frontend events
-                    match crate::commands::sound::play_tts_audio_backend(
-                        audio_result.clone(),
-                        app_handle.state::<crate::state::AppState>()
-                    ).await {
-                        Ok(_) => {
-                            info!("Backend TTS audio playback completed successfully");
-                        }
-                        Err(e) => {
-                            warn!("Backend TTS audio playback failed: {}. Falling back to frontend.", e);
+                    // Spawn another async task for audio playback so it doesn't block
+                    let app_handle_for_playback = app_handle.clone();
+                    tokio::spawn(async move {
+                        match crate::commands::sound::play_tts_audio_backend(
+                            audio_result.clone(),
+                            app_handle_for_playback.state::<crate::state::AppState>()
+                        ).await {
+                            Ok(_) => {
+                                info!("ASYNC TTS playback completed successfully");
 
-                            // Fallback to frontend event emission if backend fails
-                            if let Err(e) = app_handle.emit(
-                                "tts-audio-ready",
-                                serde_json::json!({
-                                    "audio_base64": audio_result
-                                }),
-                            ) {
-                                warn!("Failed to emit fallback TTS audio event: {}", e);
+                                // Notify TTS completion to trigger success sound
+                                if let Err(e) = crate::anthropic::handle_tts_completion(
+                                    app_handle_for_playback.clone(),
+                                    app_handle_for_playback.state::<crate::state::AppState>()
+                                ).await {
+                                    warn!("Failed to handle TTS completion: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Backend TTS audio playback failed: {}. Falling back to frontend.", e);
+
+                                // Fallback to frontend event emission if backend fails
+                                if let Err(e) = app_handle_for_playback.emit(
+                                    "tts-audio-ready",
+                                    serde_json::json!({
+                                        "audio_base64": audio_result
+                                    }),
+                                ) {
+                                    warn!("Failed to emit fallback TTS audio event: {}", e);
+                                }
                             }
                         }
-                    }
+                    });
                 } else {
                     info!("TTS processing completed: {}", audio_result);
                 }
             }
             Err(e) => {
                 warn!(
-                    "Failed to generate immediate TTS audio: {}. Continuing without audio.",
+                    "Failed to generate TTS audio: {}. Continuing without audio.",
                     e
                 );
             }
         }
 
-        // Unregister escape key after TTS completion
+        // Unregister escape key after TTS generation (not playback)
         crate::tts::unregister_tts_escape_key(&app_handle).await;
     });
+
+    // CRITICAL: Return immediately so agent execution continues
+    info!("TTS processing started in background, agent execution continues...");
 }
 
 /// Emit TTS content for immediate processing (deprecated - use process_tts_content_immediately)
