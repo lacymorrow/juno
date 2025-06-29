@@ -53,6 +53,12 @@ impl SettingsManager {
         Ok(manager)
     }
 
+    /// Get the app handle for this settings manager instance
+    /// Used internally for creating unique cache keys
+    pub fn app_handle(&self) -> &AppHandle {
+        &self.app_handle
+    }
+
     /// Initialize default settings if they don't exist
     async fn initialize_defaults(&self) -> Result<(), String> {
         let store = self.app_handle.store(SETTINGS_STORE_FILE)
