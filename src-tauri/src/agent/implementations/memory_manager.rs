@@ -325,17 +325,21 @@ impl AdvancedMemoryManager {
         let mut found_any_base64 = false;
 
         while pos < content.len() {
-            // Find start of potential base64 sequence
-            let start_pos = content[pos..].chars()
-                .position(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
-                .map(|p| pos + p);
+            // Find start of potential base64 sequence using byte-based search
+            let remaining_slice = &content[pos..];
+            let base64_char_start = remaining_slice.find(|c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
 
-            if let Some(start) = start_pos {
-                // Find end of base64 sequence
+            if let Some(start_offset) = base64_char_start {
+                let start = pos + start_offset;
+
+                // Find end of base64 sequence using byte-based iteration
                 let mut end = start;
-                for (i, ch) in content[start..].char_indices() {
-                    if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' || ch.is_whitespace() {
-                        end = start + i + ch.len_utf8();
+                let bytes = content.as_bytes();
+
+                while end < content.len() {
+                    let ch = bytes[end] as char;
+                    if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' || ch.is_ascii_whitespace() {
+                        end += 1;
                     } else {
                         break;
                     }
@@ -372,19 +376,27 @@ impl AdvancedMemoryManager {
                     }
                 }
 
+                // CRITICAL FIX: Count segments that don't qualify as base64 as regular text
+                // This fixes the token undercounting bug
+                if start > pos {
+                    let text_before = &content[pos..start];
+                    *total_tokens += text_before.len() / tokens::CHARS_PER_TOKEN_TEXT;
+                }
+
+                // Count the failed base64 segment as regular text
+                *total_tokens += segment.len() / tokens::CHARS_PER_TOKEN_TEXT;
+
                 pos = end;
             } else {
+                // No more base64 characters found - count remaining content as regular text
+                let remaining_text = &content[pos..];
+                *total_tokens += remaining_text.len() / tokens::CHARS_PER_TOKEN_TEXT;
                 break;
             }
         }
 
-        if found_any_base64 {
-            // Count any remaining text after the last base64 segment
-            if pos < content.len() {
-                let remaining_text = &content[pos..];
-                *total_tokens += remaining_text.len() / tokens::CHARS_PER_TOKEN_TEXT;
-            }
-        }
+        // If we found base64 content, any remaining text after the last segment was already counted
+        // If we didn't find any base64 content, all text was counted as regular text above
 
         found_any_base64
     }
