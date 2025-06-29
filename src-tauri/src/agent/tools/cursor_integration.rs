@@ -289,6 +289,8 @@ impl ToolProvider for CursorIntegration {
                     },
                     "required": ["file_path"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "cursor_show_suggestion".to_string(),
@@ -307,6 +309,8 @@ impl ToolProvider for CursorIntegration {
                     },
                     "required": ["message"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
             ToolDefinition {
                 name: "cursor_navigate_to".to_string(),
@@ -329,6 +333,8 @@ impl ToolProvider for CursorIntegration {
                     },
                     "required": ["file_path"]
                 }),
+                api_type: None,
+                beta_flag: None,
             },
         ])
     }

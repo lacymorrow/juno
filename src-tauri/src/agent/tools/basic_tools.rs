@@ -295,6 +295,8 @@ mod basic_tools_impl {
                 },
                 "required": ["path"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
@@ -399,6 +401,8 @@ mod basic_tools_impl {
                 },
                 "required": ["command"]
             }),
+            api_type: None,
+            beta_flag: None,
         }
     }
 
