@@ -284,7 +284,7 @@ impl ShellSession {
     }
 
     /// Read output from stdout/stderr with timeout and completion detection
-    /// Fixed: Simple non-blocking approach that preserves pipes for persistent sessions
+    /// Fixed: Ensures pipes are always restored to blocking mode, even on error
     fn read_output_with_timeout_secure(
         &self,
         child: &mut Child,
@@ -301,9 +301,23 @@ impl ShellSession {
         let stderr = child.stderr.as_mut()
             .ok_or_else(|| "Process stderr not available".to_string())?;
 
+        let stdout_fd = stdout.as_raw_fd();
+        let stderr_fd = stderr.as_raw_fd();
+
         // Set pipes to non-blocking mode to avoid hanging
-        self.set_nonblocking(stdout.as_raw_fd())?;
-        self.set_nonblocking(stderr.as_raw_fd())?;
+        self.set_nonblocking(stdout_fd)?;
+        self.set_nonblocking(stderr_fd)?;
+
+        // Helper closure to restore blocking mode before any return
+        let restore_blocking = || {
+            // Best effort restore - log errors but don't fail the operation
+            if let Err(e) = self.set_blocking(stdout_fd) {
+                error!("Failed to restore stdout to blocking mode: {}", e);
+            }
+            if let Err(e) = self.set_blocking(stderr_fd) {
+                error!("Failed to restore stderr to blocking mode: {}", e);
+            }
+        };
 
         let mut stdout_output = String::new();
         let mut stderr_output = String::new();
@@ -336,6 +350,7 @@ impl ShellSession {
                     // No data available right now, continue polling
                 }
                 Err(e) => {
+                    restore_blocking();
                     return Err(format!("Error reading stdout: {}", e));
                 }
             }
@@ -352,6 +367,7 @@ impl ShellSession {
                     // No data available right now, continue polling
                 }
                 Err(e) => {
+                    restore_blocking();
                     return Err(format!("Error reading stderr: {}", e));
                 }
             }
@@ -367,9 +383,8 @@ impl ShellSession {
             }
         }
 
-        // Restore blocking mode for future use
-        self.set_blocking(stdout.as_raw_fd())?;
-        self.set_blocking(stderr.as_raw_fd())?;
+        // Always restore blocking mode for future use
+        restore_blocking();
 
         // Check for timeout
         if !completion_found && start_time.elapsed() >= timeout {
