@@ -1,9 +1,7 @@
-use crate::state::AppState;
 use chrono::{DateTime, Local};
 use futures::FutureExt;
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
