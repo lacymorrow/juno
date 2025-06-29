@@ -246,7 +246,7 @@ impl ShellSession {
     }
 
     /// Read output from stdout/stderr with timeout and completion detection
-    /// Fixed: Race-condition-free timeout handling using thread-based approach
+    /// Fixed: Simple non-blocking approach that preserves pipes for persistent sessions
     fn read_output_with_timeout_secure(
         &self,
         child: &mut Child,
@@ -254,182 +254,126 @@ impl ShellSession {
         timeout: Duration,
         start_time: Instant,
     ) -> Result<(String, String), String> {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::mpsc;
-        use std::os::unix::io::AsRawFd;
         use std::io::{Read, ErrorKind};
+        use std::os::unix::io::AsRawFd;
 
-        // CRITICAL FIX: Use mutable references instead of taking ownership
-        // This preserves the pipes for future commands in the persistent session
-        let stdout_fd = match child.stdout.as_ref() {
-            Some(stdout) => stdout.as_raw_fd(),
-            None => return Err("Process stdout not available".to_string()),
-        };
+        // Get mutable references to stdout and stderr - never take ownership
+        let stdout = child.stdout.as_mut()
+            .ok_or_else(|| "Process stdout not available".to_string())?;
+        let stderr = child.stderr.as_mut()
+            .ok_or_else(|| "Process stderr not available".to_string())?;
 
-        let stderr_fd = match child.stderr.as_ref() {
-            Some(stderr) => stderr.as_raw_fd(),
-            None => return Err("Process stderr not available".to_string()),
-        };
+        // Set pipes to non-blocking mode to avoid hanging
+        self.set_nonblocking(stdout.as_raw_fd())?;
+        self.set_nonblocking(stderr.as_raw_fd())?;
 
-        // Set up completion detection with atomic flag
-        let completion_found = Arc::new(AtomicBool::new(false));
-        let completion_found_stdout = completion_found.clone();
+        let mut stdout_output = String::new();
+        let mut stderr_output = String::new();
+        let mut stdout_buffer = vec![0; BUFFER_SIZE];
+        let mut stderr_buffer = vec![0; BUFFER_SIZE];
+        let mut completion_found = false;
 
-        // Channels for communication between threads
-        let (stdout_tx, stdout_rx) = mpsc::channel();
-        let (stderr_tx, stderr_rx) = mpsc::channel();
+        // Poll for data with timeout
+        while start_time.elapsed() < timeout && !completion_found {
+            let mut any_data = false;
 
-        let completion_marker_owned = completion_marker.to_string();
+            // Read from stdout (non-blocking)
+            match stdout.read(&mut stdout_buffer) {
+                Ok(0) => {}, // No data available
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&stdout_buffer[..n]);
+                    stdout_output.push_str(&chunk);
+                    any_data = true;
 
-        // Spawn stdout reader thread with completion detection using file descriptor
-        let stdout_handle = thread::spawn(move || {
-            use std::fs::File;
-            use std::os::unix::io::FromRawFd;
-
-            // Create a duplicate file descriptor to avoid conflicts
-            let dup_fd = unsafe { libc::dup(stdout_fd) };
-            if dup_fd == -1 {
-                let _ = stdout_tx.send(String::new());
-                return;
-            }
-
-            let mut file = unsafe { File::from_raw_fd(dup_fd) };
-            let mut reader = BufReader::new(&mut file);
-            let mut output = String::new();
-            let mut buffer = vec![0; BUFFER_SIZE];
-
-            loop {
-                // Check if we should stop due to completion or timeout
-                if completion_found_stdout.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                match reader.read(&mut buffer) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&buffer[..n]);
-                        output.push_str(&chunk);
-
-                        // Check for completion marker
-                        if output.contains(&completion_marker_owned) {
-                            // Remove the completion marker from output
-                            if let Some(pos) = output.find(&completion_marker_owned) {
-                                output.truncate(pos);
-                            }
-                            completion_found_stdout.store(true, Ordering::Relaxed);
-                            break;
+                    // Check for completion marker
+                    if stdout_output.contains(completion_marker) {
+                        // Remove the completion marker from output
+                        if let Some(pos) = stdout_output.find(completion_marker) {
+                            stdout_output.truncate(pos);
                         }
+                        completion_found = true;
                     }
-                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                        // Non-blocking read returned no data, sleep briefly
-                        thread::sleep(Duration::from_millis(1));
-                        continue;
-                    }
-                    Err(_) => break,
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    // No data available right now, continue polling
+                }
+                Err(e) => {
+                    return Err(format!("Error reading stdout: {}", e));
                 }
             }
 
-            let _ = stdout_tx.send(output);
-        });
-
-        // Spawn stderr reader thread using file descriptor
-        let stderr_handle = thread::spawn(move || {
-            use std::fs::File;
-            use std::os::unix::io::FromRawFd;
-
-            // Create a duplicate file descriptor to avoid conflicts
-            let dup_fd = unsafe { libc::dup(stderr_fd) };
-            if dup_fd == -1 {
-                let _ = stderr_tx.send(String::new());
-                return;
-            }
-
-            let mut file = unsafe { File::from_raw_fd(dup_fd) };
-            let mut reader = BufReader::new(&mut file);
-            let mut output = String::new();
-            let mut buffer = vec![0; BUFFER_SIZE];
-
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&buffer[..n]);
-                        output.push_str(&chunk);
-                    }
-                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                        // Non-blocking read returned no data, sleep briefly
-                        thread::sleep(Duration::from_millis(1));
-                        continue;
-                    }
-                    Err(_) => break,
+            // Read from stderr (non-blocking)
+            match stderr.read(&mut stderr_buffer) {
+                Ok(0) => {}, // No data available
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&stderr_buffer[..n]);
+                    stderr_output.push_str(&chunk);
+                    any_data = true;
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    // No data available right now, continue polling
+                }
+                Err(e) => {
+                    return Err(format!("Error reading stderr: {}", e));
                 }
             }
 
-            let _ = stderr_tx.send(output);
-        });
-
-        // Wait for completion or timeout with proper race condition handling
-        let mut stdout_result = String::new();
-        let mut stderr_result = String::new();
-
-        loop {
-            // Check timeout first to avoid race condition
-            if start_time.elapsed() >= timeout {
-                completion_found.store(true, Ordering::Relaxed);
+            // If we found completion marker, break immediately
+            if completion_found {
                 break;
             }
 
-            // Check for completion
-            if completion_found.load(Ordering::Relaxed) {
-                break;
+            // If no data was read in this iteration, sleep briefly to avoid busy-waiting
+            if !any_data {
+                thread::sleep(Duration::from_millis(10));
             }
-
-            // Try to receive results with a small timeout to avoid blocking
-            match stdout_rx.try_recv() {
-                Ok(output) => {
-                    stdout_result = output;
-                    break;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => break,
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-
-            thread::sleep(Duration::from_millis(10));
         }
 
-        // Wait for stderr with timeout
-        let stderr_timeout = Duration::from_millis(100);
-        match stderr_rx.recv_timeout(stderr_timeout) {
-            Ok(output) => stderr_result = output,
-            Err(_) => {} // Timeout or disconnected, keep empty result
-        }
+        // Restore blocking mode for future use
+        self.set_blocking(stdout.as_raw_fd())?;
+        self.set_blocking(stderr.as_raw_fd())?;
 
-        // Join threads to clean up
-        let _ = stdout_handle.join();
-        let _ = stderr_handle.join();
-
-        // CRITICAL FIX: No need to restore pipes since we never took ownership
-        // The child process retains its stdout/stderr for future commands
-
-        // Final timeout check - this prevents the race condition
-        if !completion_found.load(Ordering::Relaxed) && start_time.elapsed() >= timeout {
+        // Check for timeout
+        if !completion_found && start_time.elapsed() >= timeout {
             return Err("Command execution timed out".to_string());
         }
 
         // Clean up output (remove trailing newlines, etc.)
-        let stdout_clean = stdout_result.trim_end().to_string();
-        let stderr_clean = stderr_result.trim_end().to_string();
+        let stdout_clean = stdout_output.trim_end().to_string();
+        let stderr_clean = stderr_output.trim_end().to_string();
 
         Ok((stdout_clean, stderr_clean))
     }
 
-    /// No longer needed - pipes are preserved automatically
-    /// This method was the source of the bug as it couldn't actually restore the pipes
-    fn restore_child_pipes(&self, _child: &mut Child) -> Result<(), String> {
-        // FIXED: No action needed since we never take ownership of the pipes
-        // The persistent session is maintained automatically
+    /// Set file descriptor to non-blocking mode
+    fn set_nonblocking(&self, fd: i32) -> Result<(), String> {
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            if flags == -1 {
+                return Err("Failed to get file descriptor flags".to_string());
+            }
+            if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
+                return Err("Failed to set non-blocking mode".to_string());
+            }
+        }
         Ok(())
     }
+
+    /// Set file descriptor to blocking mode
+    fn set_blocking(&self, fd: i32) -> Result<(), String> {
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            if flags == -1 {
+                return Err("Failed to get file descriptor flags".to_string());
+            }
+            if libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) == -1 {
+                return Err("Failed to set blocking mode".to_string());
+            }
+        }
+        Ok(())
+    }
+
+
 }
 
 impl Drop for ShellSession {
