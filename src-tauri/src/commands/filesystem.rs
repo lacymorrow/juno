@@ -19,18 +19,7 @@ struct FileEntry {
     // Consider adding other fields like size, modified_date if needed in the future
 }
 
-// ============================================================================
-// CONSOLIDATED: dev_ functions removed - use production functions instead
-// ============================================================================
 
-// CONSOLIDATED: dev_list_files removed - use list_files production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_get_file_content removed - use get_file_content production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_set_file_content removed - use set_file_content production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[tauri::command]
 pub async fn save_agent_response(
