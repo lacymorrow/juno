@@ -228,6 +228,7 @@ pub struct UISettings {
     pub notification_position: String,
     pub notification_show_icons: bool,
     pub notification_persist_important: bool,
+    pub smooth_mouse_movement: bool,
 }
 
 impl Default for UISettings {
@@ -241,6 +242,7 @@ impl Default for UISettings {
             notification_position: "bottom-right".to_string(),
             notification_show_icons: true,
             notification_persist_important: true,
+            smooth_mouse_movement: false, // Default to immediate movement for performance
         }
     }
 }
@@ -597,6 +599,20 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.notification_persist_important = persist)
             .map_err(|e| format!("Failed to set notification persist important: {}", e))
+    }
+
+    pub fn get_smooth_mouse_movement(&self) -> Result<bool, String> {
+        self.ui_settings
+            .lock()
+            .map(|settings| settings.smooth_mouse_movement)
+            .map_err(|e| format!("Failed to get smooth mouse movement: {}", e))
+    }
+
+    pub fn set_smooth_mouse_movement(&self, enabled: bool) -> Result<(), String> {
+        self.ui_settings
+            .lock()
+            .map(|mut settings| settings.smooth_mouse_movement = enabled)
+            .map_err(|e| format!("Failed to set smooth mouse movement: {}", e))
     }
 
     // Input Settings - Getter/Setter methods
