@@ -4,11 +4,8 @@ use tauri::{AppHandle, State, Emitter, Manager};
 use crate::state::AppState;
 use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
 use tracing::{info, error};
-use crate::utils::coordinates;
 use crate::constants::{timeouts, events};
-use super::send_dev_tool_notification;
-use crate::constants::errors::templates::FAILED_TO_EMIT;
-use crate::constants::mouse::{movement, visual, delays};
+use crate::constants::mouse::movement;
 
 // Import constants to replace magic numbers
 
@@ -92,22 +89,7 @@ pub async fn smooth_mouse_move(
     Ok(())
 }
 
-// Helper function to conditionally move mouse based on user setting
-async fn conditional_mouse_move(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
-    let use_smooth_movement = state.get_smooth_mouse_movement().unwrap_or(false);
 
-    if use_smooth_movement {
-        smooth_mouse_move(app, state, x, y, None).await
-    } else {
-        // Use immediate movement
-        state.desktop.mouse_move(x, y).map_err(|e| format!("Failed to move mouse: {}", e))
-    }
-}
 
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
@@ -344,9 +326,6 @@ pub(crate) async fn left_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use conditional mouse movement to position cursor before clicking
-    conditional_mouse_move(&app, &state, x, y).await?;
-
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
 
     match state.desktop.left_click(x, y, modifier.as_deref()) {
@@ -386,9 +365,6 @@ pub(crate) async fn right_click(
 
     log_debug_operation("right_click", &format!("Right clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
     info!("Executing right_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
-
-    // Use conditional mouse movement to position cursor before clicking
-    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
 
@@ -498,9 +474,6 @@ pub(crate) async fn middle_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use conditional mouse movement to position cursor before clicking
-    conditional_mouse_move(&app, &state, x, y).await?;
-
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click
 
     match state.desktop.middle_click(x, y, modifier.as_deref()) {
@@ -543,9 +516,6 @@ pub(crate) async fn double_click(
 
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
-
-    // Use conditional mouse movement to position cursor before clicking
-    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
 
@@ -590,9 +560,6 @@ pub(crate) async fn triple_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use conditional mouse movement to position cursor before clicking
-    conditional_mouse_move(&app, &state, x, y).await?;
-
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
 
     match state.desktop.triple_click(x, y, modifier.as_deref()) {
@@ -632,9 +599,6 @@ pub(crate) async fn left_mouse_down(
     log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_down at ({}, {})", x, y);
 
-    // Use conditional mouse movement to position cursor before mouse down
-    conditional_mouse_move(&app, &state, x, y).await?;
-
     match state.desktop.left_mouse_down(x, y) {
         Ok(_) => {
             info!("Successfully performed left mouse down at ({}, {})", x, y);
@@ -671,9 +635,6 @@ pub(crate) async fn left_mouse_up(
 
     log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_up at ({}, {})", x, y);
-
-    // Use conditional mouse movement to position cursor before mouse up
-    conditional_mouse_move(&app, &state, x, y).await?;
 
     match state.desktop.left_mouse_up(x, y) {
         Ok(_) => {
