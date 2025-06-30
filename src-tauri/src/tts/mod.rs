@@ -87,39 +87,39 @@ pub fn filter_tts_content(text: &str) -> String {
     let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
     filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 4. Remove function calls and method chaining (e.g., getData(), object.method())
-    let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
-    filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
+    // // 4. Remove function calls and method chaining (e.g., getData(), object.method())
+    // let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
+    // filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 5. Remove property access patterns (e.g., object.property, config.server.port)
-    let property_access_regex = Regex::new(r"\w+\.\w+(\.\w+)*").unwrap();
-    filtered_text = property_access_regex.replace_all(&filtered_text, " ").to_string();
+    // // 5. Remove property access patterns (e.g., object.property, config.server.port)
+    // let property_access_regex = Regex::new(r"\w+\.\w+(\.\w+)*").unwrap();
+    // filtered_text = property_access_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 6. Remove URLs and file paths
-    let url_regex = Regex::new(r"https?://[^\s]+").unwrap();
-    filtered_text = url_regex.replace_all(&filtered_text, " ").to_string();
-    let path_regex = Regex::new(r"[/~][^\s]+").unwrap();
-    filtered_text = path_regex.replace_all(&filtered_text, " ").to_string();
+    // // 6. Remove URLs and file paths
+    // let url_regex = Regex::new(r"https?://[^\s]+").unwrap();
+    // filtered_text = url_regex.replace_all(&filtered_text, " ").to_string();
+    // let path_regex = Regex::new(r"[/~][^\s]+").unwrap();
+    // filtered_text = path_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 7. Remove programming keywords and operators
-    let programming_regex = Regex::new(r"\b(const|let|var|if|else|function|return|class|import|export|from|async|await|try|catch|throw|new|this|super|extends|implements|interface|type|enum|namespace|module|public|private|protected|static|abstract|override|readonly|keyof|typeof|instanceof|in|of|for|while|do|switch|case|default|break|continue|finally|with|debugger|delete|void|yield|get|set)\b").unwrap();
-    filtered_text = programming_regex.replace_all(&filtered_text, " ").to_string();
+    // // 7. Remove programming keywords and operators
+    // let programming_regex = Regex::new(r"\b(const|let|var|if|else|function|return|class|import|export|from|async|await|try|catch|throw|new|this|super|extends|implements|interface|type|enum|namespace|module|public|private|protected|static|abstract|override|readonly|keyof|typeof|instanceof|in|of|for|while|do|switch|case|default|break|continue|finally|with|debugger|delete|void|yield|get|set)\b").unwrap();
+    // filtered_text = programming_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 8. Remove variable assignments and declarations
-    let assignment_regex = Regex::new(r"\w+\s*[=:]\s*").unwrap();
-    filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
+    // // 8. Remove variable assignments and declarations
+    // let assignment_regex = Regex::new(r"\w+\s*[=:]\s*").unwrap();
+    // filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 9. Remove JSON structures
-    let json_regex = Regex::new(r"\{[^}]*\}|\[[^\]]*\]").unwrap();
-    filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
+    // // 9. Remove JSON structures
+    // let json_regex = Regex::new(r"\{[^}]*\}|\[[^\]]*\]").unwrap();
+    // filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 10. Remove CSS selectors and rules
-    let css_regex = Regex::new(r"\.[a-zA-Z-]+\s*\{[^}]*\}|#[a-zA-Z-]+\s*\{[^}]*\}|\w+\s*\{[^}]*\}").unwrap();
-    filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
+    // // 10. Remove CSS selectors and rules
+    // let css_regex = Regex::new(r"\.[a-zA-Z-]+\s*\{[^}]*\}|#[a-zA-Z-]+\s*\{[^}]*\}|\w+\s*\{[^}]*\}").unwrap();
+    // filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 11. Remove emojis (Unicode ranges for common emoji blocks)
-    let emoji_regex = Regex::new(r"[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]").unwrap();
-    filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
+    // // 11. Remove emojis (Unicode ranges for common emoji blocks)
+    // let emoji_regex = Regex::new(r"[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]").unwrap();
+    // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
     // 12. Clean up whitespace and normalize
     let whitespace_regex = Regex::new(r"\s+").unwrap();
