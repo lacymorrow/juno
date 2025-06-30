@@ -2,7 +2,7 @@
 //! Implements the complete Anthropic Computer Use API specification.
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::core::ToolDefinition;
+use crate::agent::core::{ToolDefinition, AgentError};
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use crate::utils::coordinates;
@@ -314,6 +314,26 @@ impl From<CoordinateValidationError> for String {
     }
 }
 
+/// Helper function to check if a JSON Value contains an Anthropic Computer Use API error
+/// Returns true if the value contains { "is_error": true, ... }
+pub fn is_anthropic_error_response(value: &Value) -> bool {
+    value.get("is_error")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Helper function to extract error message from Anthropic error response
+/// Returns the error message if this is an error response, None otherwise
+pub fn extract_anthropic_error_message(value: &Value) -> Option<String> {
+    if is_anthropic_error_response(value) {
+        value.get("error")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
 /// Convert error messages to Anthropic Computer Use API compliant format
 /// According to Anthropic's specification, errors should be returned as successful JSON responses
 /// with is_error: true and error: "message" instead of using Rust's Err() pattern
@@ -374,13 +394,13 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::ScreenRecording,
                 "computer (screenshot)"
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             let screenshot_path = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
                 app_handle.clone(),
             ).await.map_err(|e| format!("Screenshot failed: {}", e)));
 
-            Ok(json!({
+            Ok::<Value, String>(json!({
                 "base64_image": screenshot_path
             }))
         }
@@ -391,7 +411,7 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::Accessibility,
                 &format!("computer ({})", action)
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             match action {
                 "left_click" => {
@@ -544,22 +564,15 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_down" => {
-                    // Anthropic Computer Use API specification: coordinates are optional for left_mouse_down
-                    // If not provided, the action occurs at the current cursor position
-                    let (screen_x, screen_y) = if input.get("coordinate").is_some() {
-                        // Coordinates provided - validate and transform them
-                        let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                        let (x, y) = coordinate.to_f64();
-                        // Transform coordinates from scaled screenshot to screen coordinates
-                        let transformed = coordinates::transform_to_screen_coordinates(x, y);
-                        (Some(transformed.0), Some(transformed.1))
-                    } else {
-                        // No coordinates provided - use current cursor position (per Anthropic spec)
-                        (None, None)
-                    };
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                    let (x, y) = coordinate.to_f64();
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
                         .map_err(|e| format!("Left mouse down failed: {}", e)));
 
                     Ok(json!({
@@ -567,22 +580,15 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_up" => {
-                    // Anthropic Computer Use API specification: coordinates are optional for left_mouse_up
-                    // If not provided, the action occurs at the current cursor position
-                    let (screen_x, screen_y) = if input.get("coordinate").is_some() {
-                        // Coordinates provided - validate and transform them
-                        let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                        let (x, y) = coordinate.to_f64();
-                        // Transform coordinates from scaled screenshot to screen coordinates
-                        let transformed = coordinates::transform_to_screen_coordinates(x, y);
-                        (Some(transformed.0), Some(transformed.1))
-                    } else {
-                        // No coordinates provided - use current cursor position (per Anthropic spec)
-                        (None, None)
-                    };
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                    let (x, y) = coordinate.to_f64();
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
                         .map_err(|e| format!("Left mouse up failed: {}", e)));
 
                     Ok(json!({
@@ -598,7 +604,7 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::Accessibility,
                 &format!("computer ({})", action)
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             match action {
                 "key" => {
@@ -668,7 +674,7 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::Accessibility,
                 "computer (scroll)"
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             // Strict coordinate validation per Anthropic Computer Use API specification
             let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
@@ -731,8 +737,14 @@ pub async fn execute_computer_tool(
     // Calculate execution time
     let execution_time_ms = execution_start.elapsed().as_millis() as u64;
 
-    // Get screenshot from result if applicable
-    let screenshot_base64 = if action == "screenshot" {
+    // Determine if execution was successful - handle Anthropic Computer Use API error format
+    let success = match &result {
+        Ok(output) => !is_anthropic_error_response(output),
+        Err(_) => false,
+    };
+
+    // Get screenshot from result if applicable AND operation was successful
+    let screenshot_base64 = if success && action == "screenshot" {
         match &result {
             Ok(output) => output.as_str().map(|s| s.to_string()),
             Err(_) => None,
@@ -742,11 +754,14 @@ pub async fn execute_computer_tool(
     };
 
     // Enhanced result logging with descriptive name and execution time
-    let success = result.is_ok();
     let result_content = if success {
         Some(format!("✅ {} completed successfully in {}ms", descriptive_tool_name, execution_time_ms))
     } else {
-        Some(format!("❌ {} failed", descriptive_tool_name))
+        let error_msg = match &result {
+            Ok(output) => extract_anthropic_error_message(output).unwrap_or_else(|| "Unknown error".to_string()),
+            Err(e) => e.clone(),
+        };
+        Some(format!("❌ {} failed: {}", descriptive_tool_name, error_msg))
     };
 
     crate::agent::tool_logger::log_enhanced_tool_call_result_with_inputs(
