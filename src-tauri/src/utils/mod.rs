@@ -1625,212 +1625,43 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
     }
 
-    if let Some((width, height)) = context.system_info.screen_resolution {
-        context_parts.push(format!("Screen resolution: {}×{}", width, height));
+    // FIXED: Provide standard resolution instead of actual display resolution
+    // This ensures agent coordinates match the screenshot coordinate space
+    if let Some((_width, _height)) = context.system_info.screen_resolution {
+        // Get the standard resolution that screenshots are scaled to
+        use crate::utils::coordinates::get_current_standard_resolution;
+        match get_current_standard_resolution() {
+            Ok((standard_width, standard_height)) => {
+                context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
+            }
+            Err(_) => {
+                // Fallback to a common standard resolution if we can't get the current one
+                context_parts.push("Screen resolution: 1366×768".to_string());
+            }
+        }
     }
 
     // Add running applications information
     if !context.running_applications.is_empty() {
-        context_parts.push("\n--- Running Applications ---".to_string());
-
-        // Show frontmost app first
-        if let Some(frontmost) = context
+        let app_list = context
             .running_applications
             .iter()
-            .find(|app| app.is_frontmost)
-        {
-            context_parts.push(format!("Frontmost app: {}", frontmost.name));
-        }
+            .take(10) // Limit to first 10 apps to avoid overwhelming the context
+            .map(|app| app.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
 
-        // Show other running apps (limit to most relevant ones)
-        let mut other_apps: Vec<_> = context
-            .running_applications
-            .iter()
-            .filter(|app| !app.is_frontmost && app.activation_policy == "Regular")
-            .collect();
-        other_apps.sort_by(|a, b| a.name.cmp(&b.name));
+        context_parts.push(format!("Running applications: {}", app_list));
 
-        if !other_apps.is_empty() {
-            let app_names: Vec<String> = other_apps
-                .iter()
-                .take(10) // Limit to top 10 to avoid overwhelming the context
-                .map(|app| app.name.clone())
-                .collect();
-            context_parts.push(format!("Other running apps: {}", app_names.join(", ")));
-
-            if other_apps.len() > 10 {
-                context_parts.push(format!(
-                    "... and {} more running applications",
-                    other_apps.len() - 10
-                ));
-            }
-        }
-    }
-
-    // Add user preferences information
-    if !context.user_preferences.preferred_applications.is_empty()
-        || context.user_preferences.browser_preference.is_some()
-        || context.user_preferences.editor_preference.is_some()
-        || context.user_preferences.terminal_preference.is_some()
-    {
-        context_parts.push("\n--- User Preferences ---".to_string());
-
-        if let Some(browser) = &context.user_preferences.browser_preference {
-            context_parts.push(format!("Preferred browser: {}", browser));
-        }
-
-        if let Some(editor) = &context.user_preferences.editor_preference {
-            context_parts.push(format!("Preferred editor: {}", editor));
-        }
-
-        if let Some(terminal) = &context.user_preferences.terminal_preference {
-            context_parts.push(format!("Preferred terminal: {}", terminal));
-        }
-
-        if let Some(productivity) = &context.user_preferences.productivity_suite {
-            context_parts.push(format!("Productivity suite: {}", productivity));
-        }
-    }
-
-    // Add installed applications summary (just count and categories)
-    if !context.installed_applications.is_empty() {
-        context_parts.push(format!("\n--- Installed Applications ---"));
-        context_parts.push(format!(
-            "Total installed apps: {}",
-            context.installed_applications.len()
-        ));
-
-        // Categorize some popular applications
-        let browsers = context
-            .installed_applications
-            .iter()
-            .filter(|app| {
-                ["Safari", "Chrome", "Firefox", "Edge", "Arc", "Brave"]
-                    .iter()
-                    .any(|browser| app.name.contains(browser))
-            })
-            .map(|app| app.name.clone())
-            .collect::<Vec<_>>();
-
-        let editors = context
-            .installed_applications
-            .iter()
-            .filter(|app| {
-                [
-                    "Visual Studio Code",
-                    "Xcode",
-                    "Sublime",
-                    "Atom",
-                    "IntelliJ",
-                    "WebStorm",
-                    "PyCharm",
-                    "TextEdit",
-                ]
-                .iter()
-                .any(|editor| app.name.contains(editor))
-            })
-            .map(|app| app.name.clone())
-            .collect::<Vec<_>>();
-
-        if !browsers.is_empty() {
-            context_parts.push(format!("Available browsers: {}", browsers.join(", ")));
-        }
-
-        if !editors.is_empty() {
-            context_parts.push(format!("Available editors: {}", editors.join(", ")));
-        }
-    }
-
-    // Enhanced context sections
-
-    // Add clipboard content
-    if let Some(clipboard) = &context.clipboard_content {
-        context_parts.push("\n--- Clipboard Content ---".to_string());
-        context_parts.push(format!("Current clipboard: {}", clipboard));
-    }
-
-    // Add selected text
-    if let Some(selected) = &context.selected_text {
-        context_parts.push("\n--- Selected Text ---".to_string());
-        context_parts.push(format!("Currently selected: {}", selected));
-    }
-
-    // Add hardware information
-    if let Some(hardware) = &context.hardware_info {
-        context_parts.push("\n--- System Performance ---".to_string());
-
-        if let Some(cpu) = hardware.cpu_usage {
-            context_parts.push(format!("CPU usage: {:.1}%", cpu));
-        }
-
-        if let Some(memory) = hardware.memory_usage {
-            context_parts.push(format!("Memory usage: {:.1}%", memory));
-        }
-
-        if let Some(disk) = hardware.disk_usage {
-            context_parts.push(format!("Disk usage: {:.1}%", disk));
-        }
-
-        // Add performance context
-        let mut performance_notes = Vec::new();
-        if let Some(cpu) = hardware.cpu_usage {
-            if cpu > 80.0 {
-                performance_notes.push("High CPU usage detected");
-            }
-        }
-        if let Some(memory) = hardware.memory_usage {
-            if memory > 85.0 {
-                performance_notes.push("High memory usage detected");
-            }
-        }
-        if let Some(disk) = hardware.disk_usage {
-            if disk > 90.0 {
-                performance_notes.push("Low disk space available");
-            }
-        }
-
-        if !performance_notes.is_empty() {
+        if context.running_applications.len() > 10 {
             context_parts.push(format!(
-                "Performance alerts: {}",
-                performance_notes.join(", ")
+                "... and {} more applications",
+                context.running_applications.len() - 10
             ));
         }
     }
 
-    // Add voice/audio state
-    if let Some(voice) = &context.voice_audio_state {
-        context_parts.push("\n--- Voice/Audio State ---".to_string());
-        context_parts.push(format!("Voice mode: {}", voice.mode));
-
-        let mut voice_status = Vec::new();
-        if voice.is_listening {
-            voice_status.push("listening");
-        }
-        if voice.is_transcribing {
-            voice_status.push("transcribing");
-        }
-        if voice.is_speaking {
-            voice_status.push("speaking");
-        }
-
-        if !voice_status.is_empty() {
-            context_parts.push(format!("Voice status: {}", voice_status.join(", ")));
-        }
-
-        if let Some(transcription) = &voice.current_transcription {
-            context_parts.push(format!("Current transcription: {}", transcription));
-        }
-
-        if voice.has_error {
-            if let Some(error) = &voice.error_message {
-                context_parts.push(format!("Voice error: {}", error));
-            } else {
-                context_parts.push("Voice system has an error".to_string());
-            }
-        }
-    }
-
-    format!("System Context:\n{}", context_parts.join("\n"))
+    context_parts.join("\n")
 }
 
 #[cfg(test)]

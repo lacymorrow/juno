@@ -253,21 +253,111 @@ pub fn update_standard_resolution_scaling_with_display(
     display_origin_y: f64,
     display_id: Option<u32>,
 ) {
-    // First do the normal scaling calculation
-    update_standard_resolution_scaling(
-        display_width,
-        display_height,
-        screenshot_width,
-        screenshot_height,
-    );
+    // Select the best standard resolution based on display aspect ratio
+    let (standard_width, standard_height) = standard_resolutions::select_best_resolution(display_width, display_height);
 
-    // Then update the display origin information
+    // Calculate scaling factors from display to standard resolution
+    let display_to_standard_scale_x = if display_width > 0 {
+        standard_width as f32 / display_width as f32
+    } else {
+        1.0
+    };
+
+    let display_to_standard_scale_y = if display_height > 0 {
+        standard_height as f32 / display_height as f32
+    } else {
+        1.0
+    };
+
+    // Calculate scaling factors from screenshot to standard resolution
+    let screenshot_to_standard_scale_x = if screenshot_width > 0 {
+        standard_width as f32 / screenshot_width as f32
+    } else {
+        1.0
+    };
+
+    let screenshot_to_standard_scale_y = if screenshot_height > 0 {
+        standard_height as f32 / screenshot_height as f32
+    } else {
+        1.0
+    };
+
+    // Validate scale factors
+    let safe_display_scale_x = if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
+        display_to_standard_scale_x
+    } else {
+        tracing::warn!("Invalid display to standard X scale factor: {}, using 1.0", display_to_standard_scale_x);
+        1.0
+    };
+
+    let safe_display_scale_y = if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
+        display_to_standard_scale_y
+    } else {
+        tracing::warn!("Invalid display to standard Y scale factor: {}, using 1.0", display_to_standard_scale_y);
+        1.0
+    };
+
+    let safe_screenshot_scale_x = if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
+        screenshot_to_standard_scale_x
+    } else {
+        tracing::warn!("Invalid screenshot to standard X scale factor: {}, using 1.0", screenshot_to_standard_scale_x);
+        1.0
+    };
+
+    let safe_screenshot_scale_y = if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
+        screenshot_to_standard_scale_y
+    } else {
+        tracing::warn!("Invalid screenshot to standard Y scale factor: {}, using 1.0", screenshot_to_standard_scale_y);
+        1.0
+    };
+
+    // Calculate legacy scale factors for backward compatibility
+    let legacy_scale_x = if display_width > 0 {
+        screenshot_width as f32 / display_width as f32
+    } else {
+        1.0
+    };
+
+    let legacy_scale_y = if display_height > 0 {
+        screenshot_height as f32 / display_height as f32
+    } else {
+        1.0
+    };
+
+    let legacy_scale_factor = (legacy_scale_x * legacy_scale_y).sqrt();
+
+    // Update scaling information with ALL values including display origin
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
-        scaling.display_origin_x = display_origin_x;
-        scaling.display_origin_y = display_origin_y;
-        scaling.display_id = display_id;
+        *scaling = ScalingInfo {
+            display_width,
+            display_height,
+            standard_width,
+            standard_height,
+            screenshot_width,
+            screenshot_height,
+            display_to_standard_scale_x: safe_display_scale_x,
+            display_to_standard_scale_y: safe_display_scale_y,
+            screenshot_to_standard_scale_x: safe_screenshot_scale_x,
+            screenshot_to_standard_scale_y: safe_screenshot_scale_y,
+            // Legacy fields for backward compatibility
+            original_width: display_width,
+            original_height: display_height,
+            scaled_width: standard_width,
+            scaled_height: standard_height,
+            scale_factor_x: safe_display_scale_x,
+            scale_factor_y: safe_display_scale_y,
+            scale_factor: legacy_scale_factor,
+            // CRITICAL: Preserve display origin for multi-monitor support
+            display_origin_x,
+            display_origin_y,
+            display_id,
+        };
 
-        info!("Updated display origin for multi-monitor: origin ({}, {}), display ID: {:?}",
+        info!("Updated standard resolution scaling with display origin: display {}x{} at origin ({}, {}) → standard {}x{} → screenshot {}x{}",
+            display_width, display_height, display_origin_x, display_origin_y, standard_width, standard_height, screenshot_width, screenshot_height);
+        info!("Scale factors - display→standard: x={:.3}, y={:.3} | screenshot→standard: x={:.3}, y={:.3}",
+            safe_display_scale_x, safe_display_scale_y, safe_screenshot_scale_x, safe_screenshot_scale_y);
+        info!("Display origin preserved: ({}, {}), display ID: {:?}",
             display_origin_x, display_origin_y, display_id);
     } else {
         tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for display origin update");
