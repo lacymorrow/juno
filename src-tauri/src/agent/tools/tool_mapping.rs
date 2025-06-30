@@ -47,15 +47,15 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
 
     // Desktop tools
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
-    // dev_left_click, desktop_click, left_click → computer tool with computer_actions::CLICK
+    // dev_left_click, desktop_click, left_click → computer tool with computer_actions::LEFT_CLICK
     // dev_right_click, right_click → computer tool with computer_actions::RIGHT_CLICK
     // dev_middle_click, middle_click → computer tool with computer_actions::MIDDLE_CLICK
     // dev_double_click, double_click → computer tool with computer_actions::DOUBLE_CLICK
     // dev_triple_click, triple_click → computer tool with computer_actions::TRIPLE_CLICK
-    // dev_left_click_drag, left_click_drag → computer tool with computer_actions::DRAG
-    // dev_left_mouse_down, left_mouse_down → computer tool with computer_actions::DRAG (start)
-    // dev_left_mouse_up, left_mouse_up → computer tool with computer_actions::DRAG (complete)
-    // mouse_move → computer tool with computer_actions::CLICK (movement automatic)
+    // dev_left_click_drag, left_click_drag → computer tool with computer_actions::LEFT_CLICK_DRAG
+// dev_left_mouse_down, left_mouse_down → computer tool with computer_actions::LEFT_MOUSE_DOWN
+// dev_left_mouse_up, left_mouse_up → computer tool with computer_actions::LEFT_MOUSE_UP
+// mouse_move → computer tool with computer_actions::MOUSE_MOVE
     // REMOVED: 4 redundant keyboard tools - Use computer tool instead
     // dev_type_text, desktop_type → computer tool with computer_actions::TYPE
     // dev_global_type_text → computer tool with computer_actions::TYPE
