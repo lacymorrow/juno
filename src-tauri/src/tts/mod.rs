@@ -635,16 +635,7 @@ async fn execute_tts_with_completion_tracking(
     result
 }
 
-// Legacy function kept for backward compatibility - DEPRECATED
-async fn execute_tts_with_state_access(
-    text: String,
-    primary_provider: &str,
-    state: &State<'_, AppState>,
-    app_handle: &AppHandle,
-) -> Result<String, String> {
-    warn!("execute_tts_with_state_access is deprecated, use execute_tts_with_completion_tracking instead");
-    execute_tts_with_completion_tracking(text, primary_provider, state, app_handle).await
-}
+
 
 // Execute TTS with fallback logic (no blocking, no race conditions)
 async fn execute_tts_with_fallback(

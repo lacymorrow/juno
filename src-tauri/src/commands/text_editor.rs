@@ -25,18 +25,9 @@ fn update_undo_state(state: &State<AppState>, path: String, previous_content: Op
     Ok(())
 }
 
-// CONSOLIDATED: dev_text_editor_view removed - use text_editor_view production function
 
-// CONSOLIDATED: dev_text_editor_create removed - use text_editor_create production function
-
-// CONSOLIDATED: dev_text_editor_str_replace removed - use text_editor_str_replace production function
-
-// CONSOLIDATED: dev_text_editor_insert removed - use text_editor_insert production function
-
-// CONSOLIDATED: dev_text_editor_undo_edit removed - use text_editor_undo_edit production function
 
 // --- PRODUCTION TEXT EDITOR FUNCTIONS WITH DEBUG CAPABILITIES ---
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[tauri::command]
 pub(crate) async fn text_editor_view(path: String) -> Result<String, String> {

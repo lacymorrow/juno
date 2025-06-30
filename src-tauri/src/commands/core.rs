@@ -352,16 +352,7 @@ pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
     state.is_desktop_available()
 }
 
-// ============================================================================
-// CONSOLIDATED: dev_ functions removed - use production functions instead
-// ============================================================================
 
-// CONSOLIDATED: dev_get_clipboard removed - use get_clipboard production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_set_clipboard removed - use set_clipboard production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 /// Get a list of available AI providers
 #[tauri::command]
@@ -691,7 +682,6 @@ pub async fn test_coordinate_transformation(
 }
 
 // --- PRODUCTION CORE FUNCTIONS WITH DEBUG CAPABILITIES ---
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[tauri::command]
 pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
