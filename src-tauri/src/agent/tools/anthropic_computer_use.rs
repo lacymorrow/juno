@@ -314,6 +314,28 @@ impl From<CoordinateValidationError> for String {
     }
 }
 
+/// Convert error messages to Anthropic Computer Use API compliant format
+/// According to Anthropic's specification, errors should be returned as successful JSON responses
+/// with is_error: true and error: "message" instead of using Rust's Err() pattern
+fn create_anthropic_error_response(error_message: String) -> Value {
+    json!({
+        "is_error": true,
+        "error": error_message
+    })
+}
+
+/// Helper macro to convert Result<T, E> to proper Anthropic format
+/// This ensures all tools follow the same error handling pattern
+/// Works with any error type that can be converted to String
+macro_rules! handle_anthropic_result {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error_msg) => return Ok(create_anthropic_error_response(error_msg.to_string())),
+        }
+    };
+}
+
 // --- Main computer tool execution function ---
 
 /// Execute computer tool
@@ -321,8 +343,10 @@ pub async fn execute_computer_tool(
     app_handle: &tauri::AppHandle,
     input: Value,
 ) -> Result<Value, String> {
-    let action = input["action"].as_str()
-        .ok_or_else(|| "Missing 'action' parameter".to_string())?;
+    let action = match input["action"].as_str() {
+        Some(action) => action,
+        None => return Ok(create_anthropic_error_response("Missing 'action' parameter".to_string())),
+    };
 
     let state_manager = app_handle.state::<AppState>();
 
@@ -346,15 +370,15 @@ pub async fn execute_computer_tool(
     let result = match action {
         "screenshot" => {
             // Validate screen recording permission
-            validate_permission(
+            handle_anthropic_result!(validate_permission(
                 app_handle,
                 RequiredPermission::ScreenRecording,
                 "computer (screenshot)"
-            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
 
-            let screenshot_path = crate::commands::core::capture_screenshot_command(
+            let screenshot_path = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
                 app_handle.clone(),
-            ).await.map_err(|e| format!("Screenshot failed: {}", e))?;
+            ).await.map_err(|e| format!("Screenshot failed: {}", e)));
 
             Ok(json!({
                 "base64_image": screenshot_path
@@ -363,24 +387,24 @@ pub async fn execute_computer_tool(
         "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
         "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
             // Validate accessibility permission for mouse operations
-            validate_permission(
+            handle_anthropic_result!(validate_permission(
                 app_handle,
                 RequiredPermission::Accessibility,
                 &format!("computer ({})", action)
-            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
 
             match action {
                 "left_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Left click failed: {}", e))?;
+                    handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Left click failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -388,15 +412,15 @@ pub async fn execute_computer_tool(
                 }
                 "right_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Right click failed: {}", e))?;
+                    handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Right click failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -404,15 +428,15 @@ pub async fn execute_computer_tool(
                 }
                 "middle_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Middle click failed: {}", e))?;
+                    handle_anthropic_result!(middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Middle click failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -420,15 +444,15 @@ pub async fn execute_computer_tool(
                 }
                 "double_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Double click failed: {}", e))?;
+                    handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Double click failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -436,15 +460,15 @@ pub async fn execute_computer_tool(
                 }
                 "triple_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
-                        .map_err(|e| format!("Triple click failed: {}", e))?;
+                    handle_anthropic_result!(triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Triple click failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -455,27 +479,27 @@ pub async fn execute_computer_tool(
                     // Support both single coordinate (standard) and dual coordinate formats
                     let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
                         // Format: start_coordinate + coordinate (end) - explicit start/end coordinates
-                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "start_coordinate", "coordinate")?;
+                        let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "start_coordinate", "coordinate"));
                         let (start_x, start_y) = start_coord.to_f64();
                         let (end_x, end_y) = end_coord.to_f64();
                         (start_x, start_y, end_x, end_y)
                     } else if input.get("end_coordinate").is_some() {
                         // Format: coordinate (start) + end_coordinate - explicit start/end coordinates
-                        let (start_coord, end_coord) = validate_coordinate_pair(&input, "coordinate", "end_coordinate")?;
+                        let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "coordinate", "end_coordinate"));
                         let (start_x, start_y) = start_coord.to_f64();
                         let (end_x, end_y) = end_coord.to_f64();
                         (start_x, start_y, end_x, end_y)
                     } else {
                         // Standard format: single coordinate (end position) - drag from current cursor position
                         // This is the official Anthropic Computer Use API specification behavior
-                        let end_coord = validate_coordinate_parameter(&input, "coordinate")?;
+                        let end_coord = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                         let (end_x, end_y) = end_coord.to_f64();
 
                         // Get current cursor position as start point (already in screen coordinates)
-                        let (start_x, start_y) = crate::commands::mouse::get_cursor_position(
+                        let (start_x, start_y) = handle_anthropic_result!(crate::commands::mouse::get_cursor_position(
                             app_handle.clone(),
                             state_manager.clone(),
-                        ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e))?;
+                        ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e)));
 
                         // Transform only the end coordinates since start coordinates are already screen coordinates
                         let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
@@ -496,8 +520,8 @@ pub async fn execute_computer_tool(
                     };
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
-                        .map_err(|e| format!("Left click drag failed: {}", e))?;
+                    handle_anthropic_result!(left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
+                        .map_err(|e| format!("Left click drag failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -505,15 +529,15 @@ pub async fn execute_computer_tool(
                 }
                 "mouse_move" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    crate::commands::mouse::mouse_move(app_handle.clone(), state_manager, screen_x, screen_y).await
-                        .map_err(|e| format!("Mouse move failed: {}", e))?;
+                    handle_anthropic_result!(crate::commands::mouse::mouse_move(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Mouse move failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -521,15 +545,15 @@ pub async fn execute_computer_tool(
                 }
                 "left_mouse_down" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
-                        .map_err(|e| format!("Left mouse down failed: {}", e))?;
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Left mouse down failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -537,15 +561,15 @@ pub async fn execute_computer_tool(
                 }
                 "left_mouse_up" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
                     let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
-                    crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
-                        .map_err(|e| format!("Left mouse up failed: {}", e))?;
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
+                        .map_err(|e| format!("Left mouse up failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -556,25 +580,26 @@ pub async fn execute_computer_tool(
         }
         "key" | "hold_key" | "type" => {
             // Validate accessibility permission for keyboard operations
-            validate_permission(
+            handle_anthropic_result!(validate_permission(
                 app_handle,
                 RequiredPermission::Accessibility,
                 &format!("computer ({})", action)
-            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
 
             match action {
                 "key" => {
                     // Support both 'key' and 'text' parameters for backward compatibility
-                    let key = input["key"].as_str()
-                        .or_else(|| input["text"].as_str()) // Backward compatibility
-                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
+                    let key = match input["key"].as_str().or_else(|| input["text"].as_str()) {
+                        Some(key) => key,
+                        None => return Ok(create_anthropic_error_response("Missing 'key' or 'text' parameter".to_string())),
+                    };
 
-                    crate::commands::keyboard::press_key(
+                    handle_anthropic_result!(crate::commands::keyboard::press_key(
                         key.to_string(),
                         None, // modifier
                         app_handle.clone(),
                         state_manager,
-                    ).await.map_err(|e| format!("Key press failed: {}", e))?;
+                    ).await.map_err(|e| format!("Key press failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -582,35 +607,39 @@ pub async fn execute_computer_tool(
                 }
                 "hold_key" => {
                     // Support both 'key' and 'text' parameters for backward compatibility
-                    let key = input["key"].as_str()
-                        .or_else(|| input["text"].as_str()) // Backward compatibility
-                        .ok_or_else(|| "Missing 'key' or 'text' parameter".to_string())?;
+                    let key = match input["key"].as_str().or_else(|| input["text"].as_str()) {
+                        Some(key) => key,
+                        None => return Ok(create_anthropic_error_response("Missing 'key' or 'text' parameter".to_string())),
+                    };
 
                     // Support both 'duration_ms' and 'duration' parameters for backward compatibility
-                    let duration_ms = input["duration_ms"].as_u64()
-                        .or_else(|| input["duration"].as_u64()) // Backward compatibility
-                        .ok_or_else(|| "Missing 'duration_ms' or 'duration' parameter".to_string())?;
+                    let duration_ms = match input["duration_ms"].as_u64().or_else(|| input["duration"].as_u64()) {
+                        Some(duration) => duration,
+                        None => return Ok(create_anthropic_error_response("Missing 'duration_ms' or 'duration' parameter".to_string())),
+                    };
 
-                    crate::commands::keyboard::hold_key(
+                    handle_anthropic_result!(crate::commands::keyboard::hold_key(
                         key.to_string(),
                         Some(duration_ms),
                         app_handle.clone(),
                         state_manager,
-                    ).await.map_err(|e| format!("Hold key failed: {}", e))?;
+                    ).await.map_err(|e| format!("Hold key failed: {}", e)));
 
                     Ok(json!({
                         "success": true
                     }))
                 }
                 "type" => {
-                    let text = input["text"].as_str()
-                        .ok_or_else(|| "Missing 'text' parameter".to_string())?;
+                    let text = match input["text"].as_str() {
+                        Some(text) => text,
+                        None => return Ok(create_anthropic_error_response("Missing 'text' parameter".to_string())),
+                    };
 
-                    crate::commands::keyboard::type_text(
+                    handle_anthropic_result!(crate::commands::keyboard::type_text(
                         text.to_string(),
                         app_handle.clone(),
                         state_manager,
-                    ).await.map_err(|e| format!("Type text failed: {}", e))?;
+                    ).await.map_err(|e| format!("Type text failed: {}", e)));
 
                     Ok(json!({
                         "success": true
@@ -621,31 +650,33 @@ pub async fn execute_computer_tool(
         }
         "scroll" => {
             // Validate accessibility permission for scroll operations
-            validate_permission(
+            handle_anthropic_result!(validate_permission(
                 app_handle,
                 RequiredPermission::Accessibility,
                 "computer (scroll)"
-            ).await.map_err(|e| format!("Permission validation failed: {}", e))?;
+            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
 
             // Strict coordinate validation per Anthropic Computer Use API specification
-            let coordinate = validate_coordinate_parameter(&input, "coordinate")?;
+            let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
             let (x, y) = coordinate.to_f64();
 
-            let scroll_direction = input["scroll_direction"].as_str()
-                .ok_or_else(|| "Missing 'scroll_direction' parameter".to_string())?;
+            let scroll_direction = match input["scroll_direction"].as_str() {
+                Some(direction) => direction,
+                None => return Ok(create_anthropic_error_response("Missing 'scroll_direction' parameter".to_string())),
+            };
             let scroll_amount = input["scroll_amount"].as_u64().unwrap_or(3);
 
             // Transform coordinates from scaled screenshot to screen coordinates
             let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-            crate::commands::window::scroll_window(
+            handle_anthropic_result!(crate::commands::window::scroll_window(
                 scroll_direction.to_string(),
                 scroll_amount as f64,
                 Some(screen_x),
                 Some(screen_y),
                 app_handle.clone(),
                 state_manager,
-            ).await.map_err(|e| format!("Scroll failed: {}", e))?;
+            ).await.map_err(|e| format!("Scroll failed: {}", e)));
 
             Ok(json!({
                 "success": true
@@ -653,10 +684,10 @@ pub async fn execute_computer_tool(
         }
         "cursor_position" => {
             // No permission validation needed for cursor position query
-            let (x, y) = crate::commands::mouse::get_cursor_position(
+            let (x, y) = handle_anthropic_result!(crate::commands::mouse::get_cursor_position(
                 app_handle.clone(),
                 state_manager,
-            ).await.map_err(|e| format!("Get cursor position failed: {}", e))?;
+            ).await.map_err(|e| format!("Get cursor position failed: {}", e)));
 
             Ok(json!({
                 "coordinate": [x, y]
@@ -665,21 +696,22 @@ pub async fn execute_computer_tool(
         "wait" => {
             // No permission validation needed for wait operation
             // Support both 'seconds' and 'duration' parameters for backward compatibility
-            let seconds = input["seconds"].as_f64()
-                .or_else(|| input["duration"].as_f64()) // Backward compatibility
-                .ok_or_else(|| "Missing 'seconds' or 'duration' parameter".to_string())?;
+            let seconds = match input["seconds"].as_f64().or_else(|| input["duration"].as_f64()) {
+                Some(seconds) => seconds,
+                None => return Ok(create_anthropic_error_response("Missing 'seconds' or 'duration' parameter".to_string())),
+            };
 
-            crate::commands::core::wait(
+            handle_anthropic_result!(crate::commands::core::wait(
                 seconds,
                 app_handle.clone(),
                 state_manager.clone(),
-            ).await.map_err(|e| format!("Wait failed: {}", e))?;
+            ).await.map_err(|e| format!("Wait failed: {}", e)));
 
             Ok(json!({
                 "success": true
             }))
         }
-        _ => Err(format!("Unknown action: {}", action)),
+        _ => Ok(create_anthropic_error_response(format!("Unknown action: {}", action))),
     };
 
     // Calculate execution time
@@ -723,8 +755,10 @@ pub async fn execute_bash_tool(
     app_handle: &tauri::AppHandle,
     input: Value,
 ) -> Result<Value, String> {
-    let command = input["command"].as_str()
-        .ok_or_else(|| "Missing 'command' parameter".to_string())?;
+    let command = match input["command"].as_str() {
+        Some(command) => command,
+        None => return Ok(create_anthropic_error_response("Missing 'command' parameter".to_string())),
+    };
 
     // Handle restart parameter if provided (Anthropic Computer Use API requirement)
     let restart = input["restart"].as_bool().unwrap_or(false);
@@ -732,14 +766,14 @@ pub async fn execute_bash_tool(
     let state_manager = app_handle.state::<AppState>();
 
     // Use the Anthropic-compliant bash command execution - NO STRING COMPARISONS
-    let result = crate::commands::shell::bash_command(
+    let result = handle_anthropic_result!(crate::commands::shell::bash_command(
         app_handle.clone(),
         state_manager,
         command.to_string(),
         None, // timeout_seconds
         Some(restart), // restart parameter
         None, // debug_mode
-    ).await.map_err(|e| format!("Bash command failed: {}", e))?;
+    ).await.map_err(|e| format!("Bash command failed: {}", e)));
 
     // Log the result for debugging
     info!("Anthropic compliant bash result: {:?}", result);
@@ -774,11 +808,15 @@ pub async fn execute_str_replace_tool(
     _app_handle: &tauri::AppHandle,
     input: Value,
 ) -> Result<Value, String> {
-    let command = input["command"].as_str()
-        .ok_or_else(|| "Missing 'command' parameter".to_string())?;
+    let command = match input["command"].as_str() {
+        Some(command) => command,
+        None => return Ok(create_anthropic_error_response("Missing 'command' parameter".to_string())),
+    };
 
-    let path = input["path"].as_str()
-        .ok_or_else(|| "Missing 'path' parameter".to_string())?;
+    let path = match input["path"].as_str() {
+        Some(path) => path,
+        None => return Ok(create_anthropic_error_response("Missing 'path' parameter".to_string())),
+    };
 
     // Get security config based on debug mode
     let config = if cfg!(debug_assertions) {
@@ -790,8 +828,8 @@ pub async fn execute_str_replace_tool(
     match command {
         "view" => {
             // Validate file path
-            let file_path = validate_file_path(path, &config)?;
-            validate_file_size(&file_path, &config)?;
+            let file_path = handle_anthropic_result!(validate_file_path(path, &config));
+            handle_anthropic_result!(validate_file_size(&file_path, &config));
 
             // Handle view_range if provided
             if let (Some(start), end) = (
@@ -802,10 +840,10 @@ pub async fn execute_str_replace_tool(
                 let end_line = end.map(|e| e as usize);
 
                 // Read file content
-                let content = fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+                let content = handle_anthropic_result!(fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
 
-                let range_content = extract_line_range(&content, start_line, end_line)?;
+                let range_content = handle_anthropic_result!(extract_line_range(&content, start_line, end_line));
 
                 Ok(json!({
                     "content": range_content,
@@ -813,8 +851,8 @@ pub async fn execute_str_replace_tool(
                 }))
             } else {
                 // Read entire file
-                let content = fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+                let content = handle_anthropic_result!(fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
 
                 let numbered_content = add_line_numbers(&content);
 
@@ -824,22 +862,26 @@ pub async fn execute_str_replace_tool(
             }
         }
         "str_replace" => {
-            let old_str = input["old_str"].as_str()
-                .ok_or_else(|| "Missing 'old_str' parameter".to_string())?;
-            let new_str = input["new_str"].as_str()
-                .ok_or_else(|| "Missing 'new_str' parameter".to_string())?;
+            let old_str = match input["old_str"].as_str() {
+                Some(old_str) => old_str,
+                None => return Ok(create_anthropic_error_response("Missing 'old_str' parameter".to_string())),
+            };
+            let new_str = match input["new_str"].as_str() {
+                Some(new_str) => new_str,
+                None => return Ok(create_anthropic_error_response("Missing 'new_str' parameter".to_string())),
+            };
 
             // Validate file path
-            let file_path = validate_file_path(path, &config)?;
-            validate_file_size(&file_path, &config)?;
+            let file_path = handle_anthropic_result!(validate_file_path(path, &config));
+            handle_anthropic_result!(validate_file_size(&file_path, &config));
 
             // Read file content
-            let content = fs::read_to_string(&file_path)
-                .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+            let content = handle_anthropic_result!(fs::read_to_string(&file_path)
+                .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
 
             // Check if old_str exists in file
             if !content.contains(old_str) {
-                return Err(format!("String '{}' not found in file '{}'", old_str, path));
+                return Ok(create_anthropic_error_response(format!("String '{}' not found in file '{}'", old_str, path)));
             }
 
             // Detect original line ending style
@@ -858,8 +900,8 @@ pub async fn execute_str_replace_tool(
             let new_content = content.replace(old_str, &normalized_new_str);
 
             // Write back to file
-            fs::write(&file_path, &new_content)
-                .map_err(|e| format!("Failed to write file '{}': {}", path, e))?;
+            handle_anthropic_result!(fs::write(&file_path, &new_content)
+                .map_err(|e| format!("Failed to write file '{}': {}", path, e)));
 
             Ok(json!({
                 "success": true,
@@ -867,33 +909,35 @@ pub async fn execute_str_replace_tool(
             }))
         }
         "create" => {
-            let file_content = input["file_text"].as_str()
-                .ok_or_else(|| "Missing 'file_text' parameter".to_string())?;
+            let file_content = match input["file_text"].as_str() {
+                Some(file_content) => file_content,
+                None => return Ok(create_anthropic_error_response("Missing 'file_text' parameter".to_string())),
+            };
 
             // Validate file path
-            let file_path = validate_file_path(path, &config)?;
+            let file_path = handle_anthropic_result!(validate_file_path(path, &config));
 
             // Check if file already exists
             if file_path.exists() {
-                return Err(format!("File '{}' already exists", path));
+                return Ok(create_anthropic_error_response(format!("File '{}' already exists", path)));
             }
 
             // Create parent directories if they don't exist
             if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create directories for '{}': {}", path, e))?;
+                handle_anthropic_result!(fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directories for '{}': {}", path, e)));
             }
 
             // Write file
-            fs::write(&file_path, file_content)
-                .map_err(|e| format!("Failed to create file '{}': {}", path, e))?;
+            handle_anthropic_result!(fs::write(&file_path, file_content)
+                .map_err(|e| format!("Failed to create file '{}': {}", path, e)));
 
             Ok(json!({
                 "success": true,
                 "message": format!("Successfully created file '{}'", path)
             }))
         }
-        _ => Err(format!("Unknown str_replace_based_edit_tool command: {}", command)),
+        _ => Ok(create_anthropic_error_response(format!("Unknown str_replace_based_edit_tool command: {}", command))),
     }
 }
 
