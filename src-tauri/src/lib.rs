@@ -598,6 +598,9 @@ pub fn run() {
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
+            // Window-relative Click Commands
+            window_relative_click,
+            focused_window_relative_click,
 
             // Sound Commands
             play_sound_by_type,
