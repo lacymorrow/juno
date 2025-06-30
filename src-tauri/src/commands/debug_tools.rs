@@ -82,13 +82,65 @@ pub async fn debug_tool_configuration(state: State<'_, AppState>) -> Result<Valu
 pub async fn debug_registered_tools(state: State<'_, AppState>) -> Result<Value, String> {
     info!("=== REGISTERED TOOLS DEBUG ===");
 
-    // This would require access to the tool provider, which isn't directly available
-    // from the state. We'll need to check this differently.
+    // Get the current tool provider instance
+    let tool_provider_registry = state.tool_provider_registry.lock().await;
 
-    Ok(json!({
-        "note": "Tool provider inspection would require additional implementation",
-        "suggestion": "Check logs during tool registration for more details"
-    }))
+    if let Some(provider_weak) = tool_provider_registry.first() {
+        if let Some(provider_arc) = provider_weak.upgrade() {
+            let provider_guard = provider_arc.lock().await;
+
+            // Get all tools directly from the provider
+            let all_tools_defs = provider_guard.get_all_registered_tools().await;
+            let tool_names: Vec<String> = all_tools_defs.iter().map(|t| t.name.clone()).collect();
+
+            // Check for critical tools
+            let has_computer = tool_names.iter().any(|name| name == "computer");
+            let has_bash = tool_names.iter().any(|name| name == "bash");
+            let has_str_replace = tool_names.iter().any(|name| name == "str_replace_based_edit_tool");
+
+            // Count tools by API type
+            let mut api_type_counts = std::collections::HashMap::new();
+            for tool_def in &all_tools_defs {
+                *api_type_counts.entry(tool_def.api_type.clone()).or_insert(0) += 1;
+            }
+
+            let debug_info = json!({
+                "total_registered": tool_names.len(),
+                "tool_names": tool_names,
+                "critical_tools": {
+                    "computer": has_computer,
+                    "bash": has_bash,
+                    "str_replace_based_edit_tool": has_str_replace
+                },
+                "api_type_counts": api_type_counts,
+                "provider_status": "active"
+            });
+
+            info!("Found {} registered tools", tool_names.len());
+            info!("Computer tool registered: {}", has_computer);
+            info!("Bash tool registered: {}", has_bash);
+            info!("String replace tool registered: {}", has_str_replace);
+
+            return Ok(debug_info);
+        }
+    }
+
+    // Fallback: if no provider found
+    let debug_info = json!({
+        "total_registered": 0,
+        "tool_names": [],
+        "critical_tools": {
+            "computer": false,
+            "bash": false,
+            "str_replace_based_edit_tool": false
+        },
+        "api_type_counts": {},
+        "provider_status": "no_provider_found",
+        "error": "No tool provider found - this indicates a system issue"
+    });
+
+    warn!("No tool provider found for debug_registered_tools");
+    Ok(debug_info)
 }
 
 /// Reset tool configuration to defaults and report what changed
