@@ -14,12 +14,12 @@ pub mod tool_names {
     pub const BASH: &str = "bash";
     pub const STR_REPLACE_BASED_EDIT_TOOL: &str = "str_replace_based_edit_tool";
     pub const SCREENSHOT: &str = "screenshot";
-    pub const CLICK: &str = "click";
+    pub const LEFT_CLICK: &str = "left_click";
     pub const TYPE: &str = "type";
     pub const KEY: &str = "key";
     pub const SCROLL: &str = "scroll";
-    pub const DRAG: &str = "drag";
-    pub const MOVE: &str = "move";
+    pub const LEFT_CLICK_DRAG: &str = "left_click_drag";
+    pub const MOUSE_MOVE: &str = "mouse_move";
     pub const ACCESSIBILITY_INTERFACE: &str = "accessibility_interface";
 
     // Text editor tools
@@ -124,7 +124,7 @@ pub mod tool_names {
 
     // Computer use actions
     pub const ACTION_SCREENSHOT: &str = "screenshot";
-    pub const ACTION_CLICK: &str = "click";
+    pub const ACTION_LEFT_CLICK: &str = "left_click";
     pub const ACTION_TYPE: &str = "type";
     pub const ACTION_KEY: &str = "key";
     pub const ACTION_SCROLL: &str = "scroll";
@@ -277,24 +277,22 @@ pub mod monitor_sessions {
 
 // Computer action constants (for documentation and consistency)
 pub mod computer_actions {
-    pub const CLICK: &str = "click";
+    // Valid Anthropic Computer Use API actions only
+    pub const SCREENSHOT: &str = "screenshot";
+    pub const LEFT_CLICK: &str = "left_click";
     pub const RIGHT_CLICK: &str = "right_click";
     pub const MIDDLE_CLICK: &str = "middle_click";
     pub const DOUBLE_CLICK: &str = "double_click";
     pub const TRIPLE_CLICK: &str = "triple_click";
-    pub const DRAG: &str = "drag";
-    pub const TYPE: &str = "type";
-    pub const KEY: &str = "key";
-    pub const CURSOR_POSITION: &str = "cursor_position";
-    pub const SCREENSHOT: &str = "screenshot";
-    pub const MOUSE_MOVE: &str = "mouse_move";
-    pub const LEFT_CLICK: &str = "left_click";
     pub const LEFT_CLICK_DRAG: &str = "left_click_drag";
+    pub const MOUSE_MOVE: &str = "mouse_move";
     pub const LEFT_MOUSE_DOWN: &str = "left_mouse_down";
     pub const LEFT_MOUSE_UP: &str = "left_mouse_up";
+    pub const KEY: &str = "key";
     pub const HOLD_KEY: &str = "hold_key";
-    pub const RELEASE_KEY: &str = "release_key";
+    pub const TYPE: &str = "type";
     pub const SCROLL: &str = "scroll";
+    pub const CURSOR_POSITION: &str = "cursor_position";
     pub const WAIT: &str = "wait";
 }
 
