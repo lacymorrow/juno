@@ -400,27 +400,66 @@ pub(crate) async fn triple_click(
 pub(crate) async fn left_mouse_down(
     app: AppHandle,
     state: State<'_, AppState>,
-    x: f64,
-    y: f64
+    x: Option<f64>,
+    y: Option<f64>
 ) -> Result<(), String> {
     let debug_enabled = should_enable_debug(false, &state);
     let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
+    // Get coordinates - use provided coordinates or current cursor position
+    let (target_x, target_y) = match (x, y) {
+        (Some(x_val), Some(y_val)) => {
+            // Both coordinates provided
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, y_val)?;
+            }
+            (x_val, y_val)
+        }
+        (Some(x_val), None) => {
+            // Only x provided, get current y
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, cursor_pos.1)?;
+            }
+            (x_val, cursor_pos.1)
+        }
+        (None, Some(y_val)) => {
+            // Only y provided, get current x
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, y_val)?;
+            }
+            (cursor_pos.0, y_val)
+        }
+        (None, None) => {
+            // Neither coordinate provided, use current cursor position
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
+            }
+            cursor_pos
+        }
+    };
 
-    log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {})", x, y), &debug_config);
-    info!("Executing left_mouse_down at ({}, {})", x, y);
+    let coord_info = match (x, y) {
+        (Some(_), Some(_)) => "(both coordinates explicit)",
+        (Some(_), None) => "(x explicit, y from cursor)",
+        (None, Some(_)) => "(x from cursor, y explicit)",
+        (None, None) => "(both coordinates from cursor)",
+    };
+    log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {}) {}", target_x, target_y, coord_info), &debug_config);
+    info!("Executing left_mouse_down at ({}, {}) {}", target_x, target_y, coord_info);
 
-    match state.desktop.left_mouse_down(x, y) {
+    match state.desktop.left_mouse_down(target_x, target_y) {
         Ok(_) => {
-            info!("Successfully performed left mouse down at ({}, {})", x, y);
+            info!("Successfully performed left mouse down at ({}, {})", target_x, target_y);
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {})", x, y));
+                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {}) [{}]", target_x, target_y, coord_info));
             }
 
             Ok(())
@@ -437,27 +476,66 @@ pub(crate) async fn left_mouse_down(
 pub(crate) async fn left_mouse_up(
     app: AppHandle,
     state: State<'_, AppState>,
-    x: f64,
-    y: f64
+    x: Option<f64>,
+    y: Option<f64>
 ) -> Result<(), String> {
     let debug_enabled = should_enable_debug(false, &state);
     let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
+    // Get coordinates - use provided coordinates or current cursor position
+    let (target_x, target_y) = match (x, y) {
+        (Some(x_val), Some(y_val)) => {
+            // Both coordinates provided
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, y_val)?;
+            }
+            (x_val, y_val)
+        }
+        (Some(x_val), None) => {
+            // Only x provided, get current y
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, cursor_pos.1)?;
+            }
+            (x_val, cursor_pos.1)
+        }
+        (None, Some(y_val)) => {
+            // Only y provided, get current x
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, y_val)?;
+            }
+            (cursor_pos.0, y_val)
+        }
+        (None, None) => {
+            // Neither coordinate provided, use current cursor position
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
+            }
+            cursor_pos
+        }
+    };
 
-    log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {})", x, y), &debug_config);
-    info!("Executing left_mouse_up at ({}, {})", x, y);
+    let coord_info = match (x, y) {
+        (Some(_), Some(_)) => "(both coordinates explicit)",
+        (Some(_), None) => "(x explicit, y from cursor)",
+        (None, Some(_)) => "(x from cursor, y explicit)",
+        (None, None) => "(both coordinates from cursor)",
+    };
+    log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {}) {}", target_x, target_y, coord_info), &debug_config);
+    info!("Executing left_mouse_up at ({}, {}) {}", target_x, target_y, coord_info);
 
-    match state.desktop.left_mouse_up(x, y) {
+    match state.desktop.left_mouse_up(target_x, target_y) {
         Ok(_) => {
-            info!("Successfully performed left mouse up at ({}, {})", x, y);
+            info!("Successfully performed left mouse up at ({}, {})", target_x, target_y);
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {})", x, y));
+                let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {}) [{}]", target_x, target_y, coord_info));
             }
 
             Ok(())
@@ -554,6 +632,111 @@ pub(crate) async fn set_smooth_mouse_movement_setting(
     enabled: bool
 ) -> Result<(), String> {
     state.set_smooth_mouse_movement(enabled)
+}
+
+#[tauri::command]
+pub(crate) async fn window_relative_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window_id: String,
+    relative_x: f64,
+    relative_y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    log_debug_operation("window_relative_click", &format!("Window-relative click in window '{}' at ({}, {}) with modifier: {:?}", window_id, relative_x, relative_y, modifier), &debug_config);
+    info!("Executing window_relative_click in window '{}' at relative coordinates ({}, {}) Modifier: {:?}", window_id, relative_x, relative_y, modifier);
+
+    // Get window bounds and calculate absolute coordinates
+    let window_bounds = state.desktop.get_window_bounds(&window_id)
+        .map_err(|e| format!("Failed to get window bounds for window '{}': {}", window_id, e))?;
+
+    let absolute_x = window_bounds.x + relative_x;
+    let absolute_y = window_bounds.y + relative_y;
+
+    // Debug validation for final coordinates
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(absolute_x, absolute_y)?;
+    }
+
+    info!("Converted relative coordinates ({}, {}) to absolute ({}, {}) for window '{}'", relative_x, relative_y, absolute_x, absolute_y, window_id);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, absolute_x, absolute_y, "#00FF00")?; // Green for window-relative click
+
+    match state.desktop.left_click(absolute_x, absolute_y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed window-relative click in window '{}' at ({}, {})", window_id, absolute_x, absolute_y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Window Click", &format!("Clicked in window '{}' at relative ({}, {}) -> absolute ({}, {})", window_id, relative_x, relative_y, absolute_x, absolute_y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform window-relative click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn focused_window_relative_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    relative_x: f64,
+    relative_y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    log_debug_operation("focused_window_relative_click", &format!("Focused window-relative click at ({}, {}) with modifier: {:?}", relative_x, relative_y, modifier), &debug_config);
+    info!("Executing focused_window_relative_click at relative coordinates ({}, {}) Modifier: {:?}", relative_x, relative_y, modifier);
+
+    // Get focused window bounds and calculate absolute coordinates
+    let focused_window_bounds = state.desktop.get_focused_window_bounds()
+        .map_err(|e| format!("Failed to get focused window bounds: {}", e))?;
+
+    let absolute_x = focused_window_bounds.x + relative_x;
+    let absolute_y = focused_window_bounds.y + relative_y;
+
+    // Debug validation for final coordinates
+    if debug_config.validate_inputs {
+        validators::valid_coordinates(absolute_x, absolute_y)?;
+    }
+
+    info!("Converted relative coordinates ({}, {}) to absolute ({}, {}) for focused window", relative_x, relative_y, absolute_x, absolute_y);
+
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+
+    create_click_visualization(&app, absolute_x, absolute_y, "#00FFFF")?; // Cyan for focused window-relative click
+
+    match state.desktop.left_click(absolute_x, absolute_y, modifier.as_deref()) {
+        Ok(_) => {
+            info!("Successfully performed focused window-relative click at ({}, {})", absolute_x, absolute_y);
+
+            // Send debug notification if enabled
+            if debug_config.send_notifications {
+                let _ = send_debug_notification(&app, "Focused Window Click", &format!("Clicked in focused window at relative ({}, {}) -> absolute ({}, {})", relative_x, relative_y, absolute_x, absolute_y));
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to perform focused window-relative click: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
 }
 
 
