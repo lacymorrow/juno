@@ -360,8 +360,8 @@ pub async fn execute_computer_tool(
                 "base64_image": screenshot_path
             }))
         }
-        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
-        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
+        "click" | "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "drag" | "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
             // Validate accessibility permission for mouse operations
             validate_permission(
                 app_handle,
@@ -943,7 +943,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
+                    "enum": ["screenshot", "click", "left_click", "right_click", "middle_click", "double_click", "triple_click", "drag", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
                 },
                 "coordinate": {
                     "type": "array",

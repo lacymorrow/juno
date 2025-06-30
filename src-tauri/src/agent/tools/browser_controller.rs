@@ -1276,13 +1276,14 @@ impl BrowserController {
                     )
                 })?;
 
-                log::info!("Clicking on element: {}", selector);
+                log::info!("Clicking element: {}", selector);
 
-                // Use JavaScript to perform the click
+                // Use JavaScript to click the element more reliably
                 let js_fn = format!(
                     r#"function() {{
                         const element = document.querySelector("{}");
                         if (!element) return false;
+
                         element.click();
                         return true;
                     }}"#,

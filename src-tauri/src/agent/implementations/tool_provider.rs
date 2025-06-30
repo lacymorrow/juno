@@ -1054,7 +1054,7 @@ impl LocalToolProvider {
             if let Some(action) = args.get("action").and_then(|a| a.as_str()) {
                 // Coordinate validation for actions that need them
                 match action {
-                    "left_click" | "right_click" | "middle_click" | "double_click" | "mouse_move" | "scroll" => {
+                    "click" | "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" | "drag" | "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" | "scroll" | "cursor_position" => {
                         // Use strict coordinate validation per Anthropic Computer Use API specification
                         match validate_coordinate_parameter(&tool_call.input, "coordinate") {
                             Ok(_) => {
