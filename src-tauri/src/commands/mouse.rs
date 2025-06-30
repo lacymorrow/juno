@@ -6,7 +6,7 @@ use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_o
 use tracing::{info, error};
 use crate::constants::{timeouts, events};
 use crate::constants::mouse::movement;
-
+// Import constants to replace magic numbers
 
 
 // Helper function to perform smooth mouse movement with cursor highlighting
@@ -112,12 +112,197 @@ async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// --- PRODUCTION WINDOW RELATIVE CLICK FUNCTIONS WITH DEBUG CAPABILITIES ---
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn window_relative_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window_id: String,
+    x: f64,
+    y: f64,
+    click_type: Option<String>,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
 
+    use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 
+    log_debug_operation("window_relative_click",
+        &format!("Window relative click: window_id={}, x={}, y={}, click_type={:?}, modifier={:?}",
+            window_id, x, y, click_type, modifier), &debug_config);
+    info!(
+        "Window relative click: window_id={}, x={}, y={}, click_type={:?}, modifier={:?}",
+        window_id, x, y, click_type, modifier
+    );
 
+    // Find the window by ID
+    let desktop = state.get_desktop()?;
+    let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
+
+    let target_window = windows
+        .into_iter()
+        .find(|window| {
+            window.id().map_or(false, |id| id == window_id)
+        })
+        .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
+
+    // Downcast to MacOSUIElement
+    let _macos_element = target_window
+        .as_any()
+        .downcast_ref::<MacOSUIElement>()
+        .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
+
+    // Convert window-relative coordinates to global coordinates
+    let (window_x, window_y, _width, _height) = target_window.bounds()
+        .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+    let global_x = window_x + x;
+    let global_y = window_y + y;
+
+    info!("Converted window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
+
+    // Perform the click using existing functionality
+    let result = match click_type.as_deref().unwrap_or("left") {
+        "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        unknown => Err(format!("Unsupported click type: {}", unknown)),
+    };
+
+    // Send debug notification if enabled
+    if debug_config.send_notifications && result.is_ok() {
+        let _ = send_debug_notification(&app, "Window Relative Click",
+            &format!("Clicked at window ({}, {}) -> global ({}, {})", x, y, global_x, global_y));
+    }
+
+    result
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn window_relative_click(
+    _app: AppHandle,
+    _state: State<'_, AppState>,
+    _window_id: String,
+    _x: f64,
+    _y: f64,
+    _click_type: Option<String>,
+    _modifier: Option<String>,
+) -> Result<(), String> {
+    Err("Window relative click is only supported on macOS currently.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn focused_window_relative_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    click_type: Option<String>,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    let debug_enabled = should_enable_debug(false, &state);
+    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+
+    use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
+
+    log_debug_operation("focused_window_relative_click",
+        &format!("Focused window relative click: x={}, y={}, click_type={:?}, modifier={:?}",
+            x, y, click_type, modifier), &debug_config);
+    info!(
+        "Focused window relative click: x={}, y={}, click_type={:?}, modifier={:?}",
+        x, y, click_type, modifier
+    );
+
+    let desktop = state.get_desktop()?;
+
+    // Get the focused element first
+    let focused_element = desktop.focused_element()
+        .map_err(|e| format!("Failed to get focused element: {}", e))?;
+
+    // Check if the focused element is a window, if not try to get its window
+    let window_element = {
+        let attrs = focused_element.attributes();
+        if attrs.role == "AXWindow" {
+            focused_element
+        } else {
+            // Try to traverse up to find the window
+            let mut current = focused_element;
+            loop {
+                match current.parent() {
+                    Ok(Some(parent)) => {
+                        let parent_attrs = parent.attributes();
+                        if parent_attrs.role == "AXWindow" {
+                            current = parent;
+                            break;
+                        }
+                        current = parent;
+                    }
+                    Ok(None) => {
+                        return Err("No window found in element hierarchy".to_string());
+                    }
+                    Err(e) => {
+                        return Err(format!("Error traversing element hierarchy: {}", e));
+                    }
+                }
+            }
+            current
+        }
+    };
+
+    // Downcast to MacOSUIElement
+    let _macos_element = window_element
+        .as_any()
+        .downcast_ref::<MacOSUIElement>()
+        .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
+
+    // Convert window-relative coordinates to global coordinates
+    let (window_x, window_y, _width, _height) = window_element.bounds()
+        .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+    let global_x = window_x + x;
+    let global_y = window_y + y;
+
+    info!("Converted focused window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
+
+    // Perform the click using existing functionality
+    let result = match click_type.as_deref().unwrap_or("left") {
+        "left" => left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        unknown => Err(format!("Unsupported click type: {}", unknown)),
+    };
+
+    // Send debug notification if enabled
+    if debug_config.send_notifications && result.is_ok() {
+        let _ = send_debug_notification(&app, "Focused Window Relative Click",
+            &format!("Clicked at focused window ({}, {}) -> global ({}, {})", x, y, global_x, global_y));
+    }
+
+    result
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn focused_window_relative_click(
+    _app: AppHandle,
+    _state: State<'_, AppState>,
+    _x: f64,
+    _y: f64,
+    _click_type: Option<String>,
+    _modifier: Option<String>,
+) -> Result<(), String> {
+    Err("Focused window relative click is only supported on macOS currently.".to_string())
+}
 
 // --- PRODUCTION MOUSE FUNCTIONS WITH DEBUG CAPABILITIES ---
+// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[tauri::command]
 pub(crate) async fn left_click(
