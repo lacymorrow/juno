@@ -13,22 +13,8 @@ use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::element::{get_focused_element_ns_workspace, MacOSUIElement};
 
-// ============================================================================
-// CONSOLIDATED: dev_ functions removed - use production functions instead
-// ============================================================================
 
-// CONSOLIDATED: dev_get_focused_element_info removed - use get_focused_element_info production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_click_focused_element removed - use click_focused_element production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_find_element_by_selector removed - use find_element_by_selector production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_click_element_by_selector removed - use click_element_by_selector production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
-// CONSOLIDATED: dev_get_selected_text removed - use get_selected_text production function
-// Located in this same file with debug capabilities enabled via debug_mode parameter
 
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
