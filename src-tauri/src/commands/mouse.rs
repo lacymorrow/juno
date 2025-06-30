@@ -567,24 +567,46 @@ pub(crate) async fn left_mouse_down(
     // Get coordinates - use provided coordinates or current cursor position
     let (target_x, target_y) = match (x, y) {
         (Some(x_val), Some(y_val)) => {
-            // Debug validation for provided coordinates
+            // Both coordinates provided
             if debug_config.validate_inputs {
                 validators::valid_coordinates(x_val, y_val)?;
             }
             (x_val, y_val)
         }
-        _ => {
-            // Use current cursor position if coordinates not provided (Anthropic Computer Use spec compliance)
+        (Some(x_val), None) => {
+            // Only x provided, get current y
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, cursor_pos.1)?;
+            }
+            (x_val, cursor_pos.1)
+        }
+        (None, Some(y_val)) => {
+            // Only y provided, get current x
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, y_val)?;
+            }
+            (cursor_pos.0, y_val)
+        }
+        (None, None) => {
+            // Neither coordinate provided, use current cursor position
             let cursor_pos = state.desktop.cursor_position()
                 .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
             cursor_pos
         }
     };
 
-    log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {}) {}", target_x, target_y,
-        if x.is_some() && y.is_some() { "(explicit coordinates)" } else { "(current cursor position)" }), &debug_config);
-    info!("Executing left_mouse_down at ({}, {}) {}", target_x, target_y,
-        if x.is_some() && y.is_some() { "(explicit coordinates)" } else { "(current cursor position)" });
+    let coord_info = match (x, y) {
+        (Some(_), Some(_)) => "(both coordinates explicit)",
+        (Some(_), None) => "(x explicit, y from cursor)",
+        (None, Some(_)) => "(x from cursor, y explicit)",
+        (None, None) => "(both coordinates from cursor)",
+    };
+    log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {}) {}", target_x, target_y, coord_info), &debug_config);
+    info!("Executing left_mouse_down at ({}, {}) {}", target_x, target_y, coord_info);
 
     match state.desktop.left_mouse_down(target_x, target_y) {
         Ok(_) => {
@@ -592,7 +614,6 @@ pub(crate) async fn left_mouse_down(
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let coord_info = if x.is_some() && y.is_some() { "explicit" } else { "cursor position" };
                 let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {}) [{}]", target_x, target_y, coord_info));
             }
 
@@ -619,24 +640,46 @@ pub(crate) async fn left_mouse_up(
     // Get coordinates - use provided coordinates or current cursor position
     let (target_x, target_y) = match (x, y) {
         (Some(x_val), Some(y_val)) => {
-            // Debug validation for provided coordinates
+            // Both coordinates provided
             if debug_config.validate_inputs {
                 validators::valid_coordinates(x_val, y_val)?;
             }
             (x_val, y_val)
         }
-        _ => {
-            // Use current cursor position if coordinates not provided (Anthropic Computer Use spec compliance)
+        (Some(x_val), None) => {
+            // Only x provided, get current y
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(x_val, cursor_pos.1)?;
+            }
+            (x_val, cursor_pos.1)
+        }
+        (None, Some(y_val)) => {
+            // Only y provided, get current x
+            let cursor_pos = state.desktop.cursor_position()
+                .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, y_val)?;
+            }
+            (cursor_pos.0, y_val)
+        }
+        (None, None) => {
+            // Neither coordinate provided, use current cursor position
             let cursor_pos = state.desktop.cursor_position()
                 .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
             cursor_pos
         }
     };
 
-    log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {}) {}", target_x, target_y,
-        if x.is_some() && y.is_some() { "(explicit coordinates)" } else { "(current cursor position)" }), &debug_config);
-    info!("Executing left_mouse_up at ({}, {}) {}", target_x, target_y,
-        if x.is_some() && y.is_some() { "(explicit coordinates)" } else { "(current cursor position)" });
+    let coord_info = match (x, y) {
+        (Some(_), Some(_)) => "(both coordinates explicit)",
+        (Some(_), None) => "(x explicit, y from cursor)",
+        (None, Some(_)) => "(x from cursor, y explicit)",
+        (None, None) => "(both coordinates from cursor)",
+    };
+    log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {}) {}", target_x, target_y, coord_info), &debug_config);
+    info!("Executing left_mouse_up at ({}, {}) {}", target_x, target_y, coord_info);
 
     match state.desktop.left_mouse_up(target_x, target_y) {
         Ok(_) => {
@@ -644,7 +687,6 @@ pub(crate) async fn left_mouse_up(
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let coord_info = if x.is_some() && y.is_some() { "explicit" } else { "cursor position" };
                 let _ = send_debug_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {}) [{}]", target_x, target_y, coord_info));
             }
 
