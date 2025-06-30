@@ -92,6 +92,23 @@ pub async fn smooth_mouse_move(
     Ok(())
 }
 
+// Helper function to conditionally move mouse based on user setting
+async fn conditional_mouse_move(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let use_smooth_movement = state.get_smooth_mouse_movement().unwrap_or(false);
+
+    if use_smooth_movement {
+        smooth_mouse_move(app, state, x, y, None).await
+    } else {
+        // Use immediate movement
+        state.desktop.mouse_move(x, y).map_err(|e| format!("Failed to move mouse: {}", e))
+    }
+}
+
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
     // Send an event to the frontend to display a visual indicator
@@ -327,8 +344,8 @@ pub(crate) async fn left_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use smooth mouse movement to position cursor before clicking
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before clicking
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
 
@@ -370,8 +387,8 @@ pub(crate) async fn right_click(
     log_debug_operation("right_click", &format!("Right clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
     info!("Executing right_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
 
-    // Use smooth mouse movement to position cursor before clicking
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before clicking
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
 
@@ -409,25 +426,52 @@ pub(crate) async fn mouse_move(
         validators::valid_coordinates(x, y)?;
     }
 
-    log_debug_operation("mouse_move", &format!("Moving mouse smoothly to ({}, {})", x, y), &debug_config);
-    info!("Executing smooth mouse_move to ({}, {})", x, y);
+    // Check if smooth mouse movement is enabled
+    let use_smooth_movement = state.get_smooth_mouse_movement().unwrap_or(false);
 
-    // Use smooth mouse movement for better user experience
-    match smooth_mouse_move(&app, &state, x, y, None).await {
-        Ok(_) => {
-            info!("Successfully moved mouse smoothly to ({}, {})", x, y);
+    if use_smooth_movement {
+        log_debug_operation("mouse_move", &format!("Moving mouse smoothly to ({}, {})", x, y), &debug_config);
+        info!("Executing smooth mouse_move to ({}, {})", x, y);
 
-            // Send debug notification if enabled
-            if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse smoothly to ({}, {})", x, y));
+        // Use smooth mouse movement for better user experience
+        match smooth_mouse_move(&app, &state, x, y, None).await {
+            Ok(_) => {
+                info!("Successfully moved mouse smoothly to ({}, {})", x, y);
+
+                // Send debug notification if enabled
+                if debug_config.send_notifications {
+                    let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse smoothly to ({}, {})", x, y));
+                }
+
+                Ok(())
             }
-
-            Ok(())
+            Err(e) => {
+                let error_msg = format!("Failed to move mouse smoothly: {}", e);
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
         }
-        Err(e) => {
-            let error_msg = format!("Failed to move mouse smoothly: {}", e);
-            error!("{}", error_msg);
-            Err(error_msg)
+    } else {
+        log_debug_operation("mouse_move", &format!("Moving mouse immediately to ({}, {})", x, y), &debug_config);
+        info!("Executing immediate mouse_move to ({}, {})", x, y);
+
+        // Use immediate mouse movement for performance
+        match state.desktop.mouse_move(x, y) {
+            Ok(_) => {
+                info!("Successfully moved mouse immediately to ({}, {})", x, y);
+
+                // Send debug notification if enabled
+                if debug_config.send_notifications {
+                    let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse immediately to ({}, {})", x, y));
+                }
+
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to move mouse immediately: {}", e);
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
         }
     }
 }
@@ -454,8 +498,8 @@ pub(crate) async fn middle_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use smooth mouse movement to position cursor before clicking
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before clicking
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click
 
@@ -500,8 +544,8 @@ pub(crate) async fn double_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use smooth mouse movement to position cursor before clicking
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before clicking
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
 
@@ -546,8 +590,8 @@ pub(crate) async fn triple_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
-    // Use smooth mouse movement to position cursor before clicking
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before clicking
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
 
@@ -588,8 +632,8 @@ pub(crate) async fn left_mouse_down(
     log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_down at ({}, {})", x, y);
 
-    // Use smooth mouse movement to position cursor before mouse down
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before mouse down
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     match state.desktop.left_mouse_down(x, y) {
         Ok(_) => {
@@ -628,8 +672,8 @@ pub(crate) async fn left_mouse_up(
     log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_up at ({}, {})", x, y);
 
-    // Use smooth mouse movement to position cursor before mouse up
-    smooth_mouse_move(&app, &state, x, y, None).await?;
+    // Use conditional mouse movement to position cursor before mouse up
+    conditional_mouse_move(&app, &state, x, y).await?;
 
     match state.desktop.left_mouse_up(x, y) {
         Ok(_) => {
@@ -671,9 +715,7 @@ pub(crate) async fn left_click_drag(
     log_debug_operation("left_click_drag", &format!("Left click drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y), &debug_config);
     info!("Executing left_click_drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y);
 
-    // Use smooth mouse movement to position cursor at start position before dragging
-    smooth_mouse_move(&app, &state, start_x, start_y, None).await?;
-
+    // Note: No need to pre-position cursor - left_click_drag handles its own positioning
     match state.desktop.left_click_drag(start_x, start_y, end_x, end_y) {
         Ok(_) => {
             info!("Successfully performed left click drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y);
@@ -721,6 +763,21 @@ pub(crate) async fn get_cursor_position(
             Err(error_msg)
         }
     }
+}
+
+#[tauri::command]
+pub(crate) async fn get_smooth_mouse_movement_setting(
+    state: State<'_, AppState>
+) -> Result<bool, String> {
+    state.get_smooth_mouse_movement()
+}
+
+#[tauri::command]
+pub(crate) async fn set_smooth_mouse_movement_setting(
+    state: State<'_, AppState>,
+    enabled: bool
+) -> Result<(), String> {
+    state.set_smooth_mouse_movement(enabled)
 }
 
 
