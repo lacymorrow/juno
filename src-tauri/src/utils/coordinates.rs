@@ -25,6 +25,9 @@ pub static SCREENSHOT_SCALE: Lazy<RwLock<ScalingInfo>> = Lazy::new(|| {
         scale_factor_x: 1.0,
         scale_factor_y: 1.0,
         scale_factor: 1.0,
+        display_origin_x: 0.0,
+        display_origin_y: 0.0,
+        display_id: None,
     })
 });
 
@@ -43,6 +46,11 @@ pub struct ScalingInfo {
     pub display_to_standard_scale_y: f32,
     pub screenshot_to_standard_scale_x: f32,
     pub screenshot_to_standard_scale_y: f32,
+
+    // NEW: Multi-monitor support - track display origin offset
+    pub display_origin_x: f64,
+    pub display_origin_y: f64,
+    pub display_id: Option<u32>, // Track which display the screenshot came from
 
     // Legacy fields for backward compatibility
     pub original_width: u32,
@@ -74,6 +82,9 @@ impl Default for ScalingInfo {
             scale_factor_x: 1.0,
             scale_factor_y: 1.0,
             scale_factor: 1.0,
+            display_origin_x: 0.0,
+            display_origin_y: 0.0,
+            display_id: None,
         }
     }
 }
@@ -179,6 +190,9 @@ pub fn update_standard_resolution_scaling(
             scale_factor_x: safe_display_scale_x,
             scale_factor_y: safe_display_scale_y,
             scale_factor: legacy_scale_factor,
+            display_origin_x: 0.0,
+            display_origin_y: 0.0,
+            display_id: None,
         };
 
         info!("Updated standard resolution scaling: display {}x{} → standard {}x{} → screenshot {}x{}",
@@ -228,8 +242,41 @@ pub fn update_scaling_info(
     );
 }
 
+/// NEW: Updates scaling information with display origin for multi-monitor support
+/// This fixes the coordinate transformation issues in multi-monitor setups
+pub fn update_standard_resolution_scaling_with_display(
+    display_width: u32,
+    display_height: u32,
+    screenshot_width: u32,
+    screenshot_height: u32,
+    display_origin_x: f64,
+    display_origin_y: f64,
+    display_id: Option<u32>,
+) {
+    // First do the normal scaling calculation
+    update_standard_resolution_scaling(
+        display_width,
+        display_height,
+        screenshot_width,
+        screenshot_height,
+    );
+
+    // Then update the display origin information
+    if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
+        scaling.display_origin_x = display_origin_x;
+        scaling.display_origin_y = display_origin_y;
+        scaling.display_id = display_id;
+
+        info!("Updated display origin for multi-monitor: origin ({}, {}), display ID: {:?}",
+            display_origin_x, display_origin_y, display_id);
+    } else {
+        tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for display origin update");
+    }
+}
+
 /// Transforms coordinates from standard resolution space to actual screen coordinates
 /// This is the primary coordinate transformation for the Anthropic Computer Use API
+/// NEW: Now accounts for display origin in multi-monitor setups
 pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64) -> (f64, f64) {
     if let Ok(scaling) = SCREENSHOT_SCALE.read() {
         // Skip transformation if no scaling was applied or dimensions are invalid
@@ -239,12 +286,17 @@ pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64
             return (standard_x, standard_y);
         }
 
-        // Transform from standard resolution coordinates to actual screen coordinates
-        let screen_x = standard_x / scaling.display_to_standard_scale_x as f64;
-        let screen_y = standard_y / scaling.display_to_standard_scale_y as f64;
+        // Transform from standard resolution coordinates to display-relative coordinates
+        let display_relative_x = standard_x / scaling.display_to_standard_scale_x as f64;
+        let display_relative_y = standard_y / scaling.display_to_standard_scale_y as f64;
 
-        info!("Transformed coordinates: standard ({}, {}) → screen ({}, {}) using display scale x={:.3}, y={:.3}",
-            standard_x, standard_y, screen_x, screen_y, scaling.display_to_standard_scale_x, scaling.display_to_standard_scale_y);
+        // Add display origin offset to get global screen coordinates
+        let screen_x = display_relative_x + scaling.display_origin_x;
+        let screen_y = display_relative_y + scaling.display_origin_y;
+
+        info!("Transformed coordinates: standard ({}, {}) → display-relative ({}, {}) → screen ({}, {}) [origin: ({}, {}), scale: x={:.3}, y={:.3}]",
+            standard_x, standard_y, display_relative_x, display_relative_y, screen_x, screen_y,
+            scaling.display_origin_x, scaling.display_origin_y, scaling.display_to_standard_scale_x, scaling.display_to_standard_scale_y);
 
         (screen_x, screen_y)
     } else {
@@ -255,6 +307,7 @@ pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64
 
 /// Transforms coordinates from actual screen space to standard resolution coordinates
 /// Used for converting screen coordinates to API-compatible standard resolution coordinates
+/// NEW: Now accounts for display origin in multi-monitor setups
 pub fn transform_screen_to_standard_coordinates(screen_x: f64, screen_y: f64) -> (f64, f64) {
     if let Ok(scaling) = SCREENSHOT_SCALE.read() {
         // Skip transformation if no scaling was applied or dimensions are invalid
@@ -264,9 +317,13 @@ pub fn transform_screen_to_standard_coordinates(screen_x: f64, screen_y: f64) ->
             return (screen_x, screen_y);
         }
 
-        // Transform from screen coordinates to standard resolution coordinates
-        let standard_x = screen_x * scaling.display_to_standard_scale_x as f64;
-        let standard_y = screen_y * scaling.display_to_standard_scale_y as f64;
+        // Subtract display origin offset to get display-relative coordinates
+        let display_relative_x = screen_x - scaling.display_origin_x;
+        let display_relative_y = screen_y - scaling.display_origin_y;
+
+        // Transform from display-relative coordinates to standard resolution coordinates
+        let standard_x = display_relative_x * scaling.display_to_standard_scale_x as f64;
+        let standard_y = display_relative_y * scaling.display_to_standard_scale_y as f64;
 
         (standard_x, standard_y)
     } else {

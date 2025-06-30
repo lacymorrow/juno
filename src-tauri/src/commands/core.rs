@@ -41,7 +41,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 
                     // Get display information to calculate proper scaling
                     match get_display_dimensions() {
-                        Ok((display_width, display_height)) => {
+                        Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
                             // Select the best standard resolution for this display
                             let (standard_width, standard_height) =
                                 crate::constants::ui::standard_resolutions::select_best_resolution(display_width, display_height);
@@ -72,21 +72,24 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
                                 base64_string
                             };
 
-                            // Update scaling information with standard resolution data
-                            coordinates::update_standard_resolution_scaling(
+                            // Update scaling information with standard resolution data AND display origin
+                            coordinates::update_standard_resolution_scaling_with_display(
                                 display_width,
                                 display_height,
                                 standard_width,  // The screenshot is now at standard resolution
                                 standard_height,
+                                origin_x,
+                                origin_y,
+                                Some(display_id),
                             );
 
-                            info!("Screenshot scaling updated: display {}x{} → standard resolution {}x{} (Anthropic Computer Use API compliant)",
-                                display_width, display_height, standard_width, standard_height);
+                            info!("Screenshot scaling updated: display {}x{} at origin ({}, {}) → standard resolution {}x{} (Anthropic Computer Use API compliant)",
+                                display_width, display_height, origin_x, origin_y, standard_width, standard_height);
 
                             // Send notification on success
                             send_dev_tool_notification(&app, "Screenshot", &format!(
-                                "Screenshot captured at standard resolution {}x{} (scaled from display {}x{})",
-                                standard_width, standard_height, display_width, display_height
+                                "Screenshot captured at standard resolution {}x{} (scaled from display {}x{} at origin ({}, {}))",
+                                standard_width, standard_height, display_width, display_height, origin_x, origin_y
                             ))?;
 
                             Ok(final_base64)
@@ -143,22 +146,60 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 }
 
 /// Get display dimensions using macOS Core Graphics
+/// NEW: Now detects cursor position and returns info for the display containing the cursor
 #[cfg(target_os = "macos")]
-fn get_display_dimensions() -> Result<(u32, u32), String> {
-    use computer_use_ai_sdk::platforms::macos::display::get_main_display;
+fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
+    use computer_use_ai_sdk::platforms::macos::display::{get_main_display, find_display_containing_point, get_active_displays};
+    use core_graphics::event::{CGEvent, CGEventSource, CGEventSourceStateID};
 
-    match get_main_display() {
+    // Get current cursor position to determine which display to use
+    let cursor_point = {
+        let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .map_err(|_| "Failed to create HID event source".to_string())?;
+        let event = CGEvent::new(event_source)
+            .map_err(|_| "Failed to create CGEvent to get cursor location".to_string())?;
+        event.location()
+    };
+
+    // Find the display containing the cursor
+    match find_display_containing_point(cursor_point) {
         Ok(display_info) => {
             let width = display_info.bounds.size.width as u32;
             let height = display_info.bounds.size.height as u32;
+            let origin_x = display_info.bounds.origin.x;
+            let origin_y = display_info.bounds.origin.y;
+            let display_id = display_info.id;
 
             if width == 0 || height == 0 {
                 return Err("Invalid display dimensions".to_string());
             }
 
-            Ok((width, height))
+            tracing::info!("Using display containing cursor: {}x{} at origin ({}, {}), ID: {}",
+                width, height, origin_x, origin_y, display_id);
+
+            Ok((width, height, origin_x, origin_y, display_id))
         }
-        Err(e) => Err(format!("Failed to get display info: {}", e))
+        Err(e) => {
+            tracing::warn!("Failed to find display for cursor position, falling back to main display: {}", e);
+
+            // Fallback to main display
+            match get_main_display() {
+                Ok(display_info) => {
+                    let width = display_info.bounds.size.width as u32;
+                    let height = display_info.bounds.size.height as u32;
+                    let origin_x = display_info.bounds.origin.x;
+                    let origin_y = display_info.bounds.origin.y;
+                    let display_id = display_info.id;
+
+                    if width == 0 || height == 0 {
+                        return Err("Invalid main display dimensions".to_string());
+                    }
+
+                    Ok((width, height, origin_x, origin_y, display_id))
+                }
+                Err(e) => Err(format!("Failed to get main display info: {}", e))
+            }
+        }
     }
 }
 
