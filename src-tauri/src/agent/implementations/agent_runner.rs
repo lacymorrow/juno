@@ -275,9 +275,14 @@ where
                     // FIXED: Emit tool result event to frontend for chat display
                     // Extract screenshot if this is a screenshot tool
                     let screenshot_base64 =
-                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
                             // For screenshot tools, the result output should contain base64 data
-                            if let Some(screenshot_data) = result.output.get("data") {
+                            // Check multiple possible field names for screenshot data
+                            if let Some(screenshot_data) = result.output.get("base64_image") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("base64") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("data") {
                                 screenshot_data.as_str().map(|s| s.to_string())
                             } else if let Some(screenshot_str) = result.output.as_str() {
                                 Some(screenshot_str.to_string())
@@ -390,9 +395,14 @@ where
                 Ok(result) => {
                     // Extract screenshot if this is a screenshot tool
                     let screenshot_base64 =
-                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
                             // For screenshot tools, the result output should contain base64 data
-                            if let Some(screenshot_data) = result.output.get("data") {
+                            // Check multiple possible field names for screenshot data
+                            if let Some(screenshot_data) = result.output.get("base64_image") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("base64") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("data") {
                                 screenshot_data.as_str().map(|s| s.to_string())
                             } else if let Some(screenshot_str) = result.output.as_str() {
                                 Some(screenshot_str.to_string())
@@ -633,9 +643,14 @@ where
             Ok(result) => {
                 // Extract screenshot if this is a screenshot tool
                 let screenshot_base64 =
-                    if tool_call.name == "capture_screenshot" || tool_call.name == "computer" {
+                    if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
                         // For screenshot tools, the result output should contain base64 data
-                        if let Some(screenshot_data) = result.output.get("data") {
+                        // Check multiple possible field names for screenshot data
+                        if let Some(screenshot_data) = result.output.get("base64_image") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_data) = result.output.get("base64") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_data) = result.output.get("data") {
                             screenshot_data.as_str().map(|s| s.to_string())
                         } else if let Some(screenshot_str) = result.output.as_str() {
                             Some(screenshot_str.to_string())

@@ -268,15 +268,23 @@ where
             if tool_name == "capture_screenshot"
                 || tool_name == "capture_element_screenshot"
                 || tool_name == "browser_screenshot"
+                || tool_name == "computer"
             {
                 if let Some(s_val) = output.as_str() {
                     final_screenshot_base64 = Some(s_val.to_string());
                     info!("📸 Screenshot captured successfully. Including in event.");
                 } else if let Some(obj) = output.as_object() {
                     // Handle cases where the output might be an object containing the base64 string
-                    if let Some(b64_val) = obj.get("base64").and_then(|v| v.as_str()) {
+                    // Check multiple possible field names for screenshot data
+                    if let Some(b64_val) = obj.get("base64_image").and_then(|v| v.as_str()) {
                         final_screenshot_base64 = Some(b64_val.to_string());
-                        info!("📸 Screenshot extracted from tool output.");
+                        info!("📸 Screenshot extracted from tool output (base64_image field).");
+                    } else if let Some(b64_val) = obj.get("base64").and_then(|v| v.as_str()) {
+                        final_screenshot_base64 = Some(b64_val.to_string());
+                        info!("📸 Screenshot extracted from tool output (base64 field).");
+                    } else if let Some(b64_val) = obj.get("data").and_then(|v| v.as_str()) {
+                        final_screenshot_base64 = Some(b64_val.to_string());
+                        info!("📸 Screenshot extracted from tool output (data field).");
                     }
                 }
             }
