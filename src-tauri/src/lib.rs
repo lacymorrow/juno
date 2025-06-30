@@ -583,6 +583,22 @@ pub fn run() {
             handle_restart_after_permissions,
             // QA Test Commands from mouse.rs
 
+            // Mouse Settings Commands
+            get_smooth_mouse_movement_setting,
+            set_smooth_mouse_movement_setting,
+
+            // Mouse Action Commands (with configurable smooth movement)
+            mouse_move,
+            left_click,
+            right_click,
+            middle_click,
+            double_click,
+            triple_click,
+            left_click_drag,
+            left_mouse_down,
+            left_mouse_up,
+            get_cursor_position,
+
             // Sound Commands
             play_sound_by_type,
             play_sound_file,
