@@ -544,12 +544,19 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_down" => {
-                    // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
-
-                    // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    // Anthropic Computer Use API specification: coordinates are optional for left_mouse_down
+                    // If not provided, the action occurs at the current cursor position
+                    let (screen_x, screen_y) = if input.get("coordinate").is_some() {
+                        // Coordinates provided - validate and transform them
+                        let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                        let (x, y) = coordinate.to_f64();
+                        // Transform coordinates from scaled screenshot to screen coordinates
+                        let transformed = coordinates::transform_to_screen_coordinates(x, y);
+                        (Some(transformed.0), Some(transformed.1))
+                    } else {
+                        // No coordinates provided - use current cursor position (per Anthropic spec)
+                        (None, None)
+                    };
 
                     // Use proper mouse command which includes debug logging and validation
                     handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
@@ -560,12 +567,19 @@ pub async fn execute_computer_tool(
                     }))
                 }
                 "left_mouse_up" => {
-                    // Strict coordinate validation per Anthropic Computer Use API specification
-                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
-
-                    // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    // Anthropic Computer Use API specification: coordinates are optional for left_mouse_up
+                    // If not provided, the action occurs at the current cursor position
+                    let (screen_x, screen_y) = if input.get("coordinate").is_some() {
+                        // Coordinates provided - validate and transform them
+                        let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                        let (x, y) = coordinate.to_f64();
+                        // Transform coordinates from scaled screenshot to screen coordinates
+                        let transformed = coordinates::transform_to_screen_coordinates(x, y);
+                        (Some(transformed.0), Some(transformed.1))
+                    } else {
+                        // No coordinates provided - use current cursor position (per Anthropic spec)
+                        (None, None)
+                    };
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
                     handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
