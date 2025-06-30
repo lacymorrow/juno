@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_missing_coordinate_parameter() {
-        let input = json!({"action": "click"});
+        let input = json!({"action": "left_click"});
         let result = validate_coordinate_parameter(&input, "coordinate");
         assert!(matches!(result, Err(CoordinateValidationError::Missing)));
     }

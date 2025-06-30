@@ -481,7 +481,7 @@ pub async fn register_desktop_tools(
 
     // REMOVED: desktop_click tool - Use computer tool with action: "click" instead
     // This tool has been consolidated into the official Anthropic Computer Use API.
-    // Use: {"name": "computer", "input": {"action": "click", "coordinate": [x, y]}}
+    // Use: {"name": "computer", "input": {"action": "left_click", "coordinate": [x, y]}}
     // For modifier support: Use computer tool with appropriate key combinations.
     // This eliminates redundancy and ensures 100% compliance with the official specification.
 

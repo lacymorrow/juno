@@ -1301,7 +1301,7 @@ impl BrowserController {
                                 call_id,
                                 output: serde_json::json!({
                                     "status": "success",
-                                    "action": "click",
+                                    "action": "left_click",
                                     "selector": selector
                                 }),
                             })
