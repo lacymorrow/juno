@@ -150,7 +150,8 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 #[cfg(target_os = "macos")]
 fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
     use computer_use_ai_sdk::platforms::macos::display::{get_main_display, find_display_containing_point, get_active_displays};
-    use core_graphics::event::{CGEvent, CGEventSource, CGEventSourceStateID};
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
     // Get current cursor position to determine which display to use
     let cursor_point = {
