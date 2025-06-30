@@ -21,6 +21,19 @@ pub(crate) const KEY_ARROW_DOWN: CGKeyCode = 125;
 pub(crate) const KEY_ARROW_UP: CGKeyCode = 126;
 pub(crate) const KEY_V: CGKeyCode = 9;
 
+// Punctuation and symbol key codes
+pub(crate) const KEY_COMMA: CGKeyCode = 43;           // ,
+pub(crate) const KEY_PERIOD: CGKeyCode = 47;          // .
+pub(crate) const KEY_SEMICOLON: CGKeyCode = 41;       // ;
+pub(crate) const KEY_QUOTE: CGKeyCode = 39;           // '
+pub(crate) const KEY_SLASH: CGKeyCode = 44;           // /
+pub(crate) const KEY_BACKSLASH: CGKeyCode = 42;       // \
+pub(crate) const KEY_BRACKET_LEFT: CGKeyCode = 33;    // [
+pub(crate) const KEY_BRACKET_RIGHT: CGKeyCode = 30;   // ]
+pub(crate) const KEY_MINUS: CGKeyCode = 27;           // -
+pub(crate) const KEY_EQUAL: CGKeyCode = 24;           // =
+pub(crate) const KEY_BACKQUOTE: CGKeyCode = 50;       // `
+
 // Add these constants for modifier keys
 pub(crate) const MODIFIER_COMMAND: CGEventFlags = CGEventFlags::CGEventFlagCommand;
 pub(crate) const MODIFIER_SHIFT: CGEventFlags = CGEventFlags::CGEventFlagShift;
@@ -58,6 +71,18 @@ pub(crate) fn key_name_to_keycode(key_name: &str) -> Option<CGKeyCode> {
         "down" | "arrowdown" => Some(KEY_ARROW_DOWN),
         "up" | "arrowup" => Some(KEY_ARROW_UP),
         "v" => Some(KEY_V),
+        // Punctuation marks
+        "," | "comma" => Some(KEY_COMMA),
+        "." | "period" => Some(KEY_PERIOD),
+        ";" | "semicolon" => Some(KEY_SEMICOLON),
+        "'" | "quote" | "apostrophe" => Some(KEY_QUOTE),
+        "/" | "slash" => Some(KEY_SLASH),
+        "\\" | "backslash" => Some(KEY_BACKSLASH),
+        "[" | "bracketleft" | "leftbracket" => Some(KEY_BRACKET_LEFT),
+        "]" | "bracketright" | "rightbracket" => Some(KEY_BRACKET_RIGHT),
+        "-" | "minus" | "dash" => Some(KEY_MINUS),
+        "=" | "equal" | "equals" => Some(KEY_EQUAL),
+        "`" | "backquote" | "grave" => Some(KEY_BACKQUOTE),
         // Handle other single-character keys
         _ => {
             // If not a special key, try treating as a single character
