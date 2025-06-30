@@ -681,7 +681,15 @@ impl ErrorRecoveryManager {
     fn get_recent_successful_operations(&self) -> Vec<ToolCall> {
         self.execution_history.iter()
             .rev()
-            .filter(|entry| entry.result.is_ok())
+            .filter(|entry: &&ExecutionHistoryEntry| {
+                match &entry.result {
+                    Ok(output) => {
+                        // Check if this is an Anthropic error response (computer tools)
+                        !crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output)
+                    }
+                    Err(_) => false, // Traditional error format
+                }
+            })
             .take(5)
             .map(|entry| entry.tool_call.clone())
             .collect()
@@ -722,8 +730,18 @@ impl ErrorRecoveryManager {
             },
             "execution_history": {
                 "total_operations": self.execution_history.len(),
-                "successful_operations": self.execution_history.iter().filter(|e| e.result.is_ok()).count(),
-                "failed_operations": self.execution_history.iter().filter(|e| e.result.is_err()).count()
+                "successful_operations": self.execution_history.iter().filter(|e: &&ExecutionHistoryEntry| {
+                    match &e.result {
+                        Ok(output) => !crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output),
+                        Err(_) => false,
+                    }
+                }).count(),
+                "failed_operations": self.execution_history.iter().filter(|e: &&ExecutionHistoryEntry| {
+                    match &e.result {
+                        Ok(output) => crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output),
+                        Err(_) => true,
+                    }
+                }).count()
             },
             "config": self.config
         })

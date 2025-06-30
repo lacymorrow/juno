@@ -147,18 +147,38 @@ where
     // Execute the tool
     let result = executor(inputs.clone());
 
-    // Determine if execution was successful
-    let success = result.is_ok();
+    // Determine if execution was successful - handle Anthropic Computer Use API error format
+    let success = match &result {
+        Ok(output) => {
+            // Check if this is an Anthropic error response (computer tools)
+            !crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output)
+        }
+        Err(_) => false, // Traditional error format
+    };
 
     // Enhanced success/error logging
     if success {
         info!("✅ Tool '{}' completed successfully", tool_name);
-    } else if let Err(ref e) = result {
-        warn!("❌ Tool '{}' failed: {}", tool_name, e);
+    } else {
+        match &result {
+            Ok(output) => {
+                // Anthropic error format
+                if let Some(error_msg) = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(output) {
+                    warn!("❌ Tool '{}' failed: {}", tool_name, error_msg);
+                } else {
+                    warn!("❌ Tool '{}' failed with unknown Anthropic error format", tool_name);
+                }
+            }
+            Err(e) => {
+                // Traditional error format
+                warn!("❌ Tool '{}' failed: {}", tool_name, e);
+            }
+        }
     }
 
     // If this is a screenshot tool, we want to include the screenshot in the event
-    let screenshot_base64 = if tool_name == "capture_screenshot" || tool_name == "screenshot" {
+    // But only if the operation was successful
+    let screenshot_base64 = if success && (tool_name == "capture_screenshot" || tool_name == "screenshot") {
         match &result {
             Ok(output) => {
                 if let Some(base64) = output.as_str() {
@@ -262,14 +282,18 @@ where
     // Determine if execution was successful and extract results
     let (success, final_result, screenshot_base64) = match result {
         Ok(Ok(output)) => {
+            // Check if this is an Anthropic error response (computer tools)
+            let is_anthropic_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&output);
+            let is_success = !is_anthropic_error;
+
             let mut final_screenshot_base64: Option<String> = None;
 
-            // Check for screenshot tool names
-            if tool_name == "capture_screenshot"
+            // Extract screenshot only if operation was successful
+            if is_success && (tool_name == "capture_screenshot"
                 || tool_name == "capture_element_screenshot"
                 || tool_name == "browser_screenshot"
                 || tool_name == "computer"
-            {
+            ) {
                 if let Some(s_val) = output.as_str() {
                     final_screenshot_base64 = Some(s_val.to_string());
                     info!("📸 Screenshot captured successfully. Including in event.");
@@ -289,8 +313,15 @@ where
                 }
             }
 
-            info!("✅ Tool '{}' completed successfully", tool_name);
-            (true, Ok(output.clone()), final_screenshot_base64)
+            if is_success {
+                info!("✅ Tool '{}' completed successfully", tool_name);
+                (true, Ok(output.clone()), final_screenshot_base64)
+            } else {
+                let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&output)
+                    .unwrap_or_else(|| "Unknown Anthropic error".to_string());
+                warn!("❌ Tool '{}' failed: {}", tool_name, error_msg);
+                (false, Err(error_msg), None)
+            }
         }
         Ok(Err(e)) => {
             warn!("❌ Tool '{}' failed: {}", tool_name, e);
