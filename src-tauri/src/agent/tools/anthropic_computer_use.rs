@@ -572,7 +572,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes debug logging and validation
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, screen_x, screen_y).await
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
                         .map_err(|e| format!("Left mouse down failed: {}", e)));
 
                     Ok(json!({
@@ -588,7 +588,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, screen_x, screen_y).await
+                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
                         .map_err(|e| format!("Left mouse up failed: {}", e)));
 
                     Ok(json!({
@@ -604,7 +604,7 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::Accessibility,
                 &format!("computer ({})", action)
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             match action {
                 "key" => {
@@ -674,7 +674,7 @@ pub async fn execute_computer_tool(
                 app_handle,
                 RequiredPermission::Accessibility,
                 "computer (scroll)"
-            ).await.map_err(|e| format!("Permission validation failed: {}", e)));
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
             // Strict coordinate validation per Anthropic Computer Use API specification
             let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
