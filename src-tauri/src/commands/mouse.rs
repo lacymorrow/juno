@@ -327,6 +327,9 @@ pub(crate) async fn left_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Use smooth mouse movement to position cursor before clicking
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
 
     match state.desktop.left_click(x, y, modifier.as_deref()) {
@@ -367,6 +370,9 @@ pub(crate) async fn right_click(
     log_debug_operation("right_click", &format!("Right clicking at ({}, {}) with modifier: {:?}", x, y, modifier), &debug_config);
     info!("Executing right_click at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
 
+    // Use smooth mouse movement to position cursor before clicking
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
 
     match state.desktop.right_click(x, y, modifier.as_deref()) {
@@ -403,22 +409,23 @@ pub(crate) async fn mouse_move(
         validators::valid_coordinates(x, y)?;
     }
 
-    log_debug_operation("mouse_move", &format!("Moving mouse to ({}, {})", x, y), &debug_config);
-    info!("Executing mouse_move to ({}, {})", x, y);
+    log_debug_operation("mouse_move", &format!("Moving mouse smoothly to ({}, {})", x, y), &debug_config);
+    info!("Executing smooth mouse_move to ({}, {})", x, y);
 
-    match state.desktop.mouse_move(x, y) {
+    // Use smooth mouse movement for better user experience
+    match smooth_mouse_move(&app, &state, x, y, None).await {
         Ok(_) => {
-            info!("Successfully moved mouse to ({}, {})", x, y);
+            info!("Successfully moved mouse smoothly to ({}, {})", x, y);
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse to ({}, {})", x, y));
+                let _ = send_debug_notification(&app, "Mouse Move", &format!("Moved mouse smoothly to ({}, {})", x, y));
             }
 
             Ok(())
         }
         Err(e) => {
-            let error_msg = format!("Failed to move mouse: {}", e);
+            let error_msg = format!("Failed to move mouse smoothly: {}", e);
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -446,6 +453,9 @@ pub(crate) async fn middle_click(
 
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
+
+    // Use smooth mouse movement to position cursor before clicking
+    smooth_mouse_move(&app, &state, x, y, None).await?;
 
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click
 
@@ -490,6 +500,9 @@ pub(crate) async fn double_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Use smooth mouse movement to position cursor before clicking
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
 
     match state.desktop.double_click(x, y, modifier.as_deref()) {
@@ -533,6 +546,9 @@ pub(crate) async fn triple_click(
     // Ensure main window has focus before performing mouse action
     ensure_main_window_focus(&app).await?;
 
+    // Use smooth mouse movement to position cursor before clicking
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
 
     match state.desktop.triple_click(x, y, modifier.as_deref()) {
@@ -572,6 +588,9 @@ pub(crate) async fn left_mouse_down(
     log_debug_operation("left_mouse_down", &format!("Left mouse down at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_down at ({}, {})", x, y);
 
+    // Use smooth mouse movement to position cursor before mouse down
+    smooth_mouse_move(&app, &state, x, y, None).await?;
+
     match state.desktop.left_mouse_down(x, y) {
         Ok(_) => {
             info!("Successfully performed left mouse down at ({}, {})", x, y);
@@ -608,6 +627,9 @@ pub(crate) async fn left_mouse_up(
 
     log_debug_operation("left_mouse_up", &format!("Left mouse up at ({}, {})", x, y), &debug_config);
     info!("Executing left_mouse_up at ({}, {})", x, y);
+
+    // Use smooth mouse movement to position cursor before mouse up
+    smooth_mouse_move(&app, &state, x, y, None).await?;
 
     match state.desktop.left_mouse_up(x, y) {
         Ok(_) => {
@@ -648,6 +670,9 @@ pub(crate) async fn left_click_drag(
 
     log_debug_operation("left_click_drag", &format!("Left click drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y), &debug_config);
     info!("Executing left_click_drag from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y);
+
+    // Use smooth mouse movement to position cursor at start position before dragging
+    smooth_mouse_move(&app, &state, start_x, start_y, None).await?;
 
     match state.desktop.left_click_drag(start_x, start_y, end_x, end_y) {
         Ok(_) => {
