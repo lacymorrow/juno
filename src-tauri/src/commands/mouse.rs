@@ -595,6 +595,9 @@ pub(crate) async fn left_mouse_down(
             // Neither coordinate provided, use current cursor position
             let cursor_pos = state.desktop.cursor_position()
                 .map_err(|e| format!("Failed to get current cursor position for left_mouse_down: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
+            }
             cursor_pos
         }
     };
@@ -668,6 +671,9 @@ pub(crate) async fn left_mouse_up(
             // Neither coordinate provided, use current cursor position
             let cursor_pos = state.desktop.cursor_position()
                 .map_err(|e| format!("Failed to get current cursor position for left_mouse_up: {}", e))?;
+            if debug_config.validate_inputs {
+                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
+            }
             cursor_pos
         }
     };
