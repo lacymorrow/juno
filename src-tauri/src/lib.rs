@@ -256,7 +256,8 @@ use crate::commands::{
     get_pending_tool_approvals, get_tool_approval_required, get_tool_config,
     get_tool_configuration_summary, get_tool_configurations, is_tool_enabled,
     reset_tool_configuration, set_tool_approval_required, set_tool_category_enabled,
-    set_tool_enabled,
+    set_tool_enabled, get_registered_tools, test_tool_config, test_tool_config_command,
+    test_dynamic_tool_categorization,
 };
 
 // Import keyboard shortcuts commands explicitly

@@ -22,6 +22,11 @@ pub mod tool_names {
     pub const MOUSE_MOVE: &str = "mouse_move";
     pub const ACCESSIBILITY_INTERFACE: &str = "accessibility_interface";
 
+    // Simplified aliases for tool configuration and mapping
+    pub const CLICK: &str = "left_click";
+    pub const MOVE: &str = "mouse_move";
+    pub const DRAG: &str = "left_click_drag";
+
     // Text editor tools
     pub const TEXT_EDITOR_INSERT: &str = "text_editor_insert";
     pub const TEXT_EDITOR_STR_REPLACE: &str = "text_editor_str_replace";
@@ -131,13 +136,10 @@ pub mod tool_names {
     pub const ACTION_WAIT: &str = "wait";
 
     // Extended computer use actions
-    pub const ACTION_LEFT_CLICK: &str = "left_click";
     pub const ACTION_RIGHT_CLICK: &str = "right_click";
     pub const ACTION_MIDDLE_CLICK: &str = "middle_click";
     pub const ACTION_DOUBLE_CLICK: &str = "double_click";
     pub const ACTION_TRIPLE_CLICK: &str = "triple_click";
-    pub const ACTION_LEFT_CLICK_DRAG: &str = "left_click_drag";
-    pub const ACTION_MOUSE_MOVE: &str = "mouse_move";
     pub const ACTION_HOLD_KEY: &str = "hold_key";
     pub const WAIT: &str = "wait";
 }
