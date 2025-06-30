@@ -393,35 +393,44 @@ where
             // FIXED: Emit tool result event to frontend for chat display
             match &tool_result {
                 Ok(result) => {
-                    // Extract screenshot if this is a screenshot tool
-                    let screenshot_base64 =
-                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
-                            // For screenshot tools, the result output should contain base64 data
-                            // Check multiple possible field names for screenshot data
-                            if let Some(screenshot_data) = result.output.get("base64_image") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_data) = result.output.get("base64") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_data) = result.output.get("data") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_str) = result.output.as_str() {
-                                Some(screenshot_str.to_string())
-                            } else {
-                                None
-                            }
+                    // Check if this is actually an error response (Anthropic Computer Use API format)
+                    let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
+                    let success = !is_error;
+
+                    // Extract screenshot if this is a screenshot tool AND the operation was successful
+                    let screenshot_base64 = if success &&
+                        (tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot") {
+                        // For screenshot tools, the result output should contain base64 data
+                        // Check multiple possible field names for screenshot data
+                        if let Some(screenshot_data) = result.output.get("base64_image") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_data) = result.output.get("base64") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_data) = result.output.get("data") {
+                            screenshot_data.as_str().map(|s| s.to_string())
+                        } else if let Some(screenshot_str) = result.output.as_str() {
+                            Some(screenshot_str.to_string())
                         } else {
                             None
-                        };
+                        }
+                    } else {
+                        None
+                    };
+
+                    let status_message = if success {
+                        format!("Batched tool {} executed successfully", tool_call.name)
+                    } else {
+                        let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&result.output)
+                            .unwrap_or_else(|| "Unknown error".to_string());
+                        format!("Batched tool {} failed: {}", tool_call.name, error_msg)
+                    };
 
                     crate::agent::tool_logger::log_tool_call_result(
                         &self.app_handle,
                         &tool_call.name,
                         result.output.clone(),
-                        true,
-                        Some(format!(
-                            "Batched tool {} executed successfully",
-                            tool_call.name
-                        )),
+                        success,
+                        Some(status_message),
                         screenshot_base64,
                     );
                 }
@@ -641,32 +650,44 @@ where
         // FIXED: Emit tool result event to frontend for chat display
         match &tool_result {
             Ok(result) => {
-                // Extract screenshot if this is a screenshot tool
-                let screenshot_base64 =
-                    if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
-                        // For screenshot tools, the result output should contain base64 data
-                        // Check multiple possible field names for screenshot data
-                        if let Some(screenshot_data) = result.output.get("base64_image") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_data) = result.output.get("base64") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_data) = result.output.get("data") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_str) = result.output.as_str() {
-                            Some(screenshot_str.to_string())
-                        } else {
-                            None
-                        }
+                // Check if this is actually an error response (Anthropic Computer Use API format)
+                let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
+                let success = !is_error;
+
+                // Extract screenshot if this is a screenshot tool AND the operation was successful
+                let screenshot_base64 = if success &&
+                    (tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot") {
+                    // For screenshot tools, the result output should contain base64 data
+                    // Check multiple possible field names for screenshot data
+                    if let Some(screenshot_data) = result.output.get("base64_image") {
+                        screenshot_data.as_str().map(|s| s.to_string())
+                    } else if let Some(screenshot_data) = result.output.get("base64") {
+                        screenshot_data.as_str().map(|s| s.to_string())
+                    } else if let Some(screenshot_data) = result.output.get("data") {
+                        screenshot_data.as_str().map(|s| s.to_string())
+                    } else if let Some(screenshot_str) = result.output.as_str() {
+                        Some(screenshot_str.to_string())
                     } else {
                         None
-                    };
+                    }
+                } else {
+                    None
+                };
+
+                let status_message = if success {
+                    format!("Tool {} executed successfully", tool_call.name)
+                } else {
+                    let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&result.output)
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    format!("Tool {} failed: {}", tool_call.name, error_msg)
+                };
 
                 crate::agent::tool_logger::log_tool_call_result(
                     &self.app_handle,
                     &tool_call.name,
                     result.output.clone(),
-                    true,
-                    Some(format!("Tool {} executed successfully", tool_call.name)),
+                    success,
+                    Some(status_message),
                     screenshot_base64,
                 );
             }

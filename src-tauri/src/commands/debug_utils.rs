@@ -204,6 +204,24 @@ macro_rules! debug_operation {
     }};
 }
 
+/// Macro for debug operation wrapping with Anthropic Computer Use API awareness
+#[macro_export]
+macro_rules! debug_operation_anthropic {
+    ($config:expr, $name:expr, $app:expr, $body:block) => {{
+        let debug_op = $crate::commands::debug_utils::DebugOperation::start($name, $config.clone());
+        let result = $body;
+        let success = match &result {
+            Ok(output) => {
+                // Check if this is an Anthropic error response
+                !$crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output)
+            }
+            Err(_) => false,
+        };
+        debug_op.complete($app, success);
+        result
+    }};
+}
+
 /// Common debug validators
 pub mod validators {
     /// Validate text input is not empty
