@@ -44,17 +44,9 @@ fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Opt
     }
 }
 
-// CONSOLIDATED: dev_scroll_window removed - use scroll_window production function
 
-// CONSOLIDATED: dev_get_window_list removed - use get_window_list production function
-
-
-// CONSOLIDATED: dev_get_window_info removed - use get_window_info production function
-
-// CONSOLIDATED: dev_focus_window removed - use focus_window production function
 
 // --- PRODUCTION WINDOW FUNCTIONS WITH DEBUG CAPABILITIES ---
-// These functions replace the dev_ prefixed functions by incorporating debug features conditionally
 
 #[tauri::command]
 pub(crate) async fn scroll_window(

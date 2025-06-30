@@ -795,6 +795,35 @@ pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
         ("right", KEY_ARROW_RIGHT),
         ("down", KEY_ARROW_DOWN),
         ("up", KEY_ARROW_UP),
+        // Add punctuation marks
+        (",", KEY_COMMA),
+        ("comma", KEY_COMMA),
+        (".", KEY_PERIOD),
+        ("period", KEY_PERIOD),
+        (";", KEY_SEMICOLON),
+        ("semicolon", KEY_SEMICOLON),
+        ("'", KEY_QUOTE),
+        ("quote", KEY_QUOTE),
+        ("apostrophe", KEY_QUOTE),
+        ("/", KEY_SLASH),
+        ("slash", KEY_SLASH),
+        ("\\", KEY_BACKSLASH),
+        ("backslash", KEY_BACKSLASH),
+        ("[", KEY_BRACKET_LEFT),
+        ("bracketleft", KEY_BRACKET_LEFT),
+        ("leftbracket", KEY_BRACKET_LEFT),
+        ("]", KEY_BRACKET_RIGHT),
+        ("bracketright", KEY_BRACKET_RIGHT),
+        ("rightbracket", KEY_BRACKET_RIGHT),
+        ("-", KEY_MINUS),
+        ("minus", KEY_MINUS),
+        ("dash", KEY_MINUS),
+        ("=", KEY_EQUAL),
+        ("equal", KEY_EQUAL),
+        ("equals", KEY_EQUAL),
+        ("`", KEY_BACKQUOTE),
+        ("backquote", KEY_BACKQUOTE),
+        ("grave", KEY_BACKQUOTE),
         // Add more special keys here as needed
     ]
     .iter()
@@ -1189,19 +1218,22 @@ pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEve
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
+    // Key down event with modifier flags
     let event_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
         .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
     event_down.set_flags(modifier_flags);
     event_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
+    // Key up event WITHOUT modifier flags - this ensures proper key release
+    // According to Anthropic Computer Use specification, key actions should press and release immediately
     let event_up = CGEvent::new_keyboard_event(source, key_code, false)
         .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-    event_up.set_flags(modifier_flags);
+    // Do NOT set modifier flags on key up event - this allows proper release
     event_up.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
-    debug!("Key press simulated for key code: {}", key_code);
+    debug!("Key press and release completed for key code: {}", key_code);
     Ok(())
 }
 
@@ -1349,7 +1381,7 @@ pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Re
         AutomationError::PlatformError("Failed to create scroll event".to_string())
     })?;
 
-    // Constants for scroll wheel event
+    // Constants for scroll wheel event types
     const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
@@ -1365,6 +1397,7 @@ pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Re
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, scroll_y as i64);
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, scroll_x as i64);
 
+    // Post the scroll event
     scroll_event.post(CGEventTapLocation::HID);
     debug!(
         "scrolled {} by {} at element center ({}, {})",
