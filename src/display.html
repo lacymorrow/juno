@@ -41,6 +41,8 @@
       if (kind === 'image') {
         const img = new Image();
         img.src = typeof data === 'string' ? data : data.src;
+        img.alt = 'Image';
+        img.onerror = () => (content.textContent = 'Failed to load image');
         content.appendChild(img);
       } else if (kind === 'html') {
         content.innerHTML = data;
@@ -50,11 +52,60 @@
         iframe.style.width = '100%';
         iframe.style.height = '100%';
         iframe.src = typeof data === 'string' ? data : data.url;
+        iframe.onerror = () => (content.textContent = 'Failed to load URL');
         content.appendChild(iframe);
       } else if (kind === 'widget') {
-        content.textContent = JSON.stringify(data);
-        // TODO: implement widget rendering (future)
+        try {
+          handleWidget(data);
+        } catch (err) {
+          console.error(err);
+          content.textContent = 'Widget error';
+        }
       }
+    }
+
+    async function handleWidget(cfg) {
+      if (cfg.widget === 'weather') {
+        await renderWeatherWidget(cfg);
+      } else if (cfg.widget === 'calendar') {
+        renderCalendarWidget(cfg);
+      } else {
+        content.textContent = 'Unknown widget';
+      }
+    }
+
+    async function renderWeatherWidget({ location }) {
+      content.textContent = 'Loading weather…';
+      try {
+        const encoded = encodeURIComponent(location);
+        const resp = await fetch(`https://wttr.in/${encoded}?format=j1`);
+        if (!resp.ok) throw new Error('Weather fetch failed');
+        const data = await resp.json();
+        const cur = data.current_condition?.[0];
+        if (!cur) throw new Error('Invalid weather data');
+        content.innerHTML = `<div style="text-align:center">
+           <div style="font-size:42px">${cur.temp_C}°C</div>
+           <div>${location}</div>
+           <div style="font-size:14px">${cur.weatherDesc?.[0]?.value ?? ''}</div>
+         </div>`;
+      } catch (e) {
+        console.error(e);
+        content.textContent = 'Failed to load weather';
+      }
+    }
+
+    function renderCalendarWidget({ url }) {
+      if (!url) {
+        content.textContent = 'Calendar URL missing';
+        return;
+      }
+      const iframe = document.createElement('iframe');
+      iframe.style.border = 'none';
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.src = url;
+      iframe.onerror = () => (content.textContent = 'Failed to load calendar');
+      content.appendChild(iframe);
     }
 
     // Initial payload
