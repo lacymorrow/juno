@@ -1277,30 +1277,54 @@ impl AppState {
                         Ok(Ok(_)) => {
                             info!("✅ MCP server '{}' started successfully", server_name);
 
-                            // INTELLIGENT COMPLETION DETECTION instead of hardcoded delay
-                            // Use exponential backoff to check server readiness (like mouse movement optimization)
+                            // INTELLIGENT COMPLETION DETECTION with accurate timing and comprehensive readiness check
+                            let readiness_start = std::time::Instant::now();
                             let mut check_delay = 10; // Start with 10ms
                             let max_delay = 200; // Max 200ms
                             let max_checks = 20; // Max 2 seconds total wait
+                            let mut cumulative_elapsed = 0u64; // Track actual elapsed time
 
                             for check_attempt in 0..max_checks {
                                 tokio::time::sleep(Duration::from_millis(check_delay)).await;
+                                cumulative_elapsed += check_delay;
 
-                                // Check if server is actually ready (replace hardcoded 1000ms delay)
+                                // Comprehensive readiness check: status + tools availability
                                 let manager_guard = manager.lock().await;
                                 let server_statuses = manager_guard.get_server_statuses().await;
                                 let server_status = server_statuses.get(&server_id);
+                                let available_tools = manager_guard.get_all_tools().await;
+                                let server_tools_count = available_tools.iter()
+                                    .filter(|tool| tool.server_id == server_id)
+                                    .count();
                                 drop(manager_guard);
 
                                 match server_status {
                                     Some(crate::agent::tools::mcp_integration::MCPServerStatus::Connected) => {
-                                        info!("MCP server '{}' confirmed ready after {}ms",
-                                              server_name, (check_attempt + 1) * check_delay);
+                                        // Additional readiness validation: ensure tools are actually discovered
+                                        // Note: Some servers may legitimately have 0 tools, so we just log this info
+                                        let actual_elapsed = readiness_start.elapsed();
+                                        if server_tools_count > 0 {
+                                            info!("MCP server '{}' confirmed fully ready after {}ms with {} tools",
+                                                  server_name, actual_elapsed.as_millis(), server_tools_count);
+                                        } else {
+                                            info!("MCP server '{}' confirmed connected after {}ms (no tools discovered - may be normal)",
+                                                  server_name, actual_elapsed.as_millis());
+                                        }
                                         break;
                                     }
+                                    Some(crate::agent::tools::mcp_integration::MCPServerStatus::Error(ref error)) => {
+                                        warn!("MCP server '{}' failed during readiness check: {}", server_name, error);
+                                        break; // Don't continue checking if server has errored
+                                    }
                                     _ => {
-                                        // Exponential backoff like mouse movement optimization
+                                        // Server still connecting/initializing - continue with exponential backoff
                                         check_delay = std::cmp::min(check_delay * 2, max_delay);
+
+                                        if check_attempt == max_checks - 1 {
+                                            let final_elapsed = readiness_start.elapsed();
+                                            warn!("MCP server '{}' readiness check timed out after {}ms (status: {:?})",
+                                                  server_name, final_elapsed.as_millis(), server_status);
+                                        }
                                     }
                                 }
                             }
