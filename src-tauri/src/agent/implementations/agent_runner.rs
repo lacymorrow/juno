@@ -635,7 +635,7 @@ where
             // Get current cursor position
             let app_state = self.app_handle.state::<crate::state::AppState>();
             if let Ok((current_x, current_y)) = crate::commands::mouse::get_cursor_position(
-                self.app_handle.clone(),
+                (*self.app_handle).clone(),
                 app_state,
             ).await {
                 // Check if we're close enough to target
