@@ -691,6 +691,11 @@ where
         let tolerance = 3; // pixels tolerance for "close enough"
 
         for attempt in 0..8 { // Max 8 attempts
+            // Check timeout at the start of each iteration
+            if start_time.elapsed() >= max_wait {
+                break;
+            }
+
             // Get current cursor position
             let app_state = self.app_handle.state::<crate::state::AppState>();
             if let Ok((current_x, current_y)) = crate::commands::mouse::get_cursor_position(
@@ -707,18 +712,26 @@ where
                 }
             }
 
-            // If we've waited too long, exit to prevent hanging
-            if start_time.elapsed() >= max_wait {
+            // Calculate exponential backoff delay, but cap it to remaining time budget
+            let base_delay_ms = 5 * (1 << attempt);
+            let remaining_time = max_wait.saturating_sub(start_time.elapsed());
+            let remaining_ms = remaining_time.as_millis() as u64;
+
+            // Only sleep if we have time remaining and the delay makes sense
+            if remaining_ms > 10 {
+                let actual_delay_ms = std::cmp::min(base_delay_ms, remaining_ms - 5); // Leave 5ms buffer
+                tokio::time::sleep(tokio::time::Duration::from_millis(actual_delay_ms)).await;
+            } else {
+                // Not enough time left for meaningful waiting
                 break;
             }
-
-            // Exponential backoff: 5ms, 10ms, 20ms, 40ms...
-            let delay_ms = 5 * (1 << attempt);
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         }
 
-        // Final minimal delay if detection failed
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        // Final minimal delay only if we have time remaining (prevent exceeding max_wait)
+        let remaining_time = max_wait.saturating_sub(start_time.elapsed());
+        if remaining_time.as_millis() >= 10 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
     }
 
     /// Execute a single tool with approval and cancellation handling
