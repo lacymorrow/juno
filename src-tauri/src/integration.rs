@@ -50,22 +50,23 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
     // Listen for dictation started events from the plugin (additional handlers)
     let app_handle_for_listener = app_handle.clone();
+
     app_handle.listen("voice-transcription:dictation-started", move |event| {
         info!("[Event] Received voice-transcription:dictation-started event");
 
         // Register escape key for dictation cancellation
-        let app_handle_for_escape = app_handle_for_listener.clone();
+        let app_handle_clone = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
-            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_for_escape).await {
+            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone).await {
                 warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
             }
         });
 
         // Play voice start sound automatically when dictation starts
-        let app_handle_for_sound = app_handle_for_listener.clone();
+        let app_handle_clone = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
-            let state = app_handle_for_sound.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_for_sound.clone(), state).await {
+            let state = app_handle_clone.state::<crate::state::AppState>();
+            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone, state).await {
                 warn!("Failed to play voice start sound: {}", e);
             }
         });
