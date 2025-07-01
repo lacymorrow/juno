@@ -87,9 +87,6 @@
     "zod": "^3.25.57"
   },
   "devDependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.42.0",
-    "@tauri-apps/cli": "^2.5.0",
-    "@tauri-apps/cli-darwin-arm64": "^2.5.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.14.1",
@@ -109,5 +106,9 @@
   "trustedDependencies": [
     "@tailwindcss/oxide",
     "esbuild"
-  ]
+  ],
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.42.0",
+    "@tauri-apps/cli-darwin-arm64": "^2.5.0"
+  }
 }
