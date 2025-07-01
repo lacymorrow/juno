@@ -56,6 +56,7 @@ pub mod tools;
 pub mod tray_commands;
 pub mod ui_token_selection;
 pub mod window; // Debug commands for tool configuration diagnostics
+pub mod display;
 
 // Re-export commands for easy access in lib.rs
 pub use self::accessibility::{
@@ -265,3 +266,5 @@ pub async fn save_audio_settings_to_centralized_settings(
     tracing::info!("Saved audio settings from AppState to centralized settings");
     Ok(())
 }
+
+pub use self::display::{display_spawn, display_update, display_close};

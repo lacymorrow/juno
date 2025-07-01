@@ -5,6 +5,8 @@ use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers as ShortcutModifiers, Shortcut}; // Global shortcuts
 use tracing::{error, info, warn};
+use std::sync::Arc;
+use crate::commands::display::DisplayWindowManager;
 
 // Settings manager import
 use crate::settings::manager::SettingsManager;
@@ -228,6 +230,7 @@ use commands::{
     safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
+    display_spawn, display_update, display_close,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
@@ -419,6 +422,7 @@ pub fn run() {
         .manage(crate::commands::collaborative_ai_commands::initialize_collaborative_ai_state()) // Manage the Collaborative AI state
         .manage(initialize_visual_reasoning_state()) // Manage the Enhanced Visual Reasoning state
         .manage(commands::self_improvement::initialize_self_improvement_state()) // Manage the Self-Improvement state (development mode only)
+        .manage(Arc::new(DisplayWindowManager::default())) // Manage the DisplayWindowManager state
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
@@ -489,6 +493,9 @@ pub fn run() {
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
             capture_element_screenshot_command,
+            display_spawn,
+            display_update,
+            display_close,
             // Computer Use API - Official Anthropic Computer Use implementation
             computer,
             // Production element functions with debug capabilities
@@ -663,13 +670,13 @@ pub fn run() {
             toggle_autostart,
             // Floating Bar Commands
             floating_bar_click,
-                    floating_bar_focus_change,
-        floating_bar_input_blur,
-        floating_bar_input_change,
-        floating_bar_submit,
-        notify_query_submitted,
-        get_floating_bar_config,
-        set_floating_bar_config,
+            floating_bar_focus_change,
+            floating_bar_input_blur,
+            floating_bar_input_change,
+            floating_bar_submit,
+            notify_query_submitted,
+            get_floating_bar_config,
+            set_floating_bar_config,
             // Floating Panel Commands
             set_floating_panel_click_through,
             enable_floating_panel_click_through,

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Display Window</title>
+  <style>
+    html, body, #root {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #111;
+      color: #eee;
+      font-family: system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #content {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    img {
+      max-width: 100%;
+      max-height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">Loading…</div>
+
+  <script type="module">
+    import { listen } from "@tauri-apps/api/event";
+
+    const content = document.getElementById('content');
+
+    function render(payload) {
+      const { kind, payload: data } = payload;
+      content.innerHTML = '';
+      if (kind === 'image') {
+        const img = new Image();
+        img.src = typeof data === 'string' ? data : data.src;
+        content.appendChild(img);
+      } else if (kind === 'html') {
+        content.innerHTML = data;
+      } else if (kind === 'url') {
+        const iframe = document.createElement('iframe');
+        iframe.style.border = 'none';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.src = typeof data === 'string' ? data : data.url;
+        content.appendChild(iframe);
+      } else if (kind === 'widget') {
+        content.textContent = JSON.stringify(data);
+        // TODO: implement widget rendering (future)
+      }
+    }
+
+    // Initial payload
+    listen('display://init', (event) => {
+      render(event.payload);
+    });
+
+    // Updates
+    listen('display://update', (event) => {
+      render(event.payload);
+    });
+  </script>
+</body>
+</html>

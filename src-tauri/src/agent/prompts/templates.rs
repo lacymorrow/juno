@@ -1218,6 +1218,39 @@ Here's how to fix it:
 - ✅ **Clear completion**: Always indicate when a task is finished
 - ✅ **Helpful errors**: Turn problems into learning opportunities"#
     }
+
+    /// 🖥️ **DISPLAY OUTPUT GUIDELINES** - Creating visual windows
+    pub fn display_guidelines() -> &'static str {
+        r#"🖥️ **DISPLAY OUTPUT GUIDELINES** - VISUAL WINDOWS & WIDGETS
+
+**PURPOSE**: Allow the agent to spawn, update, and close lightweight display windows (images, widgets, HTML, external URLs) that supplement the spoken/chat response.
+
+**DECLARATIVE MARKUP** – Use `<DISPLAY>` blocks inside the assistant reply:
+```xml
+<DISPLAY id="weather_sf" kind="widget" title="SF Weather" pos="1280,40" size="320,380">
+  {"widget":"weather","location":"San Francisco, CA"}
+</DISPLAY>
+```
+• `id`   – unique handle used for later updates or closure (required)
+• `kind` – one of `image | widget | html | url` (required)
+• Optional `title`, `pos="x,y"`, `size="w,h"`, `autoUpdate="ms"` attributes
+• The inner content is the payload (JSON for widget, raw HTML, URL string, or image src / base64)
+
+**IMPERATIVE TOOL CALLS** – For dynamic control use these tools (they can be batched):
+1. `display_spawn`  – create a new window
+2. `display_update` – update existing window
+3. `display_close`  – close the window
+
+Always include `id` so the frontend can match follow-up calls.
+
+**BEST PRACTICES**:
+- Keep spoken content in `<TTS>` concise; detailed visuals belong in `<DISPLAY>`.
+- Multiple display blocks per message are allowed.
+- Re-use the same `id` when updating instead of spawning duplicates.
+- Don't embed dangerous HTML/JS. Only safe, sanitized content is allowed.
+- Close windows when they are no longer needed to avoid clutter.
+"#
+    }
 }
 
 /// Default prompt templates for the system
@@ -1255,6 +1288,7 @@ impl DefaultPrompts {
             PromptFragments::response_prefilling_patterns(),
             PromptFragments::tts_speech_format(),
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::display_guidelines(),
             PromptFragments::official_computer_use_api(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::native_accessibility_tools(),
@@ -1286,6 +1320,7 @@ impl DefaultPrompts {
             PromptFragments::response_prefilling_patterns(),
             PromptFragments::tts_speech_format(),
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::display_guidelines(),
             PromptFragments::official_computer_use_api(),
             PromptFragments::development_awareness(),
             PromptFragments::accessibility_first_strategy(),
@@ -1487,6 +1522,7 @@ For complex desktop tasks, think through your approach:
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::native_accessibility_tools(),
             PromptFragments::tool_batching_optimization(),
+            PromptFragments::display_guidelines(),
             PromptFragments::official_computer_use_api(),
             PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
