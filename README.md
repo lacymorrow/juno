@@ -392,3 +392,51 @@ Built with:
 ---
 
 **Juno represents the cutting edge of AI-computer interaction**, with sophisticated batching algorithms that optimize performance while maintaining the flexibility and safety required for autonomous computer use. The MCP request batching system exemplifies how AI agents can be enhanced through intelligent operation grouping without sacrificing the reasoning capabilities that make them effective.
+
+## Development Features
+
+### Debug Request Logging
+
+In development mode, Juno automatically saves every agent API request to files for debugging purposes:
+
+```bash
+# Enable debug mode
+RUST_LOG=debug bun run tauri dev
+
+# Debug files will be saved to:
+./debug/agent_request_TIMESTAMP.json
+```
+
+**What gets saved:**
+
+- Complete API request payload (unredacted)
+- Full conversation context and history
+- Tool definitions and capabilities
+- Message content and metadata
+- Timestamp and request details
+
+**Security notes:**
+
+- Only works in debug builds (`cfg(debug_assertions)`)
+- Debug directory is automatically gitignored
+- Contains sensitive data - handle carefully
+
+**Usage:**
+
+```bash
+# Check for debug files
+ls -la debug/
+
+# View saved request (requires jq)
+cat debug/agent_request_*.json | jq .
+
+# Test the feature
+./scripts/test-debug-logging.sh
+```
+
+This feature is perfect for:
+
+- Debugging context issues
+- Understanding what's sent to the AI
+- Analyzing conversation flow
+- Troubleshooting agent behavior

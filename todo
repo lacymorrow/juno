@@ -8,8 +8,9 @@ src-tauri/src/anthropic.rs
 
 src-tauri/src/agent/tool_logger.rs
 
-invoke("test_cloud_backend_connection"); // hard coded
+AGENT_IMPROVEMENT_ANALYSIS.md
 
+invoke("test_cloud_backend_connection"); // hard coded
 
 If an agent is asked to do multiple things in quick succession, we need to handle that.
 

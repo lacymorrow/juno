@@ -9,6 +9,9 @@ use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
+#[cfg(debug_assertions)]
+use chrono;
+
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
@@ -722,6 +725,40 @@ impl AnthropicBrain {
     }
 }
 
+/// Save API request to file for debugging in development mode only
+#[cfg(debug_assertions)]
+async fn save_debug_request(request: &AnthropicRequest) {
+    use std::fs;
+    use std::path::PathBuf;
+    use chrono::Utc;
+
+    // Create debug directory if it doesn't exist
+    let debug_dir = PathBuf::from("debug");
+    if let Err(e) = fs::create_dir_all(&debug_dir) {
+        log::warn!("Failed to create debug directory: {}", e);
+        return;
+    }
+
+    // Generate filename with timestamp
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
+    let filename = format!("agent_request_{}.json", timestamp);
+    let filepath = debug_dir.join(filename);
+
+    // Serialize the FULL request (unsanitized) for debugging
+    match serde_json::to_string_pretty(request) {
+        Ok(json_string) => {
+            if let Err(e) = fs::write(&filepath, json_string) {
+                log::warn!("Failed to write debug request to {}: {}", filepath.display(), e);
+            } else {
+                log::info!("💾 Debug request saved to: {}", filepath.display());
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to serialize request for debug saving: {}", e);
+        }
+    }
+}
+
 #[async_trait]
 impl AgentBrain for AnthropicBrain {
     async fn decide_next_action(
@@ -966,6 +1003,12 @@ impl AgentBrain for AnthropicBrain {
             Err(e) => log::error!("Failed to serialize request payload for logging: {}", e),
         }
         // -- END DEBUG --
+
+        // -- DEVELOPMENT MODE: Save full request for debugging --
+        #[cfg(debug_assertions)]
+        {
+            save_debug_request(&request_payload).await;
+        }
 
         // --- 2. Make API Call ---
         log::debug!(
