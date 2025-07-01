@@ -211,7 +211,7 @@ impl Orchestrator {
                 if result.success {
                     Ok(format!(
                         "Task completed successfully: {}",
-                        result.output.as_str().unwrap_or("No output")
+                        result.output.to_string()
                     ))
                 } else {
                     Ok(format!(
@@ -658,7 +658,7 @@ impl Orchestrator {
             response.push_str(&format!(
                 "Task {}: {}\n",
                 i + 1,
-                result.output.as_str().unwrap_or("No output")
+                result.output.to_string()
             ));
         }
 
