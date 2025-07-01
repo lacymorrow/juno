@@ -1,11 +1,5 @@
 /// <reference types="node" />
 
-// Temporary declaration so TS doesn't error when node types are unavailable
-// Remove once @types/node is added to the project
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-declare const process: { env: Record<string, string | undefined> };
-
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
