@@ -184,12 +184,9 @@ impl CloudClient {
                     let heartbeat = WebSocketMessage {
                         message_type: MessageType::Heartbeat,
                         data: serde_json::json!({
-                            "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+                            "timestamp": current_timestamp()
                         }),
-                        timestamp: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
+                        timestamp: current_timestamp(),
                     };
 
                     if let Ok(message_json) = serde_json::to_string(&heartbeat) {
@@ -221,10 +218,7 @@ impl CloudClient {
                         let status_message = WebSocketMessage {
                             message_type: MessageType::Status,
                             data: serde_json::to_value(status).unwrap_or_default(),
-                            timestamp: SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
+                            timestamp: current_timestamp(),
                         };
 
                         if let Ok(message_json) = serde_json::to_string(&status_message) {
@@ -305,10 +299,7 @@ impl CloudClient {
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         let message_json = serde_json::to_string(&auth_message)?;
@@ -350,13 +341,10 @@ impl CloudClient {
                 let response = WebSocketMessage {
                     message_type: MessageType::Heartbeat,
                     data: serde_json::json!({
-                        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        "timestamp": current_timestamp(),
                         "response": true
                     }),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: current_timestamp(),
                 };
 
                 let response_json = serde_json::to_string(&response)?;
@@ -403,10 +391,7 @@ impl CloudClient {
         let response_message = WebSocketMessage {
             message_type: MessageType::Response,
             data: serde_json::to_value(response)?,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         let response_json = serde_json::to_string(&response_message)?;
@@ -467,10 +452,7 @@ impl CloudClient {
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         Ok(status)
@@ -829,10 +811,18 @@ impl CloudClientTask {
                 capabilities: vec![],
                 hardware_info: None,
             },
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         })
     }
+}
+
+/// Return seconds since UNIX_EPOCH, falling back to 0 on clock errors instead of panicking.
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|e| {
+            tracing::error!("🕒 SystemTime error: {:?}. Defaulting timestamp to 0", e);
+            Duration::from_secs(0)
+        })
+        .as_secs()
 }
