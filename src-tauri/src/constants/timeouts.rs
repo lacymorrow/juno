@@ -86,10 +86,6 @@ pub const VISUAL_TEMPORAL_CONTEXT_SECONDS: u64 = 30;
 pub const COLLABORATIVE_AI_KNOWLEDGE_RETRIEVAL_SECONDS: u64 = 30;
 pub const COLLABORATIVE_AI_COORDINATION_SECONDS: u64 = 60;
 
-// Legacy millisecond timeouts (for backward compatibility)
-pub const STANDARD_TIMEOUT_MS: u64 = 10000;
-pub const BROWSER_TIMEOUT_MS: u64 = 30000;
-
 // Monitor intervals
 pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
 pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
