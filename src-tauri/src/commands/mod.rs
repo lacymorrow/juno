@@ -54,6 +54,7 @@ pub mod text_editor;
 pub mod tool_choice;
 pub mod tools;
 pub mod tray_commands;
+pub mod ui_commands; // Consolidated UI API for all floating elements
 pub mod ui_token_selection;
 pub mod window; // Debug commands for tool configuration diagnostics
 
@@ -100,6 +101,7 @@ pub use self::floating_bar::{
     handle_tts_finished, handle_tts_started, initialize_bar_manager, set_floating_bar_config,
 };
 pub use self::floating_panel::*;
+pub use self::ui_commands::*; // Re-export consolidated UI API commands
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;

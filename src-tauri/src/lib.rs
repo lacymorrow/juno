@@ -231,7 +231,7 @@ use commands::{
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
     error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
-    ui_token_selection::*, window::*,
+    ui_commands::*, ui_token_selection::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -677,6 +677,18 @@ pub fn run() {
             get_floating_panel_state,
             position_floating_panel_properly,
             set_floating_panel_level,
+            // Consolidated UI API Commands
+            ui_get_state,
+            ui_set_state,
+            ui_get_config,
+            ui_set_config,
+            ui_handle_interaction,
+            ui_resize_window,
+            ui_move_window,
+            ui_set_click_through,
+            ui_show_window,
+            ui_hide_window,
+            ui_set_window_level,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,

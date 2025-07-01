@@ -27,6 +27,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         orchestrator_result,
         cloud_result,
         floating_bar_result,
+        ui_manager_result,
         monitoring_result,
     ) = tokio::join!(
         initialize_environment_state(app_handle.clone()),
@@ -37,6 +38,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         initialize_orchestrator_state(app_handle.clone()),
         initialize_cloud_state(app_handle.clone()),
         initialize_floating_bar_state(app_handle.clone()),
+        initialize_ui_manager_state(app_handle.clone()),
         initialize_monitoring_state(app_handle.clone()),
     );
 
@@ -66,6 +68,9 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     if let Err(e) = floating_bar_result {
         errors.push(format!("Floating Bar: {}", e));
+    }
+    if let Err(e) = ui_manager_result {
+        errors.push(format!("UI Manager: {}", e));
     }
     if let Err(e) = monitoring_result {
         errors.push(format!("Monitoring: {}", e));
@@ -332,6 +337,17 @@ async fn initialize_floating_bar_state(app_handle: AppHandle) -> Result<(), Stri
 
     crate::commands::floating_bar::initialize_bar_manager(app_handle.clone()).await;
     info!("Floating bar manager initialized successfully");
+
+    Ok(())
+}
+
+/// Initialize UI Manager for consolidated floating UI elements
+async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String> {
+    info!("[State] Initializing UI Manager for consolidated floating elements...");
+
+    // Initialize the global UI manager for all floating UI elements
+    crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await;
+    info!("✅ UI Manager initialized successfully");
 
     Ok(())
 }
