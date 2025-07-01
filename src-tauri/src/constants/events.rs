@@ -50,9 +50,6 @@ pub mod dictation {
     pub const TRANSCRIPTION_CANCEL: &str = "dictation-cancel";
     pub const TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
     pub const TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
-
-    // Legacy/backward compatibility events
-    pub const STOPPED: &str = "app-dictation-stopped";
 }
 
 /// Voice transcription events (from plugin)
