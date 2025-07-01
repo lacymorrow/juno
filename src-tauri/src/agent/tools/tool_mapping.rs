@@ -12,12 +12,12 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
 
     // Anthropic Computer Use tools
     map.insert(tool_names::SCREENSHOT, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::CLICK, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::LEFT_CLICK, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::TYPE, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::KEY, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::SCROLL, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::DRAG, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::MOVE, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::LEFT_CLICK_DRAG, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::MOUSE_MOVE, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::COMPUTER, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::BASH, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::STR_REPLACE_BASED_EDIT_TOOL, ToolCategory::AnthropicComputerUse);

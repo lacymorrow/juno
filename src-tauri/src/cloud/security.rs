@@ -97,10 +97,7 @@ impl CloudSecurity {
 
     /// Validate command timestamp with permissive approach
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = safe_timestamp();
 
         let time_diff = if now > timestamp {
             now - timestamp
@@ -268,10 +265,7 @@ impl CloudSecurity {
     /// Create audit log entry
     pub fn create_audit_log(&self, command: &CloudCommand, result: &Result<(), CloudError>) -> AuditLogEntry {
         AuditLogEntry {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: safe_timestamp(),
             command_id: command.id.clone(),
             command_type: self.command_type_to_string(&command.command_type),
             device_id: self.auth.get_credentials()
@@ -318,4 +312,12 @@ pub struct RateLimit {
     pub max_requests: u32,
     pub time_window_seconds: u64,
     pub burst_allowance: Option<u32>,
+}
+
+/// Return unix timestamp in seconds, defaulting to 0 if clock is before epoch.
+fn safe_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
