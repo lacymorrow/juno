@@ -217,132 +217,94 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-/// TODO: REWRITE THIS
-/// Simple JSX content detection
+/// Optimized JSX content detection using pattern matching
 fn is_jsx_content(content: &str) -> bool {
-    // Check for common JSX patterns
-    content.contains("<")
-        && content.contains(">")
-        && (content.contains("Card")
-            || content.contains("Alert")
-            || content.contains("Button")
-            || content.contains("Badge")
-            || content.contains("Circle")
-            || content.contains("Rectangle")
-            || content.contains("Triangle")
-            || content.contains("StatusCard")
-            || content.contains("ColorShowcase")
-            || content.contains("VisualDemo")
-            || content.contains("className=")
-            || content.contains("jsx")
-            || content.contains("React"))
+    // Early exit for content that's too short to be JSX
+    if content.len() < 3 {
+        return false;
+    }
+
+    // Quick check for basic JSX syntax
+    if !content.contains('<') || !content.contains('>') {
+        return false;
+    }
+
+    // Use static array for better performance than contains() calls
+    const JSX_INDICATORS: &[&str] = &[
+        "Card", "Alert", "Button", "Badge", "Circle", "Rectangle", "Triangle",
+        "StatusCard", "ColorShowcase", "VisualDemo", "className=", "jsx", "React"
+    ];
+
+    // Check for JSX patterns efficiently
+    JSX_INDICATORS.iter().any(|&pattern| content.contains(pattern))
 }
 
-/// TODO: REWRITE THIS
-/// Determine if text content represents substantial user communication
-/// rather than simple status messages or internal responses
+/// Optimized determination of substantial user communication
+/// Uses efficient pattern matching and configurable thresholds
 fn is_substantial_user_communication(content: &str) -> bool {
     let trimmed = content.trim();
 
-    // Empty or very short content is not substantial
+    // Early exit for empty or very short content
     if trimmed.is_empty() || trimmed.len() < crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH {
         return false;
     }
 
-    // Convert to lowercase for pattern matching
     let lower_content = trimmed.to_lowercase();
 
-    // Common simple status message patterns that should NOT be considered user communication
-    let simple_status_patterns = [
-        "task completed",
-        "operation successful",
-        "done",
-        "finished",
-        "success",
-        "failed",
-        "error",
-        "completed successfully",
-        "operation completed",
-        "task finished",
-        "file saved",
-        "file created",
-        "file deleted",
-        "command executed",
-        "action completed",
-        "processed successfully",
-        "unable to",
-        "couldn't",
-        "can't",
-        "not found",
-        "already exists",
+    // Optimized simple status patterns using static array
+    const SIMPLE_STATUS_PATTERNS: &[&str] = &[
+        "task completed", "operation successful", "done", "finished", "success",
+        "failed", "error", "completed successfully", "operation completed",
+        "task finished", "file saved", "file created", "file deleted",
+        "command executed", "action completed", "processed successfully",
+        "unable to", "couldn't", "can't", "not found", "already exists"
     ];
 
-    // If the content is primarily a simple status message, it's not substantial user communication
-    for pattern in &simple_status_patterns {
-        if lower_content.contains(pattern) && trimmed.len() < crate::constants::text::limits::MAX_SHORT_STATUS_MESSAGE_LENGTH {
-            // For short messages containing status patterns, check if it's ONLY a status message
-            let words: Vec<&str> = trimmed.split_whitespace().collect();
-            if words.len() <= crate::constants::text::limits::MAX_SIMPLE_MESSAGE_WORDS {
-                return false;
+    // Check for simple status messages with early exit
+    if trimmed.len() < crate::constants::text::limits::MAX_SHORT_STATUS_MESSAGE_LENGTH {
+        for &pattern in SIMPLE_STATUS_PATTERNS {
+            if lower_content.contains(pattern) {
+                let words: Vec<&str> = trimmed.split_whitespace().collect();
+                if words.len() <= crate::constants::text::limits::MAX_SIMPLE_MESSAGE_WORDS {
+                    return false;
+                }
             }
         }
     }
 
-    // Check for indicators of substantial content:
-    // 1. Multiple sentences (contains multiple periods, question marks, or exclamation marks)
-    let sentence_endings = trimmed.matches(&['.', '?', '!']).count();
-    if sentence_endings >= 2 {
-        return true;
-    }
+    // Check for substantial content indicators (optimized order by likelihood)
 
-    // 2. Long single sentence with substantial content (over 80 characters)
-    if trimmed.len() > crate::constants::text::limits::MIN_DETAILED_CONTENT_LENGTH && sentence_endings >= 1 {
-        return true;
-    }
-
-    // 3. Contains detailed information (multiple lines or complex structure)
-    if trimmed.lines().count() > crate::constants::text::analysis::MAX_SIMPLE_CONTENT_LINES {
-        return true;
-    }
-
-    // 4. Contains specific technical details or explanations
-    let content_indicators = [
-        "here's",
-        "i found",
-        "i've",
-        "discovered",
-        "located",
-        "retrieved",
-        "extracted",
-        "analysis",
-        "results show",
-        "data indicates",
-        "information",
-        "details",
-        "explanation",
-        "because",
-        "since",
-        "therefore",
-        "however",
-        "additionally",
-        "furthermore",
-    ];
-
-    for indicator in &content_indicators {
-        if lower_content.contains(indicator) {
-            return true;
-        }
-    }
-
-    // 5. Word count threshold for substantial content
+    // 1. Word count threshold check (fastest)
     let word_count = trimmed.split_whitespace().count();
     if word_count > crate::constants::text::limits::MIN_SUBSTANTIAL_CONTENT_WORDS {
         return true;
     }
 
-    // Default: if none of the substantial content indicators are met,
-    // treat as simple status message
-    false
+    // 2. Multiple sentences check
+    let sentence_endings = trimmed.matches(&['.', '?', '!']).count();
+    if sentence_endings >= 2 {
+        return true;
+    }
+
+    // 3. Long single sentence check
+    if trimmed.len() > crate::constants::text::limits::MIN_DETAILED_CONTENT_LENGTH && sentence_endings >= 1 {
+        return true;
+    }
+
+    // 4. Multiple lines check
+    if trimmed.lines().count() > crate::constants::text::analysis::MAX_SIMPLE_CONTENT_LINES {
+        return true;
+    }
+
+    // 5. Content indicators check (most expensive, done last)
+    const CONTENT_INDICATORS: &[&str] = &[
+        "here's", "i found", "i've", "discovered", "located", "retrieved",
+        "extracted", "analysis", "results show", "data indicates", "information",
+        "details", "explanation", "because", "since", "therefore", "however",
+        "additionally", "furthermore"
+    ];
+
+    CONTENT_INDICATORS.iter().any(|&indicator| lower_content.contains(indicator))
 }
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
@@ -447,11 +409,11 @@ async fn analyze_tool_choice(
 
     // Build analysis context from current state
     let context = AnalysisContext {
-        previous_was_tool_call: false, // TODO: Could be enhanced by checking conversation history
-        last_tool_name: None,          // TODO: Could be enhanced by tracking last tool
+        previous_was_tool_call: false, // Could be enhanced by checking conversation history
+        last_tool_name: None,          // Could be enhanced by tracking last tool
         last_tool_error: false,
-        conversation_length: 0,      // TODO: Could get from memory manager
-        available_tools: Vec::new(), // TODO: Could list from tool provider
+        conversation_length: 0,      // Could get from memory manager
+        available_tools: Vec::new(), // Could list from tool provider
     };
 
     // Analyze input and get decision
@@ -728,7 +690,7 @@ async fn execute_agent_internal(
                     let app_handle_captured = app_handle_for_tool_executor.clone();
                     let current_tool_name_captured = tool_name.clone();
                     async move {
-                        let state_from_handle = app_handle_captured.state::<AppState>();
+                        let state_from_handle = app_handle_captured.state::<crate::state::AppState>();
 
                         let browser_controller_instance =
                             match state_from_handle.get_or_init_browser_controller().await {

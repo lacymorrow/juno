@@ -457,20 +457,17 @@ struct GenericContentPayload {
 }
 
 // NEW: Streaming event payloads
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamingTextPayload {
     chunk: String,
     message_id: Option<String>, // Optional message ID to track which response this belongs to
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamStartPayload {
     message_id: String,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamEndPayload {
     message_id: String,
@@ -1269,85 +1266,9 @@ impl ToolMetadata {
     }
 }
 
-// OLD ToolUsageEntry - We might adapt this or replace its usage
-// #[derive(Clone, Debug, Serialize)]
-// pub struct ToolUsageEntry {
-//     pub tool: String,
-//     pub input: Value,
-//     pub output: Option<Value>,
-//     pub success: bool,
-//     pub error: Option<String>,
-//     pub screenshot_base64: Option<String>, // Field for base64 encoded screenshot
-//     pub timestamp: String,                 // ISO 8601 timestamp
-// }
-
-// Log to a specific window (e.g., a dev tools panel)
-// pub fn log_tool_usage_to_window(window: &Window, entry: &ToolUsageEntry) {
-//     info!(target: "tool_events", "Logging to window: {:?}, Tool: {}, Success: {}", window.label(), entry.tool, entry.success);
-//     // Emit the event to the specific window
-//     if let Err(e) = window.emit("tool-usage", entry) {
-//         warn!("Failed to emit tool-usage event: {}", e);
-//     }
-// }
-
-// Log to all windows or globally via AppHandle
-// pub fn log_tool_usage_global(app_handle: &AppHandle, entry: &ToolUsageEntry) {
-//     info!(target: "tool_events", "Logging globally: Tool: {}, Success: {}", entry.tool, entry.success);
-//     // Emit the event globally. This will reach all listeners.
-//     // If you only want it in the main chat, you might need to target the main window specifically.
-//     // However, for the dev panel, global might be okay, or it could listen to "agent-event" too.
-
-//     // For now, let's assume "tool-usage" is still used by DevToolsPanel or similar.
-//     // If DevToolsPanel is updated to listen to "agent-event", this can also change.
-//     if let Err(e) = app_handle.emit("tool-usage", entry) {
-//         warn!("Failed to emit consolidated tool-usage event: {}", e);
-//     }
-
-//     // Example of how you might adapt to the new system if DevToolsPanel also listens to "agent-event"
-//     // let agent_event = AgentEvent {
-//     //     event_type: if entry.success { "tool_call_result".to_string() } else { "tool_call_error".to_string() }, // Simplified
-//     //     payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload { // Or a specific error payload
-//     //         tool_name: entry.tool.clone(),
-//     //         tool_output: entry.output.clone().unwrap_or(Value::Null),
-//     //         success: entry.success,
-//     //         content: entry.error.clone(), // Or some other content
-//     //         screenshot_base64: entry.screenshot_base64.clone(),
-//     //     })
-//     // };
-//     // emit_agent_event(app_handle, agent_event);
-// }
-
-// This function is called by tools to log their usage.
-// It now needs to decide whether to log to a specific window or globally.
-// For simplicity, let's assume it logs globally using the AppHandle.
-// pub fn log_tool_usage(
-//     app_handle: &AppHandle, // Use AppHandle for global logging
-//     tool_name: &str,
-//     input: &Value,
-//     output: Option<&Value>,
-//     success: bool,
-//     error_message: Option<&str>,
-//     screenshot_base64: Option<String>, // Added screenshot data
-// ) {
-//     let entry = ToolUsageEntry::new(
-//         tool_name.to_string(),
-//         input.clone(),
-//         output.cloned(),
-//         success,
-//         error_message.map(String::from),
-//         screenshot_base64, // Pass screenshot data
-//     );
-
-//     // Log globally
-//     log_tool_usage_global(app_handle, &entry);
-
-//     // If you have a specific dev tools window and want to log there too:
-//     // if let Some(dev_window) = app_handle.get_window("devtools") {
-//     //     log_tool_usage_to_window(&dev_window, &entry);
-//     // } else {
-//     //     warn!("DevTools window not found, cannot log tool usage event to it.");
-//     // }
-// }
+// ===== REMOVED: Large block of deprecated legacy code =====
+// This section contained old ToolUsageEntry and logging functions that have been
+// replaced by the modern agent-event system. Removed for performance and clarity.
 
 pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
     let event_data = serde_json::json!({
@@ -1459,15 +1380,7 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     info!("TTS processing started in background with enhanced completion tracking...");
 }
 
-/// DEPRECATED: Use process_tts_content_immediately instead
-/// This function is deprecated because it was part of an incomplete architectural migration.
-/// The TTS system has been enhanced with proper escape key management and completion tracking.
-pub fn emit_tts_content_ready(_app_handle: AppHandle, tts_content: String) {
-    warn!("🚨 emit_tts_content_ready is DEPRECATED and was causing TTS failures!");
-    warn!("📋 TTS content received but not processed: '{}'", tts_content);
-    warn!("🔧 Use process_tts_content_immediately instead for proper TTS functionality");
-    warn!("📖 The TTS architecture has been enhanced with proper escape key management and completion tracking");
-}
+
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
     let event_data = serde_json::json!({

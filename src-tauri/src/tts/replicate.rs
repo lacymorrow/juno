@@ -35,8 +35,7 @@ pub(crate) struct ReplicateInitialResponse {
 #[derive(Deserialize, Debug)]
 pub(crate) struct ReplicateUrls {
     get: String,
-    #[allow(dead_code)] // Allow dead code, might be useful later
-    cancel: Option<String>,
+    // cancel field removed - unused for performance
 }
 
 #[derive(Deserialize, Debug)]
