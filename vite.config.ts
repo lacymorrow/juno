@@ -3,17 +3,28 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig } from "vite";
+import { defineConfig, type UserConfig } from "vite";
 import { PORTS } from "./src/lib/constants.generated";
 
-const host = process.env.TAURI_DEV_HOST;
+const host: string | undefined = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(async (): Promise<UserConfig> => ({
 	plugins: [react(), tailwindcss()],
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
+		},
+	},
+
+	// Strip console.* and debugger statements from production builds
+	build: {
+		minify: "terser",
+		terserOptions: {
+			compress: {
+				drop_console: true,
+				drop_debugger: true,
+			},
 		},
 	},
 
