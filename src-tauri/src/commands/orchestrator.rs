@@ -633,7 +633,7 @@ pub async fn execute_mcp_task(
     let mcp_manager = get_mcp_manager()?;
 
     match mcp_manager.execute_tool(&tool_name, input, call_id).await {
-        Ok(result) => Ok(result.output.to_string()),
+        Ok(result) => Ok(crate::agents::base_agent::format_task_output(&result.output)),
         Err(e) => Err(format!("MCP tool execution failed: {}", e)),
     }
 }
@@ -912,7 +912,7 @@ pub async fn execute_intelligent_parallel_tasks(
         Ok(results) => {
             let outputs: Vec<String> = results
                 .into_iter()
-                .map(|r| r.output.to_string())
+                .map(|r| crate::agents::base_agent::format_task_output(&r.output))
                 .collect();
             Ok(outputs)
         }
