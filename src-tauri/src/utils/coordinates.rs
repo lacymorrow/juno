@@ -17,14 +17,7 @@ pub static SCREENSHOT_SCALE: Lazy<RwLock<ScalingInfo>> = Lazy::new(|| {
         display_to_standard_scale_y: 1.0,
         screenshot_to_standard_scale_x: 1.0,
         screenshot_to_standard_scale_y: 1.0,
-        // Legacy fields for backward compatibility
-        original_width: 0,
-        original_height: 0,
-        scaled_width: 0,
-        scaled_height: 0,
-        scale_factor_x: 1.0,
-        scale_factor_y: 1.0,
-        scale_factor: 1.0,
+        // Removed legacy fields
         display_origin_x: 0.0,
         display_origin_y: 0.0,
         display_id: None,
@@ -51,15 +44,6 @@ pub struct ScalingInfo {
     pub display_origin_x: f64,
     pub display_origin_y: f64,
     pub display_id: Option<u32>, // Track which display the screenshot came from
-
-    // Legacy fields for backward compatibility
-    pub original_width: u32,
-    pub original_height: u32,
-    pub scaled_width: u32,
-    pub scaled_height: u32,
-    pub scale_factor_x: f32,
-    pub scale_factor_y: f32,
-    pub scale_factor: f32,
 }
 
 impl Default for ScalingInfo {
@@ -75,13 +59,6 @@ impl Default for ScalingInfo {
             display_to_standard_scale_y: 1.0,
             screenshot_to_standard_scale_x: 1.0,
             screenshot_to_standard_scale_y: 1.0,
-            original_width: 0,
-            original_height: 0,
-            scaled_width: 0,
-            scaled_height: 0,
-            scale_factor_x: 1.0,
-            scale_factor_y: 1.0,
-            scale_factor: 1.0,
             display_origin_x: 0.0,
             display_origin_y: 0.0,
             display_id: None,
@@ -155,21 +132,6 @@ pub fn update_standard_resolution_scaling(
         1.0
     };
 
-    // Calculate legacy scale factors for backward compatibility
-    let legacy_scale_x = if display_width > 0 {
-        screenshot_width as f32 / display_width as f32
-    } else {
-        1.0
-    };
-
-    let legacy_scale_y = if display_height > 0 {
-        screenshot_height as f32 / display_height as f32
-    } else {
-        1.0
-    };
-
-    let legacy_scale_factor = (legacy_scale_x * legacy_scale_y).sqrt();
-
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
         *scaling = ScalingInfo {
             display_width,
@@ -182,14 +144,6 @@ pub fn update_standard_resolution_scaling(
             display_to_standard_scale_y: safe_display_scale_y,
             screenshot_to_standard_scale_x: safe_screenshot_scale_x,
             screenshot_to_standard_scale_y: safe_screenshot_scale_y,
-            // Legacy fields for backward compatibility
-            original_width: display_width,
-            original_height: display_height,
-            scaled_width: standard_width,
-            scaled_height: standard_height,
-            scale_factor_x: safe_display_scale_x,
-            scale_factor_y: safe_display_scale_y,
-            scale_factor: legacy_scale_factor,
             display_origin_x: 0.0,
             display_origin_y: 0.0,
             display_id: None,
@@ -202,44 +156,6 @@ pub fn update_standard_resolution_scaling(
     } else {
         tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE");
     }
-}
-
-/// Updates the scaling information with separate X and Y scale factors (LEGACY)
-/// Maintained for backward compatibility
-pub fn update_scaling_info_with_separate_factors(
-    original_width: u32,
-    original_height: u32,
-    scaled_width: u32,
-    scaled_height: u32,
-    scale_factor_x: f32,
-    scale_factor_y: f32,
-) {
-    // For legacy compatibility, treat this as display->screenshot scaling
-    // and derive standard resolution scaling from it
-    update_standard_resolution_scaling(
-        original_width,
-        original_height,
-        scaled_width,
-        scaled_height,
-    );
-}
-
-/// Updates the scaling information when a screenshot is processed (LEGACY)
-/// Maintained for backward compatibility
-pub fn update_scaling_info(
-    original_width: u32,
-    original_height: u32,
-    scaled_width: u32,
-    scaled_height: u32,
-    scale_factor: f32
-) {
-    // For legacy compatibility, treat this as display->screenshot scaling
-    update_standard_resolution_scaling(
-        original_width,
-        original_height,
-        scaled_width,
-        scaled_height,
-    );
 }
 
 /// NEW: Updates scaling information with display origin for multi-monitor support
@@ -311,21 +227,6 @@ pub fn update_standard_resolution_scaling_with_display(
         1.0
     };
 
-    // Calculate legacy scale factors for backward compatibility
-    let legacy_scale_x = if display_width > 0 {
-        screenshot_width as f32 / display_width as f32
-    } else {
-        1.0
-    };
-
-    let legacy_scale_y = if display_height > 0 {
-        screenshot_height as f32 / display_height as f32
-    } else {
-        1.0
-    };
-
-    let legacy_scale_factor = (legacy_scale_x * legacy_scale_y).sqrt();
-
     // Update scaling information with ALL values including display origin
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
         *scaling = ScalingInfo {
@@ -339,15 +240,6 @@ pub fn update_standard_resolution_scaling_with_display(
             display_to_standard_scale_y: safe_display_scale_y,
             screenshot_to_standard_scale_x: safe_screenshot_scale_x,
             screenshot_to_standard_scale_y: safe_screenshot_scale_y,
-            // Legacy fields for backward compatibility
-            original_width: display_width,
-            original_height: display_height,
-            scaled_width: standard_width,
-            scaled_height: standard_height,
-            scale_factor_x: safe_display_scale_x,
-            scale_factor_y: safe_display_scale_y,
-            scale_factor: legacy_scale_factor,
-            // CRITICAL: Preserve display origin for multi-monitor support
             display_origin_x,
             display_origin_y,
             display_id,
