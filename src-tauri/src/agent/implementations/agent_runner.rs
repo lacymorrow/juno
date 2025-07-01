@@ -590,7 +590,7 @@ where
             role: crate::agent::core::Role::Tool,
             content: match &tool_result {
                 Ok(result) => {
-                    result.output.as_str().unwrap_or("No output").to_string()
+                    result.output.to_string()
                 }
                 Err(e) => format!("Error: {}", e),
             },
