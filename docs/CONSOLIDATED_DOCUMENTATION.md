@@ -184,6 +184,81 @@ pub struct AdvancedMemoryManager {
 - ✅ Orphaned tool call cleanup
 - ✅ Real-time status monitoring
 
+### Debug Request Logging (Development Mode)
+
+**Feature**: Automatic saving of every agent API request to files for debugging purposes.
+
+**Location**: `src-tauri/src/agent/providers/anthropic.rs`
+
+**Implementation**:
+
+```rust
+#[cfg(debug_assertions)]
+async fn save_debug_request(request: &AnthropicRequest) {
+    // Creates debug/ directory automatically
+    // Saves complete, unsanitized request payload as pretty JSON
+    // Filename format: agent_request_YYYYMMDD_HHMMSS_mmm.json
+}
+```
+
+**Usage**:
+
+1. **Development Mode**: Run `RUST_LOG=debug bun run tauri dev` or `cargo run` in debug mode
+2. **Automatic**: Every API request is automatically saved to `debug/` directory
+3. **Complete Context**: Files contain full request payload including:
+   - All conversation messages and history
+   - System prompts and instructions
+   - Tool definitions and schemas
+   - Model configuration and token limits
+   - Request metadata and headers
+
+**File Structure**:
+
+```
+debug/
+├── agent_request_20250101_143022_123.json  # Timestamped requests
+├── agent_request_20250101_143045_456.json
+└── agent_request_20250101_143101_789.json
+```
+
+**Example Output**:
+
+```json
+{
+  "model": "claude-3-5-sonnet-20241022",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Take a screenshot"
+    }
+  ],
+  "tools": [
+    {
+      "name": "computer",
+      "description": "Use a computer to perform tasks...",
+      "input_schema": { ... }
+    }
+  ],
+  "system": "You are Claude, an AI assistant...",
+  "max_tokens": 4096,
+  "stream": true
+}
+```
+
+**Security**:
+
+- ✅ **Development Only**: Compiled out in production builds (`#[cfg(debug_assertions)]`)
+- ✅ **Git Ignored**: `debug/` directory automatically ignored via `.gitignore`
+- ✅ **No Sensitive Data**: API keys and tokens are not included in saved requests
+- ✅ **Local Storage**: Files saved locally only, never transmitted
+
+**Benefits**:
+
+- **Debugging**: See exactly what context is being sent to the AI
+- **Prompt Engineering**: Analyze conversation flow and tool usage patterns
+- **Performance**: Identify large requests that might cause timeouts
+- **Development**: Understand agent decision-making process
+
 ---
 
 ## 🔒 Security Framework
@@ -596,6 +671,77 @@ bun run test
 - **Cloud Test Panel**: WebSocket debugging and cloud testing
 - **Voice Debugging**: Audio pipeline diagnostics and testing
 - **Performance Monitoring**: Real-time resource usage tracking
+
+### Debug Features
+
+#### Agent Request Logging (Development Mode Only)
+
+In development mode (`RUST_LOG=debug` or debug build), every agent API request is automatically saved to a file for debugging purposes. This feature helps developers see exactly what context is being sent to the agent.
+
+**Features:**
+
+- **Automatic Activation**: Only enabled in development mode (`cfg!(debug_assertions)`)
+- **Full Context Capture**: Saves the complete, unsanitized request payload including:
+  - All conversation messages
+  - System prompts
+  - Available tools and their definitions
+  - Model configuration
+  - Token limits
+- **Timestamped Files**: Each request is saved with a unique timestamp
+- **JSON Format**: Pretty-printed JSON for easy reading
+
+**File Location:**
+
+```
+debug/agent_request_YYYYMMDD_HHMMSS_mmm.json
+```
+
+**Example Output:**
+
+```json
+{
+  "model": "claude-3-5-sonnet-20241022",
+  "messages": [
+    {
+      "role": "user",
+      "content": {
+        "Text": "Take a screenshot"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "computer",
+      "description": "Use a computer to interact with desktop applications...",
+      "input_schema": { ... }
+    }
+  ],
+  "system": "You are Claude, an AI assistant...",
+  "max_tokens": 4096,
+  "stream": true
+}
+```
+
+**Usage:**
+
+1. Start Juno in development mode: `RUST_LOG=debug bun run tauri dev`
+2. Trigger any agent interaction (voice, text, or UI)
+3. Check the `debug/` directory for request files
+4. Analyze the complete context being sent to the agent
+
+**Benefits:**
+
+- **Context Debugging**: See exactly what context the agent receives
+- **Prompt Engineering**: Understand how system prompts are constructed
+- **Tool Debugging**: Verify tool definitions and availability
+- **Performance Analysis**: Track request patterns and sizes
+
+**Security:**
+
+- Only active in development builds
+- Automatically disabled in production
+- Files are gitignored to prevent accidental commits
+- No sanitization - shows the real request data
 
 ---
 
