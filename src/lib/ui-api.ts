@@ -5,7 +5,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { LogicalSize, Window } from "@tauri-apps/api/window";
+
+import { useState, useEffect } from "react";
 
 // === Core UI Types ===
 
@@ -97,7 +98,7 @@ export class UIElementManager {
     private elementId: string;
     private elementType: UIElementType;
     private listeners: Map<string, UnlistenFn> = new Map();
-    private currentState: UIStateData | null = null;
+
 
     constructor(elementId: string, elementType: UIElementType) {
         this.elementId = elementId;
@@ -111,7 +112,7 @@ export class UIElementManager {
             const state = await invoke<UIStateData>("ui_get_state", {
                 elementId: this.elementId
             });
-            this.currentState = state;
+
             return state;
         } catch (error) {
             console.error(`Failed to get state for ${this.elementId}:`, error);
@@ -230,13 +231,10 @@ export class UIElementManager {
 
     async resizeWindow(width: number, height: number): Promise<boolean> {
         try {
-            await invoke("ui_handle_window", {
+            await invoke("ui_resize_window", {
                 elementId: this.elementId,
-                windowEvent: {
-                    type: "resize",
-                    elementId: this.elementId,
-                    data: { width, height }
-                }
+                width,
+                height
             });
             return true;
         } catch (error) {
@@ -247,13 +245,10 @@ export class UIElementManager {
 
     async moveWindow(x: number, y: number): Promise<boolean> {
         try {
-            await invoke("ui_handle_window", {
+            await invoke("ui_move_window", {
                 elementId: this.elementId,
-                windowEvent: {
-                    type: "move",
-                    elementId: this.elementId,
-                    data: { x, y }
-                }
+                x,
+                y
             });
             return true;
         } catch (error) {
@@ -264,9 +259,8 @@ export class UIElementManager {
 
     async showWindow(): Promise<boolean> {
         try {
-            await invoke("ui_handle_window", {
-                elementId: this.elementId,
-                windowEvent: { type: "show", elementId: this.elementId }
+            await invoke("ui_show_window", {
+                elementId: this.elementId
             });
             return true;
         } catch (error) {
@@ -277,9 +271,8 @@ export class UIElementManager {
 
     async hideWindow(): Promise<boolean> {
         try {
-            await invoke("ui_handle_window", {
-                elementId: this.elementId,
-                windowEvent: { type: "hide", elementId: this.elementId }
+            await invoke("ui_hide_window", {
+                elementId: this.elementId
             });
             return true;
         } catch (error) {
@@ -292,7 +285,7 @@ export class UIElementManager {
         try {
             await invoke("ui_set_click_through", {
                 elementId: this.elementId,
-                clickThrough: enabled
+                enabled
             });
             return true;
         } catch (error) {
@@ -319,7 +312,6 @@ export class UIElementManager {
     async onStateUpdate(callback: (state: UIStateData) => void): Promise<UnlistenFn> {
         const eventName = `ui-state-update-${this.elementId}`;
         const unlisten = await listen<UIEventPayload<UIStateData>>(eventName, (event) => {
-            this.currentState = event.payload.data;
             callback(event.payload.data);
         });
         this.listeners.set("state-update", unlisten);

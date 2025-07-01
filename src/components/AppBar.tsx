@@ -1,125 +1,157 @@
-import { cn } from "@/lib/utils";
-import { Window } from "@tauri-apps/api/window";
+import { useEffect, useState, useRef, useCallback, FormEvent } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  AlertCircle,
-  Brain,
-  Check,
-  Loader2,
   Mic,
-  MicOff,
-  Send,
-  Sparkles,
-  Type,
+  Zap,
   Volume2,
+  MessageCircle,
+  Keyboard,
+  Send,
+  AlertCircle,
+  Check,
   X,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
-import tauriConfig from "../../src-tauri/tauri.conf.json";
+import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
-import { useInvoke } from "@/hooks/useInvoke";
-import { useEventListener } from "@/hooks/useEventListener";
-import { useWindowSize } from "@/hooks/useWindowSize";
-import type {
-  BarState,
-  BarStateData,
-  FloatingBarConfig,
-  WindowConfig,
-} from "@/types/floating-bar";
-import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
+import type { BarState } from "@/types/floating-bar";
 
-// Get default window dimensions from tauri.conf.json
-const floatingBarConfig = tauriConfig.app.windows.find(
-  (window: WindowConfig) => window.label === "floating-bar"
-);
-const DEFAULT_WIDTH =
-  floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
-const DEFAULT_HEIGHT =
-  floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
-const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
-const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
+// === NEW UI API IMPORTS ===
+import { useUIElement, UIState, type AgentStatus } from "@/lib/ui-api";
 
-// Get main icon based on enhanced state
-const getMainIcon = (barState: BarState) => {
+// === STATE CONVERSION UTILITIES ===
+
+// Convert BarState to UI API UIState
+const convertBarStateToUIState = (barState: BarState): UIState => {
   switch (barState) {
     case "default":
-      return <Sparkles className="h-4 w-4 text-emerald-400" />;
-    case "dictation_ready":
-      return <MicOff className="h-4 w-4 text-muted-foreground" />;
-    case "dictating":
-      return <Type className="h-4 w-4 text-orange-500" />;
-    case "transcribing":
-      return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
-    case "listening":
-      return <Brain className="h-4 w-4 text-blue-500" />;
+      return "default";
+    case "expanding":
+      return "expanding";
+    case "input":
+      return "input";
     case "submitting":
-      return <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />;
+      return "submitting";
     case "loading":
-      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-    case "agent_responding":
-      return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
-    case "always-listening":
-      return <Mic className="h-4 w-4 text-blue-400" />;
+      return "loading";
     case "speaking":
-      return <Volume2 className="h-4 w-4 text-purple-500" />;
+      return "speaking";
+    case "listening":
+      return "listening";
+    case "transcribing":
+      return "transcribing";
     case "success":
-      return <Check className="h-4 w-4 text-emerald-500" />;
+      return "success";
     case "error":
-      return <AlertCircle className="h-4 w-4 text-red-500" />;
+      return "error";
+    case "finishing":
+      return "finishing";
+    case "dictation_ready":
+      return "dictation-ready";
+    case "always-listening":
+      return "always-listening";
     default:
-      return <Mic className="h-4 w-4 text-blue-500" />;
+      return "default";
   }
 };
 
-// Get enhanced status text for tooltip
-const getStatusText = (
-  barState: BarState,
-  currentError: string | null,
-  agentState?: string | null
-) => {
-  switch (barState) {
-    case "dictation_ready":
-      return "Hold Option+Space to start dictating";
-    case "dictating":
-      return "Dictating... Release key to finish";
-    case "transcribing":
-      return "Processing dictation...";
-    case "listening":
-      return "Listening for voice command...";
+// Convert UI API UIState back to BarState
+const convertUIStateToBarState = (uiState: UIState): BarState => {
+  switch (uiState) {
+    case "default":
+      return "default";
+    case "expanding":
+      return "expanding";
+    case "expanded":
+      return "input"; // Expanded maps to input for bars
+    case "input":
+      return "input";
     case "submitting":
-      return "Submitting query...";
+      return "submitting";
     case "loading":
-      return "AI is processing...";
-    case "agent_responding":
-      return "AI is responding...";
+      return "loading";
     case "speaking":
-      return "Playing AI response";
+      return "speaking";
+    case "listening":
+      return "listening";
+    case "transcribing":
+      return "transcribing";
     case "success":
-      // Check agent state to determine if it was actually successful
-      if (agentState === "Failed") {
-        return "Task failed";
-      } else if (agentState === "Cancelled") {
-        return "Task cancelled";
-      } else if (agentState === "Offline") {
-        return "Connection unavailable";
-      } else {
-        return "Task completed successfully";
-      }
+      return "success";
+    case "error":
+      return "error";
+    case "finishing":
+      return "finishing";
+    case "dictation-ready":
+      return "dictation_ready";
+    case "always-listening":
+      return "always-listening";
+    default:
+      return "default";
+  }
+};
+
+// === COMPONENT DEFINITION ===
+
+const getMainIcon = (barState: BarState) => {
+  switch (barState) {
+    case "listening":
+      return <Mic size={14} className="text-blue-400" />;
+    case "transcribing":
+      return <Mic size={14} className="animate-pulse text-blue-400" />;
+    case "speaking":
+      return <Volume2 size={14} className="text-green-400" />;
+    case "loading":
+    case "submitting":
+      return <Zap size={14} className="animate-pulse text-yellow-400" />;
+    case "input":
+    case "expanding":
+      return <MessageCircle size={14} className="text-white" />;
+    case "dictation_ready":
+      return <Keyboard size={14} className="text-orange-400" />;
+    case "always-listening":
+      return <Mic size={14} className="text-blue-400 animate-pulse" />;
+    default:
+      return <Zap size={14} className="text-white" />;
+  }
+};
+
+const getStatusText = (barState: BarState, currentError: string | null) => {
+  if (currentError) {
+    return `Error: ${currentError}`;
+  }
+
+  switch (barState) {
+    case "default":
+      return "Click to start or use voice commands";
+    case "expanding":
+      return "Preparing input field...";
+    case "input":
+      return "Type your request or use voice input";
+    case "submitting":
+      return "Sending your request...";
+    case "loading":
+      return "Processing your request...";
+    case "speaking":
+      return "Speaking response...";
+    case "listening":
+      return "Listening for your voice...";
+    case "transcribing":
+      return "Converting speech to text...";
+    case "success":
+      return "Task completed successfully!";
     case "error":
       return currentError || "An error occurred";
+    case "finishing":
+      return "Finalizing response...";
+    case "dictation_ready":
+      return "Ready for dictation mode";
     case "always-listening":
-      return "Always listening for wake words";
+      return "Always listening for wake words...";
     default:
-      return "Voice assistant ready";
+      return "Ready";
   }
 };
 
-// Audio level visualization component
 const AudioLevelIndicator = ({
   barState,
   audioLevel,
@@ -127,23 +159,21 @@ const AudioLevelIndicator = ({
   barState: BarState;
   audioLevel: number;
 }) => {
-  if (
-    !["dictating", "listening"].includes(barState)
-  )
+  if (!["listening", "transcribing", "always-listening"].includes(barState)) {
     return null;
+  }
+
+  const normalizedLevel = Math.min(Math.max(audioLevel * 100, 0), 100);
+  const barCount = Math.ceil(normalizedLevel / 20); // 5 bars max
 
   return (
-    <div
-      className="flex items-center gap-1 ml-2 cursor-move"
-      data-tauri-drag-region
-    >
+    <div className="flex items-center gap-0.5">
       {[...Array(5)].map((_, i) => (
         <div
           key={i}
-          data-tauri-drag-region
           className={cn(
-            "w-1 rounded-full transition-all duration-150",
-            audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
+            "w-0.5 h-2 rounded-full transition-all duration-100",
+            i < barCount ? "bg-blue-400" : "bg-white/20"
           )}
         />
       ))}
@@ -152,166 +182,97 @@ const AudioLevelIndicator = ({
 };
 
 export function AppBar() {
-  // Enhanced state management - mirrors backend state exactly
+  // === UI API INTEGRATION ===
+  const {
+    manager,
+    state,
+    config,
+    click,
+    focus,
+    blur,
+    input,
+    submit,
+    updateState,
+  } = useUIElement("floating-bar", "bar");
+
+  // === LOCAL STATE ===
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
-  const [lastSubmittedValue, setLastSubmittedValue] = useState("");
+  const [isWindowHovered] = useState(false);
+  const [isAnimatingSize] = useState(false);
+  const [showTooltip] = useState(false);
   const [currentError, setCurrentError] = useState<string | null>(null);
-  const [transcriptionText, setTranscriptionText] = useState("");
-  const [spokenText, setSpokenText] = useState("");
-  const [isAgentWorking, setIsAgentWorking] = useState(false);
-  const [isDictationMode, setIsDictationMode] = useState(false);
-  const [isAlwaysListening, setIsAlwaysListening] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">(
+
+  // Context-like state (would normally come from context)
+  const [voiceMode, setVoiceMode] = useState<"idle" | "agent" | "dictation">(
     "idle"
   );
-  const [agentState, setAgentState] = useState<string | null>(null);
-
-  const { invokeCommand } = useInvoke();
-  const { resizeWindow } = useWindowSize("floating-bar");
-
-  // UI state
-  const [isWindowHovered, setIsWindowHovered] = useState(false);
-  const [isAnimatingSize, setIsAnimatingSize] = useState(false);
-  // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [config, setConfig] = useState<FloatingBarConfig>({
-    showVoiceIndicator: true,
-    enableAnimations: true,
-    autoHide: false,
-    autoHideDelay: 3000,
-    opacity: 0.95,
-  });
+  const [isDictationMode, setIsDictationMode] = useState(false);
+  const [isAgentWorking, setIsAgentWorking] = useState(false);
+  const [isAlwaysListening, setIsAlwaysListening] = useState(false);
+  const [agentState, setAgentState] = useState<AgentStatus>("idle");
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
-  const resizeTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // Load configuration from backend
+  // === SYNC UI API STATE WITH LOCAL STATE ===
   useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const savedConfig = await invokeCommand<FloatingBarConfig>(
-          "get_floating_bar_config"
-        );
-        setConfig(savedConfig);
-      } catch (error) {
-        console.error("Failed to load floating bar config:", error);
-      }
-    };
-    loadConfig();
-  }, [invokeCommand]);
+    if (state) {
+      console.log("AppBar: Syncing UI API state:", state);
 
-  // Update window size based on bar state
-  useEffect(() => {
-    const isCompact = ["default"].includes(barState);
-
-    const targetSize = isCompact
-      ? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
-      : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
-
-    if (isCompact) {
-      // Clear any existing timeout
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
-
-      resizeTimeoutRef.current = setTimeout(() => {
-        resizeWindow(targetSize);
-      }, 1000);
-    } else {
-      resizeWindow(targetSize);
+      const newBarState = convertUIStateToBarState(state.uiState);
+      setBarState(newBarState);
+      setInputValue(state.inputValue);
+      setCurrentError(state.currentError);
+      setVoiceMode(state.voiceMode);
+      setIsDictationMode(state.isDictationMode);
+      setIsAgentWorking(state.isAgentWorking);
+      setIsAlwaysListening(state.isAlwaysListening);
+      setAgentState(state.agentState);
+      setAudioLevel(state.audioLevel);
     }
+  }, [state]);
 
-    // Cleanup function to clear timeout on unmount or re-run
-    return () => {
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
-    };
-  }, [barState, resizeWindow]);
-
-  // Handle animation state tracking
+  // === SYNC LOCAL STATE TO UI API ===
   useEffect(() => {
-    if (config.enableAnimations) {
-      setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
-    }
-  }, [barState, config.enableAnimations]);
-
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Listen for enhanced backend state updates
-  const handleBarStateUpdate = useCallback((data: BarStateData) => {
-    console.log("Received bar-state-update:", data);
-
-    // Update all state from backend
-    setBarState(data.barState);
-    setInputValue(data.inputValue);
-    setLastSubmittedValue(data.lastSubmittedValue);
-    setCurrentError(data.currentError);
-    setTranscriptionText(data.transcriptionText);
-    setSpokenText(data.spokenText);
-    setIsAgentWorking(data.isAgentWorking);
-    setIsDictationMode(data.isDictationMode);
-    setIsAlwaysListening(data.isAlwaysListening);
-    setAudioLevel(data.audioLevel || 0);
-    setVoiceMode(data.voiceMode || "idle");
-    setAgentState(data.agentState || null);
-
-    // Auto-focus input when in input state
-    if (data.barState === "input" && inputRef.current) {
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
+    if (manager) {
+      const uiState = convertBarStateToUIState(barState);
+      updateState({
+        uiState,
+        inputValue,
+        currentError,
+        voiceMode,
+        isDictationMode,
+        isAgentWorking,
+        isAlwaysListening,
+        agentState,
+        audioLevel,
       });
     }
-  }, []);
+  }, [
+    manager,
+    updateState,
+    barState,
+    inputValue,
+    currentError,
+    voiceMode,
+    isDictationMode,
+    isAgentWorking,
+    isAlwaysListening,
+    agentState,
+    audioLevel,
+  ]);
 
-  useEventListener("bar-state-update", handleBarStateUpdate);
+  // === CONFIG LOADING ===
+  // Note: State and config are automatically loaded by useUIElement hook
 
-  // Window hover handlers
-  const handleMouseEnter = useCallback(() => {
-    setIsWindowHovered(true);
-
-    if (barState === "default") {
-      setShowTooltip(true);
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setShowTooltip(false);
-      }, 2000);
-    }
-  }, [barState]);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsWindowHovered(false);
-    setShowTooltip(false);
-    if (tooltipTimeoutRef.current) {
-      clearTimeout(tooltipTimeoutRef.current);
-    }
-  }, []);
-
-  useEventListener("mouse-entered-window", handleMouseEnter, [barState]);
-  useEventListener("mouse-left-window", handleMouseLeave);
-
-  // Listen for window focus changes
+  // === FOCUS CHANGE HANDLER ===
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
       try {
-        const currentWindow = Window.getCurrent();
+        const currentWindow = getCurrentWindow();
         unlisten = await currentWindow.onFocusChanged(
           async ({ payload: isFocused }) => {
             console.log(
@@ -320,7 +281,9 @@ export function AppBar() {
               "Current bar state:",
               barState
             );
-            await invokeCommand("floating_bar_focus_change", { isFocused });
+            if (manager) {
+              await focus({ isFocused });
+            }
           }
         );
       } catch (error) {
@@ -334,23 +297,29 @@ export function AppBar() {
         unlisten();
       }
     };
-  }, [barState, invokeCommand]);
+  }, [manager, focus, barState]);
 
-  // Handler functions that call backend commands
+  // === HANDLER FUNCTIONS USING UI API ===
   const handleBarClick = useCallback(async () => {
-    await invokeCommand("floating_bar_click");
-  }, [invokeCommand]);
+    if (manager) {
+      await click();
+    }
+  }, [manager, click]);
 
   const handleInputBlur = useCallback(async () => {
-    await invokeCommand("floating_bar_input_blur");
-  }, [invokeCommand]);
+    if (manager) {
+      await blur();
+    }
+  }, [manager, blur]);
 
   const handleInputChange = useCallback(
     async (value: string) => {
       setInputValue(value);
-      await invokeCommand("floating_bar_input_change", { value });
+      if (manager) {
+        await input(value);
+      }
     },
-    [invokeCommand]
+    [manager, input]
   );
 
   const handleSubmit = useCallback(
@@ -359,10 +328,28 @@ export function AppBar() {
       const query = inputValue.trim();
       if (!query) return;
 
-      await invokeCommand("floating_bar_submit", { query });
+      if (manager) {
+        await submit(query);
+      }
     },
-    [inputValue, invokeCommand]
+    [inputValue, manager, submit]
   );
+
+  // === UI LOGIC ===
+
+  // Focus input when entering input state
+  useEffect(() => {
+    if (barState === "input" && inputRef.current) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  }, [barState]);
+
+  const floatingBarConfig = config || {
+    opacity: 0.95,
+    showVoiceIndicator: true,
+  };
 
   // Get enhanced container styles with voice mode awareness
   const getContainerStyles = () => {
@@ -427,13 +414,15 @@ export function AppBar() {
     );
   };
 
+  // UI API handles loading and error states internally
+
   return (
     <div
       data-tauri-drag-region
       className="w-screen h-screen flex items-start justify-start relative overflow-hidden"
     >
       {/* Tooltip */}
-      {/* {showTooltip && barState === "default" && (
+      {showTooltip && barState === "default" && (
         <div
           className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none cursor-move"
           data-tauri-drag-region
@@ -442,16 +431,16 @@ export function AppBar() {
             className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs cursor-move"
             data-tauri-drag-region
           >
-            {getStatusText(barState, currentError, agentState)}
+            {getStatusText(barState, currentError)}
           </div>
         </div>
-      )} */}
+      )}
 
       <div className="relative z-50 p-3 bg-transparent" data-tauri-drag-region>
         <div
           data-tauri-drag-region
           className={getContainerStyles()}
-          style={{ opacity: config.opacity }}
+          style={{ opacity: floatingBarConfig.opacity }}
           onClick={
             ["default", "dictation_ready"].includes(barState)
               ? handleBarClick
@@ -464,7 +453,7 @@ export function AppBar() {
             barState === "finishing") && (
             <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon(barState)}
-              {config.showVoiceIndicator &&
+              {floatingBarConfig.showVoiceIndicator &&
                 (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
                 )}
@@ -536,19 +525,14 @@ export function AppBar() {
                     className="text-sm font-medium truncate"
                     data-tauri-drag-region
                   >
-                    {getStatusText(barState, currentError, agentState)}
+                    {getStatusText(barState, currentError)}
                   </div>
-                  {transcriptionText && (
-                    <div
-                      className="text-xs text-white/70 truncate"
-                      data-tauri-drag-region
-                    >
-                      "{transcriptionText}"
-                    </div>
-                  )}
                 </div>
               </div>
-              <AudioLevelIndicator barState={barState} audioLevel={audioLevel} />
+              <AudioLevelIndicator
+                barState={barState}
+                audioLevel={audioLevel}
+              />
             </div>
           )}
 
@@ -607,7 +591,13 @@ export function AppBar() {
                   className="text-sm text-white/90 truncate"
                   data-tauri-drag-region
                 >
-                  {spokenText || "Playing response..."}
+                  {agentState === "failed"
+                    ? "Task failed"
+                    : agentState === "cancelled"
+                    ? "Task cancelled"
+                    : agentState === "offline"
+                    ? "Connection unavailable"
+                    : "Playing AI response"}
                 </span>
               </div>
             </div>
@@ -620,19 +610,11 @@ export function AppBar() {
               data-tauri-drag-region
             >
               <div className="flex items-center gap-2" data-tauri-drag-region>
-                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                <Zap className="h-4 w-4 animate-spin text-yellow-400" />
                 <span className="text-sm font-medium" data-tauri-drag-region>
                   Submitting
                 </span>
               </div>
-              {lastSubmittedValue && (
-                <div
-                  className="text-xs text-white/70 truncate w-full text-center"
-                  data-tauri-drag-region
-                >
-                  {lastSubmittedValue}
-                </div>
-              )}
             </div>
           )}
 
@@ -643,19 +625,11 @@ export function AppBar() {
               data-tauri-drag-region
             >
               <div className="flex items-center gap-2" data-tauri-drag-region>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Zap className="h-4 w-4 animate-spin" />
                 <span className="text-sm font-medium" data-tauri-drag-region>
                   Processing
                 </span>
               </div>
-              {lastSubmittedValue && (
-                <div
-                  className="text-xs text-white/70 truncate w-full text-center"
-                  data-tauri-drag-region
-                >
-                  {lastSubmittedValue}
-                </div>
-              )}
             </div>
           )}
 
@@ -669,11 +643,11 @@ export function AppBar() {
                 className="flex items-center gap-3 flex-1 min-w-0"
                 data-tauri-drag-region
               >
-                {agentState === "Failed" ? (
+                {agentState === "failed" ? (
                   <AlertCircle className="h-4 w-4 text-red-300" />
-                ) : agentState === "Cancelled" ? (
+                ) : agentState === "cancelled" ? (
                   <X className="h-4 w-4 text-yellow-300" />
-                ) : agentState === "Offline" ? (
+                ) : agentState === "offline" ? (
                   <AlertCircle className="h-4 w-4 text-orange-300" />
                 ) : (
                   <Check className="h-4 w-4 text-emerald-300" />
@@ -681,37 +655,37 @@ export function AppBar() {
                 <span
                   className={cn(
                     "text-sm font-medium truncate",
-                    agentState === "Failed"
+                    agentState === "failed"
                       ? "text-red-100"
-                      : agentState === "Cancelled"
+                      : agentState === "cancelled"
                       ? "text-yellow-100"
-                      : agentState === "Offline"
+                      : agentState === "offline"
                       ? "text-orange-100"
                       : "text-emerald-100"
                   )}
                   data-tauri-drag-region
                 >
-                  {getStatusText(barState, currentError, agentState)}
+                  {getStatusText(barState, currentError)}
                 </span>
               </div>
               <div
                 className={cn(
                   "flex items-center justify-center h-6 w-6 rounded-full",
-                  agentState === "Failed"
+                  agentState === "failed"
                     ? "bg-red-400"
-                    : agentState === "Cancelled"
+                    : agentState === "cancelled"
                     ? "bg-yellow-400"
-                    : agentState === "Offline"
+                    : agentState === "offline"
                     ? "bg-orange-400"
                     : "bg-emerald-400"
                 )}
                 data-tauri-drag-region
               >
-                {agentState === "Failed" ? (
+                {agentState === "failed" ? (
                   <X size={12} className="text-red-900" />
-                ) : agentState === "Cancelled" ? (
+                ) : agentState === "cancelled" ? (
                   <X size={12} className="text-yellow-900" />
-                ) : agentState === "Offline" ? (
+                ) : agentState === "offline" ? (
                   <AlertCircle size={12} className="text-orange-900" />
                 ) : (
                   <Check size={12} className="text-emerald-900" />
@@ -752,7 +726,9 @@ export function AppBar() {
             <div
               className="opacity-0 w-full h-full transition-opacity duration-300"
               data-tauri-drag-region
-            />
+            >
+              {getMainIcon(barState)}
+            </div>
           )}
         </div>
       </div>

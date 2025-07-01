@@ -40,6 +40,9 @@ export interface FloatingBarConfig {
   opacity: number;
 }
 
+// Alias for backward compatibility
+export type BarConfig = FloatingBarConfig;
+
 // Window configuration type
 export interface WindowConfig {
   label: string;

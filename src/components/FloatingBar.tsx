@@ -25,24 +25,13 @@ import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import type {
   BarState,
-  BarStateData,
   FloatingBarConfig,
   WindowConfig,
 } from "@/types/floating-bar";
 import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
 
 // === NEW UI API IMPORTS ===
-import {
-  useUIElement,
-  createUIElement,
-  UIElementType,
-  UIState,
-  type UIStateData,
-  type UIElementConfig,
-  getStateIcon,
-  getStateColor,
-  getStateDescription,
-} from "@/lib/ui-api";
+import { useUIElement, UIState, type UIElementConfig } from "@/lib/ui-api";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
@@ -99,10 +88,10 @@ const convertUIStateToBarState = (uiState: UIState): BarState => {
 const convertUIConfigToBarConfig = (
   uiConfig: UIElementConfig
 ): FloatingBarConfig => ({
-  show_voice_indicator: uiConfig.showVoiceIndicator,
-  enable_animations: uiConfig.enableAnimations,
-  auto_hide: uiConfig.autoHide,
-  auto_hide_delay: uiConfig.autoHideDelay,
+  showVoiceIndicator: uiConfig.showVoiceIndicator,
+  enableAnimations: uiConfig.enableAnimations,
+  autoHide: uiConfig.autoHide,
+  autoHideDelay: uiConfig.autoHideDelay,
   opacity: uiConfig.opacity,
 });
 
@@ -212,15 +201,10 @@ const AudioLevelIndicator = ({
 
 export function FloatingBar() {
   // === NEW UI API INTEGRATION ===
-  const {
-    element,
-    state,
-    config,
-    loading,
-    error,
-    refreshState,
-    refreshConfig,
-  } = useUIElement("floating-bar", UIElementType.Bar);
+  const { state, config, click, input, submit, blur, focus } = useUIElement(
+    "floating-bar",
+    "bar"
+  );
 
   // Enhanced state management - now using UI API state
   const [barState, setBarState] = useState<BarState>("default");
@@ -241,15 +225,14 @@ export function FloatingBar() {
   const { resizeWindow } = useWindowSize("floating-bar");
 
   // UI state
-  const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
   const [showTooltip, setShowTooltip] = useState(false);
   const [barConfig, setBarConfig] = useState<FloatingBarConfig>({
-    show_voice_indicator: true,
-    enable_animations: true,
-    auto_hide: false,
-    auto_hide_delay: 3000,
+    showVoiceIndicator: true,
+    enableAnimations: true,
+    autoHide: false,
+    autoHideDelay: 3000,
     opacity: 0.95,
   });
 
@@ -298,9 +281,8 @@ export function FloatingBar() {
 
   // Load initial state and config
   useEffect(() => {
-    refreshState();
-    refreshConfig();
-  }, [refreshState, refreshConfig]);
+    // Initial state and config are loaded automatically by useUIElement hook
+  }, []);
 
   // Update window size based on bar state
   useEffect(() => {
@@ -321,10 +303,10 @@ export function FloatingBar() {
 
   // Handle animation state tracking
   useEffect(() => {
-    if (barConfig.enable_animations) {
+    if (barConfig.enableAnimations) {
       setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
     }
-  }, [barState, barConfig.enable_animations]);
+  }, [barState, barConfig.enableAnimations]);
 
   // Cleanup tooltip timeout on unmount
   useEffect(() => {
@@ -333,29 +315,6 @@ export function FloatingBar() {
         clearTimeout(tooltipTimeoutRef.current);
       }
     };
-  }, []);
-
-  // Window hover handlers
-  const handleMouseEnter = useCallback(() => {
-    setIsWindowHovered(true);
-
-    if (barState === "default") {
-      setShowTooltip(true);
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setShowTooltip(false);
-      }, 2000);
-    }
-  }, [barState]);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsWindowHovered(false);
-    setShowTooltip(false);
-    if (tooltipTimeoutRef.current) {
-      clearTimeout(tooltipTimeoutRef.current);
-    }
   }, []);
 
   // Listen for window focus changes
@@ -374,8 +333,8 @@ export function FloatingBar() {
               barState
             );
             // Use UI API instead of direct command
-            if (element) {
-              await element.focus({ isFocused });
+            if (focus) {
+              await focus({ isFocused });
             }
           }
         );
@@ -390,29 +349,29 @@ export function FloatingBar() {
         unlisten();
       }
     };
-  }, [barState, element]);
+  }, [barState, focus]);
 
   // === UPDATED HANDLER FUNCTIONS USING UI API ===
   const handleBarClick = useCallback(async () => {
-    if (element) {
-      await element.click();
+    if (click) {
+      await click();
     }
-  }, [element]);
+  }, [click]);
 
   const handleInputBlur = useCallback(async () => {
-    if (element) {
-      await element.blur();
+    if (blur) {
+      await blur();
     }
-  }, [element]);
+  }, [blur]);
 
   const handleInputChange = useCallback(
     async (value: string) => {
       setInputValue(value);
-      if (element) {
-        await element.input(value);
+      if (input) {
+        await input(value);
       }
     },
-    [element]
+    [input]
   );
 
   const handleSubmit = useCallback(
@@ -421,11 +380,11 @@ export function FloatingBar() {
       const query = inputValue.trim();
       if (!query) return;
 
-      if (element) {
-        await element.submit(query);
+      if (submit) {
+        await submit(query);
       }
     },
-    [inputValue, element]
+    [inputValue, submit]
   );
 
   // Get enhanced container styles with voice mode awareness
@@ -472,10 +431,7 @@ export function FloatingBar() {
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
-    const hoverEffect =
-      barState === "default" && isWindowHovered
-        ? "[transform:scale3d(1.05,1.05,1)]"
-        : "";
+    const hoverEffect = "";
 
     const clickable = ["default", "dictation_ready"].includes(barState)
       ? "cursor-pointer"
@@ -490,38 +446,6 @@ export function FloatingBar() {
       !isAnimatingSize && "backdrop-blur-md"
     );
   };
-
-  // Show loading state while UI API is initializing
-  if (loading) {
-    return (
-      <div className="w-screen h-screen flex items-start justify-start relative overflow-hidden">
-        <div
-          className="relative z-50 p-3 bg-transparent"
-          data-tauri-drag-region
-        >
-          <div className="relative flex items-center justify-center text-white rounded-full shadow-lg border border-white/20 h-[20px] w-[60px] px-2 bg-black/90">
-            <Loader2 className="h-4 w-4 animate-spin text-white" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state if UI API failed to initialize
-  if (error) {
-    return (
-      <div className="w-screen h-screen flex items-start justify-start relative overflow-hidden">
-        <div
-          className="relative z-50 p-3 bg-transparent"
-          data-tauri-drag-region
-        >
-          <div className="relative flex items-center justify-center text-white rounded-full shadow-lg border border-white/20 h-[20px] w-[60px] px-2 bg-red-600/90">
-            <AlertCircle className="h-4 w-4 text-white" />
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -560,7 +484,7 @@ export function FloatingBar() {
             barState === "finishing") && (
             <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon(barState)}
-              {barConfig.show_voice_indicator &&
+              {barConfig.showVoiceIndicator &&
                 (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
                 )}

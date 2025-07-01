@@ -3,15 +3,8 @@
  * Demonstrates how to use the UI API with a floating element
  */
 
-import React, { useEffect, useState } from "react";
-import {
-  createUIElement,
-  useUIElement,
-  UIElementType,
-  UIState,
-  VoiceMode,
-  AgentStatus,
-} from "@/lib/ui-api";
+import React, { useState } from "react";
+import { useUIElement, UIElementType, UIState } from "@/lib/ui-api";
 
 interface UIAPITestProps {
   elementType: UIElementType;
@@ -22,56 +15,48 @@ export const UIAPITest: React.FC<UIAPITestProps> = ({
   elementType,
   elementId,
 }) => {
-  const {
-    element,
-    state,
-    config,
-    loading,
-    error,
-    refreshState,
-    refreshConfig,
-  } = useUIElement(elementId, elementType);
+  const { manager, state, config } = useUIElement(elementId, elementType);
 
   const [testMessage, setTestMessage] = useState<string>("");
 
   // Test basic functionality
   const handleTestClick = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing click interaction...");
-    const success = await element.click({ testData: "click-test" });
+    const success = await manager.click({ testData: "click-test" });
     setTestMessage(success ? "✅ Click successful" : "❌ Click failed");
   };
 
   const handleTestFocus = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing focus interaction...");
-    const success = await element.focus();
+    const success = await manager.focus();
     setTestMessage(success ? "✅ Focus successful" : "❌ Focus failed");
   };
 
   const handleTestInput = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing input interaction...");
-    const success = await element.input("test input value");
+    const success = await manager.input("test input value");
     setTestMessage(success ? "✅ Input successful" : "❌ Input failed");
   };
 
   const handleTestSubmit = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing submit interaction...");
-    const success = await element.submit("test query");
+    const success = await manager.submit("test query");
     setTestMessage(success ? "✅ Submit successful" : "❌ Submit failed");
   };
 
   const handleTestStateUpdate = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing state update...");
-    const success = await element.setState({
+    const success = await manager.setState({
       uiState: "loading" as UIState,
       inputValue: "test value",
       transcriptionText: "test transcription",
@@ -79,16 +64,13 @@ export const UIAPITest: React.FC<UIAPITestProps> = ({
     setTestMessage(
       success ? "✅ State update successful" : "❌ State update failed"
     );
-
-    // Refresh state to see changes
-    setTimeout(refreshState, 500);
   };
 
   const handleTestConfigUpdate = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing config update...");
-    const success = await element.setConfig({
+    const success = await manager.setConfig({
       showVoiceIndicator: !config?.showVoiceIndicator,
       enableAnimations: !config?.enableAnimations,
       opacity: config?.opacity === 0.95 ? 0.8 : 0.95,
@@ -96,38 +78,30 @@ export const UIAPITest: React.FC<UIAPITestProps> = ({
     setTestMessage(
       success ? "✅ Config update successful" : "❌ Config update failed"
     );
-
-    // Refresh config to see changes
-    setTimeout(refreshConfig, 500);
   };
 
   const handleTestWindowResize = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing window resize...");
-    const success = await element.resizeWindow(800, 600);
+    const success = await manager.resizeWindow(800, 600);
     setTestMessage(
       success ? "✅ Window resize successful" : "❌ Window resize failed"
     );
   };
 
   const handleTestWindowMove = async () => {
-    if (!element) return;
+    if (!manager) return;
 
     setTestMessage("Testing window move...");
-    const success = await element.moveWindow(100, 100);
+    const success = await manager.moveWindow(100, 100);
     setTestMessage(
       success ? "✅ Window move successful" : "❌ Window move failed"
     );
   };
 
-  if (loading) {
-    return <div className="p-4">Loading UI element...</div>;
-  }
-
-  if (error) {
-    return <div className="p-4 text-red-500">Error: {error}</div>;
-  }
+  // The UI API doesn't provide loading/error states at the hook level
+  // Instead, state loading is handled internally and errors are reflected in state.currentError
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -308,13 +282,13 @@ export const UIAPITest: React.FC<UIAPITestProps> = ({
         <h3 className="font-semibold mb-4">Refresh Controls</h3>
         <div className="grid grid-cols-2 gap-4">
           <button
-            onClick={refreshState}
+            onClick={() => manager?.getState()}
             className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
           >
             Refresh State
           </button>
           <button
-            onClick={refreshConfig}
+            onClick={() => manager?.getConfig()}
             className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
           >
             Refresh Config
