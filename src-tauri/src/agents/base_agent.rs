@@ -46,6 +46,64 @@ pub struct TaskResult {
     pub metadata: serde_json::Value,
 }
 
+impl TaskResult {
+    /// Format the output for user-friendly display
+    /// This properly handles different JSON value types without showing raw JSON syntax
+    pub fn format_output(&self) -> String {
+        format_task_output(&self.output)
+    }
+}
+
+/// Helper function to format a serde_json::Value for user-friendly display
+///
+/// This function addresses the issue where `.to_string()` on serde_json::Value
+/// causes JSON strings to appear with escaped quotes and objects/arrays to show
+/// raw JSON syntax, making output less readable.
+pub fn format_task_output(value: &serde_json::Value) -> String {
+    match value {
+        // For JSON strings, extract the string content directly (no quotes)
+        serde_json::Value::String(s) => s.clone(),
+
+        // For numbers and booleans, display them cleanly
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+
+        // For null values, provide a meaningful message
+        serde_json::Value::Null => "No output".to_string(),
+
+        // For objects, provide a summary rather than raw JSON
+        serde_json::Value::Object(obj) => {
+            if obj.is_empty() {
+                "Empty result".to_string()
+            } else if obj.len() == 1 {
+                if let Some((key, val)) = obj.iter().next() {
+                    // For single-key objects, try to extract meaningful content
+                    match val {
+                        serde_json::Value::String(s) => s.clone(),
+                        _ => format!("{}: {}", key, format_task_output(val))
+                    }
+                } else {
+                    "Result available".to_string()
+                }
+            } else {
+                format!("Result with {} fields", obj.len())
+            }
+        },
+
+        // For arrays, provide a summary rather than raw JSON
+        serde_json::Value::Array(arr) => {
+            if arr.is_empty() {
+                "Empty list".to_string()
+            } else if arr.len() == 1 {
+                // For single-item arrays, try to extract the content
+                format_task_output(&arr[0])
+            } else {
+                format!("List with {} items", arr.len())
+            }
+        }
+    }
+}
+
 /// Capability description for an agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentCapability {
