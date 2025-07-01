@@ -4,7 +4,6 @@
 
 // Whisper configuration
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
-pub const SOUND_DEBOUNCE_MS: u64 = 300;
 pub const DEFAULT_SENSITIVITY: f32 = 0.5;
 pub const AUDIO_RECV_TIMEOUT_MS: u64 = 100;
 
