@@ -92,13 +92,13 @@ pub use self::window::*;
 pub use self::enhanced_visual_reasoning_commands::*;
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
+// Legacy floating bar commands moved to bridge system in ui_commands.rs
+// Only export non-command functions that are still needed for internal event handling
 pub use self::floating_bar::{
-    floating_bar_click, floating_bar_focus_change, floating_bar_input_blur,
-    floating_bar_input_change, floating_bar_submit, notify_query_submitted,
-    get_floating_bar_config, handle_agent_cancelled, handle_agent_started, handle_agent_stopped,
+    get_bar_manager, handle_agent_cancelled, handle_agent_started, handle_agent_stopped,
     handle_always_listening_change, handle_backend_response, handle_dictation_finished,
     handle_dictation_mode_change, handle_dictation_partial, handle_dictation_started,
-    handle_tts_finished, handle_tts_started, initialize_bar_manager, set_floating_bar_config,
+    handle_tts_finished, handle_tts_started, initialize_bar_manager,
 };
 pub use self::floating_panel::*;
 pub use self::ui_commands::*; // Re-export consolidated UI API commands

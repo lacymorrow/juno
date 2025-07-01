@@ -262,9 +262,10 @@ export function TransparentFloatingPanel({
     if (newClickThroughState !== isClickThroughEnabled) {
       setIsClickThroughEnabled(newClickThroughState);
 
-      // Update the native window click-through behavior
-      invoke("set_floating_panel_click_through", {
-        clickThrough: newClickThroughState,
+      // Update the native window click-through behavior using new UI API
+      invoke("ui_set_click_through", {
+        elementId: "floating-panel",
+        enabled: newClickThroughState,
       }).catch((error) => {
         console.warn("Failed to set click-through behavior:", error);
       });

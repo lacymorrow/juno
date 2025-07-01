@@ -335,49 +335,60 @@ impl UIManager {
     }
 
     pub async fn bridge_to_floating_bar(&mut self, interaction: &UIInteractionEvent) -> Result<(), String> {
-        // Bridge interactions to existing floating bar commands
+        // Bridge interactions directly to FloatingBarManager (bypassing legacy commands)
         match interaction.interaction_type.as_str() {
             "click" => {
-                // Call existing floating_bar_click command (takes only app handle)
-                crate::commands::floating_bar::floating_bar_click(
-                    self.app_handle.clone(),
-                ).await?;
+                // Direct call to FloatingBarManager
+                if let Some(manager) = crate::commands::floating_bar::get_bar_manager(&self.app_handle).await {
+                    let mut manager = manager.lock().await;
+                    manager.handle_click().await?;
+                } else {
+                    return Err("Bar manager not available".to_string());
+                }
             },
             "submit" => {
-                // Call existing floating_bar_submit command
+                // Direct call to FloatingBarManager
                 if let Some(data) = &interaction.data {
                     if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
-                        crate::commands::floating_bar::floating_bar_submit(
-                            self.app_handle.clone(),
-                            value.to_string(),
-                        ).await?;
+                        if let Some(manager) = crate::commands::floating_bar::get_bar_manager(&self.app_handle).await {
+                            let mut manager = manager.lock().await;
+                            manager.handle_submit(value.to_string()).await?;
+                        } else {
+                            return Err("Bar manager not available".to_string());
+                        }
                     }
                 }
             },
             "input_change" => {
-                // Call existing floating_bar_input_change command
+                // Direct call to FloatingBarManager
                 if let Some(data) = &interaction.data {
                     if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
-                        crate::commands::floating_bar::floating_bar_input_change(
-                            self.app_handle.clone(),
-                            value.to_string(),
-                        ).await?;
+                        if let Some(manager) = crate::commands::floating_bar::get_bar_manager(&self.app_handle).await {
+                            let mut manager = manager.lock().await;
+                            manager.handle_input_change(value.to_string()).await?;
+                        } else {
+                            return Err("Bar manager not available".to_string());
+                        }
                     }
                 }
             },
             "focus" => {
-                // Call existing floating_bar_focus_change command
-                crate::commands::floating_bar::floating_bar_focus_change(
-                    self.app_handle.clone(),
-                    true,
-                ).await?;
+                // Direct call to FloatingBarManager
+                if let Some(manager) = crate::commands::floating_bar::get_bar_manager(&self.app_handle).await {
+                    let mut manager = manager.lock().await;
+                    manager.handle_focus_change(true).await?;
+                } else {
+                    return Err("Bar manager not available".to_string());
+                }
             },
             "blur" => {
-                // Call existing floating_bar_focus_change command
-                crate::commands::floating_bar::floating_bar_focus_change(
-                    self.app_handle.clone(),
-                    false,
-                ).await?;
+                // Direct call to FloatingBarManager
+                if let Some(manager) = crate::commands::floating_bar::get_bar_manager(&self.app_handle).await {
+                    let mut manager = manager.lock().await;
+                    manager.handle_focus_change(false).await?;
+                } else {
+                    return Err("Bar manager not available".to_string());
+                }
             },
             _ => {
                 warn!("Unknown interaction type for floating bar: {}", interaction.interaction_type);

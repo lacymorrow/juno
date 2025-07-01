@@ -748,7 +748,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
 }
 
 // Get the bar manager
-async fn get_bar_manager(app_handle: &AppHandle) -> Option<Arc<TokioMutex<FloatingBarManager>>> {
+pub async fn get_bar_manager(app_handle: &AppHandle) -> Option<Arc<TokioMutex<FloatingBarManager>>> {
     let global_manager = BAR_MANAGER.lock().await;
     if let Some(manager) = global_manager.as_ref() {
         Some(manager.clone())
@@ -763,7 +763,7 @@ async fn get_bar_manager(app_handle: &AppHandle) -> Option<Arc<TokioMutex<Floati
 
 // Tauri commands for frontend to call
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally by bridge system
 pub async fn floating_bar_click(app: AppHandle) -> Result<(), String> {
     if let Some(manager) = get_bar_manager(&app).await {
         let mut manager = manager.lock().await;
@@ -773,7 +773,7 @@ pub async fn floating_bar_click(app: AppHandle) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally by bridge system
 pub async fn floating_bar_focus_change(app: AppHandle, is_focused: bool) -> Result<(), String> {
     if let Some(manager) = get_bar_manager(&app).await {
         let mut manager = manager.lock().await;
@@ -783,7 +783,7 @@ pub async fn floating_bar_focus_change(app: AppHandle, is_focused: bool) -> Resu
     }
 }
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally by bridge system
 pub async fn floating_bar_input_blur(app: AppHandle) -> Result<(), String> {
     if let Some(manager) = get_bar_manager(&app).await {
         let mut manager = manager.lock().await;
@@ -793,7 +793,7 @@ pub async fn floating_bar_input_blur(app: AppHandle) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally by bridge system
 pub async fn floating_bar_input_change(app: AppHandle, value: String) -> Result<(), String> {
     if let Some(manager) = get_bar_manager(&app).await {
         let mut manager = manager.lock().await;
@@ -803,7 +803,7 @@ pub async fn floating_bar_input_change(app: AppHandle, value: String) -> Result<
     }
 }
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally by bridge system
 pub async fn floating_bar_submit(app: AppHandle, query: String) -> Result<(), String> {
     if let Some(manager) = get_bar_manager(&app).await {
         let mut manager = manager.lock().await;
@@ -813,7 +813,7 @@ pub async fn floating_bar_submit(app: AppHandle, query: String) -> Result<(), St
     }
 }
 
-#[tauri::command]
+// Legacy function - no longer a Tauri command, used internally
 pub async fn notify_query_submitted(app: AppHandle, query: String) {
     handle_query_submitted(&app, query).await;
 }
@@ -938,7 +938,7 @@ pub async fn handle_query_submitted(app_handle: &AppHandle, query: String) {
 // Configuration commands
 
 /// Get the current floating bar configuration using centralized settings
-#[tauri::command]
+/// NOTE: No longer a Tauri command - use UI API instead
 pub async fn get_floating_bar_config(
     app_handle: AppHandle,
 ) -> Result<FloatingBarConfig, String> {
@@ -957,7 +957,7 @@ pub async fn get_floating_bar_config(
 }
 
 /// Set the floating bar configuration using centralized settings
-#[tauri::command]
+/// NOTE: No longer a Tauri command - use UI API instead
 pub async fn set_floating_bar_config(
     app_handle: AppHandle,
     config: FloatingBarConfig,

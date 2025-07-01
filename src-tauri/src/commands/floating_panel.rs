@@ -20,7 +20,7 @@ use objc::{msg_send, sel, sel_impl};
 /// Set the floating panel's click-through behavior
 /// When enabled (true), the panel ignores mouse events and clicks pass through
 /// When disabled (false), the panel captures mouse events and can be interacted with
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> Result<(), String> {
     info!("Setting floating panel click-through: {}", click_through);
 
@@ -68,19 +68,19 @@ pub fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> 
 }
 
 /// Enable click-through for the floating panel (makes it non-interactive)
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn enable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
     set_floating_panel_click_through(app, true)
 }
 
 /// Disable click-through for the floating panel (makes it interactive)
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn disable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
     set_floating_panel_click_through(app, false)
 }
 
 /// Get the current state of the floating panel (visible, focused, etc.)
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Value, String> {
     if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
         let is_visible = window.is_visible().unwrap_or(false);
@@ -100,7 +100,7 @@ pub fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Value, Str
 
 /// Properly position the floating panel according to macOS conventions
 /// This ensures the panel respects system UI elements like the menu bar and dock
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
         // Get screen dimensions to ensure proper positioning
@@ -131,7 +131,7 @@ pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Optio
 }
 
 /// Update the floating panel's window level for proper stacking order
-#[tauri::command]
+/// NOTE: No longer a Tauri command - used internally by UI API bridge system
 pub fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String> {
     info!("Setting floating panel window level: {}", level);
 

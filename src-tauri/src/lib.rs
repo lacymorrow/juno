@@ -661,22 +661,8 @@ pub fn run() {
             disable_autostart,
             is_autostart_enabled,
             toggle_autostart,
-            // Floating Bar Commands
-            floating_bar_click,
-                    floating_bar_focus_change,
-        floating_bar_input_blur,
-        floating_bar_input_change,
-        floating_bar_submit,
-        notify_query_submitted,
-        get_floating_bar_config,
-        set_floating_bar_config,
-            // Floating Panel Commands
-            set_floating_panel_click_through,
-            enable_floating_panel_click_through,
-            disable_floating_panel_click_through,
-            get_floating_panel_state,
-            position_floating_panel_properly,
-            set_floating_panel_level,
+            // Legacy floating bar and panel commands removed - use new UI API instead
+            // Bridge commands are handled internally through ui_handle_interaction
             // Consolidated UI API Commands
             ui_get_state,
             ui_set_state,
