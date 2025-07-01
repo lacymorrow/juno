@@ -912,7 +912,7 @@ pub async fn execute_intelligent_parallel_tasks(
         Ok(results) => {
             let outputs: Vec<String> = results
                 .into_iter()
-                .map(|r| r.output.as_str().unwrap_or("No output").to_string())
+                .map(|r| r.output.to_string())
                 .collect();
             Ok(outputs)
         }
