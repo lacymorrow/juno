@@ -484,13 +484,13 @@ impl ToolConfigManager {
             (tool_names::STR_REPLACE_BASED_EDIT_TOOL, "Create, view, and edit files with precise text operations"),
             (tool_names::BASH, "Execute bash commands and shell operations"),
             (tool_names::SCREENSHOT, "Take a screenshot of the current screen"),
-            (tool_names::CLICK, "Click on screen coordinates"),
+            (tool_names::LEFT_CLICK, "Click on screen coordinates"),
             (tool_names::TYPE, "Type text into the focused application"),
             (tool_names::KEY, "Press keyboard keys and combinations"),
             (tool_names::SCROLL, "Scroll in a direction"),
             (tool_names::WAIT, "Wait for a specified duration"),
-            (tool_names::MOVE, "Move mouse to coordinates"),
-            (tool_names::DRAG, "Drag from one coordinate to another"),
+            (tool_names::MOUSE_MOVE, "Move mouse to coordinates"),
+            (tool_names::LEFT_CLICK_DRAG, "Drag from one coordinate to another"),
         ];
 
         // Essential tools that are required for core functionality
