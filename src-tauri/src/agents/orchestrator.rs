@@ -211,7 +211,7 @@ impl Orchestrator {
                 if result.success {
                     Ok(format!(
                         "Task completed successfully: {}",
-                        result.output.to_string()
+                        crate::agents::base_agent::format_task_output(&result.output)
                     ))
                 } else {
                     Ok(format!(
@@ -658,7 +658,7 @@ impl Orchestrator {
             response.push_str(&format!(
                 "Task {}: {}\n",
                 i + 1,
-                result.output.to_string()
+                crate::agents::base_agent::format_task_output(&result.output)
             ));
         }
 

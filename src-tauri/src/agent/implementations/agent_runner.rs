@@ -590,7 +590,7 @@ where
             role: crate::agent::core::Role::Tool,
             content: match &tool_result {
                 Ok(result) => {
-                    result.output.to_string()
+                    crate::agents::base_agent::format_task_output(&result.output)
                 }
                 Err(e) => format!("Error: {}", e),
             },
@@ -639,10 +639,10 @@ where
                 app_state,
             ).await {
                 // Check if we're close enough to target
-                let distance_x = (current_x - target_x).abs();
-                let distance_y = (current_y - target_y).abs();
+                let distance_x = (current_x - target_x as f64).abs();
+                let distance_y = (current_y - target_y as f64).abs();
 
-                if distance_x <= tolerance && distance_y <= tolerance {
+                if distance_x <= tolerance as f64 && distance_y <= tolerance as f64 {
                     // Movement complete! Exit immediately
                     return;
                 }
