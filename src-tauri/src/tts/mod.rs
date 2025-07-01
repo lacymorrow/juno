@@ -50,13 +50,13 @@ impl AudioPlaybackHandle {
         }
 
         let elapsed = self.start_time.elapsed();
-        let minimum_playback_duration = std::time::Duration::from_millis(500);
-
-        if elapsed < minimum_playback_duration {
-            let remaining = minimum_playback_duration - elapsed;
-            info!("Audio completed very quickly ({}ms), waiting additional {}ms to prevent race condition",
-                  elapsed.as_millis(), remaining.as_millis());
-            tokio::time::sleep(remaining).await;
+        // OPTIMIZATION: Use event-driven completion instead of hardcoded minimum duration
+        // Only add minimal delay if audio completed suspiciously fast (< 50ms)
+        if elapsed < std::time::Duration::from_millis(50) {
+            let safety_delay = std::time::Duration::from_millis(25);
+            info!("Audio completed very quickly ({}ms), adding safety delay of {}ms",
+                  elapsed.as_millis(), safety_delay.as_millis());
+            tokio::time::sleep(safety_delay).await;
         }
 
         info!("Audio playback completion confirmed after {}ms", elapsed.as_millis());
