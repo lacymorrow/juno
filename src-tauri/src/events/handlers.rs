@@ -300,14 +300,6 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, pay
     if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
         warn!("Failed to play voice end sound: {}", e);
     }
-
-    // Rebroadcast the event as app-dictation-stopped for backward compatibility
-    if let Err(e) = app_handle.emit(constants::events::dictation::STOPPED, payload) {
-        error!(
-            "[Event] Failed to rebroadcast dictation-stopped event: {}",
-            e
-        );
-    }
 }
 
 async fn handle_voice_transcription_error(app_handle: AppHandle) {

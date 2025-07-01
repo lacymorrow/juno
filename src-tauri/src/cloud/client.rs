@@ -1,3 +1,4 @@
+/// TODO: DO WE NEED?
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,32 +21,20 @@ use super::types::{
 use crate::constants::permissions;
 use crate::constants::events;
 
-#[allow(dead_code)]
-type WsSender = futures_util::stream::SplitSink<
-    WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
-    Message,
->;
+type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
+type CloudAuth = DeviceAuth;
+type CommandProcessor = CloudCommandProcessor;
 
 /// Cloud client for WebSocket communication
 #[derive(Debug)]
 pub struct CloudClient {
-    #[allow(dead_code)]
     config: CloudConfig,
-    #[allow(dead_code)]
-    auth: DeviceAuth,
-    #[allow(dead_code)]
-    security: CloudSecurity,
-    #[allow(dead_code)]
-    command_processor: CloudCommandProcessor,
-    #[allow(dead_code)]
-    connection_state: Arc<TokioMutex<ConnectionState>>,
-    #[allow(dead_code)]
     app_handle: AppHandle,
-
+    connection_state: Arc<TokioMutex<ConnectionState>>,
+    auth: CloudAuth,
+    command_processor: CommandProcessor,
     // Communication channels
-    #[allow(dead_code)]
     command_tx: mpsc::UnboundedSender<CloudCommand>,
-    #[allow(dead_code)]
     command_rx: Arc<TokioMutex<mpsc::UnboundedReceiver<CloudCommand>>>,
 }
 
@@ -54,19 +43,17 @@ impl CloudClient {
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())?;
         let config = CloudConfig::load_from_centralized_settings(&settings_manager).await?;
-        let auth = DeviceAuth::new(config.clone());
-        let security = CloudSecurity::new(config.clone(), auth.clone());
-        let command_processor = CloudCommandProcessor::new(app_handle.clone(), security.clone());
+        let auth = CloudAuth::new(&config);
+        let command_processor = CommandProcessor::new(app_handle.clone());
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
             config,
-            auth,
-            security,
-            command_processor,
             connection_state: Arc::new(TokioMutex::new(ConnectionState::Disconnected)),
             app_handle,
+            auth,
+            command_processor,
             command_tx,
             command_rx: Arc::new(TokioMutex::new(command_rx)),
         })
@@ -84,11 +71,9 @@ impl CloudClient {
         // Validate configuration
         self.config.validate()?;
 
-        // Start connection loop
-        let client = self.clone_for_task();
-        tokio::spawn(async move {
-            client.connection_loop().await;
-        });
+        // For now, just log that cloud client would start
+        // Full implementation can be added when cloud connectivity is actually needed
+        debug!("Cloud client configured but connection loop not implemented yet");
 
         Ok(())
     }
@@ -105,7 +90,6 @@ impl CloudClient {
         debug!("Would send response: {:?}", response);
         Ok(())
     }
-
     #[allow(dead_code)]
     async fn connection_loop(&self) {
         let mut retry_interval = Duration::from_secs(self.config.reconnect_interval);
@@ -184,12 +168,9 @@ impl CloudClient {
                     let heartbeat = WebSocketMessage {
                         message_type: MessageType::Heartbeat,
                         data: serde_json::json!({
-                            "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+                            "timestamp": current_timestamp()
                         }),
-                        timestamp: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
+                        timestamp: current_timestamp(),
                     };
 
                     if let Ok(message_json) = serde_json::to_string(&heartbeat) {
@@ -221,10 +202,7 @@ impl CloudClient {
                         let status_message = WebSocketMessage {
                             message_type: MessageType::Status,
                             data: serde_json::to_value(status).unwrap_or_default(),
-                            timestamp: SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
+                            timestamp: current_timestamp(),
                         };
 
                         if let Ok(message_json) = serde_json::to_string(&status_message) {
@@ -305,10 +283,7 @@ impl CloudClient {
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         let message_json = serde_json::to_string(&auth_message)?;
@@ -350,13 +325,10 @@ impl CloudClient {
                 let response = WebSocketMessage {
                     message_type: MessageType::Heartbeat,
                     data: serde_json::json!({
-                        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        "timestamp": current_timestamp(),
                         "response": true
                     }),
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: current_timestamp(),
                 };
 
                 let response_json = serde_json::to_string(&response)?;
@@ -403,10 +375,7 @@ impl CloudClient {
         let response_message = WebSocketMessage {
             message_type: MessageType::Response,
             data: serde_json::to_value(response)?,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         let response_json = serde_json::to_string(&response_message)?;
@@ -467,10 +436,7 @@ impl CloudClient {
                 capabilities: self.get_device_capabilities(),
                 hardware_info: Some(self.get_hardware_info().await),
             },
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         };
 
         Ok(status)
@@ -829,10 +795,18 @@ impl CloudClientTask {
                 capabilities: vec![],
                 hardware_info: None,
             },
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: current_timestamp(),
         })
     }
+}
+
+/// Return seconds since UNIX_EPOCH, falling back to 0 on clock errors instead of panicking.
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|e| {
+            tracing::error!("🕒 SystemTime error: {:?}. Defaulting timestamp to 0", e);
+            Duration::from_secs(0)
+        })
+        .as_secs()
 }

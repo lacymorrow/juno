@@ -22,11 +22,6 @@ pub mod tool_names {
     pub const MOUSE_MOVE: &str = "mouse_move";
     pub const ACCESSIBILITY_INTERFACE: &str = "accessibility_interface";
 
-    // Simplified aliases for tool configuration and mapping
-    pub const CLICK: &str = "left_click";
-    pub const MOVE: &str = "mouse_move";
-    pub const DRAG: &str = "left_click_drag";
-
     // Text editor tools
     pub const TEXT_EDITOR_INSERT: &str = "text_editor_insert";
     pub const TEXT_EDITOR_STR_REPLACE: &str = "text_editor_str_replace";

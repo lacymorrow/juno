@@ -80,37 +80,20 @@ struct GeminiGenerationConfig {
     response_mime_type: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    usage_metadata: Option<GeminiUsageMetadata>,
+    // usage_metadata field removed - unused for performance
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiCandidate {
     content: GeminiContent,
-    finish_reason: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    safety_ratings: Option<Vec<GeminiSafetyRating>>,
+    // finish_reason and safety_ratings fields removed - unused for performance
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-struct GeminiUsageMetadata {
-    prompt_tokens: i32,
-    candidates_tokens: i32,
-    total_tokens: i32,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-struct GeminiSafetyRating {
-    category: String,
-    probability: String,
-}
+// Removed unused structs: GeminiUsageMetadata and GeminiSafetyRating
+// These were never accessed in the code, removing for performance
 
 const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
