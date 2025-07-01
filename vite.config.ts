@@ -17,6 +17,17 @@ export default defineConfig(async () => ({
 		},
 	},
 
+	// Strip console.* and debugger statements from production builds
+	build: {
+		minify: "terser",
+		terserOptions: {
+			compress: {
+				drop_console: true,
+				drop_debugger: true,
+			},
+		},
+	},
+
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	//
 	// 1. prevent vite from obscuring rust errors
