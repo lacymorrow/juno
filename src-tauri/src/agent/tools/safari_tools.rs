@@ -28,6 +28,14 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Return unix timestamp secs with fallback to 0.
+fn safe_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Escapes a string for safe inclusion in AppleScript string literals
 ///
 /// This function comprehensively escapes all characters that could break
@@ -287,7 +295,7 @@ JSON.stringify(serializeDOMWithIds(document.body));
                 Ok(json!({
                     "dom_structure": dom_data,
                     "extraction_method": "Safari JavaScript injection",
-                    "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+                    "timestamp": safe_timestamp()
                 }))
             }
             Err(e) => {
@@ -304,7 +312,7 @@ JSON.stringify(serializeDOMWithIds(document.body));
         })?;
 
         cache.clear(); // Clear old cache
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let timestamp = safe_timestamp();
 
         self.cache_elements_recursive(dom_data, &mut cache, timestamp);
 

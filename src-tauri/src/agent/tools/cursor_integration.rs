@@ -151,7 +151,8 @@ impl CursorIntegration {
         if let Some(col) = column {
             if line_number.is_some() {
                 // Use Ctrl+G (or Cmd+G) to go to specific line:column
-                let goto_command = format!("{}:{}", line_number.unwrap(), col);
+                let line_num = line_number.unwrap();
+                let goto_command = format!("{}:{}", line_num, col);
 
                 let navigation_steps = vec![
                     json!({

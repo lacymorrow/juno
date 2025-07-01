@@ -72,10 +72,7 @@ impl DeviceAuth {
     pub fn is_authenticated(&self) -> bool {
         if let Some(creds) = &self.credentials {
             if let Some(expires_at) = creds.expires_at {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                let now = safe_timestamp();
                 return now < expires_at;
             }
             return true; // No expiration set, assume valid
@@ -96,10 +93,7 @@ impl DeviceAuth {
             .as_ref()
             .ok_or_else(|| CloudError::AuthenticationFailed("No credentials available".to_string()))?;
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = safe_timestamp();
 
         let auth_data = serde_json::json!({
             "device_id": creds.device_id,
@@ -221,4 +215,12 @@ impl DeviceAuth {
         let expected_signature = self.create_signature(data)?;
         Ok(expected_signature == signature)
     }
+}
+
+/// Return unix timestamp in seconds, defaulting to 0 if clock is before the epoch.
+fn safe_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
