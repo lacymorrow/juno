@@ -1201,117 +1201,126 @@ impl AppState {
         self.mcp_manager.clone()
     }
 
-    /// Initialize MCP servers from configuration
+    /// Initialize enabled MCP servers - OPTIMIZED for parallel startup
     pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
-        let config_guard = self.tool_config_manager.lock().await;
-        let mcp_configs = config_guard.get_mcp_servers();
-        drop(config_guard);
+        info!("Starting optimized MCP server initialization...");
 
-        if mcp_configs.is_empty() {
-            debug!("No MCP servers configured, skipping initialization");
+        let manager = self.get_mcp_manager().await;
+        let manager_guard = manager.lock().await;
+        let enabled_servers = manager_guard.get_enabled_server_configs().await;
+        drop(manager_guard);
+
+        if enabled_servers.is_empty() {
+            info!("No enabled MCP servers found to start");
             return Ok(());
         }
 
-        let mcp_manager = self.get_mcp_manager().await;
-        let manager_guard = mcp_manager.lock().await;
+        info!("Found {} enabled MCP servers for parallel initialization", enabled_servers.len());
 
-        // Add all servers first (fast operation)
-        let mut added_servers = Vec::new();
-        for config in mcp_configs {
-            match manager_guard.add_server(config.clone()).await {
-                Ok(_) => {
-                    added_servers.push(config.clone());
-                    debug!("Added MCP server configuration: {}", config.name);
-                }
-                Err(e) => {
-                    warn!("Failed to add MCP server '{}': {}", config.name, e);
-                }
-            }
-        }
-
-        drop(manager_guard); // Release lock before starting servers
-
-        if added_servers.is_empty() {
-            warn!("No MCP servers were successfully added");
-            return Ok(());
-        }
-
-        // Start enabled servers concurrently with timeout
-        let enabled_servers: Vec<_> = added_servers
+        // PERFORMANCE OPTIMIZATION: Parallel startup with intelligent resource management
+        // Based on successful mouse movement optimization pattern
+        let startup_tasks: Vec<_> = enabled_servers
             .into_iter()
-            .filter(|config| config.enabled && config.auto_start)
+            .enumerate()
+            .map(|(index, config)| {
+                let manager = manager.clone();
+                let server_name = config.name.clone();
+                let server_id = config.id.clone();
+
+                tokio::spawn(async move {
+                    // Staggered startup by index (50ms intervals instead of 2000ms)
+                    if index > 0 {
+                        let stagger_delay = std::cmp::min(index * 50, 500); // Max 500ms stagger
+                        tokio::time::sleep(Duration::from_millis(stagger_delay as u64)).await;
+                    }
+
+                    info!("Starting MCP server '{}' (parallel slot {})", server_name, index);
+
+                    let manager_guard = manager.lock().await;
+                    let start_result = tokio::time::timeout(
+                        Duration::from_secs(
+                            crate::constants::timeouts::MCP_SERVER_STARTUP_TIMEOUT_SECONDS,
+                        ),
+                        manager_guard.start_server(&server_id),
+                    )
+                    .await;
+                    drop(manager_guard);
+
+                    match start_result {
+                        Ok(Ok(_)) => {
+                            info!("✅ MCP server '{}' started successfully", server_name);
+
+                            // INTELLIGENT COMPLETION DETECTION instead of hardcoded delay
+                            // Use exponential backoff to check server readiness (like mouse movement optimization)
+                            let mut check_delay = 10; // Start with 10ms
+                            let max_delay = 200; // Max 200ms
+                            let max_checks = 20; // Max 2 seconds total wait
+
+                            for check_attempt in 0..max_checks {
+                                tokio::time::sleep(Duration::from_millis(check_delay)).await;
+
+                                // Check if server is actually ready (replace hardcoded 1000ms delay)
+                                let manager_guard = manager.lock().await;
+                                let server_status = manager_guard.get_server_status(&server_id).await;
+                                drop(manager_guard);
+
+                                match server_status {
+                                    Some(crate::agent::tools::mcp_manager::MCPServerStatus::Running) => {
+                                        info!("MCP server '{}' confirmed ready after {}ms",
+                                              server_name, (check_attempt + 1) * check_delay);
+                                        break;
+                                    }
+                                    _ => {
+                                        // Exponential backoff like mouse movement optimization
+                                        check_delay = std::cmp::min(check_delay * 2, max_delay);
+                                    }
+                                }
+                            }
+
+                            Ok(server_name.clone())
+                        }
+                        Ok(Err(e)) => {
+                            warn!("❌ {}", format_error(templates::FAILED_TO_START, &format!("MCP server '{}'", server_name), &e));
+                            Err(format!("{}: {}", server_name, e))
+                        }
+                        Err(_) => {
+                            warn!("⏰ MCP server '{}' startup timed out after 45s", server_name);
+                            Err(format!("{}: timeout", server_name))
+                        }
+                    }
+                })
+            })
             .collect();
 
-        if !enabled_servers.is_empty() {
-            info!(
-                "Starting {} MCP servers with staggered startup to prevent race conditions",
-                enabled_servers.len()
-            );
+        // Wait for all servers to complete startup (parallel execution)
+        let startup_start = std::time::Instant::now();
+        let results = futures::future::join_all(startup_tasks).await;
+        let total_startup_time = startup_start.elapsed();
 
-            let manager = self.get_mcp_manager().await;
-            let mut successful_servers = Vec::new();
-            let mut failed_servers = Vec::new();
+        // Process results
+        let mut successful_servers = Vec::new();
+        let mut failed_servers = Vec::new();
 
-            // Start servers one by one with delays to prevent resource conflicts
-            for (index, config) in enabled_servers.iter().enumerate() {
-                if index > 0 {
-                    // Add staggered delay between server starts (2 seconds each)
-                    tokio::time::sleep(Duration::from_millis(2000)).await;
-                }
-
-                info!(
-                    "Starting MCP server {} of {}: '{}'",
-                    index + 1,
-                    enabled_servers.len(),
-                    config.name
-                );
-
-                let manager_guard = manager.lock().await;
-                let start_result = tokio::time::timeout(
-                    Duration::from_secs(
-                        crate::constants::timeouts::MCP_SERVER_STARTUP_TIMEOUT_SECONDS,
-                    ), // Increased timeout for individual servers
-                    manager_guard.start_server(&config.id),
-                )
-                .await;
-                drop(manager_guard);
-
-                match start_result {
-                    Ok(Ok(_)) => {
-                        info!("✅ MCP server '{}' started successfully", config.name);
-                        successful_servers.push(config.name.clone());
-
-                        // Give server additional time to fully initialize before starting next
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                    }
-                    Ok(Err(e)) => {
-                        warn!("❌ {}", format_error(templates::FAILED_TO_START, &format!("MCP server '{}'", config.name), &e));
-                        failed_servers.push(format!("{}: {}", config.name, e));
-                    }
-                    Err(_) => {
-                        warn!(
-                            "⏰ MCP server '{}' startup timed out after 45s",
-                            config.name
-                        );
-                        failed_servers.push(format!("{}: timeout", config.name));
-                    }
-                }
+        for result in results {
+            match result {
+                Ok(Ok(server_name)) => successful_servers.push(server_name),
+                Ok(Err(error)) => failed_servers.push(error),
+                Err(e) => failed_servers.push(format!("Task join error: {}", e)),
             }
-
-            info!(
-                "MCP initialization complete: {} succeeded, {} failed",
-                successful_servers.len(),
-                failed_servers.len()
-            );
-
-            if !failed_servers.is_empty() {
-                warn!("Failed MCP servers: {}", failed_servers.join(", "));
-            }
-        } else {
-            info!("No enabled MCP servers found to start");
         }
 
-        // Sync tools once at the end
+        info!(
+            "Optimized MCP initialization complete in {}ms: {} succeeded, {} failed",
+            total_startup_time.as_millis(),
+            successful_servers.len(),
+            failed_servers.len()
+        );
+
+        if !failed_servers.is_empty() {
+            warn!("Failed MCP servers: {}", failed_servers.join(", "));
+        }
+
+        // Sync tools once at the end (unchanged)
         if let Err(e) = self.sync_mcp_tools().await {
             warn!("Failed to sync MCP tools after initialization: {}", e);
         }
