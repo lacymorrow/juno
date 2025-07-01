@@ -22,26 +22,32 @@ pub struct StringCache;
 
 impl StringCache {
     /// Get or create an error message with context
-    pub fn get_error(template: &'static str, context: &str) -> String {
-        let key = format!("{}:{}", template, context);
+    /// Returns Arc<str> to avoid allocation on retrieval
+    ///
+    /// Note: Still allocates for cache key construction, but avoids allocation
+    /// on cache hits and eliminates String conversion from cached Arc<str>
+    pub fn get_error(template: &'static str, context: &str) -> Arc<str> {
+        let key = format!("{}|{}", template, context);
 
         // Fast path: check if already cached
         if let Ok(cache) = STRING_CACHE.read() {
             if let Some(cached) = cache.get(&key) {
-                return cached.to_string();
+                return Arc::clone(cached);
             }
         }
 
         // Slow path: create and cache
         let formatted = format!("{}: {}", template, context);
+        let arc_str: Arc<str> = formatted.into();
+
         if let Ok(mut cache) = STRING_CACHE.write() {
             // Limit cache size to prevent memory leaks
             if cache.len() < 1000 {
-                cache.insert(key, formatted.clone().into());
+                cache.insert(key, Arc::clone(&arc_str));
             }
         }
 
-        formatted
+        arc_str
     }
 
     /// Get formatted message for logging
@@ -61,7 +67,7 @@ impl StringCache {
 
         if let Ok(mut cache) = STRING_CACHE.write() {
             for (context, template) in common_errors {
-                let key = format!("{}:{}", template, context);
+                let key = format!("{}|{}", template, context);
                 let value = format!("{}: {}", template, context);
                 cache.insert(key, value.into());
             }

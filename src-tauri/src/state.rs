@@ -1205,9 +1205,36 @@ impl AppState {
     pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
         info!("Starting optimized MCP server initialization...");
 
+        // CRITICAL FIX: Load MCP server configurations from tool config manager
+        // and populate the MCP manager before trying to get enabled servers
+        let tool_config_manager = self.get_tool_config_manager().await;
+        let config_guard = tool_config_manager.lock().await;
+        let all_mcp_configs = config_guard.get_mcp_servers(); // Get all MCP server configs
+        drop(config_guard);
+
+        // Add configurations to MCP manager if not already present
         let manager = self.get_mcp_manager().await;
-        let manager_guard = manager.lock().await;
-        let enabled_servers = manager_guard.get_enabled_server_configs().await;
+        let mut manager_guard = manager.lock().await;
+
+        for config in &all_mcp_configs {
+            // Only add if not already present to avoid duplicates
+            let existing_configs = manager_guard.get_server_configs().await;
+            let already_exists = existing_configs.iter().any(|existing| existing.id == config.id);
+
+            if !already_exists {
+                if let Err(e) = manager_guard.add_server(config.clone()).await {
+                    warn!("Failed to add MCP server '{}' during initialization: {}", config.name, e);
+                    continue; // Continue with other servers even if one fails
+                }
+            }
+        }
+
+        // Now get enabled server configurations (filter enabled ones manually)
+        let all_server_configs = manager_guard.get_server_configs().await;
+        let enabled_servers: Vec<_> = all_server_configs
+            .into_iter()
+            .filter(|config| config.enabled && config.auto_start)
+            .collect();
         drop(manager_guard);
 
         if enabled_servers.is_empty() {
@@ -1261,11 +1288,12 @@ impl AppState {
 
                                 // Check if server is actually ready (replace hardcoded 1000ms delay)
                                 let manager_guard = manager.lock().await;
-                                let server_status = manager_guard.get_server_status(&server_id).await;
+                                let server_statuses = manager_guard.get_server_statuses().await;
+                                let server_status = server_statuses.get(&server_id);
                                 drop(manager_guard);
 
                                 match server_status {
-                                    Some(crate::agent::tools::mcp_manager::MCPServerStatus::Running) => {
+                                    Some(crate::agent::tools::mcp_integration::MCPServerStatus::Connected) => {
                                         info!("MCP server '{}' confirmed ready after {}ms",
                                               server_name, (check_attempt + 1) * check_delay);
                                         break;
