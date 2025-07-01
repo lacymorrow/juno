@@ -48,43 +48,46 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     info!("🎤 Setting up specialized voice transcription listeners...");
 
-    // Listen for dictation started events from the plugin (additional handlers)
-    let app_handle_for_listener = app_handle.clone();
+    // PERFORMANCE OPTIMIZATION: Use Arc reference sharing instead of excessive cloning
+    // This reduces memory allocations and improves performance
+    let shared_app_handle = Arc::new(app_handle.clone());
 
+    // Listen for dictation started events from the plugin (additional handlers)
+    let app_handle_for_listener = Arc::clone(&shared_app_handle);
     app_handle.listen("voice-transcription:dictation-started", move |event| {
         info!("[Event] Received voice-transcription:dictation-started event");
 
         // Register escape key for dictation cancellation
-        let app_handle_clone = app_handle_for_listener.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_listener);
         safe_spawn_async_task(move || async move {
-            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone).await {
+            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((**app_handle_ref).clone()).await {
                 warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
             }
         });
 
         // Play voice start sound automatically when dictation starts
-        let app_handle_clone = app_handle_for_listener.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_listener);
         safe_spawn_async_task(move || async move {
-            let state = app_handle_clone.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone, state).await {
+            let state = app_handle_ref.state::<crate::state::AppState>();
+            if let Err(e) = crate::commands::sound::play_voice_start_sound((**app_handle_ref).clone(), state).await {
                 warn!("Failed to play voice start sound: {}", e);
             }
         });
 
         // Check if this is dictation mode and update floating bar manager accordingly
-        let app_handle_clone = app_handle_for_listener.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_listener);
         safe_spawn_async_task(move || async move {
             // Check if Dictation Mode is active
-            let app_state = app_handle_clone.state::<state::AppState>();
+            let app_state = app_handle_ref.state::<state::AppState>();
             let is_dictation_mode = app_state.is_dictation_active();
 
             // If it's dictation mode, set the flag in floating bar manager first
             if is_dictation_mode {
-                commands::floating_bar::handle_dictation_mode_change(&app_handle_clone, true).await;
+                commands::floating_bar::handle_dictation_mode_change(&(**app_handle_ref).clone(), true).await;
             }
 
             // Then handle the dictation started event
-            commands::floating_bar::handle_dictation_started(&app_handle_clone).await;
+            commands::floating_bar::handle_dictation_started(&(**app_handle_ref).clone()).await;
         });
 
         // Rebroadcast the event as app-dictation-started for backward compatibility
@@ -94,11 +97,11 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     });
 
     // Listen for app-dictation-finished events to trigger the agent (CRITICAL FOR AGENT MODE)
-    let app_handle_for_agent_listener = app_handle.clone();
+    let app_handle_for_agent_listener = Arc::clone(&shared_app_handle);
     app_handle.listen("app-dictation-finished", move |event| {
         info!("[Event] Received app-dictation-finished event - triggering agent");
 
-        let app_handle_clone = app_handle_for_agent_listener.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_agent_listener);
         safe_spawn_async_task(move || async move {
             // Parse the query from the event payload
             let payload_str = event.payload();
@@ -118,31 +121,31 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                         .unwrap_or_default()
                                         .as_millis() as u64
                                 });
-                                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
+                                if let Err(e) = app_handle_ref.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
                                     error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);
                                 }
 
                                 // Submit the query to the agent system
-                                let app_state = app_handle_clone.state::<crate::state::AppState>();
+                                let app_state = app_handle_ref.state::<crate::state::AppState>();
 
                                 // CRITICAL: Register escape key IMMEDIATELY when agent processing starts
                                 // This ensures escape key is captured during the processing gap between
                                 // dictation finishing and agent execution beginning
-                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((**app_handle_ref).clone()).await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
                                 match crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
-                                    app_handle_clone.clone()
+                                    (**app_handle_ref).clone()
                                 ).await {
                                     Ok(_) => {
                                         info!("[Agent Mode] Agent query submitted successfully");
                                     }
                                     Err(e) => {
                                         error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                        crate::error_handling::utils::handle_agent_error(&(**app_handle_ref).clone(), &crate::utils::string_cache::format_error_cached("Failed to submit", "query", e)).await;
                                     }
                                 }
                             } else {
@@ -163,7 +166,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     });
 
     // Listen for partial result events from the plugin
-    let app_handle_for_listener = app_handle.clone();
+    let app_handle_for_partial_listener = Arc::clone(&shared_app_handle);
     app_handle.listen("voice-transcription:partial-result", move |event| {
         info!(
             "[Event] Received voice-transcription:partial-result event: {:?}",
@@ -175,11 +178,11 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
             if let Some(text_value) = payload_json.get("text") {
                 if let Some(text) = text_value.as_str() {
-                    let app_handle_clone = app_handle_for_listener.clone();
+                    let app_handle_ref = Arc::clone(&app_handle_for_partial_listener);
                     let partial_text = text.to_string();
                     safe_spawn_async_task(move || async move {
                         commands::floating_bar::handle_dictation_partial(
-                            &app_handle_clone,
+                            &(**app_handle_ref).clone(),
                             partial_text,
                         )
                         .await;
@@ -190,7 +193,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Rebroadcast the event as app-dictation-partial-result for backward compatibility
         if let Err(e) =
-            app_handle_for_listener.emit(events::dictation::PARTIAL_RESULT, event.payload())
+            app_handle_for_partial_listener.emit(events::dictation::PARTIAL_RESULT, event.payload())
         {
             tracing::error!("{} Failed to emit partial-result event: {}", prefixes::EVENT, e);
         }
@@ -617,7 +620,7 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                     // Use centralized error handling for agent transcription errors
                     crate::error_handling::utils::handle_agent_error(
                         app_handle,
-                        &format!("Failed to start agent transcription: {}", e),
+                        &crate::utils::string_cache::format_error_cached("Failed to start", "agent transcription", e),
                     )
                     .await;
 

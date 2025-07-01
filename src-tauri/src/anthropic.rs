@@ -26,6 +26,7 @@ use crate::constants::{agent, timeouts, events};
 use crate::constants::errors::{templates, components};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
+use crate::utils::string_cache::format_error_cached;
 
 /// Agent execution queue system to prevent concurrent execution
 #[derive(Debug)]
@@ -350,12 +351,12 @@ pub async fn submit_query(
         // Force system TTS for offline response
         let current_provider = state
             .get_tts_provider()
-            .map_err(|e| format!("Failed to access TTS provider: {}", e))?;
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "TTS provider", e))?;
 
         // Temporarily switch to system TTS for offline message
         state
             .set_tts_provider("system".to_string())
-            .map_err(|e| format!("Failed to set TTS provider: {}", e))?;
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "TTS provider", e))?;
 
         // Play offline message using system TTS
         if let Err(e) =
@@ -367,7 +368,7 @@ pub async fn submit_query(
         // Restore original TTS provider
         state
             .set_tts_provider(current_provider)
-            .map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
+            .map_err(|e| format_error_cached(templates::FAILED_TO_RESTORE, "TTS provider", e))?;
 
         return Ok(());
     }
@@ -593,7 +594,7 @@ async fn execute_agent_internal(
             )
             .await
             {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                let err_msg = format_error_cached(templates::FAILED_TO_REGISTER, "Computer Use tools for single agent", e);
                 error!("{}", err_msg);
                 return Err(err_msg);
             }
@@ -603,7 +604,7 @@ async fn execute_agent_internal(
             let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize single agent brain: {}", e);
+                    let err_msg = format_error_cached(templates::FAILED_TO_INITIALIZE, "single agent brain", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events
@@ -740,7 +741,7 @@ async fn execute_agent_internal(
             ) {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
+                    let err_msg = format_error_cached(templates::FAILED_TO_INITIALIZE, "orchestrator brain", e);
                     error!("{}", err_msg);
 
                     // Emit error via streaming events
@@ -854,7 +855,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
+                        warn!("{}", format_error_cached(templates::FAILED_TO_EXECUTE, "play cancellation sound", e));
                     }
                     (
                         "Cancelled".to_string(),
@@ -869,7 +870,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                        warn!("{}", format_error_cached(templates::FAILED_TO_EXECUTE, "play error sound", e));
                     }
                     (
                         "Failed".to_string(),
@@ -887,7 +888,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
+                        warn!("{}", format_error_cached(templates::FAILED_TO_EXECUTE, "play network error sound", e));
                     }
 
                     (
@@ -903,7 +904,7 @@ async fn execute_agent_internal(
                     )
                     .await
                     {
-                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                        warn!("{}", format_error_cached(templates::FAILED_TO_EXECUTE, "play error sound", e));
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 }
@@ -1002,7 +1003,7 @@ async fn execute_agent_internal(
                 "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit(events::agent::ERROR, event_data) {
-                warn!("{}", format!("{}: {}", "Failed to emit agent-error event", e));
+                warn!("{}", format_error_cached(templates::FAILED_TO_EMIT, "agent-error event", e));
             }
         });
     }
@@ -1045,7 +1046,7 @@ pub async fn handle_tts_completion(
     if let Err(e) =
         crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
     {
-        warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
+        warn!("{}", format_error_cached(templates::FAILED_TO_EXECUTE, "play success sound after TTS completion", e));
     }
 
     Ok(())
@@ -1128,7 +1129,7 @@ async fn register_orchestrator_delegation_tools(
                         "success": false,
                         "agent_type": "browser",
                         "error": error_msg,
-                        "message": format!("Browser agent failed: {}", error_msg)
+                        "message": format_error_cached(templates::FAILED_TO_EXECUTE, "Browser agent", error_msg)
                     }))
                 }
             }
@@ -1183,7 +1184,7 @@ async fn register_orchestrator_delegation_tools(
                         "success": false,
                         "agent_type": "desktop",
                         "error": error_msg,
-                        "message": format!("Desktop agent failed: {}", error_msg)
+                        "message": format_error_cached(templates::FAILED_TO_EXECUTE, "Desktop agent", error_msg)
                     }))
                 }
             }
@@ -1236,7 +1237,7 @@ async fn register_orchestrator_delegation_tools(
                         "success": false,
                         "agent_type": "file",
                         "error": error_msg,
-                        "message": format!("File agent failed: {}", error_msg)
+                        "message": format_error_cached(templates::FAILED_TO_EXECUTE, "File agent", error_msg)
                     }))
                 }
             }
@@ -1289,7 +1290,7 @@ async fn execute_specialized_agent_task(
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
     let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt) {
         Ok(brain) => brain,
-        Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
+        Err(e) => return Err(format_error_cached(templates::FAILED_TO_CREATE, "specialist brain", e)),
     };
 
     // Create specialist agent runner with the shared memory (conversation context preserved)
@@ -1425,7 +1426,7 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
     if let Some(controller) = controller_guard.take() {
         if let Err(e) = controller.cleanup().await {
             error!("Failed to clean up browser controller: {}", e);
-            return Err(format!("Failed to clean up browser: {}", e));
+            return Err(crate::utils::string_cache::format_error_cached("Failed to cleanup", "browser", e));
         }
         info!("Browser controller cleaned up successfully");
     } else {
@@ -1464,7 +1465,7 @@ pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<()
         }
         Err(e) => {
             error!("Failed to clear conversation history: {}", e);
-            Err(format!("Failed to clear conversation history: {}", e))
+            Err(crate::utils::string_cache::format_error_cached("Failed to clear", "conversation history", e))
         }
     }
 }

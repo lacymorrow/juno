@@ -16,6 +16,7 @@ use crate::{state, cli, agent, commands};
 use crate::agent::providers::factory::BrainFactory;
 use crate::constants::timeouts;
 use crate::state::AppState;
+use crate::utils::string_cache;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -289,13 +290,16 @@ impl StartupSequence {
         // Step 2: Load environment variables
         Self::init_environment();
 
-        // Step 3: Initialize desktop engine
+        // Step 3: Initialize string cache for performance optimization
+        Self::init_string_cache();
+
+        // Step 4: Initialize desktop engine
         let desktop_arc = Self::init_desktop();
 
-        // Step 4: Initialize AI providers
+        // Step 5: Initialize AI providers
         let _ = Self::init_providers(); // Non-fatal if this fails
 
-        // Step 5: Handle CLI commands (may exit early)
+        // Step 6: Handle CLI commands (may exit early)
         match Self::handle_cli(&desktop_arc) {
             Ok(should_continue) => {
                 if !should_continue {
@@ -307,7 +311,7 @@ impl StartupSequence {
             }
         }
 
-        // Step 6: Initialize application state
+        // Step 7: Initialize application state
         let app_state = Self::init_state(desktop_arc.clone());
 
         Ok((desktop_arc, app_state))
@@ -321,6 +325,11 @@ impl StartupSequence {
     fn init_environment() {
         info!("🌍 Initializing environment...");
         init_environment();
+    }
+
+    fn init_string_cache() {
+        info!("⚡ Initializing string cache for performance optimization...");
+        string_cache::initialize_string_cache();
     }
 
     fn init_desktop() -> Option<Arc<Desktop>> {

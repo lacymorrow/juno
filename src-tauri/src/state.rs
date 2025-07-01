@@ -32,6 +32,7 @@ use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::{app, audio, events, errors::templates};
+use crate::utils::string_cache::format_error_cached;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -380,112 +381,112 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.tts_provider.clone())
-            .map_err(|e| format!("Failed to get TTS provider: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "TTS provider", e))
     }
 
     pub fn set_tts_provider(&self, provider: String) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.tts_provider = provider)
-            .map_err(|e| format!("Failed to set TTS provider: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "TTS provider", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.dictation_active)
-            .map_err(|e| format!("Failed to get dictation active: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "dictation active state", e))
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.dictation_active = active)
-            .map_err(|e| format!("Failed to set dictation active: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "dictation active state", e))
     }
 
     pub fn get_dictation_clipboard_enabled(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.dictation_clipboard_enabled)
-            .map_err(|e| format!("Failed to get dictation clipboard enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "dictation clipboard enabled", e))
     }
 
     pub fn set_dictation_clipboard_enabled(&self, enabled: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.dictation_clipboard_enabled = enabled)
-            .map_err(|e| format!("Failed to set dictation clipboard enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "dictation clipboard enabled", e))
     }
 
     pub fn get_sound_enabled(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.sound_enabled)
-            .map_err(|e| format!("Failed to get sound enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "sound enabled", e))
     }
 
     pub fn set_sound_enabled(&self, enabled: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.sound_enabled = enabled)
-            .map_err(|e| format!("Failed to set sound enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "sound enabled", e))
     }
 
     pub fn get_always_listening_active(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_active)
-            .map_err(|e| format!("Failed to get always listening active: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "always listening active", e))
     }
 
     pub fn set_always_listening_active(&self, active: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_active = active)
-            .map_err(|e| format!("Failed to set always listening active: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "always listening active", e))
     }
 
     pub fn get_always_listening_sensitivity(&self) -> Result<f32, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_sensitivity)
-            .map_err(|e| format!("Failed to get always listening sensitivity: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "always listening sensitivity", e))
     }
 
     pub fn set_always_listening_sensitivity(&self, sensitivity: f32) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_sensitivity = sensitivity)
-            .map_err(|e| format!("Failed to set always listening sensitivity: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "always listening sensitivity", e))
     }
 
     pub fn get_always_listening_wake_words(&self) -> Result<Vec<String>, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_wake_words.clone())
-            .map_err(|e| format!("Failed to get always listening wake words: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "always listening wake words", e))
     }
 
     pub fn set_always_listening_wake_words(&self, wake_words: Vec<String>) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_wake_words = wake_words)
-            .map_err(|e| format!("Failed to set always listening wake words: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "always listening wake words", e))
     }
 
     pub fn get_notification_sound_enabled(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.notification_sound_enabled)
-            .map_err(|e| format!("Failed to get notification sound enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "notification sound enabled", e))
     }
 
     pub fn set_notification_sound_enabled(&self, enabled: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.notification_sound_enabled = enabled)
-            .map_err(|e| format!("Failed to set notification sound enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "notification sound enabled", e))
     }
 
     // UI Settings - Getter/Setter methods
@@ -493,126 +494,126 @@ impl AppState {
         self.ui_settings
             .lock()
             .map(|settings| settings.bar_ui_state.clone())
-            .map_err(|e| format!("Failed to get bar UI state: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "bar UI state", e))
     }
 
     pub fn set_bar_ui_state(&self, state: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.bar_ui_state = state)
-            .map_err(|e| format!("Failed to set bar UI state: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "bar UI state", e))
     }
 
     pub fn get_performance_monitoring_enabled(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.performance_monitoring_enabled)
-            .map_err(|e| format!("Failed to get performance monitoring enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "performance monitoring enabled", e))
     }
 
     pub fn set_performance_monitoring_enabled_internal(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.performance_monitoring_enabled = enabled)
-            .map_err(|e| format!("Failed to set performance monitoring enabled: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "performance monitoring enabled", e))
     }
 
     pub fn get_debug_mode(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.debug_mode)
-            .map_err(|e| format!("Failed to get debug mode: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "debug mode", e))
     }
 
     pub fn set_debug_mode_internal(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.debug_mode = enabled)
-            .map_err(|e| format!("Failed to set debug mode: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "debug mode", e))
     }
 
     pub fn get_notification_type(&self) -> Result<String, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_type.clone())
-            .map_err(|e| format!("Failed to get notification type: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "notification type", e))
     }
 
     pub fn set_notification_type(&self, notification_type: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_type = notification_type)
-            .map_err(|e| format!("Failed to set notification type: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "notification type", e))
     }
 
     pub fn get_notification_duration(&self) -> Result<u32, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_duration)
-            .map_err(|e| format!("Failed to get notification duration: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "notification duration", e))
     }
 
     pub fn set_notification_duration(&self, duration: u32) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_duration = duration)
-            .map_err(|e| format!("Failed to set notification duration: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "notification duration", e))
     }
 
     pub fn get_notification_position(&self) -> Result<String, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_position.clone())
-            .map_err(|e| format!("Failed to get notification position: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_ACCESS, "notification position", e))
     }
 
     pub fn set_notification_position(&self, position: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_position = position)
-            .map_err(|e| format!("Failed to set notification position: {}", e))
+            .map_err(|e| format_error_cached(templates::FAILED_TO_SET, "notification position", e))
     }
 
     pub fn get_notification_show_icons(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_show_icons)
-            .map_err(|e| format!("Failed to get notification show icons: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "notification show icons", e))
     }
 
     pub fn set_notification_show_icons(&self, show_icons: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_show_icons = show_icons)
-            .map_err(|e| format!("Failed to set notification show icons: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to set", "notification show icons", e))
     }
 
     pub fn get_notification_persist_important(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_persist_important)
-            .map_err(|e| format!("Failed to get notification persist important: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "notification persist important", e))
     }
 
     pub fn set_notification_persist_important(&self, persist: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_persist_important = persist)
-            .map_err(|e| format!("Failed to set notification persist important: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to set", "notification persist important", e))
     }
 
     pub fn get_smooth_mouse_movement(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.smooth_mouse_movement)
-            .map_err(|e| format!("Failed to get smooth mouse movement: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "smooth mouse movement", e))
     }
 
     pub fn set_smooth_mouse_movement(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.smooth_mouse_movement = enabled)
-            .map_err(|e| format!("Failed to set smooth mouse movement: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to set", "smooth mouse movement", e))
     }
 
     // Input Settings - Getter/Setter methods
@@ -620,35 +621,35 @@ impl AppState {
         self.input_settings
             .lock()
             .map(|settings| settings.keyboard_shortcuts.clone())
-            .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "keyboard shortcuts", e))
     }
 
     pub fn set_keyboard_shortcuts(&self, shortcuts: KeyboardShortcuts) -> Result<(), String> {
         self.input_settings
             .lock()
             .map(|mut settings| settings.keyboard_shortcuts = shortcuts)
-            .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to set", "keyboard shortcuts", e))
     }
 
     pub fn get_agent_trigger_mode(&self) -> Result<AgentTriggerMode, String> {
         self.input_settings
             .lock()
             .map(|settings| settings.agent_trigger_mode.clone())
-            .map_err(|e| format!("Failed to get agent trigger mode: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "agent trigger mode", e))
     }
 
     pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) -> Result<(), String> {
         self.input_settings
             .lock()
             .map(|mut settings| settings.agent_trigger_mode = mode)
-            .map_err(|e| format!("Failed to set agent trigger mode: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to set", "agent trigger mode", e))
     }
 
     pub fn get_dictation_trigger_mode(&self) -> Result<DictationTriggerMode, String> {
         self.input_settings
             .lock()
             .map(|settings| settings.dictation_trigger_mode.clone())
-            .map_err(|e| format!("Failed to get dictation trigger mode: {}", e))
+            .map_err(|e| crate::utils::string_cache::format_error_cached("Failed to get", "dictation trigger mode", e))
     }
 
     pub fn set_dictation_trigger_mode(&self, mode: DictationTriggerMode) -> Result<(), String> {
