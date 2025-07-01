@@ -22,8 +22,6 @@ import {
 } from "react";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
-import { useInvoke } from "@/hooks/useInvoke";
-import { useEventListener } from "@/hooks/useEventListener";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import type {
   BarState,
@@ -32,6 +30,19 @@ import type {
   WindowConfig,
 } from "@/types/floating-bar";
 import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
+
+// === NEW UI API IMPORTS ===
+import {
+  useUIElement,
+  createUIElement,
+  UIElementType,
+  UIState,
+  type UIStateData,
+  type UIElementConfig,
+  getStateIcon,
+  getStateColor,
+  getStateDescription,
+} from "@/lib/ui-api";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
@@ -43,6 +54,57 @@ const DEFAULT_HEIGHT =
   floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
 const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
 const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
+
+// Convert UI API state to legacy BarState for backward compatibility
+const convertUIStateToBarState = (uiState: UIState): BarState => {
+  switch (uiState) {
+    case "default":
+      return "default";
+    case "expanding":
+      return "expanding";
+    case "input":
+      return "input";
+    case "shrinking":
+      return "shrinking";
+    case "submitting":
+      return "submitting";
+    case "loading":
+      return "loading";
+    case "finishing":
+      return "finishing";
+    case "success":
+      return "success";
+    case "listening":
+      return "listening";
+    case "error":
+      return "error";
+    case "transcribing":
+      return "transcribing";
+    case "speaking":
+      return "speaking";
+    case "dictating":
+      return "dictating";
+    case "always-listening":
+      return "always-listening";
+    case "agent-responding":
+      return "agent_responding";
+    case "dictation-ready":
+      return "dictation_ready";
+    default:
+      return "default";
+  }
+};
+
+// Convert UI API config to legacy FloatingBarConfig
+const convertUIConfigToBarConfig = (
+  uiConfig: UIElementConfig
+): FloatingBarConfig => ({
+  show_voice_indicator: uiConfig.showVoiceIndicator,
+  enable_animations: uiConfig.enableAnimations,
+  auto_hide: uiConfig.autoHide,
+  auto_hide_delay: uiConfig.autoHideDelay,
+  opacity: uiConfig.opacity,
+});
 
 // Get main icon based on enhanced state
 const getMainIcon = (barState: BarState) => {
@@ -127,10 +189,7 @@ const AudioLevelIndicator = ({
   barState: BarState;
   audioLevel: number;
 }) => {
-  if (
-    !["dictating", "listening"].includes(barState)
-  )
-    return null;
+  if (!["dictating", "listening"].includes(barState)) return null;
 
   return (
     <div
@@ -152,7 +211,18 @@ const AudioLevelIndicator = ({
 };
 
 export function FloatingBar() {
-  // Enhanced state management - mirrors backend state exactly
+  // === NEW UI API INTEGRATION ===
+  const {
+    element,
+    state,
+    config,
+    loading,
+    error,
+    refreshState,
+    refreshConfig,
+  } = useUIElement("floating-bar", UIElementType.Bar);
+
+  // Enhanced state management - now using UI API state
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
@@ -168,7 +238,6 @@ export function FloatingBar() {
   );
   const [agentState, setAgentState] = useState<string | null>(null);
 
-  const { invokeCommand } = useInvoke();
   const { resizeWindow } = useWindowSize("floating-bar");
 
   // UI state
@@ -176,31 +245,62 @@ export function FloatingBar() {
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
   const [showTooltip, setShowTooltip] = useState(false);
-  const [config, setConfig] = useState<FloatingBarConfig>({
-    showVoiceIndicator: true,
-    enableAnimations: true,
-    autoHide: false,
-    autoHideDelay: 3000,
+  const [barConfig, setBarConfig] = useState<FloatingBarConfig>({
+    show_voice_indicator: true,
+    enable_animations: true,
+    auto_hide: false,
+    auto_hide_delay: 3000,
     opacity: 0.95,
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // Load configuration from backend
+  // === SYNC UI API STATE WITH LOCAL STATE ===
   useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const savedConfig = await invokeCommand<FloatingBarConfig>(
-          "get_floating_bar_config"
-        );
-        setConfig(savedConfig);
-      } catch (error) {
-        console.error("Failed to load floating bar config:", error);
+    if (state) {
+      console.log("FloatingBar: Syncing UI API state:", state);
+      setBarState(convertUIStateToBarState(state.uiState));
+      setInputValue(state.inputValue);
+      setLastSubmittedValue(state.lastSubmittedValue);
+      setCurrentError(state.currentError);
+      setTranscriptionText(state.transcriptionText);
+      setSpokenText(state.spokenText);
+      setIsAgentWorking(state.isAgentWorking);
+      setIsDictationMode(state.isDictationMode);
+      setIsAlwaysListening(state.isAlwaysListening);
+      setAudioLevel(state.audioLevel || 0);
+      setVoiceMode(
+        state.voiceMode === "dictation"
+          ? "dictation"
+          : state.voiceMode === "agent"
+          ? "agent"
+          : "idle"
+      );
+      setAgentState(state.agentState === "idle" ? null : state.agentState);
+
+      // Auto-focus input when in input state
+      if (state.uiState === "input" && inputRef.current) {
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
       }
-    };
-    loadConfig();
-  }, [invokeCommand]);
+    }
+  }, [state]);
+
+  // === SYNC UI API CONFIG WITH LOCAL CONFIG ===
+  useEffect(() => {
+    if (config) {
+      console.log("FloatingBar: Syncing UI API config:", config);
+      setBarConfig(convertUIConfigToBarConfig(config));
+    }
+  }, [config]);
+
+  // Load initial state and config
+  useEffect(() => {
+    refreshState();
+    refreshConfig();
+  }, [refreshState, refreshConfig]);
 
   // Update window size based on bar state
   useEffect(() => {
@@ -221,10 +321,10 @@ export function FloatingBar() {
 
   // Handle animation state tracking
   useEffect(() => {
-    if (config.enableAnimations) {
+    if (barConfig.enable_animations) {
       setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
     }
-  }, [barState, config.enableAnimations]);
+  }, [barState, barConfig.enable_animations]);
 
   // Cleanup tooltip timeout on unmount
   useEffect(() => {
@@ -234,34 +334,6 @@ export function FloatingBar() {
       }
     };
   }, []);
-
-  // Listen for enhanced backend state updates
-  const handleBarStateUpdate = useCallback((data: BarStateData) => {
-    console.log("Received bar-state-update:", data);
-
-    // Update all state from backend
-    setBarState(data.barState);
-    setInputValue(data.inputValue);
-    setLastSubmittedValue(data.lastSubmittedValue);
-    setCurrentError(data.currentError);
-    setTranscriptionText(data.transcriptionText);
-    setSpokenText(data.spokenText);
-    setIsAgentWorking(data.isAgentWorking);
-    setIsDictationMode(data.isDictationMode);
-    setIsAlwaysListening(data.isAlwaysListening);
-    setAudioLevel(data.audioLevel || 0);
-    setVoiceMode(data.voiceMode || "idle");
-    setAgentState(data.agentState || null);
-
-    // Auto-focus input when in input state
-    if (data.barState === "input" && inputRef.current) {
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-    }
-  }, []);
-
-  useEventListener("bar-state-update", handleBarStateUpdate);
 
   // Window hover handlers
   const handleMouseEnter = useCallback(() => {
@@ -286,9 +358,6 @@ export function FloatingBar() {
     }
   }, []);
 
-  useEventListener("mouse-entered-window", handleMouseEnter, [barState]);
-  useEventListener("mouse-left-window", handleMouseLeave);
-
   // Listen for window focus changes
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -304,7 +373,10 @@ export function FloatingBar() {
               "Current bar state:",
               barState
             );
-            await invokeCommand("floating_bar_focus_change", { isFocused });
+            // Use UI API instead of direct command
+            if (element) {
+              await element.focus({ isFocused });
+            }
           }
         );
       } catch (error) {
@@ -318,23 +390,29 @@ export function FloatingBar() {
         unlisten();
       }
     };
-  }, [barState, invokeCommand]);
+  }, [barState, element]);
 
-  // Handler functions that call backend commands
+  // === UPDATED HANDLER FUNCTIONS USING UI API ===
   const handleBarClick = useCallback(async () => {
-    await invokeCommand("floating_bar_click");
-  }, [invokeCommand]);
+    if (element) {
+      await element.click();
+    }
+  }, [element]);
 
   const handleInputBlur = useCallback(async () => {
-    await invokeCommand("floating_bar_input_blur");
-  }, [invokeCommand]);
+    if (element) {
+      await element.blur();
+    }
+  }, [element]);
 
   const handleInputChange = useCallback(
     async (value: string) => {
       setInputValue(value);
-      await invokeCommand("floating_bar_input_change", { value });
+      if (element) {
+        await element.input(value);
+      }
     },
-    [invokeCommand]
+    [element]
   );
 
   const handleSubmit = useCallback(
@@ -343,9 +421,11 @@ export function FloatingBar() {
       const query = inputValue.trim();
       if (!query) return;
 
-      await invokeCommand("floating_bar_submit", { query });
+      if (element) {
+        await element.submit(query);
+      }
     },
-    [inputValue, invokeCommand]
+    [inputValue, element]
   );
 
   // Get enhanced container styles with voice mode awareness
@@ -411,6 +491,38 @@ export function FloatingBar() {
     );
   };
 
+  // Show loading state while UI API is initializing
+  if (loading) {
+    return (
+      <div className="w-screen h-screen flex items-start justify-start relative overflow-hidden">
+        <div
+          className="relative z-50 p-3 bg-transparent"
+          data-tauri-drag-region
+        >
+          <div className="relative flex items-center justify-center text-white rounded-full shadow-lg border border-white/20 h-[20px] w-[60px] px-2 bg-black/90">
+            <Loader2 className="h-4 w-4 animate-spin text-white" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if UI API failed to initialize
+  if (error) {
+    return (
+      <div className="w-screen h-screen flex items-start justify-start relative overflow-hidden">
+        <div
+          className="relative z-50 p-3 bg-transparent"
+          data-tauri-drag-region
+        >
+          <div className="relative flex items-center justify-center text-white rounded-full shadow-lg border border-white/20 h-[20px] w-[60px] px-2 bg-red-600/90">
+            <AlertCircle className="h-4 w-4 text-white" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-tauri-drag-region
@@ -435,7 +547,7 @@ export function FloatingBar() {
         <div
           data-tauri-drag-region
           className={getContainerStyles()}
-          style={{ opacity: config.opacity }}
+          style={{ opacity: barConfig.opacity }}
           onClick={
             ["default", "dictation_ready"].includes(barState)
               ? handleBarClick
@@ -448,7 +560,7 @@ export function FloatingBar() {
             barState === "finishing") && (
             <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon(barState)}
-              {config.showVoiceIndicator &&
+              {barConfig.show_voice_indicator &&
                 (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
                 )}
@@ -532,7 +644,10 @@ export function FloatingBar() {
                   )}
                 </div>
               </div>
-              <AudioLevelIndicator barState={barState} audioLevel={audioLevel} />
+              <AudioLevelIndicator
+                barState={barState}
+                audioLevel={audioLevel}
+              />
             </div>
           )}
 
@@ -653,11 +768,11 @@ export function FloatingBar() {
                 className="flex items-center gap-3 flex-1 min-w-0"
                 data-tauri-drag-region
               >
-                {agentState === "Failed" ? (
+                {agentState === "failed" ? (
                   <AlertCircle className="h-4 w-4 text-red-300" />
-                ) : agentState === "Cancelled" ? (
+                ) : agentState === "cancelled" ? (
                   <X className="h-4 w-4 text-yellow-300" />
-                ) : agentState === "Offline" ? (
+                ) : agentState === "offline" ? (
                   <AlertCircle className="h-4 w-4 text-orange-300" />
                 ) : (
                   <Check className="h-4 w-4 text-emerald-300" />
@@ -665,11 +780,11 @@ export function FloatingBar() {
                 <span
                   className={cn(
                     "text-sm font-medium truncate",
-                    agentState === "Failed"
+                    agentState === "failed"
                       ? "text-red-100"
-                      : agentState === "Cancelled"
+                      : agentState === "cancelled"
                       ? "text-yellow-100"
-                      : agentState === "Offline"
+                      : agentState === "offline"
                       ? "text-orange-100"
                       : "text-emerald-100"
                   )}
@@ -681,21 +796,21 @@ export function FloatingBar() {
               <div
                 className={cn(
                   "flex items-center justify-center h-6 w-6 rounded-full",
-                  agentState === "Failed"
+                  agentState === "failed"
                     ? "bg-red-400"
-                    : agentState === "Cancelled"
+                    : agentState === "cancelled"
                     ? "bg-yellow-400"
-                    : agentState === "Offline"
+                    : agentState === "offline"
                     ? "bg-orange-400"
                     : "bg-emerald-400"
                 )}
                 data-tauri-drag-region
               >
-                {agentState === "Failed" ? (
+                {agentState === "failed" ? (
                   <X size={12} className="text-red-900" />
-                ) : agentState === "Cancelled" ? (
+                ) : agentState === "cancelled" ? (
                   <X size={12} className="text-yellow-900" />
-                ) : agentState === "Offline" ? (
+                ) : agentState === "offline" ? (
                   <AlertCircle size={12} className="text-orange-900" />
                 ) : (
                   <Check size={12} className="text-emerald-900" />
