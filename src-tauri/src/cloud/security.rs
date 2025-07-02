@@ -14,11 +14,11 @@
 //! Registration: Called via CloudSecurity::new() during cloud initialization
 
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
 use super::types::{CloudError, CloudCommand, CloudCommandType};
 use super::config::{CloudConfig, SecurityLevel};
 use super::auth::DeviceAuth;
+use crate::utils::current_timestamp_secs;
 
 /// Security levels for different operations - now maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +97,7 @@ impl CloudSecurity {
 
     /// Validate command timestamp with permissive approach
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
-        let now = safe_timestamp();
+        let now = current_timestamp_secs();
 
         let time_diff = if now > timestamp {
             now - timestamp
@@ -265,7 +265,7 @@ impl CloudSecurity {
     /// Create audit log entry
     pub fn create_audit_log(&self, command: &CloudCommand, result: &Result<(), CloudError>) -> AuditLogEntry {
         AuditLogEntry {
-            timestamp: safe_timestamp(),
+            timestamp: current_timestamp_secs(),
             command_id: command.id.clone(),
             command_type: self.command_type_to_string(&command.command_type),
             device_id: self.auth.get_credentials()
@@ -314,10 +314,4 @@ pub struct RateLimit {
     pub burst_allowance: Option<u32>,
 }
 
-/// Return unix timestamp in seconds, defaulting to 0 if clock is before epoch.
-fn safe_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
+
