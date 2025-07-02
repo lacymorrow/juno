@@ -54,6 +54,7 @@ tempfile = "3.10.1"
 cocoa = { version = "0.25", optional = true }
 objc = { version = "0.2", optional = true }
 objc-sys = { version = "0.3", features = ["gnustep-2-0"] }
+dispatch = { version = "0.2", optional = true }
 shlex = "1.3.0"
 glob = "0.3.1"
 dirs = "5.0"
@@ -108,7 +109,7 @@ libc = "0.2"
 default = ["custom-protocol", "macos-proxy"]
 # this feature is used when building mobile applications
 # mobile = ["tauri/mobile"] # Temporarily comment out if causing issues
-macos-proxy = ["tauri/macos-proxy", "cocoa", "objc"]
+macos-proxy = ["tauri/macos-proxy", "cocoa", "objc", "dispatch"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]

@@ -218,10 +218,10 @@ impl StopCoordinator {
         cleanup_results.push("State events emitted".to_string());
 
         // 7. Update floating bar
-        crate::commands::floating_bar::handle_backend_response(
+        crate::commands::ui_commands::handle_backend_response(
             app_handle,
-            "Stopped",
-            Some(format!("All operations stopped: {}", reason))
+            Some(format!("All operations stopped: {}", reason)),
+            "Stopped".to_string()
         ).await;
         cleanup_results.push("Floating bar updated".to_string());
 
