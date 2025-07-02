@@ -57,7 +57,7 @@ impl DictationStateManager {
                 voice_controller_active: false,
                 monitor_state_active: false,
                 floating_bar_state: "default".to_string(),
-                last_updated: Self::current_timestamp(),
+                last_updated: crate::utils::current_timestamp_ms(),
             })),
             state_history: Arc::new(Mutex::new(Vec::new())),
             listeners: Arc::new(Mutex::new(HashMap::new())),
@@ -122,7 +122,7 @@ impl DictationStateManager {
         let event = StateChangeEvent {
             previous_state: previous_state.clone(),
             new_state: new_state.clone(),
-            timestamp: Self::current_timestamp(),
+            timestamp: crate::utils::current_timestamp_ms(),
             reason,
             component,
         };
@@ -169,7 +169,7 @@ impl DictationStateManager {
             components.floating_bar_state = state;
         }
 
-        components.last_updated = Self::current_timestamp();
+        components.last_updated = crate::utils::current_timestamp_ms();
 
         // Check for inconsistencies
         let inconsistencies = self.detect_inconsistencies(&components).await;
@@ -222,7 +222,7 @@ impl DictationStateManager {
             voice_controller_active: false,
             monitor_state_active: false,
             floating_bar_state: "default".to_string(),
-            last_updated: Self::current_timestamp(),
+            last_updated: crate::utils::current_timestamp_ms(),
         };
 
         // 6. Emit comprehensive reset events
@@ -286,7 +286,7 @@ impl DictationStateManager {
             "inconsistencies": inconsistencies,
             "state_consistent": inconsistencies.is_empty(),
             "force_reset_in_progress": *self.force_reset_in_progress.lock().await,
-            "timestamp": Self::current_timestamp()
+            "timestamp": crate::utils::current_timestamp_ms()
         })
     }
 
@@ -471,12 +471,7 @@ impl DictationStateManager {
         }
     }
 
-    fn current_timestamp() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
+
 }
 
 // Global state manager instance
@@ -551,7 +546,7 @@ pub async fn transition_dictation_state(
         "idle" => DictationState::Idle,
         "starting" => DictationState::Starting,
         "active" => DictationState::Active {
-            started_at: DictationStateManager::current_timestamp(),
+            started_at: crate::utils::current_timestamp_ms(),
         },
         "stopping" => DictationState::Stopping,
         "force_resetting" => DictationState::ForceResetting,
@@ -593,7 +588,7 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
         voice_controller_active: false,
         monitor_state_active: false,
         floating_bar_state: "default".to_string(),
-        last_updated: DictationStateManager::current_timestamp(),
+        last_updated: crate::utils::current_timestamp_ms(),
     };
 
     // Emit comprehensive reset events
@@ -638,7 +633,7 @@ pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
 
     let target_state = if active {
         DictationState::Active {
-            started_at: DictationStateManager::current_timestamp(),
+            started_at: crate::utils::current_timestamp_ms(),
         }
     } else {
         DictationState::Idle
