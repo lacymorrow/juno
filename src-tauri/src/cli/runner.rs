@@ -354,9 +354,9 @@ async fn test_tts(_app_handle: AppHandle) -> Result<(), String> {
 /// Load CLI settings from centralized settings manager
 /// Used by CLI initialization and configuration retrieval
 pub async fn load_cli_settings_from_centralized_settings(
-    app: &AppHandle,
+    app: AppHandle,
 ) -> Result<CLISettings, String> {
-    let settings_manager = SettingsManager::new(app.clone())
+    let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     settings_manager.get_cli_settings().await
@@ -365,10 +365,10 @@ pub async fn load_cli_settings_from_centralized_settings(
 /// Save CLI settings to centralized settings manager
 /// Used by CLI configuration updates
 pub async fn save_cli_settings_to_centralized_settings(
-    app: &AppHandle,
+    app: AppHandle,
     settings: &CLISettings,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app.clone())
+    let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     settings_manager.set_cli_settings(settings).await
@@ -376,8 +376,8 @@ pub async fn save_cli_settings_to_centralized_settings(
 
 /// Initialize CLI settings from centralized settings
 /// Used by application startup for CLI configuration
-pub async fn initialize_cli_settings(app: &AppHandle) -> Result<(), String> {
-    match load_cli_settings_from_centralized_settings(app).await {
+pub async fn initialize_cli_settings(app: AppHandle) -> Result<(), String> {
+    match load_cli_settings_from_centralized_settings(app.clone()).await {
         Ok(cli_settings) => {
             info!("Loaded CLI settings from centralized settings");
             info!(
@@ -408,9 +408,9 @@ pub async fn initialize_cli_settings(app: &AppHandle) -> Result<(), String> {
 /// Load voice transcription settings from centralized settings
 /// Used by voice transcription plugin initialization
 pub async fn load_voice_transcription_settings_from_centralized_settings(
-    app: &AppHandle,
+    app: AppHandle,
 ) -> Result<crate::settings::VoiceTranscriptionSettings, String> {
-    let settings_manager = SettingsManager::new(app.clone())
+    let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     settings_manager.get_voice_transcription_settings().await
@@ -419,10 +419,10 @@ pub async fn load_voice_transcription_settings_from_centralized_settings(
 /// Save voice transcription settings to centralized settings
 /// Used by voice transcription plugin configuration updates
 pub async fn save_voice_transcription_settings_to_centralized_settings(
-    app: &AppHandle,
+    app: AppHandle,
     settings: &crate::settings::VoiceTranscriptionSettings,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app.clone())
+    let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     settings_manager
@@ -432,8 +432,8 @@ pub async fn save_voice_transcription_settings_to_centralized_settings(
 
 /// Initialize voice transcription settings from centralized settings
 /// Used by application startup for voice transcription configuration
-pub async fn initialize_voice_transcription_settings(app: &AppHandle) -> Result<(), String> {
-    match load_voice_transcription_settings_from_centralized_settings(app).await {
+pub async fn initialize_voice_transcription_settings(app: AppHandle) -> Result<(), String> {
+    match load_voice_transcription_settings_from_centralized_settings(app.clone()).await {
         Ok(voice_settings) => {
             info!("Loaded voice transcription settings from centralized settings");
             Ok(())

@@ -88,7 +88,7 @@ pub async fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
 
 /// Helper function to save autostart setting to centralized settings
 async fn save_autostart_to_centralized_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app.clone())
+    let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
     settings_manager.set_autostart_enabled(enabled).await
