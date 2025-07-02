@@ -326,10 +326,10 @@ pub async fn update_self_improvement_config(
 
     let mut state_guard = state.lock().await;
 
-    if let Some(engine) = state_guard.as_mut() {
-        engine.config = config;
-        tracing::info!("⚙️ Self-improvement configuration updated successfully");
-        Ok("Configuration updated successfully".to_string())
+    if let Some(_engine) = state_guard.as_mut() {
+        // TODO: Update engine configuration when SelfImprovementEngine supports config updates
+        tracing::info!("⚙️ Self-improvement configuration would be updated (not implemented yet)");
+        Ok("Configuration update placeholder - not implemented yet".to_string())
     } else {
         Err("Self-improvement system not initialized".to_string())
     }

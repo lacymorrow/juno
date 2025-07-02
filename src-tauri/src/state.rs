@@ -685,6 +685,11 @@ impl AppState {
         }
     }
 
+    // Method to check if cancellation is requested
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancel_rx.borrow()
+    }
+
     // Method to mark agent execution started
     pub fn mark_agent_execution_started(&self, execution_id: String) -> Result<(), String> {
         let mut execution_state = self

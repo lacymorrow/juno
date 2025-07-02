@@ -63,10 +63,10 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
 
         // Play voice start sound automatically when dictation starts
-        let app_handle_clone = app_handle_for_listener.clone();
+        let app_handle_for_sound = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
-            let state = app_handle_clone.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone, state).await {
+            let state = app_handle_for_sound.state::<crate::state::AppState>();
+            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_for_sound.clone(), state).await {
                 warn!("Failed to play voice start sound: {}", e);
             }
         });

@@ -5,15 +5,15 @@
 
 pub mod types;
 pub mod config;
-pub mod engine;
-pub mod analysis;
-pub mod validation;
-pub mod benchmarks;
 
-// Re-export all public types
+// Re-export all public types from existing modules
 pub use types::*;
 pub use config::*;
-pub use engine::*;
-pub use analysis::*;
-pub use validation::*;
-pub use benchmarks::*;
+
+/// Register self-improvement tools with a provider (stub for compilation)
+pub async fn register_self_improvement_tools_with_provider(
+    _provider: &mut crate::agent::implementations::tool_provider::LocalToolProvider,
+) -> Result<(), crate::agent::core::AgentError> {
+    // Stub implementation - self-improvement tools not fully implemented yet
+    Ok(())
+}

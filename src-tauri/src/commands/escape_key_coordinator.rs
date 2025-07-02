@@ -104,6 +104,13 @@ impl EscapeKeyCoordinator {
     async fn register_global_shortcut(&self, app_handle: &AppHandle) -> Result<(), String> {
         info!("[EscapeKeyCoordinator] Registering global Escape key shortcut");
 
+        // Skip registration in headless mode - global shortcuts not needed
+        if crate::cli::headless::is_headless_mode() {
+            info!("[EscapeKeyCoordinator] Skipping global shortcut registration in headless mode");
+            self.is_registered.store(true, Ordering::SeqCst); // Mark as registered to maintain state consistency
+            return Ok(());
+        }
+
         let escape_shortcut = Shortcut::new(None, Code::Escape);
         let result = app_handle.global_shortcut().register(escape_shortcut);
 
@@ -123,6 +130,13 @@ impl EscapeKeyCoordinator {
     /// Unregister the global escape key shortcut
     async fn unregister_global_shortcut(&self, app_handle: &AppHandle) -> Result<(), String> {
         info!("[EscapeKeyCoordinator] Unregistering global Escape key shortcut");
+
+        // Skip unregistration in headless mode - no shortcut was registered
+        if crate::cli::headless::is_headless_mode() {
+            info!("[EscapeKeyCoordinator] Skipping global shortcut unregistration in headless mode");
+            self.is_registered.store(false, Ordering::SeqCst);
+            return Ok(());
+        }
 
         let escape_shortcut = Shortcut::new(None, Code::Escape);
         let result = app_handle.global_shortcut().unregister(escape_shortcut);

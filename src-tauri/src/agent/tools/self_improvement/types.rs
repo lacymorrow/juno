@@ -35,7 +35,7 @@ pub enum FocusArea {
 }
 
 /// Benchmark types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum BenchmarkType {
     /// Accuracy benchmarking
     Accuracy,
@@ -256,4 +256,24 @@ pub struct ImprovementIteration {
     pub accepted: bool,
     /// Iteration metadata
     pub metadata: IterationMetadata,
+}
+
+/// Self-improvement engine (stub implementation for compilation)
+#[derive(Debug)]
+pub struct SelfImprovementEngine {
+    pub current_iteration: Option<ImprovementIteration>,
+    pub archive: Vec<ImprovementIteration>,
+}
+
+impl SelfImprovementEngine {
+    pub fn new(_config: super::SelfImprovementConfig) -> Result<Self, String> {
+        Ok(Self {
+            current_iteration: None,
+            archive: Vec::new(),
+        })
+    }
+
+    pub async fn execute_improvement_cycle(&mut self) -> Result<ImprovementIteration, String> {
+        Err("Self-improvement engine not fully implemented".to_string())
+    }
 }

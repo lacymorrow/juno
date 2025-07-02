@@ -217,12 +217,62 @@ pub fn clear_permission_cache() {
     }
 }
 
-/// Handle CLI command processing and determine if app should continue
+/// Enhanced CLI processing that handles both legacy and new headless agent commands
 pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     let cli = cli::Cli::parse();
 
-    // If handle_cli_commands returns Ok(true), it means a command was executed
-    // and the application should exit.
+    // Check if this is a headless command first
+    if cli::headless::should_run_headless(&cli) {
+        info!("🤖 Running in headless mode");
+
+        // Set global headless mode flag for other components
+        cli::headless::set_headless_mode(true);
+
+        // Create a minimal Tauri app for headless operations
+        let app_result = create_headless_app(desktop_arc.clone());
+
+        match app_result {
+            Ok(app_handle) => {
+                // Create async runtime for headless operations
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| crate::error_handling::JunoError::SystemError(format!("Failed to create async runtime: {}", e)))?;
+
+                // Execute headless command
+                let result = rt.block_on(async {
+                    let headless_runtime = cli::HeadlessRuntime::new(app_handle, &cli);
+                    headless_runtime.execute_command(&cli).await
+                });
+
+                // Handle result and exit with appropriate code
+                match result {
+                    Ok(result) => {
+                        if result.success {
+                            std::process::exit(crate::constants::cli::exit_code::SUCCESS);
+                        } else {
+                            eprintln!("Error: {}", result.error.unwrap_or_default());
+                            std::process::exit(crate::constants::cli::exit_code::AGENT_ERROR);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Headless execution failed: {}", e);
+                        std::process::exit(match e {
+                            crate::error_handling::JunoError::NetworkError(_) => crate::constants::cli::exit_code::NETWORK_ERROR,
+                            crate::error_handling::JunoError::PermissionError(_) => crate::constants::cli::exit_code::PERMISSION_ERROR,
+                            _ => crate::constants::cli::exit_code::AGENT_ERROR,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to create headless app: {}", e);
+                std::process::exit(crate::constants::cli::exit_code::GENERAL_ERROR);
+            }
+        }
+    }
+
+    // Handle legacy CLI commands (TTS tests, self-improvement, etc.)
     if let Some(desktop_ref) = desktop_arc.as_ref() {
         match cli::runner::handle_cli_commands(&cli, desktop_ref) {
             Ok(should_exit) => {
@@ -237,7 +287,6 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
         }
     } else {
         // Handle CLI commands without desktop instance - create minimal instance for CLI only
-        // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
         match Desktop::new(false, false) {
             Ok(minimal_desktop) => {
                 match cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
@@ -263,7 +312,7 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
     }
 
     // Proceed with Tauri application launch if no CLI command was run
-    println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
+    info!("No CLI commands detected, launching Tauri application...");
     Ok(true)
 }
 
@@ -275,6 +324,35 @@ pub fn init_app_state(desktop_arc: Option<Arc<Desktop>>) -> state::AppState {
     commands::shell::init_shell_state(&app_state);
 
     app_state
+}
+
+/// Create a minimal Tauri app for headless operations
+fn create_headless_app(desktop_arc: Option<Arc<Desktop>>) -> Result<tauri::AppHandle, String> {
+    use tauri::{Builder, Manager};
+
+    let app_state = init_app_state(desktop_arc);
+
+    let app = Builder::default()
+        .plugin(tauri_plugin_voice_transcription::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(app_state)
+        .build(tauri::generate_context!())
+        .map_err(|e| format!("Failed to build headless app: {}", e))?;
+
+    let app_handle = app.handle().clone();
+
+    // Initialize headless mode
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+    rt.block_on(async {
+        cli::headless::init_headless_mode(app_handle.clone()).await
+            .map_err(|e| format!("Failed to initialize headless mode: {}", e))
+    })?;
+
+    Ok(app_handle)
 }
 
 /// Startup sequence coordinator

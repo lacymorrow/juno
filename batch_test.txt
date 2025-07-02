@@ -1,0 +1,3 @@
+What is the current time?
+Count from 1 to 3
+Say hello

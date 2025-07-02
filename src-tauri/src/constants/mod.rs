@@ -25,6 +25,7 @@ pub mod settings;
 pub mod text;
 pub mod timeouts;
 pub mod ui;
+pub mod cli;
 
 // Re-export everything from agent for convenience
 pub use agent::*;
@@ -64,8 +65,5 @@ pub const MAX_FILE_SIZE_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 pub use platform::*;
 
 // App messages that can be re-exported for convenience
-pub mod messages {
-    // Note: Currently no messages module in files, but keeping structure for future use
-    pub const GENERIC_SUCCESS: &str = "Operation completed successfully";
-    pub const GENERIC_ERROR: &str = "An error occurred during the operation";
-}
+pub const GENERIC_SUCCESS: &str = "Operation completed successfully";
+pub const GENERIC_ERROR: &str = "An error occurred during the operation";
