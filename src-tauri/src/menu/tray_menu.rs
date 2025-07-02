@@ -371,8 +371,31 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         }
     });
 
-    // Tray icon state is now handled by agent state changes and floating bar state monitoring
-    // No need for separate dictation finished listener
+    // Listen for dictation completion events (when transcription finishes)
+    let _ = app_handle.listen("app-dictation-finished", {
+        let app_handle = app_handle_clone.clone();
+        move |event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // When dictation finishes, check if it's transitioning to agent mode
+                // If there's a query payload, it means agent mode is starting
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
+                    if payload.get("query").is_some() {
+                        // Dictation finished and agent is about to start
+                        update_tray_icon_state(TrayIconState::Processing).await;
+                    } else {
+                        // Just dictation finishing without agent mode
+                        let new_state = determine_current_state(&app_handle).await;
+                        update_tray_icon_state(new_state).await;
+                    }
+                } else {
+                    // Fallback - just determine current state
+                    let new_state = determine_current_state(&app_handle).await;
+                    update_tray_icon_state(new_state).await;
+                }
+            });
+        }
+    });
 
     let _ = app_handle.listen("always-listening-mode-changed", {
         let app_handle = app_handle_clone.clone();

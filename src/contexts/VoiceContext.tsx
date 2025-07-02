@@ -91,11 +91,10 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
       );
 
       unlistenCallbacks.push(
-        await listen("dictation-active", (event) => {
-          const isActive = event.payload as boolean;
+        await listen("app-dictation-finished", () => {
           setVoiceState((prev) => ({
             ...prev,
-            isListening: isActive,
+            isListening: false,
           }));
         })
       );

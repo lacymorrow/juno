@@ -93,8 +93,9 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         }
     });
 
-    // Agent submission is now handled directly in voice transcription final result handler
-    // No need for separate app-dictation-finished listener
+    // NOTE: Removed duplicate app-dictation-finished handler that was causing race conditions.
+    // Agent execution is now handled through the query-submitted event from FloatingBar only.
+    // The app-dictation-finished event is still used by VoiceContext and tray menu for UI updates.
 
     // Listen for query-submitted events from FloatingBar to trigger the agent
     let app_handle_for_bar_listener = app_handle.clone();
