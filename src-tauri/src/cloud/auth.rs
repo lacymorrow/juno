@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use std::time::{SystemTime, UNIX_EPOCH};
 use super::types::{CloudError, DeviceRegistration, AuthResponse};
 use super::config::CloudConfig;
 use base64::{Engine as _, engine::general_purpose};
+use crate::utils::current_timestamp_secs;
 
 /// Device authentication credentials
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,7 +72,7 @@ impl DeviceAuth {
     pub fn is_authenticated(&self) -> bool {
         if let Some(creds) = &self.credentials {
             if let Some(expires_at) = creds.expires_at {
-                let now = safe_timestamp();
+                let now = current_timestamp_secs();
                 return now < expires_at;
             }
             return true; // No expiration set, assume valid
@@ -93,7 +93,7 @@ impl DeviceAuth {
             .as_ref()
             .ok_or_else(|| CloudError::AuthenticationFailed("No credentials available".to_string()))?;
 
-        let timestamp = safe_timestamp();
+        let timestamp = current_timestamp_secs();
 
         let auth_data = serde_json::json!({
             "device_id": creds.device_id,
@@ -217,10 +217,4 @@ impl DeviceAuth {
     }
 }
 
-/// Return unix timestamp in seconds, defaulting to 0 if clock is before the epoch.
-fn safe_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
+

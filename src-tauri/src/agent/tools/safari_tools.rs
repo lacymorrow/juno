@@ -26,15 +26,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Return unix timestamp secs with fallback to 0.
-fn safe_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
+use crate::utils::current_timestamp_secs;
 
 /// Escapes a string for safe inclusion in AppleScript string literals
 ///
@@ -295,7 +287,7 @@ JSON.stringify(serializeDOMWithIds(document.body));
                 Ok(json!({
                     "dom_structure": dom_data,
                     "extraction_method": "Safari JavaScript injection",
-                    "timestamp": safe_timestamp()
+                    "timestamp": current_timestamp_secs()
                 }))
             }
             Err(e) => {
@@ -312,7 +304,7 @@ JSON.stringify(serializeDOMWithIds(document.body));
         })?;
 
         cache.clear(); // Clear old cache
-        let timestamp = safe_timestamp();
+        let timestamp = current_timestamp_secs();
 
         self.cache_elements_recursive(dom_data, &mut cache, timestamp);
 
