@@ -123,7 +123,8 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 }
 
                                 // Submit the query to the agent system
-                                let app_state = app_handle_clone.state::<crate::state::AppState>();
+                                let app_handle_for_state = app_handle_clone.clone();
+                                let app_state = app_handle_for_state.state::<crate::state::AppState>();
 
                                 // CRITICAL: Register escape key IMMEDIATELY when agent processing starts
                                 // This ensures escape key is captured during the processing gap between
@@ -132,17 +133,20 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
+                                // Clone for error handling since submit_query will move app_handle_clone
+                                let app_handle_for_error = app_handle_clone.clone();
+
                                 match crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
-                                    app_handle_clone.clone()
+                                    app_handle_clone
                                 ).await {
                                     Ok(_) => {
                                         info!("[Agent Mode] Agent query submitted successfully");
                                     }
                                     Err(e) => {
                                         error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                        crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
                                     }
                                 }
                             } else {

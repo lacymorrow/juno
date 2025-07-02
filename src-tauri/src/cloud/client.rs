@@ -750,7 +750,6 @@ impl CloudClient {
         CloudClientTask {
             config: self.config.clone(),
             auth: self.auth.clone(),
-            security: self.security.clone(),
             command_processor: self.command_processor.clone(),
             connection_state: self.connection_state.clone(),
             app_handle: self.app_handle.clone(),
@@ -765,8 +764,6 @@ struct CloudClientTask {
     config: CloudConfig,
     #[allow(dead_code)]
     auth: DeviceAuth,
-    #[allow(dead_code)]
-    security: CloudSecurity,
     #[allow(dead_code)]
     command_processor: CloudCommandProcessor,
     #[allow(dead_code)]

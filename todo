@@ -8,11 +8,57 @@ src-tauri/src/anthropic.rs
 
 src-tauri/src/agent/tool_logger.rs
 
+AGENT_IMPROVEMENT_ANALYSIS.md
+
 invoke("test_cloud_backend_connection"); // hard coded
 
 redundant current_timestamp and safe_time
 
 If an agent is asked to do multiple things in quick succession, we need to handle that.
+
+TTS called late
+2025-07-02T02:37:19.427851Z  INFO Desktop engine initialized successfully.
+2025-07-02T02:37:19.470548Z  INFO Loaded tool configuration from centralized settings
+2025-07-02T02:37:19.470589Z  INFO Loaded tool configuration from centralized settings on startup
+2025-07-02T02:37:21.107093Z  INFO Native permissions checked - no password prompts required
+2025-07-02T02:37:21.133759Z  INFO Native permissions checked - no password prompts required
+2025-07-02T02:37:22.541722Z  INFO Received query: hi
+2025-07-02T02:37:22.541763Z  INFO Checking network connectivity...
+2025-07-02T02:37:23.130437Z  INFO Network connectivity confirmed, proceeding with agent execution
+2025-07-02T02:37:23.130538Z  INFO Queued new agent query with ID: b5145dff-7d5d-4e22-be54-3f93919f8201
+2025-07-02T02:37:23.130562Z  INFO Queued agent query with ID: b5145dff-7d5d-4e22-be54-3f93919f8201
+2025-07-02T02:37:23.130575Z  INFO Starting atomic agent execution for query ID: b5145dff-7d5d-4e22-be54-3f93919f8201
+2025-07-02T02:37:23.130590Z  INFO [AppState] Agent execution started with ID: 1d07708a-b416-4d78-a49a-2d2f334f9ca2 (max steps: 15)
+2025-07-02T02:37:23.130596Z  INFO Starting new agent execution with ID: 1d07708a-b416-4d78-a49a-2d2f334f9ca2 (max steps: 15)
+2025-07-02T02:37:23.130681Z  INFO [EscapeKey] Register escape key handler requested - delegating to coordinator
+2025-07-02T02:37:23.130751Z  INFO [EscapeKeyCoordinator] User 'legacy_shortcut_handler' registered, count: 1
+2025-07-02T02:37:23.130776Z  INFO [EscapeKeyCoordinator] Registering global Escape key shortcut
+2025-07-02T02:37:23.130893Z  INFO [EscapeKeyCoordinator] Global Escape key shortcut registered successfully
+2025-07-02T02:37:23.130931Z  INFO [AppState] Attempting reset_cancel. Current state (is_cancelled): false
+2025-07-02T02:37:23.130934Z  INFO [AppState] reset_cancel: No reset needed (already false).
+2025-07-02T02:37:23.130938Z  INFO Reset cancellation signal for new agent execution
+2025-07-02T02:37:24.779501Z  INFO Entering MacOSEngine::get_focused_element (using safe implementation)
+2025-07-02T02:37:25.903163Z  INFO System context gathered successfully
+2025-07-02T02:37:25.903309Z  INFO Loaded agent mode from centralized settings: Single
+2025-07-02T02:37:25.903322Z  INFO Using agent mode: Single
+2025-07-02T02:37:25.903326Z  INFO 🔧 Setting up SINGLE AGENT mode with direct tools (no delegation)
+2025-07-02T02:37:25.903366Z  INFO 🔓 Initializing basic tools with balanced security (maximum freedom)
+2025-07-02T02:37:25.903373Z  INFO 🛡️ Security mode: Development (minimal restrictions)
+2025-07-02T02:37:25.903534Z  INFO ✅ Registered permissive basic tools: read_file (minimal restrictions), run_terminal_command (blacklist approach)
+2025-07-02T02:37:25.903546Z  INFO 🚀 AI now has maximum freedom with minimal security constraints
+2025-07-02T02:37:25.903551Z  INFO ✅ Registered basic tools for single agent
+2025-07-02T02:37:25.903613Z  INFO Registering desktop tools...
+2025-07-02T02:37:25.903675Z  INFO Registered tool: get_focused_element_info
+2025-07-02T02:37:25.903727Z  INFO Registered tool: capture_screenshot
+2025-07-02T02:37:25.903773Z  INFO Registered tool: capture_element_screenshot
+2025-07-02T02:37:25.903827Z  INFO Registered tool: get_clipboard
+2025-07-02T02:37:25.903884Z  INFO Registered tool: set_clipboard
+2025-07-02T02:37:25.903893Z  INFO Registering additional computer use tools...
+2025-07-02T02:37:25.903960Z  INFO Registered tool: scroll
+2025-07-02T02:37:25.904006Z  INFO Registered tool: wait
+2025-07-02T02:37:25.904059Z  INFO Registered tool: release_key
+2025-07-02T02:37:25.904134Z  INFO Registered tool: cursor_position
+2025-07-02T02:37:25.904209Z  INFO Registered tool: list_windows
 
 Can we show a canceling state when we have initiated a cancel with esc but the agent has not stopped yet?
 
