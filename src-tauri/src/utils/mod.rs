@@ -5,6 +5,7 @@ pub mod coordinates;
 pub mod coordinate_validation;
 pub mod key_parsing;
 pub mod network;
+pub mod string_cache;
 
 use computer_use_ai_sdk::Desktop;
 
