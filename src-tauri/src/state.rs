@@ -416,7 +416,7 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.dictation_clipboard_enabled = enabled)
-            .map_err(|e| format!("Failed to set dictation clipboard enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation clipboard enabled", e))
     }
 
     pub fn get_sound_enabled(&self) -> Result<bool, String> {
