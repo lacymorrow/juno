@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use serde::Serialize;
 use serde_json;
 use tracing::{info, error};
-use super::send_dev_tool_notification; // Use helper from parent module
+
 
 #[derive(Serialize)]
 struct WindowInfo {

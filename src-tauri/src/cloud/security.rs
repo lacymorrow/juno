@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
 use super::types::{CloudError, CloudCommand, CloudCommandType};
-use super::config::{CloudConfig, SecurityLevel};
+use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 
 /// Security levels for different operations - now maximally permissive

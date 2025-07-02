@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use tokio::sync::RwLock;
 use once_cell::sync::Lazy;
 use crate::state::AppState;
