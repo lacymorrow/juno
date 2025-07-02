@@ -162,6 +162,66 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
     });
 
+    // Listen for query-submitted events from FloatingBar to trigger the agent
+    let app_handle_for_bar_listener = app_handle.clone();
+    app_handle.listen("query-submitted", move |event| {
+        info!("[Event] Received query-submitted event from FloatingBar - triggering agent");
+
+        let app_handle_clone = app_handle_for_bar_listener.clone();
+        safe_spawn_async_task(move || async move {
+            // Parse the query from the event payload (JSON-encoded string)
+            let payload_str = event.payload();
+            match serde_json::from_str::<String>(payload_str) {
+                Ok(query_text) => {
+                    let trimmed_query = query_text.trim();
+
+                    if !trimmed_query.is_empty() {
+                info!("[FloatingBar] Submitting query to agent: '{}'", trimmed_query);
+
+                // Emit user message event for frontend to add to conversation
+                let user_message_data = serde_json::json!({
+                    "content": trimmed_query,
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64
+                });
+                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
+                    error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);
+                }
+
+                // Submit the query to the agent system
+                let app_state = app_handle_clone.state::<crate::state::AppState>();
+
+                // Register escape key for agent processing
+                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                    warn!("[FloatingBar] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
+                }
+
+                match crate::anthropic::submit_query(
+                    trimmed_query.to_string(),
+                    app_state,
+                    app_handle_clone.clone()
+                ).await {
+                    Ok(_) => {
+                        info!("[FloatingBar] Agent query submitted successfully");
+                    }
+                    Err(e) => {
+                        error!("[FloatingBar] Failed to submit query to agent: {}", e);
+                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                    }
+                }
+                    } else {
+                        info!("[FloatingBar] Query text was empty - ignoring");
+                    }
+                }
+                Err(e) => {
+                    error!("[FloatingBar] Failed to parse query-submitted payload as string: {}", e);
+                }
+            }
+        });
+    });
+
     // Listen for partial result events from the plugin
     let app_handle_for_listener = app_handle.clone();
     app_handle.listen("voice-transcription:partial-result", move |event| {

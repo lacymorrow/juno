@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
   Sparkles,
@@ -109,6 +110,37 @@ export function FloatingBar() {
     };
   }, []);
 
+  // === WINDOW RESIZING ===
+  useEffect(() => {
+    const resizeWindow = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const currentUiState = barState.barState as UIState;
+        const isCompact = ["default", "dictation-ready"].includes(
+          currentUiState
+        );
+        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
+        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+
+        console.log(
+          `FloatingBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+        );
+
+        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+      } catch (error) {
+        console.error("Failed to resize floating bar window:", error);
+      }
+    };
+
+    resizeWindow();
+  }, [
+    barState.barState,
+    defaultWidth,
+    defaultHeight,
+    EXPANDED_WIDTH,
+    EXPANDED_HEIGHT,
+  ]);
+
   // === UI HANDLERS ===
   const handleClick = useCallback(async () => {
     try {
@@ -153,7 +185,7 @@ export function FloatingBar() {
             interaction: {
               element_id: "floating-bar",
               interaction_type: "submit",
-              data: { query: trimmedValue },
+              data: { value: trimmedValue },
               timestamp: Date.now(),
             },
           });
