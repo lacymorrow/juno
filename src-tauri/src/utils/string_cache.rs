@@ -235,21 +235,27 @@ mod tests {
         let template = "Failed to load {}: {}";
         let context = "configuration file";
 
+        // Get initial count (might not be 0 if other tests ran first or during test execution)
+        let (initial_count, _) = StringCache::get_stats();
+
         // First call should cache the template
         let result1 = StringCache::get_template_error(template, context, "file not found");
-        let (count1, _) = StringCache::get_stats();
+        let (count_after_first, _) = StringCache::get_stats();
 
         // Second call with different error should use cached template
         let result2 = StringCache::get_template_error(template, context, "permission denied");
-        let (count2, _) = StringCache::get_stats();
+        let (count_after_second, _) = StringCache::get_stats();
 
         // Cache count should remain the same (template cached, not the full error)
-        assert_eq!(count1, count2);
+        assert_eq!(count_after_first, count_after_second);
         assert_eq!(result1, "Failed to load configuration file: file not found");
         assert_eq!(result2, "Failed to load configuration file: permission denied");
 
-        // Should have exactly 1 cache entry for this template+context combination
-        assert_eq!(count1, 1); // Fixed: should be 1 after single cache insertion
+        // Should have exactly 1 more cache entry than initial (robust to shared state)
+        let entries_added_by_first = count_after_first - initial_count;
+        assert_eq!(entries_added_by_first, 1,
+            "Cache should add exactly 1 entry after first call. Initial: {}, After first call: {}, Added: {}",
+            initial_count, count_after_first, entries_added_by_first);
     }
 
     #[test]
@@ -271,14 +277,18 @@ mod tests {
         // Clear cache and reinitialize
         StringCache::clear();
         let (count_before, _) = StringCache::get_stats();
-        assert_eq!(count_before, 0);
 
         StringCache::initialize();
         let (count_after, _) = StringCache::get_stats();
-        assert!(count_after > 0, "Cache should be pre-warmed with common patterns");
+        assert!(count_after > count_before, "Cache should be pre-warmed with common patterns");
 
-        // Should have exactly the number of patterns we defined
-        assert_eq!(count_after, 28); // Fixed: initialize() defines exactly 28 patterns
+        // Count the expected patterns from the initialize() method
+        // This is the actual number of patterns defined in the common_patterns vector
+        const EXPECTED_PATTERN_COUNT: usize = 28; // 4 Voice + 5 Agent + 10 State + 5 MCP + 4 File patterns
+        let patterns_added = count_after - count_before;
+        assert_eq!(patterns_added, EXPECTED_PATTERN_COUNT,
+            "Cache should add exactly {} patterns after initialization. Before: {}, After: {}, Added: {}. If this fails, verify the pattern count in StringCache::initialize()",
+            EXPECTED_PATTERN_COUNT, count_before, count_after, patterns_added);
     }
 
     // === NEW COMPREHENSIVE EDGE CASE TESTS ===
@@ -328,18 +338,39 @@ mod tests {
 
         let template = "Failed to connect to {}: {}";
 
+        // Get initial count (cache may be populated during test execution)
+        let (initial_count, _) = StringCache::get_stats();
+
         // Test multiple contexts with same template
         let result1 = StringCache::get_template_error(template, "database", "timeout");
+        let (count_after_first, _) = StringCache::get_stats();
+
         let result2 = StringCache::get_template_error(template, "API server", "503 error");
+        let (count_after_second, _) = StringCache::get_stats();
+
         let result3 = StringCache::get_template_error(template, "database", "connection refused");
+        let (final_count, _) = StringCache::get_stats();
 
-        let (cache_count, _) = StringCache::get_stats();
-
-        // Should have 2 cache entries (one for each unique template+context combination)
-        assert_eq!(cache_count, 2);
+        // Verify results are correct
         assert_eq!(result1, "Failed to connect to database: timeout");
         assert_eq!(result2, "Failed to connect to API server: 503 error");
         assert_eq!(result3, "Failed to connect to database: connection refused");
+
+        // Should have 2 cache entries added (one for each unique template+context combination)
+        // result3 should use the cached template from result1 (same context)
+        let entries_added_by_first = count_after_first - initial_count;
+        let entries_added_by_second = count_after_second - count_after_first;
+        let entries_added_by_third = final_count - count_after_second;
+
+        assert_eq!(entries_added_by_first, 1,
+            "First call should add exactly 1 cache entry. Initial: {}, After first: {}, Added: {}",
+            initial_count, count_after_first, entries_added_by_first);
+        assert_eq!(entries_added_by_second, 1,
+            "Second call should add exactly 1 cache entry. After first: {}, After second: {}, Added: {}",
+            count_after_first, count_after_second, entries_added_by_second);
+        assert_eq!(entries_added_by_third, 0,
+            "Third call should add 0 cache entries (should reuse cached template). After second: {}, Final: {}, Added: {}",
+            count_after_second, final_count, entries_added_by_third);
     }
 
     #[test]
@@ -377,15 +408,22 @@ mod tests {
 
         let template = "Operation {} failed: {}";
 
+        // Get initial count (cache may be populated during test execution)
+        let (initial_count, _) = StringCache::get_stats();
+
         // Generate many calls to test performance
+        // Use 10 unique contexts, repeated 10 times each (100 total calls)
         for i in 0..100 {
             let context = format!("batch_{}", i % 10); // 10 unique contexts
             let error = format!("error_{}", i);
             let _result = StringCache::get_template_error(template, &context, error);
         }
 
-        let (cache_count, _) = StringCache::get_stats();
-        // Should have cached 10 template+context combinations
-        assert_eq!(cache_count, 10);
+        let (final_count, _) = StringCache::get_stats();
+        // Should have cached exactly 10 template+context combinations
+        let entries_added = final_count - initial_count;
+        assert_eq!(entries_added, 10,
+            "Should add exactly 10 cache entries (one per unique context). Initial: {}, Final: {}, Added: {}",
+            initial_count, final_count, entries_added);
     }
 }
