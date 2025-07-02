@@ -50,6 +50,11 @@ pub mod test_fix_verification; // Test verification for recent fixes
 
 /// Parse a shortcut string into a Shortcut object
 /// Examples: "Alt+D" -> Shortcut, "Option+Space" -> Shortcut, "F1" -> Shortcut, "Ctrl+Shift+F12" -> Shortcut
+/// Get the Tauri context - centralized to avoid duplicate symbol errors
+pub fn get_tauri_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {
@@ -229,9 +234,9 @@ use commands::{
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-    error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
+            error_recovery::*, filesystem::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
-    ui_token_selection::*, window::*,
+    ui_commands::*, ui_token_selection::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -661,22 +666,18 @@ pub fn run() {
             disable_autostart,
             is_autostart_enabled,
             toggle_autostart,
-            // Floating Bar Commands
-            floating_bar_click,
-                    floating_bar_focus_change,
-        floating_bar_input_blur,
-        floating_bar_input_change,
-        floating_bar_submit,
-        notify_query_submitted,
-        get_floating_bar_config,
-        set_floating_bar_config,
-            // Floating Panel Commands
-            set_floating_panel_click_through,
-            enable_floating_panel_click_through,
-            disable_floating_panel_click_through,
-            get_floating_panel_state,
-            position_floating_panel_properly,
-            set_floating_panel_level,
+            // Legacy floating bar and panel commands removed - use new UI API instead
+            // Bridge commands are handled internally through ui_handle_interaction
+            // Consolidated UI API Commands
+            ui_get_element_state,
+            ui_create_element,
+            ui_update_element,
+            ui_delete_element,
+            ui_handle_interaction,
+            ui_get_bar_config,
+            ui_set_bar_config,
+            ui_set_panel_click_through,
+            ui_set_panel_level,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,
@@ -960,7 +961,7 @@ pub fn run() {
         });
 
     // Enhanced error handling to prevent crashes due to permission issues
-    match builder.run(tauri::generate_context!()) {
+    match builder.run(get_tauri_context()) {
         Ok(()) => {
             info!("Tauri application exited successfully");
         }

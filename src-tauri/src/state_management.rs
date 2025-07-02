@@ -27,6 +27,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         orchestrator_result,
         cloud_result,
         floating_bar_result,
+        ui_manager_result,
         monitoring_result,
     ) = tokio::join!(
         initialize_environment_state(app_handle.clone()),
@@ -37,6 +38,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         initialize_orchestrator_state(app_handle.clone()),
         initialize_cloud_state(app_handle.clone()),
         initialize_floating_bar_state(app_handle.clone()),
+        initialize_ui_manager_state(app_handle.clone()),
         initialize_monitoring_state(app_handle.clone()),
     );
 
@@ -66,6 +68,9 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     if let Err(e) = floating_bar_result {
         errors.push(format!("Floating Bar: {}", e));
+    }
+    if let Err(e) = ui_manager_result {
+        errors.push(format!("UI Manager: {}", e));
     }
     if let Err(e) = monitoring_result {
         errors.push(format!("Monitoring: {}", e));
@@ -330,8 +335,22 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
 async fn initialize_floating_bar_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing floating bar state...");
 
-    crate::commands::floating_bar::initialize_bar_manager(app_handle.clone()).await;
+            crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await?;
     info!("Floating bar manager initialized successfully");
+
+    Ok(())
+}
+
+/// Initialize UI Manager for consolidated floating UI elements
+async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String> {
+    info!("[State] Initializing UI Manager for consolidated floating elements...");
+
+    // Initialize the global UI manager for all floating UI elements
+    if let Err(e) = crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await {
+        warn!("Failed to initialize UI manager: {}", e);
+        return Err(format!("UI Manager initialization failed: {}", e));
+    }
+    info!("✅ UI Manager initialized successfully");
 
     Ok(())
 }
@@ -402,7 +421,7 @@ pub async fn handle_dictation_state_transition(
     }
 
     // Update floating bar manager
-    crate::commands::floating_bar::handle_dictation_mode_change(app_handle, active).await;
+    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, active).await;
 
     info!("Dictation state transition completed: active={}", active);
     Ok(())
@@ -503,10 +522,10 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());
 
     // Update floating bar
-    crate::commands::floating_bar::handle_backend_response(
+    crate::commands::ui_commands::handle_backend_response(
         app_handle,
-        "Stopped",
         Some("All operations stopped.".to_string()),
+        "Stopped".to_string(),
     )
     .await;
 
