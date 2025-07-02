@@ -160,7 +160,8 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
     if is_dictation_active {
         handle_dictation_mode_result(app_handle, extracted_text).await;
     } else {
-        handle_agent_mode_result(app_handle, extracted_text, payload_str.to_string()).await;
+        // Agent Mode: Handle agent submission directly without middleman
+        handle_agent_mode_submission(app_handle, extracted_text).await;
     }
 }
 
@@ -236,50 +237,59 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     info!("[Dictation Mode] Completed dictation successfully");
 }
 
-async fn handle_agent_mode_result(
-    app_handle: AppHandle,
-    extracted_text: Option<String>,
-    payload_str: String,
-) {
+async fn handle_agent_mode_submission(app_handle: AppHandle, extracted_text: Option<String>) {
     info!("[Event] Processing final result for AI Agent Mode");
 
-    // Update floating bar manager for agent mode query
-    if let Some(text) = &extracted_text {
-        let query_text = text.clone();
-        crate::commands::ui_commands::handle_dictation_finished(&app_handle, Some(query_text))
-            .await;
+    // Update floating bar manager for agent mode (UI state only)
+    if extracted_text.is_some() {
+        crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
     }
 
-    // Transform the payload format
-    match serde_json::from_str::<serde_json::Value>(&payload_str) {
-        Ok(payload_json) => {
-            if let Some(text_value) = payload_json.get("text") {
-                let transformed_payload = serde_json::json!({
-                    "query": text_value
-                });
-                if let Err(e) =
-                    app_handle.emit(constants::events::dictation::FINISHED, transformed_payload)
-                {
-                    error!("[Event] Failed to rebroadcast final-result event: {}", e);
+    // Submit query directly to agent if we have text
+    if let Some(text) = extracted_text {
+        let trimmed_query = text.trim();
+        if !trimmed_query.is_empty() {
+            info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
+
+            // Emit user message event for frontend to add to conversation
+            let user_message_data = serde_json::json!({
+                "content": trimmed_query,
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            });
+            if let Err(e) = app_handle.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
+                error!("[Agent Mode] Failed to emit user-message-submitted event: {}", e);
+            }
+
+            // Clone app_handle early to avoid borrow checker issues
+            let app_handle_for_submit = app_handle.clone();
+            let app_handle_for_error = app_handle.clone();
+
+            // Submit the query to the agent system
+            let app_state = app_handle.state::<crate::state::AppState>();
+
+            // CRITICAL: Register escape key IMMEDIATELY when agent processing starts
+            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+                warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
+            }
+
+            match crate::anthropic::submit_query(
+                trimmed_query.to_string(),
+                app_state,
+                app_handle_for_submit
+            ).await {
+                Ok(_) => {
+                    info!("[Agent Mode] Agent query submitted successfully");
                 }
-            } else {
-                error!(
-                    "[Event] No 'text' field found in final-result payload: {}",
-                    payload_str
-                );
+                Err(e) => {
+                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                    crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
+                }
             }
-        }
-        Err(e) => {
-            error!(
-                "[Event] Failed to parse final-result payload as JSON: {}, payload: {}",
-                e, payload_str
-            );
-            if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, payload_str) {
-                error!(
-                    "[Event] Failed to rebroadcast final-result event (fallback): {}",
-                    e
-                );
-            }
+        } else {
+            info!("[Agent Mode] Query text was empty - ignoring");
         }
     }
 }
