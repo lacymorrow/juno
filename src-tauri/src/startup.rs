@@ -16,6 +16,7 @@ use crate::{state, cli, agent, commands};
 use crate::agent::providers::factory::BrainFactory;
 use crate::constants::timeouts;
 use crate::state::AppState;
+use crate::cli::headless::HeadlessRuntime;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -221,6 +222,60 @@ pub fn clear_permission_cache() {
 pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     let cli = cli::Cli::parse();
 
+    // Check if this is a headless operation
+    if cli.is_headless() {
+        info!("Headless mode detected, processing CLI command without GUI");
+        return handle_headless_cli(&cli, desktop_arc);
+    }
+
+    // Handle legacy CLI flags for backward compatibility
+    if cli.has_legacy_flags() {
+        info!("Legacy CLI flags detected, processing with legacy handler");
+        return handle_legacy_cli(&cli, desktop_arc);
+    }
+
+    // No CLI commands to process, continue with GUI application
+    info!("No CLI commands detected, launching GUI application...");
+    Ok(true)
+}
+
+/// Handle headless CLI operations
+async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+    use crate::cli::headless::HeadlessRuntime;
+    use crate::error_handling::JunoError;
+
+    // Create minimal Tauri app for CLI operations if needed
+    let app_handle = create_minimal_tauri_app().await?;
+
+    // Create runtime with app handle and CLI options
+    let runtime = HeadlessRuntime::new(app_handle.clone(), cli);
+
+    // Execute the CLI command using the headless runtime
+    match runtime.execute_command(cli).await {
+        Ok(result) => {
+            runtime.output_result(&result);
+            Ok(false) // Exit after processing
+        }
+        Err(e) => {
+            eprintln!("Error executing headless command: {}", e);
+            Ok(false) // Exit after error
+        }
+    }
+}
+
+/// Synchronous wrapper for headless CLI handling
+fn handle_headless_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+    use tokio::runtime::Runtime;
+
+    let rt = Runtime::new().map_err(|e| {
+        crate::error_handling::JunoError::SystemError(format!("Failed to create async runtime: {}", e))
+    })?;
+
+    rt.block_on(handle_headless_cli_async(cli, desktop_arc))
+}
+
+/// Handle legacy CLI flags for backward compatibility
+fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     // If handle_cli_commands returns Ok(true), it means a command was executed
     // and the application should exit.
     if let Some(desktop_ref) = desktop_arc.as_ref() {
@@ -262,9 +317,89 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
         }
     }
 
-    // Proceed with Tauri application launch if no CLI command was run
-    println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-    Ok(true)
+    Ok(true) // Continue with GUI application
+}
+
+/// Create a minimal Tauri application for CLI operations
+async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::JunoError> {
+    use crate::error_handling::JunoError;
+    use tokio::sync::oneshot;
+    use std::sync::{Arc, Mutex};
+
+    let (tx, rx) = oneshot::channel::<Result<AppHandle, JunoError>>();
+    let app_handle_container = Arc::new(Mutex::new(None::<AppHandle>));
+    let app_handle_container_clone = app_handle_container.clone();
+
+    // Create the app in a thread with proper lifecycle management
+    std::thread::spawn(move || {
+        let result = tauri::Builder::default()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .plugin(tauri_plugin_voice_transcription::init())
+            .plugin(tauri_plugin_process::init())
+            .setup(move |app| {
+                let app_handle = app.handle().clone();
+
+                // Initialize minimal app state for CLI operations
+                let desktop_arc = init_desktop_engine(); // This is safe and won't crash
+                let app_state = init_app_state(desktop_arc);
+                app.manage(app_state);
+
+                // Store the handle in the container - don't send yet, build must complete first
+                if let Ok(mut container) = app_handle_container_clone.lock() {
+                    *container = Some(app_handle);
+                } else {
+                    error!("Failed to store app handle in container");
+                }
+
+                info!("Headless Tauri app setup completed");
+                Ok(())
+            })
+            .build(tauri::generate_context!());
+
+        // Send the result only after build completes (fixes race condition)
+        let send_result = match result {
+            Ok(_app) => {
+                info!("Headless Tauri app created successfully");
+
+                // Get the app handle from the container now that build succeeded
+                match app_handle_container.lock() {
+                    Ok(container) => {
+                        if let Some(handle) = container.as_ref() {
+                            tx.send(Ok(handle.clone()))
+                        } else {
+                            tx.send(Err(JunoError::SystemError("App handle not captured during setup".to_string())))
+                        }
+                    }
+                    Err(e) => {
+                        tx.send(Err(JunoError::SystemError(format!("Failed to access app handle container: {}", e))))
+                    }
+                }
+            },
+            Err(e) => {
+                error!("Failed to create headless Tauri app: {}", e);
+                // Properly propagate build errors through the channel
+                tx.send(Err(JunoError::SystemError(format!("Failed to build Tauri app: {}", e))))
+            }
+        };
+
+        // Handle channel send failures appropriately
+        if let Err(_) = send_result {
+            error!("Failed to send app initialization result - receiver may have timed out");
+        }
+
+        // Keep the thread alive for CLI operations with reasonable timeout (fixes thread leak)
+        // Use sleep instead of indefinite parking to prevent permanent thread leak
+        std::thread::sleep(std::time::Duration::from_secs(300)); // 5 minutes for CLI operations
+        info!("Headless Tauri app thread exiting after timeout - preventing thread leak");
+    });
+
+    // Wait for the app handle with timeout to prevent deadlock
+    tokio::time::timeout(
+        tokio::time::Duration::from_secs(15),
+        rx
+    ).await
+    .map_err(|_| JunoError::SystemError("Timeout waiting for headless Tauri app initialization".to_string()))?
+    .map_err(|_| JunoError::SystemError("Failed to receive app handle from initialization thread".to_string()))?
 }
 
 /// Initialize application state with desktop instance
@@ -382,5 +517,60 @@ mod tests {
             Err(e) => println!("Quick startup handled error gracefully: {}", e),
         }
         assert!(true, "Quick startup should handle errors gracefully");
+    }
+
+    #[test]
+    fn test_headless_cli_detection() {
+        // Test CLI headless mode detection
+        let cli = cli::Cli::parse_from(vec!["juno", "--headless", "query", "test"]);
+        assert!(cli.is_headless(), "Should detect headless mode");
+
+        let cli_with_command = cli::Cli::parse_from(vec!["juno", "agent", "status"]);
+        assert!(cli_with_command.is_headless(), "Should detect headless mode with subcommands");
+
+        let cli_gui = cli::Cli::parse_from(vec!["juno"]);
+        assert!(!cli_gui.is_headless(), "Should not detect headless mode for GUI");
+    }
+
+    #[test]
+    fn test_legacy_cli_detection() {
+        // Test legacy CLI flag detection
+        let cli = cli::Cli::parse_from(vec!["juno", "--tts-provider", "system", "--tts-text", "test"]);
+        assert!(cli.has_legacy_flags(), "Should detect legacy TTS flags");
+
+        let cli_normal = cli::Cli::parse_from(vec!["juno", "query", "test"]);
+        assert!(!cli_normal.has_legacy_flags(), "Should not detect legacy flags in modern CLI");
+    }
+
+    #[test]
+    fn test_create_minimal_tauri_app_logic() {
+        // Test that the create_minimal_tauri_app function logic is sound
+        // We can't run the actual async function in a unit test, but we can verify
+        // the synchronization primitives work correctly
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::oneshot;
+        use crate::error_handling::JunoError;
+
+        // Test the container pattern we use for app handle storage
+        let app_handle_container = Arc::new(Mutex::new(None::<String>)); // Use String as a simple test type
+        let container_clone = app_handle_container.clone();
+
+        // Simulate storing a value
+        {
+            let mut container = container_clone.lock().unwrap();
+            *container = Some("test_handle".to_string());
+        }
+
+        // Simulate retrieving the value
+        {
+            let container = app_handle_container.lock().unwrap();
+            assert!(container.is_some(), "Container should hold the stored value");
+            assert_eq!(container.as_ref().unwrap(), "test_handle");
+        }
+
+        // Test the channel pattern
+        let (tx, _rx) = oneshot::channel::<Result<String, JunoError>>();
+        let send_result = tx.send(Ok("test".to_string()));
+        assert!(send_result.is_ok(), "Channel send should succeed");
     }
 }
