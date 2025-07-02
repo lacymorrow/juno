@@ -42,7 +42,7 @@ pub mod onboarding;
 pub mod orchestrator;
 pub mod permissions;
 pub mod providers;
-pub mod self_improvement; // Research-backed self-improving code generation system (debug mode only)
+
 pub mod settings;
 pub mod shell;
 pub mod shortcuts;
@@ -106,7 +106,7 @@ pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
-pub use self::self_improvement::*; // Re-export self-improvement commands (debug mode only)
+
 pub use self::settings::*;
 pub use self::shell::*;
 pub use self::shortcuts::*;

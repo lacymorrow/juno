@@ -43,8 +43,9 @@ impl CloudClient {
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())?;
         let config = CloudConfig::load_from_centralized_settings(&settings_manager).await?;
-        let auth = CloudAuth::new(&config);
-        let command_processor = CommandProcessor::new(app_handle.clone());
+        let auth = CloudAuth::new(config.clone());
+        let security = crate::cloud::security::CloudSecurity::new(config.clone(), auth.clone());
+        let command_processor = CommandProcessor::new(app_handle.clone(), security);
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
@@ -747,7 +748,6 @@ impl CloudClient {
         CloudClientTask {
             config: self.config.clone(),
             auth: self.auth.clone(),
-            security: self.security.clone(),
             command_processor: self.command_processor.clone(),
             connection_state: self.connection_state.clone(),
             app_handle: self.app_handle.clone(),
@@ -762,8 +762,6 @@ struct CloudClientTask {
     config: CloudConfig,
     #[allow(dead_code)]
     auth: DeviceAuth,
-    #[allow(dead_code)]
-    security: CloudSecurity,
     #[allow(dead_code)]
     command_processor: CloudCommandProcessor,
     #[allow(dead_code)]
