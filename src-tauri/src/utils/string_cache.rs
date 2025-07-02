@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use once_cell::sync::Lazy;
+use crate::constants::errors::templates;
 
 /// String interning cache for reducing format! allocations
 static STRING_CACHE: Lazy<Arc<RwLock<HashMap<String, Arc<str>>>>> =
@@ -53,27 +54,48 @@ impl StringCache {
     /// Get cached error message for common template patterns
     /// This is the main optimization function - replace format!() calls with this
     pub fn get_template_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
-        let key = format!("{}|{}|{}", template, context, error);
+        // Create cache key from template + context only (not the variable error)
+        let cache_key = format!("{}|{}", template, context);
 
-        // Fast path: check if already cached
+        // Fast path: check if template is already cached for this context
         if let Ok(cache) = STRING_CACHE.read() {
-            if let Some(cached) = cache.get(&key) {
-                return cached.to_string(); // Arc<str> -> String for compatibility
+            if let Some(cached_template) = cache.get(&cache_key) {
+                // The cached template already has the context filled in, just need to add the error
+                return cached_template.replacen("{}", &error.to_string(), 1);
             }
         }
 
-        // Slow path: create using template and cache
-        let formatted = format!("{} {}: {}", template, context, error);
-        let arc_str: Arc<str> = formatted.clone().into();
+        // Format the template properly - replace first {} with context, second {} with error
+        let formatted = Self::replace_first_two_placeholders(template, context, &error.to_string());
 
+        // Cache the template with context filled in for future use
         if let Ok(mut cache) = STRING_CACHE.write() {
             // Limit cache size to prevent memory leaks
-            if cache.len() < 2000 { // Increased for template errors
-                cache.insert(key, arc_str);
+            if cache.len() < 2000 {
+                // Cache the template with context already filled in
+                let template_with_context = template.replacen("{}", context, 1);
+                cache.insert(cache_key, template_with_context.into());
             }
         }
 
         formatted
+    }
+
+    /// Replace the first two {} placeholders with the given values
+    fn replace_first_two_placeholders(template: &str, first: &str, second: &str) -> String {
+        let mut result = template.to_string();
+
+        // Find and replace the first {} placeholder
+        if let Some(pos) = result.find("{}") {
+            result.replace_range(pos..pos+2, first);
+
+            // Find and replace the second {} placeholder (if it exists)
+            if let Some(pos) = result.find("{}") {
+                result.replace_range(pos..pos+2, second);
+            }
+        }
+
+        result
     }
 
     /// Get formatted message for logging
@@ -83,51 +105,52 @@ impl StringCache {
 
     /// Pre-warm cache with common error patterns from the codebase
     pub fn initialize() {
-        let common_errors = vec![
+        let common_patterns = vec![
             // Voice/Audio patterns
-            ("voice_controller_lock", ErrorTemplates::LOCK_FAILED),
-            ("TTS provider", ErrorTemplates::ACCESS_FAILED),
-            ("voice start sound", "Failed to play"),
-            ("voice transcription", ErrorTemplates::PARSE_FAILED),
+            (templates::FAILED_TO_ACCESS, "voice_controller_lock"),
+            (templates::FAILED_TO_ACCESS, "TTS provider"),
+            ("Failed to play", "voice start sound"),
+            (templates::FAILED_TO_PARSE, "voice transcription"),
 
             // Agent/Brain patterns
-            ("agent brain", ErrorTemplates::ACCESS_FAILED),
-            ("Computer Use tools", "Failed to register"),
-            ("single agent brain", "Failed to initialize"),
-            ("orchestrator brain", "Failed to initialize"),
-            ("tool execution", ErrorTemplates::EXECUTE_FAILED),
+            (templates::FAILED_TO_ACCESS, "agent brain"),
+            (templates::FAILED_TO_REGISTER, "Computer Use tools"),
+            (templates::FAILED_TO_INITIALIZE, "single agent brain"),
+            (templates::FAILED_TO_INITIALIZE, "orchestrator brain"),
+            (templates::FAILED_TO_EXECUTE, "tool execution"),
 
             // State management patterns
-            ("dictation active", "Failed to get"),
-            ("dictation active", "Failed to set"),
-            ("always listening active", "Failed to get"),
-            ("always listening active", "Failed to set"),
-            ("TTS provider", "Failed to get"),
-            ("TTS provider", "Failed to set"),
-            ("sound enabled", "Failed to get"),
-            ("sound enabled", "Failed to set"),
-            ("debug mode", "Failed to get"),
-            ("debug mode", "Failed to set"),
+            (templates::FAILED_TO_RETRIEVE, "dictation active status"),
+            (templates::FAILED_TO_SET, "dictation active status"),
+            (templates::FAILED_TO_RETRIEVE, "always listening active status"),
+            (templates::FAILED_TO_SET, "always listening active status"),
+            (templates::FAILED_TO_RETRIEVE, "TTS provider"),
+            (templates::FAILED_TO_SET, "TTS provider"),
+            (templates::FAILED_TO_RETRIEVE, "sound enabled status"),
+            (templates::FAILED_TO_SET, "sound enabled status"),
+            (templates::FAILED_TO_RETRIEVE, "debug mode status"),
+            (templates::FAILED_TO_SET, "debug mode status"),
 
             // MCP/Integration patterns
-            ("MCP servers", "Failed to start"),
-            ("cloud client", "Failed to create"),
-            ("cloud client", "Failed to start"),
-            ("settings manager", "Failed to create"),
-            ("event emit", ErrorTemplates::EMIT_FAILED),
+            (templates::FAILED_TO_START, "MCP servers"),
+            (templates::FAILED_TO_CREATE, "cloud client"),
+            (templates::FAILED_TO_START, "cloud client"),
+            (templates::FAILED_TO_CREATE, "settings manager"),
+            (templates::FAILED_TO_EMIT, "event"),
 
             // File/IO patterns
-            ("temporary file", "Failed to create"),
-            ("JSON parsing", ErrorTemplates::PARSE_FAILED),
-            ("settings JSON", "Failed to save"),
-            ("window list JSON", ErrorTemplates::PARSE_FAILED),
+            (templates::FAILED_TO_CREATE, "temporary file"),
+            (templates::FAILED_TO_PARSE, "JSON data"),
+            (templates::FAILED_TO_SAVE, "settings JSON"),
+            (templates::FAILED_TO_PARSE, "window list JSON"),
         ];
 
         if let Ok(mut cache) = STRING_CACHE.write() {
-            for (context, template) in common_errors {
-                let key = format!("{}|{}", template, context);
-                let value = format!("{}: {}", template, context);
-                cache.insert(key, value.into());
+            for (template, context) in common_patterns {
+                let cache_key = format!("{}|{}", template, context);
+                // Cache the template with context already filled in (first placeholder)
+                let template_with_context = template.replacen("{}", context, 1);
+                cache.insert(cache_key, template_with_context.into());
             }
         }
     }
@@ -171,4 +194,185 @@ pub fn initialize_string_cache() {
     StringCache::initialize();
     let (count, capacity) = StringCache::get_stats();
     log::info!("✅ String cache initialized with {} pre-warmed entries (capacity: {})", count, capacity);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_template_error_formatting() {
+        // Clear cache for clean test
+        StringCache::clear();
+
+        // Test proper placeholder replacement
+        let template = "Failed to access {}: {}";
+        let context = "TTS provider";
+        let error = "connection timeout";
+
+        let result = StringCache::get_template_error(template, context, error);
+        assert_eq!(result, "Failed to access TTS provider: connection timeout");
+    }
+
+    #[test]
+    fn test_template_error_caching() {
+        // Clear cache for clean test
+        StringCache::clear();
+
+        let template = "Failed to load {}: {}";
+        let context = "configuration file";
+
+        // First call should cache the template
+        let result1 = StringCache::get_template_error(template, context, "file not found");
+        let (count1, _) = StringCache::get_stats();
+
+        // Second call with different error should use cached template
+        let result2 = StringCache::get_template_error(template, context, "permission denied");
+        let (count2, _) = StringCache::get_stats();
+
+        // Cache count should remain the same (template cached, not the full error)
+        assert_eq!(count1, count2);
+        assert_eq!(result1, "Failed to load configuration file: file not found");
+        assert_eq!(result2, "Failed to load configuration file: permission denied");
+
+        // Should have exactly 1 cache entry for this template+context combination
+        assert_eq!(count1, 1);
+    }
+
+    #[test]
+    fn test_format_error_cached_function() {
+        // Clear cache for clean test
+        StringCache::clear();
+
+        let result = format_error_cached(
+            templates::FAILED_TO_RETRIEVE,
+            "user settings",
+            "database connection lost"
+        );
+
+        assert_eq!(result, "Failed to retrieve user settings: database connection lost");
+    }
+
+    #[test]
+    fn test_cache_initialization() {
+        // Clear cache and reinitialize
+        StringCache::clear();
+        let (count_before, _) = StringCache::get_stats();
+        assert_eq!(count_before, 0);
+
+        StringCache::initialize();
+        let (count_after, _) = StringCache::get_stats();
+        assert!(count_after > 0, "Cache should be pre-warmed with common patterns");
+
+        // Should have exactly the number of patterns we defined
+        assert_eq!(count_after, 28); // Number of patterns in initialize()
+    }
+
+    // === NEW COMPREHENSIVE EDGE CASE TESTS ===
+
+    #[test]
+    fn test_context_with_braces_edge_case() {
+        StringCache::clear();
+
+        let template = "Failed to access {}: {}";
+        let context = "file {config.json}";  // Contains braces
+        let error = "not found";
+
+        let result = StringCache::get_template_error(template, context, error);
+        // This should work correctly - first {} replaced with context, second {} with error
+        assert_eq!(result, "Failed to access file {config.json}: not found");
+    }
+
+    #[test]
+    fn test_error_with_braces_edge_case() {
+        StringCache::clear();
+
+        let template = "Failed to parse {}: {}";
+        let context = "JSON data";
+        let error = "unexpected character '{' at position 5";  // Contains braces
+
+        let result = StringCache::get_template_error(template, context, error);
+        assert_eq!(result, "Failed to parse JSON data: unexpected character '{' at position 5");
+    }
+
+    #[test]
+    fn test_multiple_placeholder_pairs() {
+        StringCache::clear();
+
+        // Test template with multiple {} pairs
+        let template = "Failed to {} {}: {} occurred at {}";
+        let context = "load config";
+        let error = "file not found";
+
+        let result = StringCache::get_template_error(template, context, error);
+        // Should only replace first two {} placeholders
+        assert_eq!(result, "Failed to load config: file not found occurred at {}");
+    }
+
+    #[test]
+    fn test_caching_effectiveness() {
+        StringCache::clear();
+
+        let template = "Failed to connect to {}: {}";
+
+        // Test multiple contexts with same template
+        let result1 = StringCache::get_template_error(template, "database", "timeout");
+        let result2 = StringCache::get_template_error(template, "API server", "503 error");
+        let result3 = StringCache::get_template_error(template, "database", "connection refused");
+
+        let (cache_count, _) = StringCache::get_stats();
+
+        // Should have 2 cache entries (one for each unique template+context combination)
+        assert_eq!(cache_count, 2);
+        assert_eq!(result1, "Failed to connect to database: timeout");
+        assert_eq!(result2, "Failed to connect to API server: 503 error");
+        assert_eq!(result3, "Failed to connect to database: connection refused");
+    }
+
+    #[test]
+    fn test_empty_context_and_error() {
+        StringCache::clear();
+
+        let template = "Failed to access {}: {}";
+        let result = StringCache::get_template_error(template, "", "");
+        assert_eq!(result, "Failed to access : ");
+    }
+
+    #[test]
+    fn test_template_without_placeholders() {
+        StringCache::clear();
+
+        let template = "System error occurred";
+        let result = StringCache::get_template_error(template, "context", "error");
+        // Without placeholders, should return original template
+        assert_eq!(result, "System error occurred");
+    }
+
+    #[test]
+    fn test_template_with_single_placeholder() {
+        StringCache::clear();
+
+        let template = "Error in {}: no details available";
+        let result = StringCache::get_template_error(template, "module", "timeout");
+        // Should replace first placeholder only
+        assert_eq!(result, "Error in module: no details available");
+    }
+
+    #[test]
+    fn test_performance_under_load() {
+        StringCache::clear();
+
+        let template = "Operation {} failed: {}";
+
+        // Generate many calls to test performance
+        for i in 0..100 {
+            let context = format!("batch_{}", i % 10); // 10 unique contexts
+            let error = format!("error_{}", i);
+            let _result = StringCache::get_template_error(template, &context, error);
+        }
+
+        let (cache_count, _) = StringCache::get_stats();
+        // Should have cached 10 template+context combinations
+        assert_eq!(cache_count, 10);
+    }
 }

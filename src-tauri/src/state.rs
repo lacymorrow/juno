@@ -409,7 +409,7 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.dictation_clipboard_enabled)
-            .map_err(|e| format!("Failed to get dictation clipboard enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation clipboard enabled", e))
     }
 
     pub fn set_dictation_clipboard_enabled(&self, enabled: bool) -> Result<(), String> {
