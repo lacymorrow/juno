@@ -388,8 +388,8 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // --- Execute Startup Sequence ---
-    let (desktop_arc, app_state) = match startup::StartupSequence::run() {
-        Ok((desktop_arc, app_state)) => (desktop_arc, app_state),
+    let (_desktop_arc, app_state) = match startup::StartupSequence::run() {
+        Ok((_desktop_arc, app_state)) => (_desktop_arc, app_state),
         Err(_) => {
             // CLI command was executed, exit early
             return;

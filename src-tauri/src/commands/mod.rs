@@ -42,6 +42,7 @@ pub mod onboarding;
 pub mod orchestrator;
 pub mod permissions;
 pub mod providers;
+// pub mod self_improvement; // TODO: Fix module not found
 
 pub mod settings;
 pub mod shell;
@@ -106,6 +107,7 @@ pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
+// pub use self::self_improvement::*; // TODO: Fix module not found
 
 pub use self::settings::*;
 pub use self::shell::*;

@@ -36,6 +36,7 @@ pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-X
 pub mod mcp_integration;
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
+// pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
 
 pub mod timer_tools; // Add timer tools for agent scheduling
 pub mod tool_config; // Configuration and category management for all tools
@@ -58,6 +59,7 @@ pub use exploration_reasoning::{ExplorationConfig, ExplorationEngine, Exploratio
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use safari_tools::{get_safari_tool_definitions, get_safari_tools, SafariTools}; // Export Safari tools
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
+// pub use self_improvement::*; // Export self-improvement types and functions - TODO: Fix module not found
 
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types

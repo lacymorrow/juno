@@ -32,10 +32,11 @@ use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::{app, audio, events, errors::templates};
+use crate::utils::string_cache::format_error_cached;
 
-// Helper function for error formatting - properly handles template substitution
-fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+// Helper function for error formatting - uses cached templates for better performance
+fn format_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
+    format_error_cached(template, context, error)
 }
 
 /// Keyboard shortcut configuration
@@ -380,28 +381,28 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.tts_provider.clone())
-            .map_err(|e| format!("Failed to get TTS provider: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "TTS provider", e))
     }
 
     pub fn set_tts_provider(&self, provider: String) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.tts_provider = provider)
-            .map_err(|e| format!("Failed to set TTS provider: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "TTS provider", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.dictation_active)
-            .map_err(|e| format!("Failed to get dictation active: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation active status", e))
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.dictation_active = active)
-            .map_err(|e| format!("Failed to set dictation active: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation active status", e))
     }
 
     pub fn get_dictation_clipboard_enabled(&self) -> Result<bool, String> {
