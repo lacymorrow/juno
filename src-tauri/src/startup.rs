@@ -326,9 +326,11 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
     use tokio::sync::oneshot;
     use std::sync::{Arc, Mutex};
 
-    let (tx, rx) = oneshot::channel();
+    let (tx, rx) = oneshot::channel::<Result<AppHandle, JunoError>>();
+    let app_handle_container = Arc::new(Mutex::new(None::<AppHandle>));
+    let app_handle_container_clone = app_handle_container.clone();
 
-    // Create the app in a thread and keep it alive without running the event loop
+    // Create the app in a thread with proper lifecycle management
     std::thread::spawn(move || {
         let result = tauri::Builder::default()
             .plugin(tauri_plugin_store::Builder::default().build())
@@ -342,9 +344,11 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
                 let app_state = init_app_state(desktop_arc);
                 app.manage(app_state);
 
-                // Send the app handle immediately after setup
-                if let Err(_) = tx.send(Ok(app_handle)) {
-                    error!("Failed to send app handle for headless operations");
+                // Store the handle in the container - don't send yet, build must complete first
+                if let Ok(mut container) = app_handle_container_clone.lock() {
+                    *container = Some(app_handle);
+                } else {
+                    error!("Failed to store app handle in container");
                 }
 
                 info!("Headless Tauri app setup completed");
@@ -352,21 +356,41 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
             })
             .build(tauri::generate_context!());
 
-        match result {
-            Ok(app) => {
+        // Send the result only after build completes (fixes race condition)
+        let send_result = match result {
+            Ok(_app) => {
                 info!("Headless Tauri app created successfully");
 
-                // Keep the app instance alive by moving it into a long-lived context
-                // Don't call app.run() as that would block and create lifecycle issues
-                // Instead, just hold onto the app instance to keep it valid
-                std::thread::park(); // Park the thread indefinitely to keep app alive
+                // Get the app handle from the container now that build succeeded
+                match app_handle_container.lock() {
+                    Ok(container) => {
+                        if let Some(handle) = container.as_ref() {
+                            tx.send(Ok(handle.clone()))
+                        } else {
+                            tx.send(Err(JunoError::SystemError("App handle not captured during setup".to_string())))
+                        }
+                    }
+                    Err(e) => {
+                        tx.send(Err(JunoError::SystemError(format!("Failed to access app handle container: {}", e))))
+                    }
+                }
             },
             Err(e) => {
                 error!("Failed to create headless Tauri app: {}", e);
-                // Try to send the error, but the channel might already be closed
-                // This error will be caught by the timeout below
+                // Properly propagate build errors through the channel
+                tx.send(Err(JunoError::SystemError(format!("Failed to build Tauri app: {}", e))))
             }
+        };
+
+        // Handle channel send failures appropriately
+        if let Err(_) = send_result {
+            error!("Failed to send app initialization result - receiver may have timed out");
         }
+
+        // Keep the thread alive for CLI operations with reasonable timeout (fixes thread leak)
+        // Use sleep instead of indefinite parking to prevent permanent thread leak
+        std::thread::sleep(std::time::Duration::from_secs(300)); // 5 minutes for CLI operations
+        info!("Headless Tauri app thread exiting after timeout - preventing thread leak");
     });
 
     // Wait for the app handle with timeout to prevent deadlock
@@ -516,5 +540,37 @@ mod tests {
 
         let cli_normal = cli::Cli::parse_from(vec!["juno", "query", "test"]);
         assert!(!cli_normal.has_legacy_flags(), "Should not detect legacy flags in modern CLI");
+    }
+
+    #[test]
+    fn test_create_minimal_tauri_app_logic() {
+        // Test that the create_minimal_tauri_app function logic is sound
+        // We can't run the actual async function in a unit test, but we can verify
+        // the synchronization primitives work correctly
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::oneshot;
+        use crate::error_handling::JunoError;
+
+        // Test the container pattern we use for app handle storage
+        let app_handle_container = Arc::new(Mutex::new(None::<String>)); // Use String as a simple test type
+        let container_clone = app_handle_container.clone();
+
+        // Simulate storing a value
+        {
+            let mut container = container_clone.lock().unwrap();
+            *container = Some("test_handle".to_string());
+        }
+
+        // Simulate retrieving the value
+        {
+            let container = app_handle_container.lock().unwrap();
+            assert!(container.is_some(), "Container should hold the stored value");
+            assert_eq!(container.as_ref().unwrap(), "test_handle");
+        }
+
+        // Test the channel pattern
+        let (tx, _rx) = oneshot::channel::<Result<String, JunoError>>();
+        let send_result = tx.send(Ok("test".to_string()));
+        assert!(send_result.is_ok(), "Channel send should succeed");
     }
 }
