@@ -423,70 +423,70 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.sound_enabled)
-            .map_err(|e| format!("Failed to get sound enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "sound enabled", e))
     }
 
     pub fn set_sound_enabled(&self, enabled: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.sound_enabled = enabled)
-            .map_err(|e| format!("Failed to set sound enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "sound enabled", e))
     }
 
     pub fn get_always_listening_active(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_active)
-            .map_err(|e| format!("Failed to get always listening active: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "always listening active", e))
     }
 
     pub fn set_always_listening_active(&self, active: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_active = active)
-            .map_err(|e| format!("Failed to set always listening active: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "always listening active", e))
     }
 
     pub fn get_always_listening_sensitivity(&self) -> Result<f32, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_sensitivity)
-            .map_err(|e| format!("Failed to get always listening sensitivity: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "always listening sensitivity", e))
     }
 
     pub fn set_always_listening_sensitivity(&self, sensitivity: f32) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_sensitivity = sensitivity)
-            .map_err(|e| format!("Failed to set always listening sensitivity: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "always listening sensitivity", e))
     }
 
     pub fn get_always_listening_wake_words(&self) -> Result<Vec<String>, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_wake_words.clone())
-            .map_err(|e| format!("Failed to get always listening wake words: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "always listening wake words", e))
     }
 
     pub fn set_always_listening_wake_words(&self, wake_words: Vec<String>) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.always_listening_wake_words = wake_words)
-            .map_err(|e| format!("Failed to set always listening wake words: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "always listening wake words", e))
     }
 
     pub fn get_notification_sound_enabled(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.notification_sound_enabled)
-            .map_err(|e| format!("Failed to get notification sound enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification sound enabled", e))
     }
 
     pub fn set_notification_sound_enabled(&self, enabled: bool) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.notification_sound_enabled = enabled)
-            .map_err(|e| format!("Failed to set notification sound enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification sound enabled", e))
     }
 
     // UI Settings - Getter/Setter methods
@@ -494,126 +494,126 @@ impl AppState {
         self.ui_settings
             .lock()
             .map(|settings| settings.bar_ui_state.clone())
-            .map_err(|e| format!("Failed to get bar UI state: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "bar UI state", e))
     }
 
     pub fn set_bar_ui_state(&self, state: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.bar_ui_state = state)
-            .map_err(|e| format!("Failed to set bar UI state: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "bar UI state", e))
     }
 
     pub fn get_performance_monitoring_enabled(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.performance_monitoring_enabled)
-            .map_err(|e| format!("Failed to get performance monitoring enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "performance monitoring enabled", e))
     }
 
     pub fn set_performance_monitoring_enabled_internal(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.performance_monitoring_enabled = enabled)
-            .map_err(|e| format!("Failed to set performance monitoring enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "performance monitoring enabled", e))
     }
 
     pub fn get_debug_mode(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.debug_mode)
-            .map_err(|e| format!("Failed to get debug mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "debug mode", e))
     }
 
     pub fn set_debug_mode_internal(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.debug_mode = enabled)
-            .map_err(|e| format!("Failed to set debug mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "debug mode", e))
     }
 
     pub fn get_notification_type(&self) -> Result<String, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_type.clone())
-            .map_err(|e| format!("Failed to get notification type: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification type", e))
     }
 
     pub fn set_notification_type(&self, notification_type: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_type = notification_type)
-            .map_err(|e| format!("Failed to set notification type: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification type", e))
     }
 
     pub fn get_notification_duration(&self) -> Result<u32, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_duration)
-            .map_err(|e| format!("Failed to get notification duration: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification duration", e))
     }
 
     pub fn set_notification_duration(&self, duration: u32) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_duration = duration)
-            .map_err(|e| format!("Failed to set notification duration: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification duration", e))
     }
 
     pub fn get_notification_position(&self) -> Result<String, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_position.clone())
-            .map_err(|e| format!("Failed to get notification position: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification position", e))
     }
 
     pub fn set_notification_position(&self, position: String) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_position = position)
-            .map_err(|e| format!("Failed to set notification position: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification position", e))
     }
 
     pub fn get_notification_show_icons(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_show_icons)
-            .map_err(|e| format!("Failed to get notification show icons: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification show icons", e))
     }
 
     pub fn set_notification_show_icons(&self, show_icons: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_show_icons = show_icons)
-            .map_err(|e| format!("Failed to set notification show icons: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification show icons", e))
     }
 
     pub fn get_notification_persist_important(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_persist_important)
-            .map_err(|e| format!("Failed to get notification persist important: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification persist important", e))
     }
 
     pub fn set_notification_persist_important(&self, persist: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_persist_important = persist)
-            .map_err(|e| format!("Failed to set notification persist important: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification persist important", e))
     }
 
     pub fn get_smooth_mouse_movement(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
             .map(|settings| settings.smooth_mouse_movement)
-            .map_err(|e| format!("Failed to get smooth mouse movement: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "smooth mouse movement", e))
     }
 
     pub fn set_smooth_mouse_movement(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.smooth_mouse_movement = enabled)
-            .map_err(|e| format!("Failed to set smooth mouse movement: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "smooth mouse movement", e))
     }
 
     // Input Settings - Getter/Setter methods
@@ -621,42 +621,42 @@ impl AppState {
         self.input_settings
             .lock()
             .map(|settings| settings.keyboard_shortcuts.clone())
-            .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e))
     }
 
     pub fn set_keyboard_shortcuts(&self, shortcuts: KeyboardShortcuts) -> Result<(), String> {
         self.input_settings
             .lock()
             .map(|mut settings| settings.keyboard_shortcuts = shortcuts)
-            .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "keyboard shortcuts", e))
     }
 
     pub fn get_agent_trigger_mode(&self) -> Result<AgentTriggerMode, String> {
         self.input_settings
             .lock()
             .map(|settings| settings.agent_trigger_mode.clone())
-            .map_err(|e| format!("Failed to get agent trigger mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "agent trigger mode", e))
     }
 
     pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) -> Result<(), String> {
         self.input_settings
             .lock()
             .map(|mut settings| settings.agent_trigger_mode = mode)
-            .map_err(|e| format!("Failed to set agent trigger mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "agent trigger mode", e))
     }
 
     pub fn get_dictation_trigger_mode(&self) -> Result<DictationTriggerMode, String> {
         self.input_settings
             .lock()
             .map(|settings| settings.dictation_trigger_mode.clone())
-            .map_err(|e| format!("Failed to get dictation trigger mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation trigger mode", e))
     }
 
     pub fn set_dictation_trigger_mode(&self, mode: DictationTriggerMode) -> Result<(), String> {
         self.input_settings
             .lock()
             .map(|mut settings| settings.dictation_trigger_mode = mode)
-            .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation trigger mode", e))
     }
 
     // Method to trigger cancellation
@@ -691,7 +691,7 @@ impl AppState {
         let mut execution_state = self
             .agent_execution
             .lock()
-            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e))?;
         execution_state.execution_active = true;
         execution_state.execution_id = Some(execution_id.clone());
         info!(
@@ -710,7 +710,7 @@ impl AppState {
         let mut execution_state = self
             .agent_execution
             .lock()
-            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e))?;
         execution_state.execution_active = true;
         execution_state.execution_id = Some(execution_id.clone());
         execution_state.max_steps = Some(max_steps);
@@ -728,7 +728,7 @@ impl AppState {
             let mut execution_state = self
                 .agent_execution
                 .lock()
-                .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+                .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e))?;
             let execution_id = execution_state.execution_id.take();
             execution_state.execution_active = false;
             execution_state.current_step = None;
@@ -772,7 +772,7 @@ impl AppState {
         let mut execution_state = self
             .agent_execution
             .lock()
-            .map_err(|e| format!("Failed to acquire agent_execution lock: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e))?;
         execution_state.current_step = Some(step);
         debug!("[AppState] Agent current step updated to: {}", step);
         Ok(())
@@ -847,7 +847,7 @@ impl AppState {
                     Ok(arc_pw)
                 }
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize Playwright driver: {}", e);
+                    let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "Playwright driver", e);
                     error!("{}", err_msg);
                     Err(err_msg)
                 }
@@ -882,7 +882,7 @@ impl AppState {
                     Ok(controller)
                 }
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize browser controller: {}", e);
+                    let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "browser controller", e);
                     error!("{}", err_msg);
                     Err(err_msg)
                 }
@@ -907,7 +907,7 @@ impl AppState {
         let mut components_lock = self
             .state_components
             .lock()
-            .map_err(|e| format!("Failed to acquire state_components lock: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "state_components lock", e))?;
         components_lock.insert(type_id, Box::new(component));
         Ok(())
     }
@@ -948,7 +948,7 @@ impl AppState {
         let mut checked_guard = self
             .permissions_checked
             .lock()
-            .map_err(|e| format!("Failed to acquire permissions_checked lock: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "permissions_checked lock", e))?;
         *checked_guard = true;
         Ok(())
     }
@@ -987,7 +987,7 @@ impl AppState {
     // Method to load tool configuration from centralized settings
     pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
             &settings_manager,
             self,
@@ -998,7 +998,7 @@ impl AppState {
     // Method to save tool configuration to centralized settings
     pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         crate::agent::tools::tool_config::save_tool_config_to_centralized_settings(
             &settings_manager,
             self,
@@ -1012,10 +1012,10 @@ impl AppState {
     pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         // Load cloud configuration
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         let config = CloudConfig::load_from_centralized_settings(&settings_manager)
             .await
-            .map_err(|e| format!("Failed to load cloud config: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_LOAD, "cloud config", e))?;
 
         // Update stored config
         {
@@ -1039,7 +1039,7 @@ impl AppState {
         if config.enabled {
             let client = CloudClient::new(app_handle.clone())
                 .await
-                .map_err(|e| format!("Failed to create cloud client: {}", e))?;
+                .map_err(|e| format_error(templates::FAILED_TO_CREATE, "cloud client", e))?;
 
             let mut client_guard = self.cloud_client.lock().await;
             *client_guard = Some(client);
@@ -1055,7 +1055,7 @@ impl AppState {
             client
                 .start()
                 .await
-                .map_err(|e| format!("Failed to start cloud client: {}", e))?;
+                .map_err(|e| format_error(templates::FAILED_TO_START, "cloud client", e))?;
         }
         Ok(())
     }
@@ -1091,11 +1091,11 @@ impl AppState {
     ) -> Result<(), String> {
         // Save to centralized settings
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         config
             .save_to_centralized_settings(&settings_manager)
             .await
-            .map_err(|e| format!("Failed to save cloud config: {}", e))?;
+            .map_err(|e| format_error(templates::FAILED_TO_SAVE, "cloud config", e))?;
 
         // Update stored config
         {
@@ -1151,7 +1151,7 @@ impl AppState {
                     if enabled { "enabled" } else { "disabled" }
                 );
             })
-            .map_err(|e| format!("Failed to set performance monitoring enabled: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "performance monitoring enabled", e))
     }
 
     // Production cloud connector methods
@@ -1494,7 +1494,7 @@ impl AppState {
 
         if let Err(e) = app_handle.emit(events::system::MCP_STATE_UPDATED, payload) {
             warn!("Failed to emit MCP state update: {}", e);
-            return Err(format!("Failed to emit MCP state update: {}", e));
+            return Err(format_error(templates::FAILED_TO_EMIT, "MCP state update", e));
         }
 
         debug!("Emitted MCP state update to frontend");
@@ -1629,7 +1629,7 @@ impl AppState {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.debug_mode = enabled)
-            .map_err(|e| format!("Failed to set debug mode: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "debug mode", e))
     }
 
     pub fn is_debug_mode(&self) -> bool {
@@ -1647,7 +1647,7 @@ impl AppState {
         self.agent_execution
             .lock()
             .map(|mut execution| execution.tool_approval_required = required)
-            .map_err(|e| format!("Failed to set tool approval required: {}", e))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "tool approval required", e))
     }
 
     pub fn is_tool_approval_required(&self) -> bool {
@@ -1720,14 +1720,14 @@ pub(crate) fn update_undo_state(
     let mut last_edited = state
         .last_edited_file
         .lock()
-        .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
+        .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "last_edited_file lock", e))?;
     *last_edited = Some(file_path);
     drop(last_edited);
 
     let mut previous = state
         .previous_content
         .lock()
-        .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
+        .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "previous_content lock", e))?;
     *previous = Some(previous_content);
 
     Ok(())

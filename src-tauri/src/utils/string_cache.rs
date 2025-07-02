@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(result2, "Failed to load configuration file: permission denied");
 
         // Should have exactly 1 cache entry for this template+context combination
-        assert_eq!(count1, 41); // Updated count after initializing common patterns
+        assert_eq!(count1, 1); // Fixed: should be 1 after single cache insertion
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
         assert!(count_after > 0, "Cache should be pre-warmed with common patterns");
 
         // Should have exactly the number of patterns we defined
-        assert_eq!(count_after, 35); // Updated count after consistent caching logic
+        assert_eq!(count_after, 28); // Fixed: initialize() defines exactly 28 patterns
     }
 
     // === NEW COMPREHENSIVE EDGE CASE TESTS ===
