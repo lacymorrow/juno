@@ -37,7 +37,7 @@ impl FloatingBarConfig {
     /// Load configuration from centralized settings or create default.
     /// Uses centralized SettingsManager instead of individual JSON store.
     /// Used by: Application startup and configuration management.
-    pub async fn load_from_centralized_settings(app_handle: &AppHandle) -> Result<Self, String> {
+    pub async fn load_from_centralized_settings(app_handle: AppHandle) -> Result<Self, String> {
         let settings_manager = SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
@@ -48,16 +48,16 @@ impl FloatingBarConfig {
             return Ok(convert_settings_to_config(&settings));
         }
 
-        // Handle error case
+        // Handle error case - need to save defaults
         debug!("Failed to load floating bar settings, creating default");
         let default_config = Self::default();
-        default_config.save_to_centralized_settings(app_handle).await?;
+        default_config.save_to_centralized_settings(&app_handle).await?;
         Ok(default_config)
     }
 
     /// Save configuration to centralized settings.
-    /// Uses centralized SettingsManager instead of individual JSON store.
-    /// Used by: Settings UI and configuration updates.
+    /// Emits settings events automatically via SettingsManager.
+    /// Used by: User configuration updates and application state management.
     pub async fn save_to_centralized_settings(&self, app_handle: &AppHandle) -> Result<(), String> {
         let settings_manager = SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
@@ -944,7 +944,7 @@ pub async fn get_floating_bar_config(
 ) -> Result<FloatingBarConfig, String> {
     info!("Getting floating bar configuration from centralized settings");
 
-    match FloatingBarConfig::load_from_centralized_settings(&app_handle).await {
+    match FloatingBarConfig::load_from_centralized_settings(app_handle.clone()).await {
         Ok(config) => {
             debug!("Successfully loaded floating bar config from centralized settings: {:?}", config);
             Ok(config)
@@ -965,7 +965,7 @@ pub async fn set_floating_bar_config(
     info!("Setting floating bar configuration in centralized settings: {:?}", config);
 
     // Save to centralized settings (which will also emit settings events)
-    config.save_to_centralized_settings(&app_handle).await?;
+    config.save_to_centralized_settings(app_handle.clone()).await?;
 
     // Emit event to notify frontend of config change (for backward compatibility)
     if let Err(e) = app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
