@@ -229,7 +229,7 @@ use commands::{
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-    error_recovery::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, memory::*,
+            error_recovery::*, filesystem::*, keyboard::*, memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_commands::*, ui_token_selection::*, window::*,
 };
@@ -664,17 +664,15 @@ pub fn run() {
             // Legacy floating bar and panel commands removed - use new UI API instead
             // Bridge commands are handled internally through ui_handle_interaction
             // Consolidated UI API Commands
-            ui_get_state,
-            ui_set_state,
-            ui_get_config,
-            ui_set_config,
+            ui_get_element_state,
+            ui_create_element,
+            ui_update_element,
+            ui_delete_element,
             ui_handle_interaction,
-            ui_resize_window,
-            ui_move_window,
-            ui_set_click_through,
-            ui_show_window,
-            ui_hide_window,
-            ui_set_window_level,
+            ui_get_bar_config,
+            ui_set_bar_config,
+            ui_set_panel_click_through,
+            ui_set_panel_level,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,

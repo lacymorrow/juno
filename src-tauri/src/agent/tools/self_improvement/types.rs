@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
+use super::config::SelfImprovementConfig;
 
 /// Improvement strategy types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +36,7 @@ pub enum FocusArea {
 }
 
 /// Benchmark types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum BenchmarkType {
     /// Accuracy benchmarking
     Accuracy,
@@ -122,6 +123,65 @@ pub struct ReliabilityMetrics {
     pub mtbf: f64,
     /// Recovery time (seconds)
     pub recovery_time: f64,
+}
+
+/// Main self-improvement engine
+#[derive(Debug)]
+pub struct SelfImprovementEngine {
+    /// Current active iteration
+    pub current_iteration: Option<ImprovementIteration>,
+    /// Archive of all completed iterations
+    pub archive: Vec<ImprovementIteration>,
+    /// Configuration for the engine
+    pub config: SelfImprovementConfig,
+}
+
+impl SelfImprovementEngine {
+    /// Create a new self-improvement engine
+    pub fn new(config: SelfImprovementConfig) -> Result<Self, String> {
+        Ok(Self {
+            current_iteration: None,
+            archive: Vec::new(),
+            config,
+        })
+    }
+
+    /// Execute a complete improvement cycle
+    pub async fn execute_improvement_cycle(&mut self) -> Result<ImprovementIteration, String> {
+        // For now, return a mock iteration
+        let iteration = ImprovementIteration {
+            id: format!("iter_{}", chrono::Utc::now().timestamp()),
+            timestamp: chrono::Utc::now(),
+            status: IterationStatus::Completed,
+            analysis: PerformanceAnalysis {
+                timestamp: chrono::Utc::now(),
+                health_score: 0.85,
+                issues: Vec::new(),
+                opportunities: Vec::new(),
+                recommendations: Vec::new(),
+            },
+            improvements: Vec::new(),
+            benchmark_results: None,
+            utility_score: 0.75,
+            accepted: true,
+            metadata: IterationMetadata {
+                meta_agent_id: None,
+                strategy: StrategyType::SICA,
+                focus_areas: vec![FocusArea::Performance],
+                execution_time: 30.0,
+                resource_usage: ResourceUsage {
+                    cpu_time: 15.0,
+                    memory_usage: 128.0,
+                    disk_io: 50.0,
+                    network_io: 10.0,
+                },
+            },
+        };
+
+        self.current_iteration = Some(iteration.clone());
+        self.archive.push(iteration.clone());
+        Ok(iteration)
+    }
 }
 
 /// Comprehensive benchmark results

@@ -335,7 +335,7 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
 async fn initialize_floating_bar_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing floating bar state...");
 
-    crate::commands::floating_bar::initialize_bar_manager(app_handle.clone()).await;
+            crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await?;
     info!("Floating bar manager initialized successfully");
 
     Ok(())
@@ -418,7 +418,7 @@ pub async fn handle_dictation_state_transition(
     }
 
     // Update floating bar manager
-    crate::commands::floating_bar::handle_dictation_mode_change(app_handle, active).await;
+            crate::commands::ui_commands::handle_dictation_mode_change(app_handle, active).await;
 
     info!("Dictation state transition completed: active={}", active);
     Ok(())
@@ -519,10 +519,10 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());
 
     // Update floating bar
-    crate::commands::floating_bar::handle_backend_response(
+            crate::commands::ui_commands::handle_backend_response(
         app_handle,
-        "Stopped",
         Some("All operations stopped.".to_string()),
+        "Stopped".to_string(),
     )
     .await;
 

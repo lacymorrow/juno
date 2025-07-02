@@ -30,8 +30,7 @@ pub mod enhanced_visual_reasoning_commands;
 pub mod error_recovery;
 pub mod escape_key_coordinator;
 pub mod filesystem;
-pub mod floating_bar;
-pub mod floating_panel;
+// floating_bar and floating_panel modules removed - functionality migrated to ui_commands
 pub mod keyboard;
 pub mod mcp;
 pub mod memory;
@@ -92,15 +91,7 @@ pub use self::window::*;
 pub use self::enhanced_visual_reasoning_commands::*;
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
-// Legacy floating bar commands moved to bridge system in ui_commands.rs
-// Only export non-command functions that are still needed for internal event handling
-pub use self::floating_bar::{
-    get_bar_manager, handle_agent_cancelled, handle_agent_started, handle_agent_stopped,
-    handle_always_listening_change, handle_backend_response, handle_dictation_finished,
-    handle_dictation_mode_change, handle_dictation_partial, handle_dictation_started,
-    handle_tts_finished, handle_tts_started, initialize_bar_manager,
-};
-pub use self::floating_panel::*;
+// Floating bar functionality fully migrated to ui_commands.rs - no longer needed
 pub use self::ui_commands::*; // Re-export consolidated UI API commands
 pub use self::mcp::*;
 pub use self::memory::*;

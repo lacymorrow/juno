@@ -66,7 +66,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         let app_handle_clone = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
             let state = app_handle_clone.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone, state).await {
+            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone.clone(), state).await {
                 warn!("Failed to play voice start sound: {}", e);
             }
         });
@@ -80,11 +80,11 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
             // If it's dictation mode, set the flag in floating bar manager first
             if is_dictation_mode {
-                commands::floating_bar::handle_dictation_mode_change(&app_handle_clone, true).await;
+                commands::ui_commands::handle_dictation_mode_change(&app_handle_clone, true).await;
             }
 
             // Then handle the dictation started event
-            commands::floating_bar::handle_dictation_started(&app_handle_clone).await;
+            commands::ui_commands::handle_dictation_started(&app_handle_clone).await;
         });
 
         // Rebroadcast the event as app-dictation-started for backward compatibility
@@ -178,7 +178,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                     let app_handle_clone = app_handle_for_listener.clone();
                     let partial_text = text.to_string();
                     safe_spawn_async_task(move || async move {
-                        commands::floating_bar::handle_dictation_partial(
+                        commands::ui_commands::handle_dictation_partial(
                             &app_handle_clone,
                             partial_text,
                         )
@@ -268,7 +268,7 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
     // Update floating bar manager
     let app_handle_for_bar = app_handle.clone();
     safe_spawn_async_task(move || async move {
-        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+        commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, false).await;
     });
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
@@ -294,7 +294,7 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
     // Update floating bar manager
     let app_handle_for_bar = app_handle.clone();
     safe_spawn_async_task(move || async move {
-        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+        commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, false).await;
     });
 
     // Emit cleanup complete event
@@ -320,7 +320,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
             // Update floating bar to indicate agent mode is starting
-            commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
+            commands::ui_commands::handle_always_listening_change(&app_handle_clone, true).await;
 
             // Emit event to UI to show wake word was detected
             if let Err(e) = app_handle_clone.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
@@ -500,7 +500,7 @@ async fn handle_always_listening_command_processed(app_handle: &AppHandle) {
 /// Handle return to wake word mode
 async fn handle_always_listening_return_to_wake_word(app_handle: &AppHandle) {
     // Update floating bar to indicate wake word mode
-    commands::floating_bar::handle_always_listening_change(app_handle, false).await;
+            commands::ui_commands::handle_always_listening_change(app_handle, false).await;
 
     // The always listening system will automatically return to monitoring mode
     // after processing the command, so we don't need to do anything else here
@@ -860,17 +860,17 @@ pub mod utils {
         // Update floating bar manager if applicable
         match component {
             "dictation" => {
-                commands::floating_bar::handle_dictation_mode_change(app_handle, new_state).await;
+                commands::ui_commands::handle_dictation_mode_change(app_handle, new_state).await;
             }
             "agent" => {
                 if new_state {
-                    commands::floating_bar::handle_agent_started(app_handle).await;
+                    commands::ui_commands::handle_agent_started(app_handle).await;
                 } else {
-                    commands::floating_bar::handle_agent_stopped(app_handle).await;
+                                          commands::ui_commands::handle_agent_stopped(app_handle).await;
                 }
             }
             "always_listening" => {
-                commands::floating_bar::handle_always_listening_change(app_handle, new_state).await;
+                commands::ui_commands::handle_always_listening_change(app_handle, new_state).await;
             }
             _ => {
                 warn!("Unknown component for state coordination: {}", component);
