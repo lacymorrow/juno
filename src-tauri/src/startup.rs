@@ -261,8 +261,6 @@ async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desk
             Ok(false) // Exit after error
         }
     }
-
-
 }
 
 /// Synchronous wrapper for headless CLI handling
@@ -325,40 +323,59 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
 /// Create a minimal Tauri application for CLI operations
 async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::JunoError> {
     use crate::error_handling::JunoError;
-    use std::sync::mpsc;
-    use std::thread;
+    use tokio::sync::oneshot;
+    use std::sync::{Arc, Mutex};
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = oneshot::channel();
 
-    thread::spawn(move || {
-        let tx_clone = tx.clone(); // Clone for the closure
+    // Create the app in a thread and keep it alive without running the event loop
+    std::thread::spawn(move || {
         let result = tauri::Builder::default()
             .plugin(tauri_plugin_store::Builder::default().build())
             .plugin(tauri_plugin_voice_transcription::init())
+            .plugin(tauri_plugin_process::init())
             .setup(move |app| {
-                // Send the app handle back to the main thread
-                if let Err(_) = tx_clone.send(app.handle().clone()) {
-                    eprintln!("Failed to send app handle");
+                let app_handle = app.handle().clone();
+
+                // Initialize minimal app state for CLI operations
+                let desktop_arc = init_desktop_engine(); // This is safe and won't crash
+                let app_state = init_app_state(desktop_arc);
+                app.manage(app_state);
+
+                // Send the app handle immediately after setup
+                if let Err(_) = tx.send(Ok(app_handle)) {
+                    error!("Failed to send app handle for headless operations");
                 }
+
+                info!("Headless Tauri app setup completed");
                 Ok(())
             })
             .build(tauri::generate_context!());
 
         match result {
-            Ok(_app) => {
-                // Don't run the app, just keep it alive for CLI operations
-                // The app handle was already sent via the channel
+            Ok(app) => {
+                info!("Headless Tauri app created successfully");
+
+                // Keep the app instance alive by moving it into a long-lived context
+                // Don't call app.run() as that would block and create lifecycle issues
+                // Instead, just hold onto the app instance to keep it valid
+                std::thread::park(); // Park the thread indefinitely to keep app alive
             },
             Err(e) => {
-                eprintln!("Failed to create minimal Tauri app: {}", e);
+                error!("Failed to create headless Tauri app: {}", e);
+                // Try to send the error, but the channel might already be closed
+                // This error will be caught by the timeout below
             }
         }
     });
 
-    // Wait for the app handle
-    rx.recv().map_err(|e| {
-        JunoError::SystemError(format!("Failed to receive app handle: {}", e))
-    })
+    // Wait for the app handle with timeout to prevent deadlock
+    tokio::time::timeout(
+        tokio::time::Duration::from_secs(15),
+        rx
+    ).await
+    .map_err(|_| JunoError::SystemError("Timeout waiting for headless Tauri app initialization".to_string()))?
+    .map_err(|_| JunoError::SystemError("Failed to receive app handle from initialization thread".to_string()))?
 }
 
 /// Initialize application state with desktop instance

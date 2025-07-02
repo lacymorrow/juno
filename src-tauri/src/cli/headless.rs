@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use tauri::{AppHandle, Manager, Emitter};
 use serde_json::{json, Value};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, OutputFormat};
 use crate::constants::{cli, events};
 use crate::error_handling::JunoError;
 use crate::state::AppState;
@@ -28,25 +28,7 @@ pub struct HeadlessRuntime {
     timeout_duration: Duration,
 }
 
-/// Output format for CLI results
-#[derive(Debug, Clone)]
-pub enum OutputFormat {
-    Json,
-    Text,
-    Markdown,
-    Quiet,
-}
 
-impl From<&str> for OutputFormat {
-    fn from(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "json" => OutputFormat::Json,
-            "markdown" => OutputFormat::Markdown,
-            "quiet" => OutputFormat::Quiet,
-            _ => OutputFormat::Text,
-        }
-    }
-}
 
 /// Result of a headless operation
 #[derive(Debug, Clone)]
@@ -64,7 +46,7 @@ impl HeadlessRuntime {
     pub fn new(app_handle: AppHandle, cli: &Cli) -> Self {
         Self {
             app_handle,
-            output_format: OutputFormat::from(cli.output.as_str()),
+            output_format: cli.output.clone(),
             verbosity: match cli.get_verbosity_level() {
                 crate::cli::VerbosityLevel::Quiet => 0,
                 crate::cli::VerbosityLevel::Normal => 1,
@@ -804,6 +786,39 @@ impl HeadlessRuntime {
                 });
                 println!("{}", serde_json::to_string_pretty(&json_output).unwrap_or_default());
             }
+            OutputFormat::Yaml => {
+                let yaml_output = serde_yaml::to_string(&json!({
+                    "success": result.success,
+                    "output": result.output,
+                    "error": result.error,
+                    "execution_time_ms": result.execution_time.as_millis(),
+                    "agent_state": result.agent_state,
+                    "screenshot": result.screenshot
+                })).unwrap_or_else(|_| "# Error: Failed to serialize to YAML".to_string());
+                println!("{}", yaml_output);
+            }
+            OutputFormat::Table => {
+                println!("┌─────────────────┬─────────────────────────────────────────────────────────────────┐");
+                println!("│ Field           │ Value                                                           │");
+                println!("├─────────────────┼─────────────────────────────────────────────────────────────────┤");
+                println!("│ Status          │ {}                                                           │",
+                         if result.success { "✅ Success" } else { "❌ Failed" });
+                if let Some(state) = &result.agent_state {
+                    println!("│ Agent State     │ {:<63} │", state.chars().take(63).collect::<String>());
+                }
+                println!("│ Execution Time  │ {:<63} │", format!("{:?}", result.execution_time));
+                if !result.output.is_empty() {
+                    let output_lines: Vec<&str> = result.output.lines().collect();
+                    for (i, line) in output_lines.iter().enumerate() {
+                        let field_name = if i == 0 { "Output" } else { "" };
+                        println!("│ {:<15} │ {:<63} │", field_name, line.chars().take(63).collect::<String>());
+                    }
+                }
+                if let Some(error) = &result.error {
+                    println!("│ Error           │ {:<63} │", error.chars().take(63).collect::<String>());
+                }
+                println!("└─────────────────┴─────────────────────────────────────────────────────────────────┘");
+            }
             OutputFormat::Markdown => {
                 println!("# Agent Result\n");
                 println!("**Status:** {}\n", if result.success { "✅ Success" } else { "❌ Failed" });
@@ -850,6 +865,21 @@ impl HeadlessRuntime {
                 println!("{}", serde_json::to_string_pretty(&error_result).unwrap_or_else(|_| {
                     format!("{{\"success\":false,\"error\":\"{}\"}}", error)
                 }));
+            }
+            OutputFormat::Yaml => {
+                let yaml_output = serde_yaml::to_string(&json!({
+                    "success": false,
+                    "error": error
+                })).unwrap_or_else(|_| format!("# Error\n# Failed to serialize to YAML: {}", error));
+                println!("{}", yaml_output);
+            }
+            OutputFormat::Table => {
+                println!("┌─────────────────┬─────────────────────────────────────────────────────────────────┐");
+                println!("│ Field           │ Value                                                           │");
+                println!("├─────────────────┼─────────────────────────────────────────────────────────────────┤");
+                println!("│ Status          │ ❌ Failed                                                       │");
+                println!("│ Error           │ {:<63} │", error.chars().take(63).collect::<String>());
+                println!("└─────────────────┴─────────────────────────────────────────────────────────────────┘");
             }
             OutputFormat::Markdown => {
                 println!("# Error\n\n{}", error);
