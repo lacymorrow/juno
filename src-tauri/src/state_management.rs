@@ -346,7 +346,10 @@ async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String
     info!("[State] Initializing UI Manager for consolidated floating elements...");
 
     // Initialize the global UI manager for all floating UI elements
-    crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await;
+    if let Err(e) = crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await {
+        warn!("Failed to initialize UI manager: {}", e);
+        return Err(format!("UI Manager initialization failed: {}", e));
+    }
     info!("✅ UI Manager initialized successfully");
 
     Ok(())
@@ -418,7 +421,7 @@ pub async fn handle_dictation_state_transition(
     }
 
     // Update floating bar manager
-            crate::commands::ui_commands::handle_dictation_mode_change(app_handle, active).await;
+    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, active).await;
 
     info!("Dictation state transition completed: active={}", active);
     Ok(())
@@ -519,7 +522,7 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());
 
     // Update floating bar
-            crate::commands::ui_commands::handle_backend_response(
+    crate::commands::ui_commands::handle_backend_response(
         app_handle,
         Some("All operations stopped.".to_string()),
         "Stopped".to_string(),
