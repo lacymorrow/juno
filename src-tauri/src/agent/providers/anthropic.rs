@@ -507,8 +507,8 @@ impl AnthropicBrain {
 
         // CRITICAL FIX: Handle any remaining TTS state at end of stream
         if in_tts_tag || !tts_buffer.is_empty() {
-            log::warn!(
-                "Stream ended with incomplete TTS state: in_tts_tag={}, buffer='{}'",
+            log::debug!(
+                "Stream ended with remaining TTS state: in_tts_tag={}, buffer='{}'",
                 in_tts_tag,
                 tts_buffer
             );
@@ -516,9 +516,10 @@ impl AnthropicBrain {
             // If we're in the middle of a TTS tag, extract what we have as TTS content
             if in_tts_tag && !tts_content.trim().is_empty() {
                 log::info!(
-                    "Extracting incomplete TTS content at stream end: '{}'",
+                    "⚠️  FALLBACK: Extracting incomplete TTS content at stream end: '{}'",
                     tts_content
                 );
+                log::warn!("TTS was processed at stream end instead of immediately during streaming. This indicates the TTS tags may have been split across chunks.");
                 on_text_chunk(String::new(), vec![tts_content.clone()]);
             }
 
@@ -591,7 +592,7 @@ impl AnthropicBrain {
                     // Found complete closing tag
                     if !tts_content.trim().is_empty() {
                         extracted_tts_list.push(tts_content.clone());
-                        log::info!("Extracted TTS content: '{}'", tts_content);
+                        log::info!("✅ IMMEDIATE: Extracted TTS content during streaming: '{}'", tts_content);
                     }
 
                     // Reset TTS state for next potential block
@@ -601,8 +602,20 @@ impl AnthropicBrain {
                     chars_to_consume = i;
                     continue;
                 } else if remaining_len < 6 && self.could_be_partial_closing_tag(&remaining_str) {
-                    // Potential partial closing tag at end of buffer - stop processing here
-                    // CRITICAL FIX: Do not consume characters when we have a partial closing tag
+                    // Potential partial closing tag at end of buffer
+                    // AGGRESSIVE FIX: If we have substantial TTS content and this looks like a closing tag,
+                    // extract the TTS content immediately instead of waiting for the full tag
+                    if !tts_content.trim().is_empty() && remaining_str.starts_with("</") {
+                        log::info!("🚀 IMMEDIATE: Extracting TTS content on partial closing tag: '{}'", tts_content);
+                        extracted_tts_list.push(tts_content.clone());
+                        *in_tts_tag = false;
+                        tts_content.clear();
+                        // Skip the partial closing tag characters we've seen
+                        i += remaining_str.len();
+                        chars_to_consume = i;
+                        continue;
+                    }
+                    // Otherwise, stop processing here and wait for more data
                     break;
                 } else {
                     // Content inside TTS tag - add to TTS content only (not to display)
