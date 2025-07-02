@@ -6,16 +6,12 @@
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
-use std::sync::{Arc, Mutex, OnceLock, LazyLock};
-use tauri::{AppHandle, Builder, App, Manager, State};
+use std::sync::{Arc, Mutex, LazyLock};
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
-use crate::agent::providers::factory::BrainFactory;
-use crate::constants::timeouts;
-use crate::state::AppState;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -245,29 +241,34 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
                     headless_runtime.execute_command(&cli).await
                 });
 
-                // Handle result and exit with appropriate code
+                // Handle result and return instead of exiting
                 match result {
                     Ok(result) => {
                         if result.success {
-                            std::process::exit(crate::constants::cli::exit_code::SUCCESS);
+                            // Successful execution - indicate app should exit
+                            return Ok(false);
                         } else {
-                            eprintln!("Error: {}", result.error.unwrap_or_default());
-                            std::process::exit(crate::constants::cli::exit_code::AGENT_ERROR);
+                            // Failed execution - return error with context
+                            let error_msg = result.error.unwrap_or_default();
+                            eprintln!("Error: {}", error_msg);
+                            return Err(crate::error_handling::JunoError::SystemError(
+                                format!("Agent execution failed: {}", error_msg)
+                            ));
                         }
                     }
                     Err(e) => {
+                        // Failed execution - return the error
                         eprintln!("Headless execution failed: {}", e);
-                        std::process::exit(match e {
-                            crate::error_handling::JunoError::NetworkError(_) => crate::constants::cli::exit_code::NETWORK_ERROR,
-                            crate::error_handling::JunoError::PermissionError(_) => crate::constants::cli::exit_code::PERMISSION_ERROR,
-                            _ => crate::constants::cli::exit_code::AGENT_ERROR,
-                        });
+                        return Err(e);
                     }
                 }
             }
             Err(e) => {
+                // Failed to create headless app - return error
                 eprintln!("Failed to create headless app: {}", e);
-                std::process::exit(crate::constants::cli::exit_code::GENERAL_ERROR);
+                return Err(crate::error_handling::JunoError::SystemError(
+                    format!("Failed to create headless app: {}", e)
+                ));
             }
         }
     }
@@ -328,7 +329,7 @@ pub fn init_app_state(desktop_arc: Option<Arc<Desktop>>) -> state::AppState {
 
 /// Create a minimal Tauri app for headless operations
 fn create_headless_app(desktop_arc: Option<Arc<Desktop>>) -> Result<tauri::AppHandle, String> {
-    use tauri::{Builder, Manager};
+    use tauri::Builder;
 
     let app_state = init_app_state(desktop_arc);
 

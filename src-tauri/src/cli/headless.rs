@@ -137,15 +137,44 @@ impl HeadlessRuntime {
         }
 
         // Set up result capture
-        let (result_tx, result_rx) = oneshot::channel::<String>();
+        let (result_tx, result_rx) = oneshot::channel::<(String, String)>();
         let result_tx = Arc::new(Mutex::new(Some(result_tx)));
 
-        // Set up event listeners for capturing agent response
-        let _app_handle = self.app_handle.clone();
-        let _result_tx_clone = result_tx.clone();
+        // Set up event listener for capturing agent response
+        let app_handle = self.app_handle.clone();
+        let result_tx_clone = result_tx.clone();
 
-        // Note: In headless mode, we'll use a different approach than event listening
-        // TODO: Implement proper event handling for headless mode
+        // Listen for the agent-stream-end event which contains the final result
+        let verbosity = self.verbosity; // Capture verbosity level for the closure
+        let unlisten = app_handle.listen(events::streaming::STREAM_END, move |event| {
+            if verbosity >= cli::verbosity::VERBOSE {
+                info!("Received agent-stream-end event in headless mode");
+            }
+
+            // Parse the event payload
+            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                let complete_text = payload.get("complete_text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let agent_state = payload.get("agent_state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+
+                // Send result through the channel
+                if let Ok(mut tx_guard) = result_tx_clone.lock() {
+                    if let Some(tx) = tx_guard.take() {
+                        if let Err(_) = tx.send((complete_text, agent_state)) {
+                            warn!("Failed to send result through channel - receiver dropped");
+                        }
+                    }
+                }
+            } else {
+                warn!("Failed to parse agent-stream-end event payload");
+            }
+        });
 
         // Submit the query to the agent
         let state = self.app_handle.state::<AppState>();
@@ -153,26 +182,34 @@ impl HeadlessRuntime {
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
-        let result = timeout(self.timeout_duration, result_rx).await
+        let (result, agent_state) = timeout(self.timeout_duration, result_rx).await
             .map_err(|_| JunoError::ApplicationError("Query execution timed out".to_string()))?
             .map_err(|_| JunoError::ApplicationError("Failed to receive query result".to_string()))?;
 
-        // Parse the result
-        let output = if let Ok(json_result) = serde_json::from_str::<Value>(&result) {
-            json_result.get("text")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| result.clone())
+        // Clean up the event listener
+        unlisten();
+
+        // Determine if the query was successful based on agent state
+        let success = match agent_state.as_str() {
+            "Finished" => true,
+            "Failed" | "Cancelled" | "Offline" => false,
+            _ => true, // Default to success for unknown states
+        };
+
+        // The result is already the complete text from the agent
+        let output = result;
+        let error = if !success {
+            Some(format!("Agent execution failed with state: {}", agent_state))
         } else {
-            result
+            None
         };
 
         Ok(HeadlessResult {
-            success: true,
+            success,
             output,
-            error: None,
+            error,
             execution_time: Duration::default(), // Will be set by caller
-            agent_state: Some("Completed".to_string()),
+            agent_state: Some(agent_state),
             screenshot: None,
         })
     }
