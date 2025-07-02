@@ -965,7 +965,7 @@ pub async fn set_floating_bar_config(
     info!("Setting floating bar configuration in centralized settings: {:?}", config);
 
     // Save to centralized settings (which will also emit settings events)
-    config.save_to_centralized_settings(app_handle.clone()).await?;
+    config.save_to_centralized_settings(&app_handle).await?;
 
     // Emit event to notify frontend of config change (for backward compatibility)
     if let Err(e) = app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
