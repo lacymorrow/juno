@@ -50,6 +50,11 @@ pub mod test_fix_verification; // Test verification for recent fixes
 
 /// Parse a shortcut string into a Shortcut object
 /// Examples: "Alt+D" -> Shortcut, "Option+Space" -> Shortcut, "F1" -> Shortcut, "Ctrl+Shift+F12" -> Shortcut
+/// Get the Tauri context - centralized to avoid duplicate symbol errors
+pub fn get_tauri_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {
@@ -956,7 +961,7 @@ pub fn run() {
         });
 
     // Enhanced error handling to prevent crashes due to permission issues
-    match builder.run(tauri::generate_context!()) {
+    match builder.run(get_tauri_context()) {
         Ok(()) => {
             info!("Tauri application exited successfully");
         }

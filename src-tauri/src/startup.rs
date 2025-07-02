@@ -354,7 +354,7 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
                 info!("Headless Tauri app setup completed");
                 Ok(())
             })
-            .build(tauri::generate_context!());
+            .build(crate::get_tauri_context());
 
         // Send the result only after build completes (fixes race condition)
         let send_result = match result {
