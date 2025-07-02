@@ -213,7 +213,7 @@ impl DictationStateManager {
         }
 
         // 4. Reset floating bar
-        crate::commands::floating_bar::handle_dictation_mode_change(app_handle, false).await;
+        crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
 
         // 5. Reset manager state
         *self.current_state.write().await = DictationState::Idle;
@@ -366,7 +366,7 @@ impl DictationStateManager {
         }
 
         // Sync floating bar
-        crate::commands::floating_bar::handle_dictation_mode_change(app_handle, is_active).await;
+        crate::commands::ui_commands::handle_dictation_mode_change(app_handle, is_active).await;
 
         // Emit state events
         if let Err(e) = app_handle.emit(events::dictation::ACTIVE, is_active) {
@@ -585,7 +585,7 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
     }
 
     // Reset floating bar with proper dictation mode change
-    crate::commands::floating_bar::handle_dictation_mode_change(app_handle, false).await;
+            crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
 
     // Reset manager's internal component states
     *manager.component_states.write().await = ComponentStates {

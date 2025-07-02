@@ -112,6 +112,10 @@ Tool consolidation strategies, batching optimization, and performance improvemen
 
 ## System Integration
 
+### [standardized-ui-api.mdc](mdc:standardized-ui-api.mdc) **NEW**
+
+**CRITICAL**: Complete Standardized UI API implementation for all floating UI components. Consolidates scattered floating UI variants into a unified, extensible architecture. All new UI components MUST use this API.
+
 ### [clean-architecture-maintenance.mdc](mdc:clean-architecture-maintenance.mdc)
 
 Clean architecture principles, modular design patterns, and maintenance guidelines.

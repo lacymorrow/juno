@@ -32,6 +32,7 @@ pub struct CloudClient {
     app_handle: AppHandle,
     connection_state: Arc<TokioMutex<ConnectionState>>,
     auth: CloudAuth,
+    security: CloudSecurity,
     command_processor: CommandProcessor,
     // Communication channels
     command_tx: mpsc::UnboundedSender<CloudCommand>,
@@ -44,8 +45,8 @@ impl CloudClient {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())?;
         let config = CloudConfig::load_from_centralized_settings(&settings_manager).await?;
         let auth = CloudAuth::new(config.clone());
-        let security = crate::cloud::security::CloudSecurity::new(config.clone(), auth.clone());
-        let command_processor = CommandProcessor::new(app_handle.clone(), security);
+        let security = CloudSecurity::new(config.clone(), auth.clone());
+        let command_processor = CommandProcessor::new(app_handle.clone(), security.clone());
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
@@ -54,6 +55,7 @@ impl CloudClient {
             connection_state: Arc::new(TokioMutex::new(ConnectionState::Disconnected)),
             app_handle,
             auth,
+            security,
             command_processor,
             command_tx,
             command_rx: Arc::new(TokioMutex::new(command_rx)),

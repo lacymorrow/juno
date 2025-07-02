@@ -12,6 +12,8 @@ AGENT_IMPROVEMENT_ANALYSIS.md
 
 invoke("test_cloud_backend_connection"); // hard coded
 
+redundant current_timestamp and safe_time
+
 If an agent is asked to do multiple things in quick succession, we need to handle that.
 
 TTS called late

@@ -458,7 +458,7 @@ async fn execute_agent_internal(
     // This ensures the floating bar shows agent activity regardless of trigger source
     let app_handle_for_bar_start = app_handle.clone();
     tauri::async_runtime::spawn(async move {
-        crate::commands::floating_bar::handle_agent_started(&app_handle_for_bar_start).await;
+                    crate::commands::ui_commands::handle_agent_started(&app_handle_for_bar_start).await;
     });
 
     // Register escape key for cancellation during agent execution
@@ -969,7 +969,7 @@ async fn execute_agent_internal(
     // First notify that the agent has stopped working
     let app_handle_for_bar_stop = app_handle.clone();
     tauri::async_runtime::spawn(async move {
-        crate::commands::floating_bar::handle_agent_stopped(&app_handle_for_bar_stop).await;
+        crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar_stop).await;
     });
 
     // --- Update Floating Bar Manager with Completion Details ---
@@ -978,13 +978,13 @@ async fn execute_agent_internal(
     let text_for_bar = final_response.text.clone();
     tauri::async_runtime::spawn(async move {
         // First notify that the agent has stopped working
-        crate::commands::floating_bar::handle_agent_stopped(&app_handle_for_bar).await;
+        crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar).await;
 
         // Then provide the completion details
-        crate::commands::floating_bar::handle_backend_response(
+        crate::commands::ui_commands::handle_backend_response(
             &app_handle_for_bar,
-            &agent_state_for_bar,
             Some(text_for_bar),
+            agent_state_for_bar,
         )
         .await;
     });
@@ -1039,7 +1039,7 @@ pub async fn handle_tts_completion(
     info!("TTS completion event received from frontend");
 
     // Update floating bar manager for TTS finish
-    crate::commands::floating_bar::handle_tts_finished(&app_handle).await;
+                crate::commands::ui_commands::handle_tts_finished(&app_handle).await;
 
     // Play agent success sound now that TTS has finished
     if let Err(e) =

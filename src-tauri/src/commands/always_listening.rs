@@ -65,7 +65,7 @@ pub async fn start_always_listening_mode(
                     }
 
                     // Update floating bar
-                    crate::commands::floating_bar::handle_always_listening_change(&app, true).await;
+                    crate::commands::ui_commands::handle_always_listening_change(&app, true).await;
 
                     Ok("Always listening mode started successfully".to_string())
                 }
@@ -159,7 +159,7 @@ pub async fn stop_always_listening_mode(
                     }
 
                     // Update floating bar
-                    crate::commands::floating_bar::handle_always_listening_change(&app, false).await;
+                    crate::commands::ui_commands::handle_always_listening_change(&app, false).await;
 
                     Ok("Always listening mode stopped successfully".to_string())
                 }

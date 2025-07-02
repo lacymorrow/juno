@@ -1,0 +1,269 @@
+---
+description: Proper patterns for UI component backend integration to avoid broken implementations
+globs: src/components/*.tsx,src/lib/*.ts
+alwaysApply: true
+---
+# UI Component Backend Integration Patterns
+
+## Critical Rule: Verify APIs Before Integration
+
+**NEVER assume comprehensive APIs exist without checking the actual backend implementation.**
+
+## The FloatingBar Migration Lesson
+
+### 🔍 **Problem Pattern**
+
+Components were initially migrated to use **non-existent UI API commands** that looked comprehensive in documentation but didn't actually exist in the backend:
+
+```typescript
+// ❌ WRONG - These commands don't exist in the backend
+await invoke("ui_get_state", { elementId: "foo" });
+await invoke("ui_set_state", { elementId: "foo", state: {} });
+
+// ❌ WRONG - This hook doesn't exist
+const { manager, state, config } = useUIElement("element-id", "bar");
+```
+
+### ✅ **Solution Pattern**
+
+Always use **actual backend commands and events**:
+
+```typescript
+// ✅ CORRECT - Listen to actual backend events
+useEffect(() => {
+  const unlisten = listen("bar-state-update", (event) => {
+    const stateData = event.payload as UIStateData;
+    setState(stateData);
+  });
+  return () => { unlisten.then(fn => fn()); };
+}, []);
+
+// ✅ CORRECT - Use actual backend commands
+await invoke("ui_handle_interaction", {
+  elementId: "floating-bar",
+  interaction: { interaction_type: "click", data: {} }
+});
+```
+
+## Backend Verification Process
+
+### Step 1: Check Command Registry
+
+Always verify commands exist in [src-tauri/src/commands/registry.rs](mdc:src-tauri/src/commands/registry.rs):
+
+```rust
+// Check what commands are actually registered
+pub fn get_commands() -> Vec<Box<dyn Fn(tauri::Invoke) + Send + Sync>> {
+    vec![
+        // Look for actual command registrations
+        ui_commands::ui_handle_interaction,
+        // NOT: ui_get_state, ui_set_state (these don't exist)
+    ]
+}
+```
+
+### Step 2: Check Command Implementation
+
+Verify the command actually exists in [src-tauri/src/commands/ui_commands.rs](mdc:src-tauri/src/commands/ui_commands.rs):
+
+```rust
+// ✅ This command actually exists
+#[tauri::command]
+pub async fn ui_handle_interaction(
+    element_id: String,
+    interaction: UIInteractionEvent,
+    app_state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Real implementation
+}
+
+// ❌ These commands do NOT exist
+// #[tauri::command]
+// pub async fn ui_get_state(...) // NOT FOUND
+// #[tauri::command]
+// pub async fn ui_set_state(...) // NOT FOUND
+```
+
+### Step 3: Check Event Emission
+
+Verify what events the backend actually emits:
+
+```rust
+// ✅ Backend actually emits this event
+pub const STATE_UPDATE: &str = "bar-state-update";
+
+// In the implementation:
+app_handle.emit(events::bar::STATE_UPDATE, state_data)?;
+```
+
+## Component Integration Patterns
+
+### ✅ **Pattern 1: Event Listener + Command Pattern**
+
+```typescript
+export function MyUIComponent() {
+  const [state, setState] = useState<UIState>("default");
+  const [config, setConfig] = useState<UIElementConfig | null>(null);
+
+  // Listen to ACTUAL backend events
+  useEffect(() => {
+    const unlisten = listen("bar-state-update", (event) => {
+      const stateData = event.payload as UIStateData;
+      setState(stateData.uiState);
+      setConfig(stateData.config);
+    });
+
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
+  // Use ACTUAL backend commands
+  const handleInteraction = async (type: string, data?: any) => {
+    try {
+      await invoke("ui_handle_interaction", {
+        elementId: "my-component",
+        interaction: { interaction_type: type, data: data || {} }
+      });
+    } catch (error) {
+      console.error(`UI interaction failed:`, error);
+    }
+  };
+
+  // Component implementation...
+}
+```
+
+### ❌ **Anti-Pattern: Assumed API Integration**
+
+```typescript
+// ❌ WRONG - Don't assume APIs exist
+export function BrokenComponent() {
+  // This hook doesn't exist
+  const { manager, state, config } = useUIElement("element-id", "bar");
+
+  // These commands don't exist
+  const handleClick = () => manager.click();
+  const handleSubmit = (value: string) => manager.submit(value);
+
+  // Component will be completely broken
+}
+```
+
+## Type Definition Strategy
+
+### ✅ **DO: Define Types Inline**
+
+```typescript
+// Define component-specific types directly in the component file
+type UIState =
+  | "default" | "expanding" | "input" | "shrinking"
+  | "submitting" | "loading" | "finishing" | "success"
+  | "listening" | "error" | "transcribing" | "speaking";
+
+interface UIStateData {
+  uiState: UIState;
+  inputValue: string;
+  isVisible: boolean;
+  config: UIElementConfig;
+}
+
+interface UIElementConfig {
+  width: number;
+  height: number;
+  position: { x: number; y: number };
+  enableAnimations: boolean;
+}
+```
+
+### ❌ **DON'T: Import Non-Existent Types**
+
+```typescript
+// ❌ WRONG - This file was deleted
+import { BarState, FloatingBarConfig } from "@/types/floating-bar";
+
+// ❌ WRONG - These functions were removed
+convertUIStateToBarState(state);
+convertBarStateToUIState(state);
+```
+
+## Debugging Process
+
+### When UI Components Don't Work
+
+1. **Check Event Emission**
+
+   ```typescript
+   useEffect(() => {
+     const unlisten = listen("bar-state-update", (event) => {
+       console.log("📨 Event received:", event.payload);
+       // Add this log to verify events are being emitted
+     });
+     return () => { unlisten.then(fn => fn()); };
+   }, []);
+   ```
+
+2. **Check Command Execution**
+
+   ```typescript
+   const handleInteraction = async (type: string, data?: any) => {
+     try {
+       console.log("🔧 Calling ui_handle_interaction:", { type, data });
+       await invoke("ui_handle_interaction", {
+         elementId: "my-component",
+         interaction: { interaction_type: type, data: data || {} }
+       });
+       console.log("✅ Command successful");
+     } catch (error) {
+       console.error("❌ Command failed:", error);
+     }
+   };
+   ```
+
+3. **Verify Backend Status**
+
+   ```bash
+   # Check backend compiles
+   cargo check --manifest-path src-tauri/Cargo.toml
+
+   # Check frontend compiles
+   npm run build
+   ```
+
+## Development Checklist
+
+### Before Creating UI Components
+
+- [ ] ✅ Check what backend commands actually exist in `src-tauri/src/commands/`
+- [ ] ✅ Verify what events are emitted in `src-tauri/src/constants/events.rs`
+- [ ] ✅ Test command calls with actual backend before implementing UI
+- [ ] ✅ Define types inline in the component file
+- [ ] ❌ Never assume comprehensive APIs exist without verification
+- [ ] ❌ Never import from deleted type files
+- [ ] ❌ Never create conversion functions between legacy and new types
+
+### After Component Implementation
+
+- [ ] ✅ Test with `cargo check` for backend compilation
+- [ ] ✅ Test with `npm run build` for frontend compilation
+- [ ] ✅ Verify events are being received (add console.log temporarily)
+- [ ] ✅ Verify commands execute successfully (add console.log temporarily)
+- [ ] ✅ Test component actually responds to backend state changes
+
+## Key Takeaways
+
+1. **API Documentation ≠ API Implementation** - Always verify APIs exist in the actual codebase
+2. **Events + Commands Pattern** - Use event listeners for state updates, commands for user actions
+3. **Inline Type Definitions** - Don't depend on shared type files that might be deleted
+4. **Test Early** - Verify backend integration before building complex UI logic
+5. **Console.log Debugging** - Always add logging when UI components aren't responding as expected
+
+## Success Metrics
+
+A properly integrated UI component should:
+
+- ✅ Compile without TypeScript errors
+- ✅ Receive backend events and update visual state accordingly
+- ✅ Execute backend commands when user interacts
+- ✅ Handle loading/error states gracefully
+- ✅ Work consistently across app restarts
+
+Remember: **A broken UI component is often the result of integrating with non-existent APIs, not implementation bugs.**

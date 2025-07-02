@@ -232,7 +232,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     }
 
     // Update floating bar manager for dictation mode completion
-    crate::commands::floating_bar::handle_dictation_finished(&app_handle, None).await;
+                    crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
     info!("[Dictation Mode] Completed dictation successfully");
 }
 
@@ -246,7 +246,7 @@ async fn handle_agent_mode_result(
     // Update floating bar manager for agent mode query
     if let Some(text) = &extracted_text {
         let query_text = text.clone();
-        crate::commands::floating_bar::handle_dictation_finished(&app_handle, Some(query_text))
+        crate::commands::ui_commands::handle_dictation_finished(&app_handle, Some(query_text))
             .await;
     }
 
@@ -321,7 +321,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     // Update floating bar manager to set dictation mode
     let app_handle_for_bar = app_handle.clone();
     tauri::async_runtime::spawn(async move {
-        crate::commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true)
+                    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, true)
             .await;
     });
 
@@ -384,7 +384,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                 // Update floating bar manager to reset dictation mode
                 let app_handle_for_bar = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    crate::commands::floating_bar::handle_dictation_mode_change(
+                    crate::commands::ui_commands::handle_dictation_mode_change(
                         &app_handle_for_bar,
                         false,
                     )
@@ -452,7 +452,7 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     }
 
     // Update floating bar manager
-    crate::commands::floating_bar::handle_dictation_mode_change(&app_handle, false).await;
+    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!(

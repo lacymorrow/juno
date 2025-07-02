@@ -20,6 +20,9 @@ import {
   useRecentMessages,
 } from "@/contexts/VoiceContext";
 
+// === NEW UI API IMPORTS ===
+import { useUIElement, UIState, AgentStatus } from "@/lib/ui-api";
+
 // Enhanced state management for the transparent panel
 interface PanelState {
   mode: "compact" | "expanded" | "chat" | "settings";
@@ -40,6 +43,59 @@ interface TransparentFloatingPanelProps {
   onModeChange?: (mode: "compact" | "expanded" | "chat" | "settings") => void;
 }
 
+// Convert Panel states to UI API states
+const convertPanelModeToUIState = (mode: string): UIState => {
+  switch (mode) {
+    case "compact":
+      return "default";
+    case "expanded":
+      return "expanded";
+    case "chat":
+      return "input";
+    case "settings":
+      return "default";
+    default:
+      return "default";
+  }
+};
+
+const convertAgentStatusToUIState = (status: string): UIState => {
+  switch (status) {
+    case "listening":
+      return "listening";
+    case "thinking":
+      return "loading";
+    case "responding":
+      return "agent-responding";
+    case "error":
+      return "error";
+    default:
+      return "default";
+  }
+};
+
+const convertToAgentStatus = (status: string): AgentStatus => {
+  switch (status) {
+    case "idle":
+      return "idle";
+    case "listening":
+    case "thinking":
+      return "working";
+    case "responding":
+      return "responding";
+    case "error":
+      return "failed";
+    case "finished":
+      return "finished";
+    case "cancelled":
+      return "cancelled";
+    case "offline":
+      return "offline";
+    default:
+      return "idle";
+  }
+};
+
 export function TransparentFloatingPanel({
   className,
   maxWidth = 400,
@@ -48,6 +104,9 @@ export function TransparentFloatingPanel({
   disableWindowManagement = false,
   onModeChange,
 }: TransparentFloatingPanelProps) {
+  // === NEW UI API INTEGRATION ===
+  const { state, updateState } = useUIElement("floating-panel", "panel");
+
   // Use context hooks instead of local state
   const { voiceState } = useVoice();
   const agentState = useAgentState();
@@ -65,6 +124,65 @@ export function TransparentFloatingPanel({
 
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // === SYNC UI API STATE WITH LOCAL STATE ===
+  useEffect(() => {
+    if (state) {
+      console.log("Panel: Syncing UI API state:", state);
+
+      // Convert UI state back to panel mode
+      let newMode = panelState.mode;
+      if (state.uiState === "default") newMode = "compact";
+      else if (state.uiState === "expanded") newMode = "expanded";
+      else if (state.uiState === "input") newMode = "chat";
+
+      setPanelState((prev) => ({
+        ...prev,
+        mode: newMode,
+        agentStatus: state.isAgentWorking ? "thinking" : "idle",
+        error: state.currentError || undefined,
+        transcriptionText: state.transcriptionText,
+      }));
+
+      setInputValue(state.inputValue);
+    }
+  }, [state]);
+
+  // === SYNC CONTEXT STATE TO UI API ===
+  useEffect(() => {
+    if (updateState && agentState) {
+      const uiState = convertAgentStatusToUIState(agentState.status);
+      updateState({
+        uiState,
+        isAgentWorking: agentState.status !== "idle",
+        currentError: agentState.error || null,
+        agentState: convertToAgentStatus(agentState.status),
+      });
+    }
+  }, [updateState, agentState]);
+
+  useEffect(() => {
+    if (updateState && voiceState) {
+      updateState({
+        voiceMode: voiceState.mode,
+        transcriptionText: voiceState.transcriptionText || "",
+        audioLevel: voiceState.audioLevel || 0,
+      });
+    }
+  }, [updateState, voiceState]);
+
+  // Update UI state when panel mode changes
+  useEffect(() => {
+    if (updateState) {
+      const uiState = convertPanelModeToUIState(panelState.mode);
+      updateState({ uiState });
+    }
+  }, [updateState, panelState.mode]);
+
+  // Load initial state and config automatically handled by useUIElement hook
+  useEffect(() => {
+    // Initial state and config are loaded automatically
+  }, []);
 
   // Window and panel management with delayed resizing for smooth transitions
   useEffect(() => {
@@ -144,9 +262,10 @@ export function TransparentFloatingPanel({
     if (newClickThroughState !== isClickThroughEnabled) {
       setIsClickThroughEnabled(newClickThroughState);
 
-      // Update the native window click-through behavior
-      invoke("set_floating_panel_click_through", {
-        clickThrough: newClickThroughState,
+      // Update the native window click-through behavior using new UI API
+      invoke("ui_set_click_through", {
+        elementId: "floating-panel",
+        enabled: newClickThroughState,
       }).catch((error) => {
         console.warn("Failed to set click-through behavior:", error);
       });
