@@ -24,11 +24,13 @@ use tokio::sync::Mutex;
 use crate::agent::core::AgentError;
 use crate::agent::tools::self_improvement::{
     BenchmarkResults, BenchmarkType, CostMetrics, ImprovementIteration, IterationStatus,
-    PerformanceConfig, SafetyConstraints, SelfImprovementConfig, SelfImprovementEngine,
+    PerformanceConfig, SafetyConstraints, SelfImprovementConfig, // SelfImprovementEngine not available
 };
 
 /// Global self-improvement engine state (development mode only)
-type SelfImprovementState = Arc<Mutex<Option<SelfImprovementEngine>>>;
+// Note: SelfImprovementEngine not implemented yet
+// type SelfImprovementState = Arc<Mutex<Option<SelfImprovementEngine>>>;
+type SelfImprovementState = Arc<Mutex<Option<()>>>;
 
 /// Initialize the self-improvement state for Tauri management
 pub fn initialize_self_improvement_state() -> SelfImprovementState {
@@ -92,6 +94,11 @@ pub async fn initialize_self_improvement(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let config = request
         .config
         .unwrap_or_else(SelfImprovementConfig::default);
@@ -104,6 +111,7 @@ pub async fn initialize_self_improvement(
 
     tracing::info!("🚀 Self-improvement system initialized successfully (Development Mode Only)");
     Ok("Self-improvement system initialized in development mode with comprehensive safety features".to_string())
+    */
 }
 
 /// Start a complete self-improvement cycle
@@ -116,6 +124,11 @@ pub async fn start_improvement_cycle(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let mut state_guard = state.lock().await;
 
     if let Some(engine) = state_guard.as_mut() {
@@ -133,6 +146,7 @@ pub async fn start_improvement_cycle(
     } else {
         Err("Self-improvement system not initialized".to_string())
     }
+    */
 }
 
 /// Get comprehensive status of the self-improvement system
@@ -163,6 +177,26 @@ pub async fn get_self_improvement_status(
 
     let state_guard = state.lock().await;
 
+    // Note: SelfImprovementEngine is not implemented yet, so return disabled status
+    Ok(SelfImprovementStatus {
+        enabled: false,
+        development_mode: true,
+        current_iteration: None,
+        total_iterations: 0,
+        last_improvement_score: 0.0,
+        archive_size: 0,
+        performance_summary: PerformanceSummary {
+            health_score: 0.0,
+            tool_reliability: 0.0,
+            prompt_effectiveness: 0.0,
+            resource_efficiency: 0.0,
+            error_rate: 0.0,
+            improvement_opportunities: 0,
+        },
+    })
+
+    // TODO: Uncomment when SelfImprovementEngine is available
+    /*
     if let Some(engine) = state_guard.as_ref() {
         // Gather performance metrics
         let performance_summary = PerformanceSummary {
@@ -200,11 +234,11 @@ pub async fn get_self_improvement_status(
                 tool_reliability: 0.0,
                 prompt_effectiveness: 0.0,
                 resource_efficiency: 0.0,
-                error_rate: 0.0,
                 improvement_opportunities: 0,
             },
         })
     }
+    */
 }
 
 /// Analyze current system performance and identify improvement opportunities
@@ -268,7 +302,7 @@ pub async fn analyze_system_performance(
     }))
 }
 
-/// Get the improvement archive (history of all iterations)
+/// Get complete archive of all improvement iterations (development mode only)
 #[command]
 pub async fn get_improvement_archive(
     state: State<'_, SelfImprovementState>,
@@ -278,6 +312,11 @@ pub async fn get_improvement_archive(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let state_guard = state.lock().await;
 
     if let Some(engine) = state_guard.as_ref() {
@@ -285,6 +324,7 @@ pub async fn get_improvement_archive(
     } else {
         Err("Self-improvement system not initialized".to_string())
     }
+    */
 }
 
 /// Get detailed results for a specific iteration
@@ -298,6 +338,11 @@ pub async fn get_iteration_details(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let state_guard = state.lock().await;
 
     if let Some(engine) = state_guard.as_ref() {
@@ -311,6 +356,7 @@ pub async fn get_iteration_details(
     } else {
         Err("Self-improvement system not initialized".to_string())
     }
+    */
 }
 
 /// Update self-improvement configuration
@@ -324,6 +370,11 @@ pub async fn update_self_improvement_config(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let mut state_guard = state.lock().await;
 
     if let Some(engine) = state_guard.as_mut() {
@@ -333,6 +384,7 @@ pub async fn update_self_improvement_config(
     } else {
         Err("Self-improvement system not initialized".to_string())
     }
+    */
 }
 
 /// Emergency stop for self-improvement process with rollback
@@ -345,6 +397,11 @@ pub async fn emergency_stop_improvement(
         return Err("Self-improvement is only available in development mode".to_string());
     }
 
+    // Note: SelfImprovementEngine is not implemented yet
+    return Err("Self-improvement engine is not implemented yet".to_string());
+
+    // TODO: Implement when SelfImprovementEngine is available
+    /*
     let mut state_guard = state.lock().await;
 
     if let Some(engine) = state_guard.as_mut() {
@@ -362,6 +419,7 @@ pub async fn emergency_stop_improvement(
     } else {
         Err("Self-improvement system not initialized".to_string())
     }
+    */
 }
 
 /// Generate an improvement proposal without implementing it

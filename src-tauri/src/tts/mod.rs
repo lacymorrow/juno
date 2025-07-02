@@ -2,13 +2,18 @@ pub mod elevenlabs;
 pub mod replicate;
 pub mod system;
 
-use tauri::{State, AppHandle};
-use crate::state::AppState;
-use tracing::{info, warn, error, debug};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use regex::Regex;
+use tauri::{AppHandle, Manager, State};
+use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
+
+use crate::{
+    constants::errors::templates,
+    settings::manager::SettingsManager,
+    state::AppState,
+    utils::string_cache::format_error_cached,
+};
 
 // Global flags for TTS coordination
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -147,21 +152,21 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 
     // Decode base64 audio data
     let audio_bytes = BASE64_STANDARD.decode(base64_audio)
-        .map_err(|e| format!("Failed to decode base64 TTS audio: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_DECODE, "base64 TTS audio", e))?;
 
     // Create temporary file for audio playback
     let mut temp_file = TempFileBuilder::new()
         .prefix("tts_audio_")
         .suffix(".m4a") // Use .m4a for compatibility
         .tempfile()
-        .map_err(|e| format!("Failed to create temporary file for TTS audio: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, "temporary file for TTS audio", e))?;
 
     // Write audio data to temporary file
     temp_file.write_all(&audio_bytes)
-        .map_err(|e| format!("Failed to write TTS audio to temporary file: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_WRITE, "TTS audio to temporary file", e))?;
 
     temp_file.flush()
-        .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_SAVE, "TTS audio to temporary file", e))?;
 
     let temp_path = temp_file.path().to_path_buf();
     let completion_notify = Arc::new(tokio::sync::Notify::new());
@@ -181,7 +186,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             let mut child = tokio::process::Command::new("afplay")
                 .arg(&temp_path)
                 .spawn()
-                .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
+                .map_err(|e| format_error_cached(templates::FAILED_TO_START, "afplay process", e))?;
 
             let playback_started_clone = playback_started.clone();
 
@@ -198,7 +203,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("macOS afplay completed successfully");
                         } else {
-                            let error_msg = format!("macOS afplay exited with non-zero status: {}", status);
+                            let error_msg = format_error_cached(templates::FAILED_TO_EXECUTE, "macOS afplay with non-zero status", status);
                             error!("{}", error_msg);
 
                             // Store error for propagation
@@ -218,7 +223,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to wait for macOS afplay process: {}", e);
+                        let error_msg = format_error_cached(templates::FAILED_TO_EXECUTE, "macOS afplay process", e);
                         error!("{}", error_msg);
 
                         // Store error for propagation
@@ -242,7 +247,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
             let mut child = tokio::process::Command::new("aplay")
                 .arg(&temp_path)
                 .spawn()
-                .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
+                .map_err(|e| format_error_cached(templates::FAILED_TO_START, "aplay process", e))?;
 
             let playback_started_clone = playback_started.clone();
 
@@ -259,7 +264,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("Linux aplay completed successfully");
                         } else {
-                            let error_msg = format!("Linux aplay exited with non-zero status: {}", status);
+                            let error_msg = format_error_cached(templates::FAILED_TO_EXECUTE, "Linux aplay with non-zero status", status);
                             error!("{}", error_msg);
 
                             // Store error for propagation
@@ -279,7 +284,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to wait for Linux aplay process: {}", e);
+                        let error_msg = format_error_cached(templates::FAILED_TO_EXECUTE, "Linux aplay process", e);
                         error!("{}", error_msg);
 
                         // Store error for propagation
@@ -411,30 +416,23 @@ pub async fn set_tts_provider_command(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    info!("Setting TTS provider to: {}", provider);
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, "settings manager", e))?;
 
-    // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate"];
-    if !valid_providers.contains(&provider.as_str()) {
-        return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
-    }
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format_error_cached(templates::FAILED_TO_LOAD, "audio settings", e))?;
 
-    // Get current settings from centralized system
-    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-
-    let mut audio_settings = settings_manager.get_audio_settings().await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
-
-    // Update centralized settings
     audio_settings.tts_provider = provider.clone();
-    settings_manager.set_audio_settings(&audio_settings).await
-        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
+        .map_err(|e| format_error_cached(templates::FAILED_TO_SAVE, "audio settings", e))?;
 
-    // Update app state for backward compatibility
-    state.set_tts_provider(provider.clone()).map_err(|e| format!("Failed to set tts_provider: {}", e))?;
+    state.set_tts_provider(provider.clone()).map_err(|e| format_error_cached(templates::FAILED_TO_SET, "tts_provider", e))?;
 
-    info!("TTS provider set to: {} (saved to centralized settings)", provider);
+    info!("TTS provider updated to: {}", provider);
     Ok(())
 }
 
@@ -443,15 +441,14 @@ pub async fn set_tts_provider_command(
 pub async fn get_tts_provider_command(
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // Get provider from centralized settings
-    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, "settings manager", e))?;
 
-    let audio_settings = settings_manager.get_audio_settings().await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format_error_cached(templates::FAILED_TO_LOAD, "audio settings", e))?;
 
-    // Reduced logging frequency - only log at debug level
-    tracing::debug!("Current TTS provider from centralized settings: {}", audio_settings.tts_provider);
     Ok(audio_settings.tts_provider)
 }
 
@@ -474,7 +471,7 @@ pub async fn invoke_tts(
     // CRITICAL FIX 3: Reset stop flag at the start of each operation
     reset_tts_stop_flag();
 
-    let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
+    let provider = state.get_tts_provider().map_err(|e| format_error_cached(templates::FAILED_TO_LOAD, "tts_provider for invoke_tts", e))?;
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
@@ -746,6 +743,13 @@ pub async fn invoke_tts_for_provider(
             warn!("Unknown TTS provider specified: '{}'. Cannot invoke.", provider);
             Err(format!("Unknown TTS provider: {}", provider))
         }
+    }
+}
+
+pub async fn is_sound_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    match state.get_sound_enabled() {
+        Ok(enabled) => Ok(enabled),
+        Err(e) => Err(format_error_cached(templates::FAILED_TO_LOAD, "sound settings", e))
     }
 }
 

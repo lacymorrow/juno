@@ -1,0 +1,196 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# API Action Migration Guide
+
+## Overview
+This guide documents the systematic process for migrating API action names in the Juno Computer Use Agent, based on the successful "click" to "left_click" migration.
+
+## Migration Architecture
+
+### Core Files Affected by Action Name Changes
+
+1. **Prompt Templates**: [src-tauri/src/agent/anthropic_computer_use.rs](mdc:src-tauri/src/agent/anthropic_computer_use.rs)
+   - Contains the LLM prompt templates that define available actions
+   - **CRITICAL**: Action names here must match exactly what the computer.rs handler expects
+
+2. **Constants Definitions**: [src-tauri/src/constants/agent.rs](mdc:src-tauri/src/constants/agent.rs)
+   - Defines `ACTION_*` constants used throughout the codebase
+   - **WATCH FOR**: Duplicate constant definitions during renames
+
+3. **Action Handlers**: [src-tauri/src/commands/computer.rs](mdc:src-tauri/src/commands/computer.rs)
+   - Contains the match statements that map action names to handlers
+   - **CRITICAL**: Must match exactly what prompt templates send
+
+4. **Tool Configuration**: [src-tauri/src/agent/tools/tool_config.rs](mdc:src-tauri/src/agent/tools/tool_config.rs)
+   - Maps `tool_names::*` constants to tool configurations
+   - **CRITICAL**: Must reference correct constant names after renames
+
+5. **Tool Mapping**: [src-tauri/src/agent/tools/tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs)
+   - Maps tool names to their implementations
+   - **CRITICAL**: Must stay synchronized with tool_config.rs
+
+6. **Generated Constants**: [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts)
+   - Auto-generated TypeScript constants from Rust
+   - **AUTOMATIC**: Regenerated during build process
+
+## Migration Process
+
+### Phase 1: Pre-Migration Analysis
+
+1. **Identify All References**
+   ```bash
+   # Find all references to the old action name
+   grep -r "click" src-tauri/src/
+   grep -r "CLICK" src-tauri/src/
+   ```
+
+2. **Check for Duplicate Constants**
+   ```bash
+   # Look for potential duplicates
+   grep -n "ACTION_.*CLICK" src-tauri/src/constants/agent.rs
+   ```
+
+3. **Verify Current Build State**
+   ```bash
+   # Ensure starting from clean state
+   cargo check --manifest-path src-tauri/Cargo.toml
+   bun run build
+   ```
+
+### Phase 2: Execute Migration
+
+1. **Update Prompt Templates**
+   - Change action names in prompt templates
+   - Ensure consistency across all computer use prompts
+
+2. **Update Constants**
+   - Rename `ACTION_*` constants
+   - **CRITICAL**: Check for and remove duplicates
+   - Update tool name constants (`tool_names::*`)
+
+3. **Update Action Handlers**
+   - Modify match statements in [computer.rs](mdc:src-tauri/src/commands/computer.rs)
+   - **CRITICAL**: Ensure action names match prompt templates exactly
+   - Update response action names in handler functions
+
+4. **Update Tool Configurations**
+   - Fix references to renamed constants in [tool_config.rs](mdc:src-tauri/src/agent/tools/tool_config.rs)
+   - Update corresponding mappings in [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs)
+
+### Phase 3: Validation and Testing
+
+1. **Compilation Check**
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml --message-format=short
+   ```
+
+2. **Frontend Build**
+   ```bash
+   bun run build
+   ```
+
+3. **Constants Generation Verification**
+   ```bash
+   npm run generate-constants
+   ```
+
+## Common Pitfalls and Solutions
+
+### 1. Action Name Mismatch
+**Problem**: Prompt templates send "left_click" but handlers expect "click"
+```rust
+// ❌ WRONG - Mismatch
+match action_name.as_str() {
+    "click" => { /* but prompts send "left_click" */ }
+}
+
+// ✅ CORRECT - Aligned
+match action_name.as_str() {
+    "left_click" => { /* matches prompt templates */ }
+}
+```
+
+### 2. Duplicate Constants
+**Problem**: Multiple definitions of the same constant
+```rust
+// ❌ WRONG - Duplicate definitions
+pub const ACTION_LEFT_CLICK: &str = "left_click";  // Line 126
+// ... other code ...
+pub const ACTION_LEFT_CLICK: &str = "left_click";  // Line 133
+```
+
+**Solution**: Remove duplicates, keep only one definition
+
+### 3. Stale Tool Name References
+**Problem**: Tool configurations reference renamed constants
+```rust
+// ❌ WRONG - References old constant name
+tool_names::CLICK  // But constant is now LEFT_CLICK
+
+// ✅ CORRECT - Updated reference
+tool_names::LEFT_CLICK
+```
+
+### 4. Frontend Build Dependency
+**Problem**: Tauri proc macro panic due to missing dist directory
+**Solution**: Always run `bun run build` before `cargo check` in Tauri v2
+
+## Response Action Name Consistency
+
+**CRITICAL**: Handler functions must return the correct action name
+```rust
+// ❌ WRONG - Returns old action name
+Ok(ComputerUseResult {
+    action: "click".to_string(),  // But action is now "left_click"
+    // ...
+})
+
+// ✅ CORRECT - Returns current action name
+Ok(ComputerUseResult {
+    action: "left_click".to_string(),
+    // ...
+})
+```
+
+## Migration Checklist
+
+### Pre-Migration
+- [ ] Identify all files referencing old action names
+- [ ] Check for duplicate constant definitions
+- [ ] Verify clean build state
+- [ ] Document current behavior for regression testing
+
+### During Migration
+- [ ] Update prompt templates first
+- [ ] Update constants (remove duplicates)
+- [ ] Update action handlers to match prompts
+- [ ] Update tool configurations and mappings
+- [ ] Update response action names
+
+### Post-Migration Validation
+- [ ] Run `cargo check` - must pass without errors
+- [ ] Run `bun run build` - must generate frontend assets
+- [ ] Verify constants generation works
+- [ ] Test actual computer use actions end-to-end
+- [ ] Confirm response action names are correct
+
+## Best Practices
+
+1. **Atomic Changes**: Keep related changes together in single commits
+2. **Compilation-Driven**: Use `cargo check` to catch issues early
+3. **Constant Synchronization**: Always update tool configurations with constant renames
+4. **Frontend Dependency**: Build frontend before Rust in Tauri v2
+5. **End-to-End Testing**: Verify actual computer use functionality works
+6. **Documentation**: Update comments and documentation with new action names
+
+## Integration with Build System
+
+The migration affects the constants generation process:
+- Rust constants are auto-generated into TypeScript
+- Frontend build must complete before Tauri compilation
+- Constants must be synchronized across all layers
+
+This ensures type-safe, consistent action names across the entire application while maintaining the single source of truth in Rust constants.

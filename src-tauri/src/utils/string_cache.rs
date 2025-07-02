@@ -63,7 +63,7 @@ impl StringCache {
         }
 
         // Slow path: create using template and cache
-        let formatted = format!(template, context, error);
+        let formatted = format!("{} {}: {}", template, context, error);
         let arc_str: Arc<str> = formatted.clone().into();
 
         if let Ok(mut cache) = STRING_CACHE.write() {

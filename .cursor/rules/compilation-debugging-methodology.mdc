@@ -1,0 +1,255 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Compilation Debugging Methodology
+
+## Overview
+This rule documents the systematic approach to debugging compilation issues in the Juno Tauri v2 application, based on successful resolution of complex build failures.
+
+## Core Debugging Principles
+
+### 1. Compilation-First Approach
+Always use `cargo check` as the primary diagnostic tool:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | tee cargo-check-results.log
+```
+
+**Why This Works:**
+- Reveals all compilation errors in one pass
+- Shows exact file locations and line numbers
+- Catches dependency and reference issues
+- Provides actionable error messages
+
+### 2. Frontend-Backend Dependency Chain
+In Tauri v2, the build order is critical:
+```bash
+# CORRECT ORDER
+bun run build        # Build frontend first
+cargo check          # Then check Rust compilation
+
+# WRONG ORDER
+cargo check          # This will fail if frontend dist is missing
+bun run build        # Too late - proc macro already panicked
+```
+
+**Critical Files:**
+- [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts) - Auto-generated TypeScript constants
+- [dist/](mdc:dist/) - Frontend build output directory required by Tauri
+- [src-tauri/tauri.conf.json](mdc:src-tauri/tauri.conf.json) - References frontend dist path
+
+## Common Compilation Error Patterns
+
+### 1. Duplicate Constant Definitions
+**Symptoms:**
+```rust
+error[E0428]: the name `ACTION_LEFT_CLICK` is defined multiple times
+  --> src/constants/agent.rs:126:11
+   |
+126 | pub const ACTION_LEFT_CLICK: &str = "left_click";
+   |           ^^^^^^^^^^^^^^^^^
+   |
+133 | pub const ACTION_LEFT_CLICK: &str = "left_click";
+   |           ^^^^^^^^^^^^^^^^^ `ACTION_LEFT_CLICK` redefined here
+```
+
+**Solution Pattern:**
+1. Search for all instances: `grep -n "ACTION_LEFT_CLICK" src-tauri/src/constants/agent.rs`
+2. Remove duplicates, keep only one definition
+3. Verify with `cargo check`
+
+### 2. Missing Constant References
+**Symptoms:**
+```rust
+error[E0425]: cannot find value `CLICK` in module `tool_names`
+  --> src/agent/tools/tool_config.rs:45:23
+   |
+45 |     tool_names::CLICK,
+   |                 ^^^^^ not found in `tool_names`
+```
+
+**Solution Pattern:**
+1. Check if constant was renamed: `grep -r "CLICK" src-tauri/src/constants/`
+2. Find new constant name: `grep -r "LEFT_CLICK" src-tauri/src/constants/`
+3. Update references in affected files
+4. Verify with `cargo check`
+
+### 3. Tauri Proc Macro Panic
+**Symptoms:**
+```rust
+error: proc-macro derive panicked
+  --> src-tauri/src/main.rs:xx:xx
+   |
+   | panic occurred in proc macro
+```
+
+**Root Cause:** Missing frontend dist directory
+
+**Solution Pattern:**
+1. Check if `dist/` directory exists: `ls -la dist/`
+2. Build frontend: `bun run build`
+3. Verify dist contents: `ls -la dist/`
+4. Retry Rust compilation: `cargo check`
+
+## Systematic Debugging Process
+
+### Phase 1: Error Collection
+1. **Full Compilation Check**
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | tee cargo-check-results.log
+   ```
+
+2. **Error Analysis**
+   - Count total errors: `grep -c "error\[" cargo-check-results.log`
+   - Categorize by type: duplicates, missing references, proc macros
+   - Identify root causes vs. cascading failures
+
+### Phase 2: Systematic Resolution
+
+1. **Frontend Dependencies First**
+   ```bash
+   # Always resolve frontend build issues first
+   bun run build
+   ls -la dist/  # Verify dist directory exists
+   ```
+
+2. **Constant Issues**
+   ```bash
+   # Find duplicate constants
+   grep -rn "pub const ACTION_" src-tauri/src/constants/
+   
+   # Check for missing references
+   grep -rn "tool_names::" src-tauri/src/agent/tools/
+   ```
+
+3. **Incremental Validation**
+   ```bash
+   # Check progress after each fix
+   cargo check --manifest-path src-tauri/Cargo.toml --message-format=short
+   ```
+
+### Phase 3: Verification
+
+1. **Clean Build Test**
+   ```bash
+   # Ensure reproducible build
+   cargo clean --manifest-path src-tauri/Cargo.toml
+   bun run build
+   cargo check --manifest-path src-tauri/Cargo.toml
+   ```
+
+2. **Constants Generation**
+   ```bash
+   # Verify constants sync
+   npm run generate-constants
+   git diff src/lib/constants.generated.ts
+   ```
+
+## File-Specific Debugging Patterns
+
+### Constants Files [src-tauri/src/constants/](mdc:src-tauri/src/constants/)
+**Common Issues:**
+- Duplicate constant definitions
+- Inconsistent naming conventions
+- Missing exports in mod.rs
+
+**Debug Commands:**
+```bash
+# Find duplicates
+grep -rn "pub const" src-tauri/src/constants/ | sort | uniq -d
+
+# Check naming consistency
+grep -rn "ACTION_.*CLICK" src-tauri/src/constants/
+
+# Verify exports
+cat src-tauri/src/constants/mod.rs
+```
+
+### Tool Configuration [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools/)
+**Common Issues:**
+- References to renamed constants
+- Mismatched tool name mappings
+- Tool configuration sync issues
+
+**Debug Commands:**
+```bash
+# Find constant references
+grep -rn "tool_names::" src-tauri/src/agent/tools/
+
+# Check tool mappings
+grep -rn "ToolName::" src-tauri/src/agent/tools/tool_mapping.rs
+```
+
+### Computer Commands [src-tauri/src/commands/computer.rs](mdc:src-tauri/src/commands/computer.rs)
+**Common Issues:**
+- Action name mismatches
+- Missing match arms
+- Incorrect response action names
+
+**Debug Commands:**
+```bash
+# Check action match patterns
+grep -A 5 -B 5 "match.*action_name" src-tauri/src/commands/computer.rs
+
+# Verify response action names
+grep -rn "action.*to_string" src-tauri/src/commands/computer.rs
+```
+
+## Error Message Interpretation
+
+### Compilation Error Hierarchy
+1. **Syntax Errors** - Fix first, block everything else
+2. **Reference Errors** - Missing/renamed constants
+3. **Type Errors** - Usually cascading from reference errors
+4. **Proc Macro Errors** - Often frontend dependency issues
+
+### Error Message Patterns
+```rust
+// Duplicate definition
+error[E0428]: the name `CONSTANT_NAME` is defined multiple times
+
+// Missing reference  
+error[E0425]: cannot find value `CONSTANT_NAME` in module `module_name`
+
+// Proc macro panic
+error: proc-macro derive panicked
+```
+
+## Success Metrics
+
+### Pre-Resolution State
+- ❌ 8 compilation errors
+- ❌ Duplicate constants
+- ❌ Missing references
+- ❌ Proc macro panic
+
+### Post-Resolution State
+- ✅ 0 compilation errors
+- ✅ Clean cargo check
+- ✅ Successful frontend build
+- ✅ Constants generation working
+
+## Best Practices
+
+1. **Always Start with Frontend Build**
+   - Tauri v2 requires frontend dist directory
+   - Prevents proc macro panics
+   - Ensures constants are generated
+
+2. **Use Systematic Error Resolution**
+   - Fix duplicates before references
+   - Address root causes, not symptoms
+   - Verify each fix with cargo check
+
+3. **Maintain Build Reproducibility**
+   - Document build order dependencies
+   - Use consistent debugging commands
+   - Verify clean build after fixes
+
+4. **Leverage Grep for Pattern Detection**
+   - Find all instances of problematic patterns
+   - Verify consistency across files
+   - Track down cascading reference issues
+
+This methodology ensures systematic, reproducible resolution of compilation issues while maintaining code quality and build consistency.

@@ -60,7 +60,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         // Register escape key for dictation cancellation
         let app_handle_ref = Arc::clone(&app_handle_for_listener);
         safe_spawn_async_task(move || async move {
-            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((**app_handle_ref).clone()).await {
+            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((*app_handle_ref).clone()).await {
                 warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
             }
         });
@@ -69,7 +69,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         let app_handle_ref = Arc::clone(&app_handle_for_listener);
         safe_spawn_async_task(move || async move {
             let state = app_handle_ref.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound((**app_handle_ref).clone(), state).await {
+            if let Err(e) = crate::commands::sound::play_voice_start_sound((*app_handle_ref).clone(), state).await {
                 warn!("Failed to play voice start sound: {}", e);
             }
         });
@@ -83,11 +83,11 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
             // If it's dictation mode, set the flag in floating bar manager first
             if is_dictation_mode {
-                commands::floating_bar::handle_dictation_mode_change(&(**app_handle_ref).clone(), true).await;
+                commands::floating_bar::handle_dictation_mode_change(&(*app_handle_ref).clone(), true).await;
             }
 
             // Then handle the dictation started event
-            commands::floating_bar::handle_dictation_started(&(**app_handle_ref).clone()).await;
+            commands::floating_bar::handle_dictation_started(&(*app_handle_ref).clone()).await;
         });
 
         // Rebroadcast the event as app-dictation-started for backward compatibility
@@ -131,21 +131,21 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 // CRITICAL: Register escape key IMMEDIATELY when agent processing starts
                                 // This ensures escape key is captured during the processing gap between
                                 // dictation finishing and agent execution beginning
-                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((**app_handle_ref).clone()).await {
+                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler((*app_handle_ref).clone()).await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
                                 match crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
-                                    (**app_handle_ref).clone()
+                                    (*app_handle_ref).clone()
                                 ).await {
                                     Ok(_) => {
                                         info!("[Agent Mode] Agent query submitted successfully");
                                     }
                                     Err(e) => {
                                         error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&(**app_handle_ref).clone(), &crate::utils::string_cache::format_error_cached("Failed to submit", "query", e)).await;
+                                        crate::error_handling::utils::handle_agent_error(&(*app_handle_ref).clone(), &crate::utils::string_cache::format_error_cached("Failed to submit", "query", e)).await;
                                     }
                                 }
                             } else {
@@ -182,7 +182,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                     let partial_text = text.to_string();
                     safe_spawn_async_task(move || async move {
                         commands::floating_bar::handle_dictation_partial(
-                            &(**app_handle_ref).clone(),
+                            &app_handle_ref,
                             partial_text,
                         )
                         .await;
@@ -205,29 +205,32 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
 /// Setup force stop and cleanup event listeners for voice transcription
 fn setup_force_stop_listeners(app_handle: &AppHandle) {
+    // PERFORMANCE OPTIMIZATION: Use Arc reference sharing to reduce cloning overhead
+    let shared_app_handle = Arc::new(app_handle.clone());
+
     // Listen for force stop events (timeout/stuck transcription)
-    let app_handle_for_force_stop = app_handle.clone();
+    let app_handle_for_force_stop = Arc::clone(&shared_app_handle);
     app_handle.listen("dictation-transcription-force-stop", move |_event| {
         warn!(
             "[Event] Received dictation-transcription-force-stop event - force stopping dictation"
         );
 
-        let app_handle_clone = app_handle_for_force_stop.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_force_stop);
         safe_spawn_async_task(move || async move {
-            handle_voice_controller_force_stop(&app_handle_clone).await;
+            handle_voice_controller_force_stop(&app_handle_ref).await;
         });
     });
 
     // Listen for force cleanup events (stuck state recovery)
-    let app_handle_for_force_cleanup = app_handle.clone();
+    let app_handle_for_force_cleanup = Arc::clone(&shared_app_handle);
     app_handle.listen("dictation-transcription-force-cleanup", move |_event| {
         warn!(
             "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
         );
 
-        let app_handle_clone = app_handle_for_force_cleanup.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_force_cleanup);
         safe_spawn_async_task(move || async move {
-            handle_dictation_state_cleanup(&app_handle_clone).await;
+            handle_dictation_state_cleanup(&app_handle_ref).await;
         });
     });
 }
@@ -294,10 +297,10 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
         warn!("Failed to reset dictation active state: {}", e);
     }
 
-    // Update floating bar manager
-    let app_handle_for_bar = app_handle.clone();
+    // Update floating bar manager - Arc optimization for better memory efficiency
+    let app_handle_ref = Arc::new(app_handle.clone());
     safe_spawn_async_task(move || async move {
-        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+        commands::floating_bar::handle_dictation_mode_change(&app_handle_ref, false).await;
     });
 
     // Emit cleanup complete event
@@ -315,18 +318,21 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
 fn setup_always_listening_integration(app_handle: &AppHandle) {
     info!("🔊 Setting up always listening integration...");
 
+    // PERFORMANCE OPTIMIZATION: Use Arc reference sharing to reduce cloning overhead
+    let shared_app_handle = Arc::new(app_handle.clone());
+
     // Listen for always listening wake word activation
-    let app_handle_for_wake_word = app_handle.clone();
+    let app_handle_for_wake_word = Arc::clone(&shared_app_handle);
     app_handle.listen("always-listening:activated", move |_event| {
         info!("[AlwaysListening] Wake word detected - preparing for agent activation");
 
-        let app_handle_clone = app_handle_for_wake_word.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_wake_word);
         safe_spawn_async_task(move || async move {
             // Update floating bar to indicate agent mode is starting
-            commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
+            commands::floating_bar::handle_always_listening_change(&app_handle_ref, true).await;
 
             // Emit event to UI to show wake word was detected
-            if let Err(e) = app_handle_clone.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
+            if let Err(e) = app_handle_ref.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
                 error!("{} Failed to emit wake-word-detected event: {}", prefixes::ALWAYS_LISTENING, e);
             }
 
@@ -335,16 +341,16 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
     });
 
     // Listen for always listening transcription results (after wake word)
-    let app_handle_for_always_listening = app_handle.clone();
+    let app_handle_for_always_listening = Arc::clone(&shared_app_handle);
     app_handle.listen("always-listening:transcription", move |event| {
         info!(
             "[AlwaysListening] Received transcription after wake word: {:?}",
             event.payload()
         );
 
-        let app_handle_clone = app_handle_for_always_listening.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_always_listening);
         safe_spawn_async_task(move || async move {
-            handle_always_listening_transcription(&app_handle_clone, event.payload()).await;
+            handle_always_listening_transcription(&app_handle_ref, event.payload()).await;
         });
     });
 
@@ -419,39 +425,42 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 
 /// Setup always listening control listeners for stop requests and mode management
 fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
+    // PERFORMANCE OPTIMIZATION: Use Arc reference sharing to reduce cloning overhead
+    let shared_app_handle = Arc::new(app_handle.clone());
+
     // Listen for always listening stop requests (from stop words)
-    let app_handle_for_stop_request = app_handle.clone();
+    let app_handle_for_stop_request = Arc::clone(&shared_app_handle);
     app_handle.listen("always-listening:stop-requested", move |event| {
         info!(
             "[AlwaysListening] Received stop request: {:?}",
             event.payload()
         );
 
-        let app_handle_clone = app_handle_for_stop_request.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_stop_request);
         safe_spawn_async_task(move || async move {
-            handle_always_listening_stop_request(&app_handle_clone).await;
+            handle_always_listening_stop_request(&app_handle_ref).await;
         });
     });
 
     // Listen for command processed events (to auto-stop or return to wake word mode)
-    let app_handle_for_command_processed = app_handle.clone();
+    let app_handle_for_command_processed = Arc::clone(&shared_app_handle);
     app_handle.listen("always-listening:command-processed", move |_event| {
         info!("[AlwaysListening] Command processed - considering auto-stop");
 
-        let app_handle_clone = app_handle_for_command_processed.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_command_processed);
         safe_spawn_async_task(move || async move {
-            handle_always_listening_command_processed(&app_handle_clone).await;
+            handle_always_listening_command_processed(&app_handle_ref).await;
         });
     });
 
     // Listen for return to wake word mode events
-    let app_handle_for_wake_word_return = app_handle.clone();
+    let app_handle_for_wake_word_return = Arc::clone(&shared_app_handle);
     app_handle.listen("always-listening:return-to-wake-word", move |_event| {
         info!("[AlwaysListening] Returning to wake word detection mode");
 
-        let app_handle_clone = app_handle_for_wake_word_return.clone();
+        let app_handle_ref = Arc::clone(&app_handle_for_wake_word_return);
         safe_spawn_async_task(move || async move {
-            handle_always_listening_return_to_wake_word(&app_handle_clone).await;
+            handle_always_listening_return_to_wake_word(&app_handle_ref).await;
         });
     });
 }

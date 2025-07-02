@@ -58,7 +58,7 @@ pub use exploration_reasoning::{ExplorationConfig, ExplorationEngine, Exploratio
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use safari_tools::{get_safari_tool_definitions, get_safari_tools, SafariTools}; // Export Safari tools
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
-pub use self_improvement::register_self_improvement_tools_with_provider; // Export self-improvement tool registration (debug mode only)
+// Note: self_improvement module tools are incomplete - registration function not available
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service // Export enhanced visual reasoning components

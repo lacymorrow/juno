@@ -1,0 +1,284 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Constants Synchronization System
+
+## Overview
+This rule documents the critical constants synchronization system in Juno that maintains consistency between Rust backend and TypeScript frontend constants, preventing action name mismatches and build failures.
+
+## Architecture Overview
+
+### Single Source of Truth: Rust Constants
+All constants originate from Rust files in [src-tauri/src/constants/](mdc:src-tauri/src/constants/):
+
+```rust
+// src-tauri/src/constants/agent.rs
+pub const ACTION_LEFT_CLICK: &str = "left_click";
+pub const ACTION_RIGHT_CLICK: &str = "right_click";
+pub const ACTION_MOUSE_MOVE: &str = "mouse_move";
+```
+
+### Auto-Generated TypeScript: [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts)
+**NEVER EDIT MANUALLY** - This file is auto-generated:
+
+```typescript
+// This file is auto-generated from Rust constants
+// Run `npm run generate-constants` to regenerate
+
+export const AGENT_ACTIONS = {
+    LEFT_CLICK: "left_click",
+    RIGHT_CLICK: "right_click", 
+    MOUSE_MOVE: "mouse_move",
+    // ... 243 total constants
+} as const;
+```
+
+### Frontend-Only Constants: [src/lib/constants.ts](mdc:src/lib/constants.ts)
+Frontend-specific constants that don't need Rust equivalents:
+
+```typescript
+// Re-export generated constants for convenience
+export * from './constants.generated';
+
+export const UI_CONSTANTS = {
+    SCROLL_THRESHOLD: 100,
+    ANIMATION_DURATION_MS: 200,
+} as const;
+```
+
+## Generation Process
+
+### Build Script: [scripts/generate-ts-constants.js](mdc:scripts/generate-ts-constants.js)
+Extracts constants from Rust files and generates TypeScript:
+
+```javascript
+// Scans these Rust files
+const rustFiles = [
+    'src-tauri/src/constants/agent.rs',
+    'src-tauri/src/constants/events.rs',
+    'src-tauri/src/constants/http.rs',
+];
+
+// Generates typed TypeScript with proper categorization
+generateTypedConstants(extractedConstants, outputPath);
+```
+
+### Automatic Generation via NPM Scripts
+Constants are generated automatically during build:
+
+```json
+{
+    "scripts": {
+        "generate-constants": "node scripts/generate-ts-constants.js",
+        "prebuild": "npm run generate-constants",
+        "build": "tsc && vite build"
+    }
+}
+```
+
+**CRITICAL**: Constants generation runs before every build to ensure synchronization.
+
+## Constants File Organization
+
+### Rust Constants Structure
+```
+src-tauri/src/constants/
+├── mod.rs              # Module exports and re-exports
+├── agent.rs            # Agent actions and configuration  
+├── events.rs           # Tauri event names
+├── http.rs             # HTTP status codes
+└── ui.rs               # UI-related constants
+```
+
+### Key Constant Categories
+
+#### Agent Actions [src-tauri/src/constants/agent.rs](mdc:src-tauri/src/constants/agent.rs)
+```rust
+// Computer Use Actions
+pub const ACTION_LEFT_CLICK: &str = "left_click";
+pub const ACTION_RIGHT_CLICK: &str = "right_click";
+pub const ACTION_MOUSE_MOVE: &str = "mouse_move";
+pub const ACTION_LEFT_CLICK_DRAG: &str = "left_click_drag";
+
+// Agent Configuration
+pub const MAX_ITERATIONS: u32 = 15;
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+```
+
+#### Event Names [src-tauri/src/constants/events.rs](mdc:src-tauri/src/constants/events.rs)
+```rust
+// Agent Events
+pub const AGENT_ACTIVITY_UPDATE: &str = "agent-activity-update";
+pub const AGENT_CONTINUATION_REQUEST: &str = "agent-continuation-request";
+
+// System Events  
+pub const SYSTEM_READY: &str = "system-ready";
+pub const ERROR_OCCURRED: &str = "error-occurred";
+```
+
+## Critical Synchronization Points
+
+### 1. Action Name Consistency
+**CRITICAL**: Action names must match exactly between:
+- Prompt templates in [src-tauri/src/agent/anthropic_computer_use.rs](mdc:src-tauri/src/agent/anthropic_computer_use.rs)
+- Handler matches in [src-tauri/src/commands/computer.rs](mdc:src-tauri/src/commands/computer.rs)
+- Constants in [src-tauri/src/constants/agent.rs](mdc:src-tauri/src/constants/agent.rs)
+
+### 2. Tool Name References
+Tool configurations must reference correct constants:
+
+```rust
+// src-tauri/src/agent/tools/tool_config.rs
+use crate::constants::agent::tool_names;
+
+// Must reference current constant names
+tool_names::LEFT_CLICK,  // Not the old CLICK
+tool_names::MOUSE_MOVE,  // Not the old MOVE
+```
+
+### 3. Event System Synchronization
+Frontend event listeners must use generated constants:
+
+```typescript
+// Frontend code
+import { EVENTS } from '@/lib/constants';
+
+// Use generated constants, never hardcoded strings
+listen(EVENTS.AGENT_ACTIVITY_UPDATE, handleUpdate);
+```
+
+## Generation Workflow
+
+### Development Workflow
+1. **Modify Rust constants** in [src-tauri/src/constants/](mdc:src-tauri/src/constants/)
+2. **Generate TypeScript** with `npm run generate-constants`
+3. **Build frontend** with `bun run build` (auto-generates constants)
+4. **Use constants** in TypeScript via imports
+5. **Verify compilation** with `cargo check`
+
+### Automatic Build Integration
+```bash
+# This sequence runs automatically during bun run build:
+npm run generate-constants  # Generate TypeScript from Rust
+tsc && vite build           # Build frontend with generated constants
+```
+
+## Common Synchronization Issues
+
+### 1. Missing Constant Generation
+**Symptoms:**
+- TypeScript errors about missing constants
+- Outdated constants in generated file
+- Build timestamp mismatches
+
+**Solution:**
+```bash
+npm run generate-constants
+git diff src/lib/constants.generated.ts  # Verify changes
+```
+
+### 2. Action Name Mismatches  
+**Symptoms:**
+- Computer use actions not working
+- "Unknown action" errors in logs
+- Prompt templates out of sync
+
+**Debug Pattern:**
+```bash
+# Check action name consistency
+grep -r "left_click" src-tauri/src/constants/
+grep -r "left_click" src-tauri/src/commands/computer.rs
+grep -r "left_click" src-tauri/src/agent/anthropic_computer_use.rs
+```
+
+### 3. Tool Configuration Drift
+**Symptoms:**
+- Compilation errors about missing tool names
+- Tool configuration loading failures
+- Runtime tool resolution errors
+
+**Debug Pattern:**
+```bash
+# Find tool name references
+grep -rn "tool_names::" src-tauri/src/agent/tools/
+grep -rn "ToolName::" src-tauri/src/agent/tools/
+```
+
+## Validation Checklist
+
+### Pre-Deployment Validation
+- [ ] Run `npm run generate-constants` 
+- [ ] Verify [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts) updated
+- [ ] Check git diff shows expected constant changes
+- [ ] Confirm `cargo check` passes
+- [ ] Test action execution end-to-end
+- [ ] Verify event system working
+
+### Post-Constant-Change Validation
+- [ ] All Rust constants have corresponding TypeScript exports
+- [ ] Action names match between prompts and handlers
+- [ ] Tool configurations reference correct constants
+- [ ] Event names consistent across frontend/backend
+- [ ] Build process generates constants automatically
+
+## Best Practices
+
+### 1. Constant Naming Conventions
+```rust
+// Use SCREAMING_SNAKE_CASE for constants
+pub const ACTION_LEFT_CLICK: &str = "left_click";
+
+// Use kebab-case for actual string values
+pub const AGENT_ACTIVITY_UPDATE: &str = "agent-activity-update";
+
+// Group related constants with consistent prefixes
+pub const ACTION_LEFT_CLICK: &str = "left_click";
+pub const ACTION_RIGHT_CLICK: &str = "right_click";
+```
+
+### 2. Never Hardcode Action Names
+```typescript
+// ❌ WRONG - Hardcoded strings
+listen("agent-activity-update", handler);
+emit("system-ready");
+
+// ✅ CORRECT - Use generated constants  
+import { EVENTS } from '@/lib/constants';
+listen(EVENTS.AGENT_ACTIVITY_UPDATE, handler);
+emit(EVENTS.SYSTEM_READY);
+```
+
+### 3. Maintain Single Source of Truth
+- **Rust constants** are the authoritative source
+- **Generated TypeScript** is derived, never edited manually
+- **Frontend constants** only for UI-specific values
+- **Tool configurations** reference Rust constants only
+
+### 4. Atomic Constant Changes
+When changing constants:
+1. Update Rust constant definition
+2. Update all references in Rust code
+3. Generate TypeScript constants
+4. Test compilation and functionality
+5. Commit all changes together
+
+## Integration Points
+
+### With Build System
+- Constants generation integrated into `prebuild` script
+- Frontend build depends on generated constants
+- Tauri compilation requires frontend dist directory
+
+### With Development Workflow
+- VS Code/Cursor can reference generated constants for autocomplete
+- Git should track generated files for deployment
+- Development server hot-reloads when constants change
+
+### With CI/CD Pipeline
+- Build process automatically generates constants
+- Compilation tests verify constant synchronization
+- Deployment includes both Rust and generated TypeScript files
+
+This system ensures type-safe, consistent constants across the entire application while maintaining Rust as the single source of truth.

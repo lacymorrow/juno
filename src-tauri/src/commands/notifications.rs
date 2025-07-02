@@ -4,6 +4,8 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 use log::{error, info};
 use crate::constants::events;
+use crate::constants::errors::{templates, components, actions};
+use crate::utils::string_cache::format_error_cached;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
@@ -36,12 +38,12 @@ pub struct SystemNotificationPermission {
 pub async fn get_notification_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<NotificationSettings, String> {
-    let notification_type = state.get_notification_type().map_err(|e| format!("Failed to get notification type: {}", e))?;
-    let sound_enabled = state.get_notification_sound_enabled().map_err(|e| format!("Failed to get sound enabled: {}", e))?;
-    let duration = state.get_notification_duration().map_err(|e| format!("Failed to get duration: {}", e))?;
-    let position = state.get_notification_position().map_err(|e| format!("Failed to get position: {}", e))?;
-    let show_icons = state.get_notification_show_icons().map_err(|e| format!("Failed to get show icons: {}", e))?;
-    let persist_important = state.get_notification_persist_important().map_err(|e| format!("Failed to get persist important: {}", e))?;
+    let notification_type = state.get_notification_type().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "notification type", e))?;
+    let sound_enabled = state.get_notification_sound_enabled().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "sound enabled", e))?;
+    let duration = state.get_notification_duration().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "duration", e))?;
+    let position = state.get_notification_position().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "position", e))?;
+    let show_icons = state.get_notification_show_icons().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "show icons", e))?;
+    let persist_important = state.get_notification_persist_important().map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, "persist important", e))?;
 
     Ok(NotificationSettings {
         notification_type,
@@ -59,7 +61,7 @@ pub async fn set_notification_type(
     state: tauri::State<'_, AppState>,
     notification_type: String,
 ) -> Result<(), String> {
-    state.set_notification_type(notification_type).map_err(|e| format!("Failed to set notification type: {}", e))?;
+    state.set_notification_type(notification_type).map_err(|e| format_error_cached(templates::FAILED_TO_SET, "notification type", e))?;
     Ok(())
 }
 

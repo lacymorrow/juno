@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
 use crate::constants::events;
-use crate::constants::errors::templates::FAILED_TO_EMIT;
-use crate::constants::errors::prefixes::COMMAND;
+use crate::constants::errors::{templates, components, actions, prefixes};
+use crate::utils::string_cache::format_error_cached;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -22,12 +22,12 @@ pub async fn start_always_listening_mode(
 
     // Get current settings from centralized system
     let settings_manager = SettingsManager::new(app.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, components::SETTINGS_MANAGER, e))?;
 
     let mut audio_settings = settings_manager
         .get_audio_settings()
         .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, actions::AUDIO_SETTINGS, e))?;
 
     // Check if already active
     if audio_settings.always_listening_active {
@@ -39,11 +39,11 @@ pub async fn start_always_listening_mode(
     settings_manager
         .set_audio_settings(&audio_settings)
         .await
-        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_SAVE, actions::AUDIO_SETTINGS, e))?;
 
     // Update app state
     if let Err(e) = state.set_always_listening_active(true) {
-        let err_msg = format!("Failed to set always_listening_active: {}", e);
+        let err_msg = format_error_cached(templates::FAILED_TO_SET, "always_listening_active", e);
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
@@ -61,7 +61,7 @@ pub async fn start_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, true) {
-                        error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("{} {}", prefixes::COMMAND, format_error_cached(templates::FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
 
                     // Update floating bar
@@ -81,7 +81,7 @@ pub async fn start_always_listening_mode(
                         warn!("[Command] Failed to reset always_listening_active: {}", e);
                     }
 
-                    let err_msg = format!("Failed to start always listening mode: {}", e);
+                    let err_msg = format_error_cached(templates::FAILED_TO_START, "always listening mode", e);
                     error!("[Command] {}", err_msg);
                     Err(err_msg)
                 }
@@ -116,12 +116,12 @@ pub async fn stop_always_listening_mode(
 
     // Get current settings from centralized system
     let settings_manager = SettingsManager::new(app.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, components::SETTINGS_MANAGER, e))?;
 
     let mut audio_settings = settings_manager
         .get_audio_settings()
         .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, actions::AUDIO_SETTINGS, e))?;
 
     // Check if already inactive
     if !audio_settings.always_listening_active {
@@ -133,11 +133,11 @@ pub async fn stop_always_listening_mode(
     settings_manager
         .set_audio_settings(&audio_settings)
         .await
-        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_SAVE, actions::AUDIO_SETTINGS, e))?;
 
     // Update app state
     if let Err(e) = state.set_always_listening_active(false) {
-        let err_msg = format!("Failed to set always_listening_active: {}", e);
+        let err_msg = format_error_cached(templates::FAILED_TO_SET, "always_listening_active", e);
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
@@ -155,7 +155,7 @@ pub async fn stop_always_listening_mode(
 
                     // Emit event to UI
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
-                        error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
+                        error!("{} {}", prefixes::COMMAND, format_error_cached(templates::FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
 
                     // Update floating bar
@@ -164,7 +164,7 @@ pub async fn stop_always_listening_mode(
                     Ok("Always listening mode stopped successfully".to_string())
                 }
                 Err(e) => {
-                    let err_msg = format!("Failed to stop always listening mode: {}", e);
+                    let err_msg = format_error_cached(templates::FAILED_TO_STOP, "always listening mode", e);
                     error!("[Command] {}", err_msg);
                     Err(err_msg)
                 }
@@ -188,12 +188,12 @@ pub async fn toggle_always_listening_mode(
 
     // Get current settings from centralized system
     let settings_manager = SettingsManager::new(app.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_CREATE, components::SETTINGS_MANAGER, e))?;
 
     let audio_settings = settings_manager
         .get_audio_settings()
         .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+        .map_err(|e| format_error_cached(templates::FAILED_TO_RETRIEVE, actions::AUDIO_SETTINGS, e))?;
 
     if audio_settings.always_listening_active {
         stop_always_listening_mode(app, state).await?;

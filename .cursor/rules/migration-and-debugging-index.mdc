@@ -1,0 +1,144 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Migration and Debugging Rules Index
+
+## Overview
+This index provides quick access to comprehensive rules for API migrations, compilation debugging, and constants management in the Juno Computer Use Agent.
+
+## Available Rules
+
+### 1. API Action Migration Guide
+**File**: [api-action-migration-guide.mdc](mdc:.cursor/rules/api-action-migration-guide.mdc)
+
+**Purpose**: Systematic process for migrating API action names (e.g., "click" to "left_click")
+
+**Key Topics**:
+- Migration architecture and affected files
+- Phase-by-phase migration process
+- Common pitfalls and solutions
+- Response action name consistency
+- Comprehensive migration checklist
+
+**Use When**:
+- Changing computer use action names
+- Updating prompt templates
+- Modifying action handlers
+- Refactoring tool configurations
+
+### 2. Compilation Debugging Methodology
+**File**: [compilation-debugging-methodology.mdc](mdc:.cursor/rules/compilation-debugging-methodology.mdc)
+
+**Purpose**: Systematic approach to debugging compilation issues in Tauri v2
+
+**Key Topics**:
+- Compilation-first debugging principles
+- Frontend-backend dependency chain
+- Common error patterns and solutions
+- File-specific debugging patterns
+- Systematic resolution processes
+
+**Use When**:
+- Facing compilation errors
+- Debugging build failures
+- Resolving dependency issues
+- Troubleshooting proc macro panics
+
+### 3. Constants Synchronization System
+**File**: [constants-synchronization-system.mdc](mdc:.cursor/rules/constants-synchronization-system.mdc)
+
+**Purpose**: Maintaining consistency between Rust and TypeScript constants
+
+**Key Topics**:
+- Architecture of constants generation
+- Synchronization points and critical files
+- Generation workflow and automation
+- Common synchronization issues
+- Validation and best practices
+
+**Use When**:
+- Adding new constants
+- Modifying existing constants
+- Troubleshooting constant sync issues
+- Setting up constants generation
+
+## Quick Reference Mapping
+
+### For API Changes
+- **Changing action names** → [api-action-migration-guide.mdc](mdc:.cursor/rules/api-action-migration-guide.mdc)
+- **Updating prompt templates** → [api-action-migration-guide.mdc](mdc:.cursor/rules/api-action-migration-guide.mdc)
+- **Tool configuration updates** → [api-action-migration-guide.mdc](mdc:.cursor/rules/api-action-migration-guide.mdc)
+
+### For Build Issues
+- **Compilation errors** → [compilation-debugging-methodology.mdc](mdc:.cursor/rules/compilation-debugging-methodology.mdc)
+- **Proc macro panics** → [compilation-debugging-methodology.mdc](mdc:.cursor/rules/compilation-debugging-methodology.mdc)
+- **Frontend build failures** → [compilation-debugging-methodology.mdc](mdc:.cursor/rules/compilation-debugging-methodology.mdc)
+
+### For Constants Issues
+- **Constants out of sync** → [constants-synchronization-system.mdc](mdc:.cursor/rules/constants-synchronization-system.mdc)
+- **Missing TypeScript constants** → [constants-synchronization-system.mdc](mdc:.cursor/rules/constants-synchronization-system.mdc)
+- **Action name mismatches** → [constants-synchronization-system.mdc](mdc:.cursor/rules/constants-synchronization-system.mdc)
+
+## Essential Command Reference
+
+### Quick Diagnostic Commands
+```bash
+# Check compilation status
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short
+
+# Build frontend and generate constants
+bun run build
+
+# Generate constants manually
+npm run generate-constants
+
+# Find constant references
+grep -rn "ACTION_" src-tauri/src/constants/
+grep -rn "tool_names::" src-tauri/src/agent/tools/
+```
+
+### Emergency Recovery Commands
+```bash
+# Clean rebuild
+cargo clean --manifest-path src-tauri/Cargo.toml
+bun run build
+cargo check --manifest-path src-tauri/Cargo.toml
+
+# Verify constants sync
+npm run generate-constants
+git diff src/lib/constants.generated.ts
+```
+
+## Integration with Existing Rules
+
+These rules complement the existing workspace rules:
+- **Constants Management**: Builds on [constants-management.mdc](mdc:.cursor/rules/constants-management.mdc) with migration-specific guidance
+- **Computer Use API**: Aligns with [anthropic-computer-use-api-compliance.mdc](mdc:.cursor/rules/anthropic-computer-use-api-compliance.mdc)
+- **Tauri Architecture**: Complements [tauri-architecture-patterns.mdc](mdc:.cursor/rules/tauri-architecture-patterns.mdc)
+- **No Backward Compatibility**: Supports clean migration patterns from [no-backward-compatibility.mdc](mdc:.cursor/rules/no-backward-compatibility.mdc)
+- **No Micromanaging**: Provides systematic, trust-based approaches per [no-micromanaging-over-engineering.mdc](mdc:.cursor/rules/no-micromanaging-over-engineering.mdc)
+
+## Success Metrics
+
+### Pre-Migration/Debug State
+- ❌ Compilation errors
+- ❌ Action name mismatches
+- ❌ Constants out of sync
+- ❌ Build failures
+
+### Post-Migration/Debug State
+- ✅ Clean compilation
+- ✅ Consistent action names
+- ✅ Synchronized constants
+- ✅ Successful builds
+
+## When to Use This Index
+
+1. **Starting a migration** - Check API Action Migration Guide
+2. **Facing build errors** - Reference Compilation Debugging Methodology
+3. **Constants issues** - Consult Constants Synchronization System
+4. **Unsure which rule** - Use the Quick Reference Mapping above
+
+These rules are based on the successful "click" to "left_click" migration experience and provide battle-tested patterns for maintaining the Juno codebase.

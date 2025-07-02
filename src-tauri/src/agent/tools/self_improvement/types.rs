@@ -34,8 +34,8 @@ pub enum FocusArea {
     CodeQuality,
 }
 
-/// Benchmark types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Benchmarking types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum BenchmarkType {
     /// Accuracy benchmarking
     Accuracy,
