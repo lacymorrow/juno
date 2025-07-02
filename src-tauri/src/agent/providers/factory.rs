@@ -815,14 +815,7 @@ impl BrainFactory {
         // Register Safari tools for fast Safari DOM automation
         Self::register_safari_tools(provider, app_handle.clone()).await?;
 
-        // Register self-improvement tools (per-provider instance, development mode only)
-        if let Err(e) =
-            crate::agent::tools::register_self_improvement_tools_with_provider(provider).await
-        {
-            warn!("Failed to register self-improvement tools: {}", e);
-        } else {
-            info!("Self-improvement tools registered successfully");
-        }
+
 
         // MCP tools are handled separately and loaded only when needed:
         // 1. At app startup (state_management.rs)
