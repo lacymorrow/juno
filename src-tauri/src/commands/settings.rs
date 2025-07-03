@@ -289,3 +289,40 @@ pub async fn import_settings(
 
     Ok(())
 }
+
+/// Get command overlay visibility setting
+#[command]
+pub async fn get_command_overlay_enabled(
+    app_handle: AppHandle,
+) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+
+    // For now, store as a simple boolean value in the settings store
+    // This can be extended later to use a more comprehensive visualization settings structure
+    let store = app_handle.store("settings.json")
+        .map_err(|e| format!("Failed to access settings store: {}", e))?;
+
+    Ok(store.get("command_overlay_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)) // Default to enabled
+}
+
+/// Set command overlay visibility setting
+#[command]
+pub async fn set_command_overlay_enabled(
+    app_handle: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+
+    // Store the setting in the settings store
+    let store = app_handle.store("settings.json")
+        .map_err(|e| format!("Failed to access settings store: {}", e))?;
+
+    store.set("command_overlay_enabled", serde_json::Value::Bool(enabled));
+    store.save().map_err(|e| format!("Failed to save settings: {}", e))?;
+
+    Ok(())
+}

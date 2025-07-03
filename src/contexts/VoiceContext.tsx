@@ -46,6 +46,13 @@ interface VoiceContextType {
   addMessage: (message: Omit<ChatMessage, "timestamp">) => void;
   clearError: () => void;
   resetTranscription: () => void;
+  /**
+   * Set isSpeaking state for TTS playback.
+   * Should be called from audio playback logic:
+   *   setIsSpeaking(true) when audio starts
+   *   setIsSpeaking(false) when audio ends
+   */
+  setIsSpeaking: (isSpeaking: boolean) => void;
 }
 
 // Removed unused initial state constants since they were duplicates of the useState defaults
@@ -108,24 +115,24 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
         })
       );
 
-      // TTS events
-      unlistenCallbacks.push(
-        await listen(EVENTS.TTS_AUDIO_READY, () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isSpeaking: true,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen(EVENTS.TTS_STOP_REQUESTED, () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isSpeaking: false,
-          }));
-        })
-      );
+      // TTS events - removed isSpeaking logic (handled by audio playback)
+      // unlistenCallbacks.push(
+      //   await listen(EVENTS.TTS_AUDIO_READY, () => {
+      //     setVoiceState((prev) => ({
+      //       ...prev,
+      //       isSpeaking: true,
+      //     }));
+      //   })
+      // );
+      //
+      // unlistenCallbacks.push(
+      //   await listen(EVENTS.TTS_STOP_REQUESTED, () => {
+      //     setVoiceState((prev) => ({
+      //       ...prev,
+      //       isSpeaking: false,
+      //     }));
+      //   })
+      // );
 
       // Audio level updates
       unlistenCallbacks.push(
@@ -257,6 +264,11 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
     setVoiceState((prev) => ({ ...prev, transcriptionText: undefined }));
   };
 
+  // New: setIsSpeaking for TTS playback
+  const setIsSpeaking = (isSpeaking: boolean) => {
+    setVoiceState((prev) => ({ ...prev, isSpeaking }));
+  };
+
   const contextValue: VoiceContextType = {
     voiceState,
     agentState,
@@ -264,6 +276,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
     addMessage,
     clearError,
     resetTranscription,
+    setIsSpeaking,
   };
 
   return (

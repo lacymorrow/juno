@@ -30,7 +30,8 @@ export type ChatMessage = {
     | "assistant"
     | "system"
     | "tool_call_request"
-    | "tool_call_result";
+    | "tool_call_result"
+    | "thinking";
   content: string;
   isJsx?: boolean;
   screenshot_base64?: string;
@@ -142,7 +143,7 @@ export function ChatMessageComponent({
   onSaveResponse,
 }: ChatMessageProps) {
   // Handle special message types with existing components
-  if (msg.agent_state === UI.AGENT_STATUS_THINKING) {
+  if (msg.role === "thinking") {
     return (
       <div className="flex justify-start">
         <div className="flex items-start gap-3 max-w-[80%]">
