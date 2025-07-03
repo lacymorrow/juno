@@ -13,13 +13,6 @@ pub mod tool_names {
     pub const COMPUTER: &str = "computer";
     pub const BASH: &str = "bash";
     pub const STR_REPLACE_BASED_EDIT_TOOL: &str = "str_replace_based_edit_tool";
-    pub const SCREENSHOT: &str = "screenshot";
-    pub const LEFT_CLICK: &str = "left_click";
-    pub const TYPE: &str = "type";
-    pub const KEY: &str = "key";
-    pub const SCROLL: &str = "scroll";
-    pub const LEFT_CLICK_DRAG: &str = "left_click_drag";
-    pub const MOUSE_MOVE: &str = "mouse_move";
     pub const ACCESSIBILITY_INTERFACE: &str = "accessibility_interface";
 
     // Text editor tools
@@ -87,37 +80,11 @@ pub mod tool_names {
     pub const DELETE_FILE: &str = "delete_file";
     pub const TEXT_EDITOR_EDIT: &str = "text_editor_edit";
 
-    // Timer tools standardized names
+    // Timer tools (standardized to match actual implementations)
+    pub const SET_TIMER: &str = "set_timer";
     pub const LIST_TIMERS: &str = "list_timers";
     pub const CANCEL_TIMER: &str = "cancel_timer";
     pub const TIMER_STATUS: &str = "timer_status";
-
-    // Timer tools
-    pub const TIMER_CREATE: &str = "timer_create";
-    pub const TIMER_START: &str = "timer_start";
-    pub const TIMER_STOP: &str = "timer_stop";
-    pub const TIMER_PAUSE: &str = "timer_pause";
-    pub const TIMER_RESUME: &str = "timer_resume";
-    pub const TIMER_GET_STATUS: &str = "timer_get_status";
-    pub const TIMER_LIST: &str = "timer_list";
-    pub const TIMER_DELETE: &str = "timer_delete";
-    pub const CREATE_TIMER: &str = "create_timer";
-
-    // Computer use actions
-    pub const ACTION_SCREENSHOT: &str = "screenshot";
-    pub const ACTION_LEFT_CLICK: &str = "left_click";
-    pub const ACTION_TYPE: &str = "type";
-    pub const ACTION_KEY: &str = "key";
-    pub const ACTION_SCROLL: &str = "scroll";
-    pub const ACTION_WAIT: &str = "wait";
-
-    // Extended computer use actions
-    pub const ACTION_RIGHT_CLICK: &str = "right_click";
-    pub const ACTION_MIDDLE_CLICK: &str = "middle_click";
-    pub const ACTION_DOUBLE_CLICK: &str = "double_click";
-    pub const ACTION_TRIPLE_CLICK: &str = "triple_click";
-    pub const ACTION_HOLD_KEY: &str = "hold_key";
-    pub const WAIT: &str = "wait";
 }
 
 // Intent keywords for user request analysis

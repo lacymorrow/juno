@@ -560,7 +560,7 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_timer_tools(tools: &mut HashMap<String, ToolConfig>) {
         let timer_tools = vec![
-            (tool_names::CREATE_TIMER, "Create a scheduled timer"),
+            (tool_names::SET_TIMER, "Create a scheduled timer"),
             (tool_names::LIST_TIMERS, "List active timers"),
             (tool_names::CANCEL_TIMER, "Cancel a timer"),
             (tool_names::TIMER_STATUS, "Check timer status"),
