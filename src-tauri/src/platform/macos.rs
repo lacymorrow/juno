@@ -28,7 +28,7 @@ use {
         sel, sel_impl,
         declare::ClassDecl
     },
-    std::sync::{Mutex, LazyLock},
+    std::sync::Mutex,
 };
 
 /// Apply comprehensive macOS-specific setup for all application windows

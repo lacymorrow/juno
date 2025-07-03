@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::agent::intelligence::{
     AnalysisContext, IntelligenceConfig, OperationalMode, ToolChoiceDecision,

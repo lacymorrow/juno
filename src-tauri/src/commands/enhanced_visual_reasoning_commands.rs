@@ -5,10 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::tools::enhanced_visual_reasoning::{
     VisualReasoningEngine, VisualReasoningConfig, VisualReasoningResult,
-    ReasoningContext, ReasoningCapabilities, ReasoningStatistics,
-    SceneUnderstanding, SceneType
+    ReasoningContext, ReasoningCapabilities, ReasoningStatistics
 };
-use crate::agent::core::AgentError;
+
 
 /// Global state for the Enhanced Visual Reasoning Engine
 pub struct VisualReasoningState {

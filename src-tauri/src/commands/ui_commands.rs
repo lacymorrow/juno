@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, Listener, State};
+use tauri::{AppHandle, Emitter, Manager, Listener};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use crate::constants::{timeouts, events};
-use crate::state::AppState;
+
 use crate::settings::{manager::SettingsManager, FloatingBarSettings};
 use crate::utils::async_runtime::safe_spawn_async_task;
 

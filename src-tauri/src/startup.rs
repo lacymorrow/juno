@@ -6,7 +6,7 @@
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
-use std::sync::{Arc, Mutex, OnceLock, LazyLock};
+use std::sync::{Arc, Mutex, LazyLock};
 use tauri::{AppHandle, Builder, App, Manager, State};
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};

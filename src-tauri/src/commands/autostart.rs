@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 use crate::settings::manager::SettingsManager;
 

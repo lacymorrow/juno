@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info, warn};
 use tokio::time::{Duration, Instant};
-use image::{ImageBuffer, Rgba};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 /// Configuration for Exploration-Then-Reasoning system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -544,7 +543,7 @@ impl ExplorationEngine {
     /// Detects interactive elements in a screenshot
     async fn detect_interactive_elements(
         &self,
-        screenshot: &str,
+        _screenshot: &str,
     ) -> Result<Vec<InteractiveElement>, ExplorationError> {
         // This would integrate with computer vision models in production
         // For now, return a simplified implementation
@@ -570,7 +569,7 @@ impl ExplorationEngine {
     async fn select_exploration_action(
         &self,
         current_state_id: &str,
-        exploration_goals: &[ExplorationGoal],
+        _exploration_goals: &[ExplorationGoal],
     ) -> Result<ExplorationAction, ExplorationError> {
         let current_state = self.exploration_memory
             .get_state(current_state_id)
@@ -716,7 +715,7 @@ impl FunctionAwareTaskGoalGenerator {
 
     pub async fn generate_exploration_goals(
         &self,
-        app_context: &AppContext,
+        _app_context: &AppContext,
     ) -> Result<Vec<ExplorationGoal>, ExplorationError> {
         // Generate goals based on application type
         let mut goals = Vec::new();

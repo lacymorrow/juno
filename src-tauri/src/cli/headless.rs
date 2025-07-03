@@ -6,14 +6,14 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
-use tauri::{AppHandle, Manager, Emitter};
+use tracing::info;
+use tauri::{AppHandle, Manager};
 use serde_json::{json, Value};
 
 use crate::cli::{Cli, OutputFormat};
-use crate::constants::{cli, events};
+use crate::constants::cli;
 use crate::error_handling::JunoError;
 use crate::state::AppState;
 
@@ -332,7 +332,7 @@ impl HeadlessRuntime {
         let result_tx = Arc::new(Mutex::new(Some(result_tx)));
 
         // Listen for dictation completion
-        let result_tx_clone = result_tx.clone();
+                        let _result_tx_clone = result_tx.clone();
         // For headless mode, we'll use a different approach than event listening
         /*
         self.app_handle.listen(events::voice_transcription::FINAL_RESULT, move |event| {

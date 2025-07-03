@@ -4,7 +4,7 @@
 //! including checkpoint management, rollback operations, and recovery statistics.
 
 use crate::agent::error_recovery::{
-    AgentState, ErrorRecoveryManager, ExecutionCheckpoint, RecoveryConfig, RollbackInfo,
+    ErrorRecoveryManager, RecoveryConfig,
 };
 use crate::constants::errors::templates;
 use crate::state::AppState;
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{command, State};
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Format error message with template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {

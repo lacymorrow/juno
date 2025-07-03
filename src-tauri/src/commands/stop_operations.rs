@@ -1,7 +1,7 @@
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::AppHandle;
 use tracing::{info, warn};
-use crate::state::AppState;
-use crate::constants;
+
+
 use crate::commands::stop_coordinator::get_stop_coordinator;
 
 /// Stop all ongoing operations - agent execution, dictation, TTS, always listening, etc.

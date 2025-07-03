@@ -6,8 +6,8 @@ use std::fs;
 use std::io;
 use std::path::{PathBuf, Path};
 use tracing::{info, warn, error};
-use super::send_dev_tool_notification; // Use helper from parent module
-use crate::constants::errors::{templates, components};
+ // Use helper from parent module
+use crate::constants::errors::templates;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -31,7 +31,7 @@ fn update_undo_state(state: &State<AppState>, path: String, previous_content: Op
 
 #[tauri::command]
 pub(crate) async fn text_editor_view(path: String) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, validators};
+    use crate::commands::debug_utils::{DebugConfig, log_debug_operation, validators};
 
     // Note: For text editor operations, we can't easily access AppState for debug settings,
     // so we'll use a simplified debug approach based on cfg!(debug_assertions)

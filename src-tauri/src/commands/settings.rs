@@ -3,13 +3,12 @@
 //! Tauri commands for managing all application settings through a single, reactive interface.
 //! Replaces scattered settings commands throughout the codebase.
 
-use tauri::{command, AppHandle, State};
+use tauri::{command, AppHandle};
 use crate::settings::{
     manager::SettingsManager, AppSettings, KeyboardShortcuts, FloatingBarSettings, AgentSettings,
-    ProviderSettings, CloudSettings, AudioSettings, ToolSettings, OnboardingSettings,
-    CLISettings, VoiceTranscriptionSettings
+    ProviderSettings, CloudSettings, AudioSettings, ToolSettings, OnboardingSettings
 };
-use tracing::info;
+
 use crate::constants::errors::templates;
 use crate::constants::errors::components;
 use crate::constants::errors::actions;

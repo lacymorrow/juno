@@ -10,7 +10,6 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationPar
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{info, warn, error, debug};
 use serde_json;
-use crate::constants;
 
 use crate::error::{Error, Result};
 
@@ -29,7 +28,7 @@ const MIN_SPEECH_VOLUME: f32 = 0.02; // Minimum volume required for speech proce
 // New constants for intelligent filtering
 const MIN_MEANINGFUL_CONTENT_LENGTH: usize = 3; // Minimum characters for meaningful content
 const MAX_AGENT_CALLS_PER_MINUTE: u32 = 5; // Rate limit for agent calls
-const AUTO_STOP_TIMEOUT_MS: u64 = 30000; // Auto-stop always listening after 30 seconds of processing
+
 const COMMAND_COMPLETION_TIMEOUT_MS: u64 = 5000; // Return to wake word after command completion
 
 // Stop words that should end always listening mode

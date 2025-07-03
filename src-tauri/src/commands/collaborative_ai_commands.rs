@@ -8,7 +8,7 @@ use crate::agent::tools::collaborative_ai::{
     WorkflowDesignResult, WorkflowExecutionResult, DesignCapabilities, DesignStatistics,
     PerformanceRequirements, ResourceRequirements
 };
-use crate::agent::core::AgentError;
+
 
 /// Global state for the Collaborative AI Designer
 pub struct CollaborativeAIState {

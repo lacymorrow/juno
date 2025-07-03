@@ -21,9 +21,8 @@ use crate::agent::tools::{
     basic_tools::register_basic_tools, browser_tools::get_browser_tool_definitions,
     desktop_tools::setup_tools,
 };
-use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager};
-use crate::constants::{agent, timeouts, events};
-use crate::constants::errors::{templates, components};
+use crate::agent::traits::{AgentRunnable, MemoryManager};
+use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 
@@ -393,7 +392,7 @@ pub async fn submit_query(
 async fn analyze_tool_choice(
     query: &str,
     state: &tauri::State<'_, AppState>,
-    app_handle: &tauri::AppHandle,
+    _app_handle: &tauri::AppHandle,
 ) -> Option<ToolChoice> {
     // Determine operational mode based on current state
     let mode = match state.get_dictation_active() {

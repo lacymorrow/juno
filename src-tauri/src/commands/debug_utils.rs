@@ -4,7 +4,7 @@
 //! in production functions, eliminating the need for separate dev_ wrapper functions.
 
 use tauri::{AppHandle, Emitter};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use serde_json::json;
 use std::time::Instant;
 use crate::constants::events;

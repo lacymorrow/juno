@@ -1,12 +1,10 @@
 use crate::agent::core::AgentError;
-use crate::constants::agent::config::{
-    CONTINUATION_REQUEST_TIMEOUT_SECONDS, DEFAULT_CONTINUATION_ADDITIONAL_STEPS,
-};
+use crate::constants::agent::config::CONTINUATION_REQUEST_TIMEOUT_SECONDS;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, error, info, warn};
 use crate::constants::events;
