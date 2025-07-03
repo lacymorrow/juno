@@ -1,10 +1,7 @@
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
-import {
-  JsxMessageRenderer,
-  isJsxContent,
-} from "@/components/ui/jsx-message-renderer";
+import { JsxMessageRenderer } from "@/components/ui/jsx-message-renderer";
 import {
   AIMessage,
   AIMessageAvatar,
@@ -229,10 +226,7 @@ export function ChatMessageComponent({
               </>
             )}
           </span>
-        ) : msg.isJsx ||
-          (msg.role === "assistant" &&
-            !msg.isStreaming &&
-            isJsxContent(msg.content)) ? (
+        ) : msg.isJsx ? (
           <JsxMessageRenderer jsx={msg.content} />
         ) : msg.role === "assistant" && msg.content ? (
           <AIResponse>{msg.content}</AIResponse>
