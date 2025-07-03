@@ -7,7 +7,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-use crate::constants::{timeouts, events};
+use crate::constants::{timeouts, events, ui};
 
 use crate::settings::{manager::SettingsManager, FloatingBarSettings};
 use crate::utils::async_runtime::safe_spawn_async_task;
@@ -75,22 +75,22 @@ pub enum BarState {
 impl BarState {
     pub fn as_str(&self) -> &str {
         match self {
-            BarState::Default => "default",
-            BarState::Expanding => "expanding",
-            BarState::Input => "input",
-            BarState::Shrinking => "shrinking",
-            BarState::Submitting => "submitting",
-            BarState::Loading => "loading",
-            BarState::Success => "success",
-            BarState::Error => "error",
-            BarState::Speaking => "speaking",
-            BarState::Listening => "listening",
-            BarState::Transcribing => "transcribing",
-            BarState::Dictating => "dictating",
-            BarState::DictationReady => "dictation_ready",
-            BarState::AlwaysListening => "always_listening",
-            BarState::Finishing => "finishing",
-            BarState::AgentResponding => "agent_responding",
+            BarState::Default => ui::bar_states::DEFAULT,
+            BarState::Expanding => ui::bar_states::EXPANDING,
+            BarState::Input => ui::bar_states::INPUT,
+            BarState::Shrinking => ui::bar_states::SHRINKING,
+            BarState::Submitting => ui::bar_states::SUBMITTING,
+            BarState::Loading => ui::bar_states::LOADING,
+            BarState::Success => ui::bar_states::SUCCESS,
+            BarState::Error => ui::bar_states::ERROR,
+            BarState::Speaking => ui::bar_states::SPEAKING,
+            BarState::Listening => ui::bar_states::LISTENING,
+            BarState::Transcribing => ui::bar_states::TRANSCRIBING,
+            BarState::Dictating => ui::bar_states::DICTATING,
+            BarState::DictationReady => ui::bar_states::DICTATION_READY,
+            BarState::AlwaysListening => ui::bar_states::ALWAYS_LISTENING,
+            BarState::Finishing => ui::bar_states::FINISHING,
+            BarState::AgentResponding => ui::bar_states::AGENT_RESPONDING,
         }
     }
 }

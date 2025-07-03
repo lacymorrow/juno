@@ -19,6 +19,7 @@ import {
   useAgentState,
   useRecentMessages,
 } from "@/contexts/VoiceContext";
+import { UI } from "@/lib/constants.generated";
 
 // === NEW UI API IMPORTS ===
 import { useUIElement, UIState, AgentStatus } from "@/lib/ui-api";
@@ -47,30 +48,30 @@ interface TransparentFloatingPanelProps {
 const convertPanelModeToUIState = (mode: string): UIState => {
   switch (mode) {
     case "compact":
-      return "default";
+      return UI.BAR_STATES_DEFAULT;
     case "expanded":
-      return "expanded";
+      return UI.BAR_STATES_EXPANDING;
     case "chat":
-      return "input";
+      return UI.BAR_STATES_INPUT;
     case "settings":
-      return "default";
+      return UI.BAR_STATES_DEFAULT;
     default:
-      return "default";
+      return UI.BAR_STATES_DEFAULT;
   }
 };
 
 const convertAgentStatusToUIState = (status: string): UIState => {
   switch (status) {
     case "listening":
-      return "listening";
+      return UI.BAR_STATES_LISTENING;
     case "thinking":
-      return "loading";
+      return UI.BAR_STATES_LOADING;
     case "responding":
-      return "agent-responding";
+      return UI.BAR_STATES_AGENT_RESPONDING;
     case "error":
-      return "error";
+      return UI.BAR_STATES_ERROR;
     default:
-      return "default";
+      return UI.BAR_STATES_DEFAULT;
   }
 };
 
@@ -132,9 +133,9 @@ export function TransparentFloatingPanel({
 
       // Convert UI state back to panel mode
       let newMode = panelState.mode;
-      if (state.uiState === "default") newMode = "compact";
-      else if (state.uiState === "expanded") newMode = "expanded";
-      else if (state.uiState === "input") newMode = "chat";
+      if (state.uiState === UI.BAR_STATES_DEFAULT) newMode = "compact";
+      else if (state.uiState === UI.BAR_STATES_EXPANDING) newMode = "expanded";
+      else if (state.uiState === UI.BAR_STATES_INPUT) newMode = "chat";
 
       setPanelState((prev) => ({
         ...prev,

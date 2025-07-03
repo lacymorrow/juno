@@ -28,31 +28,32 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { UI } from "@/lib/constants.generated";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 
 // === STANDARDIZED UI API TYPES ===
 
 /**
- * UI State enumeration - MUST match backend BarState.as_str() exactly
+ * UI State enumeration - Uses generated constants from backend
  * These values are emitted by the backend UIManager in bar-state-update events
  */
 type UIState =
-  | "default"
-  | "expanding"
-  | "input"
-  | "shrinking"
-  | "submitting"
-  | "loading"
-  | "finishing"
-  | "success"
-  | "listening"
-  | "error"
-  | "transcribing"
-  | "speaking"
-  | "dictating"
-  | "dictation_ready" // Note: backend uses underscore, not kebab-case
-  | "always_listening" // Note: backend uses underscore, not kebab-case
-  | "agent_responding"; // Note: backend uses underscore, not kebab-case
+  | typeof UI.BAR_STATES_DEFAULT
+  | typeof UI.BAR_STATES_EXPANDING
+  | typeof UI.BAR_STATES_INPUT
+  | typeof UI.BAR_STATES_SHRINKING
+  | typeof UI.BAR_STATES_SUBMITTING
+  | typeof UI.BAR_STATES_LOADING
+  | typeof UI.BAR_STATES_FINISHING
+  | typeof UI.BAR_STATES_SUCCESS
+  | typeof UI.BAR_STATES_LISTENING
+  | typeof UI.BAR_STATES_ERROR
+  | typeof UI.BAR_STATES_TRANSCRIBING
+  | typeof UI.BAR_STATES_SPEAKING
+  | typeof UI.BAR_STATES_DICTATING
+  | typeof UI.BAR_STATES_DICTATION_READY
+  | typeof UI.BAR_STATES_ALWAYS_LISTENING
+  | typeof UI.BAR_STATES_AGENT_RESPONDING;
 
 /**
  * Backend State Data Structure - Matches exactly what backend emits
@@ -115,7 +116,7 @@ export function FloatingBar() {
    * This is the single source of truth for all UI state
    */
   const [barState, setBarState] = useState<BarStateData>({
-    barState: "default",
+    barState: UI.BAR_STATES_DEFAULT,
     inputValue: "",
     lastSubmittedValue: "",
     currentError: null,
@@ -197,9 +198,10 @@ export function FloatingBar() {
         const currentUiState = barState.barState;
 
         // Define compact states that use small window size
-        const isCompact = ["default", "dictation_ready"].includes(
-          currentUiState
-        );
+        const isCompact = [
+          UI.BAR_STATES_DEFAULT,
+          UI.BAR_STATES_DICTATION_READY,
+        ].includes(currentUiState as any);
         const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
         const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
@@ -234,82 +236,66 @@ export function FloatingBar() {
 
   /**
    * Sends interaction to backend via ui_handle_interaction command
-   * This is the standardized way to trigger backend actions
+   * This is the standardized way for UI components to communicate user actions
    */
   const sendInteraction = async (interaction: UIInteractionEvent) => {
     try {
       console.log("🔧 FloatingBar: Sending interaction:", interaction);
 
       await invoke("ui_handle_interaction", {
-        elementId: COMPONENT_ID,
-        interaction,
+        elementId: interaction.element_id,
+        interaction: {
+          interaction_type: interaction.interaction_type,
+          data: interaction.data || {},
+        },
       });
 
       console.log("✅ FloatingBar: Interaction sent successfully");
     } catch (error) {
-      console.error("❌ FloatingBar: Interaction failed:", error);
-
-      // TODO: Could emit error event or show user notification
-      // This demonstrates proper error handling without breaking the UI
+      console.error("❌ FloatingBar: Failed to send interaction:", error);
     }
   };
 
-  /**
-   * Handle bar click - Demonstrates simple interaction
-   */
+  // === USER INTERACTION HANDLERS ===
+
   const handleClick = useCallback(async () => {
     const interaction = createInteraction("click");
     await sendInteraction(interaction);
   }, []);
 
-  /**
-   * Handle input changes - Demonstrates data-carrying interaction
-   */
   const handleInputChange = useCallback(async (value: string) => {
     const interaction = createInteraction("input_change", { value });
     await sendInteraction(interaction);
   }, []);
 
-  /**
-   * Handle form submission - Demonstrates validation + interaction
-   */
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
-      const trimmedValue = barState.inputValue.trim();
-
-      if (trimmedValue) {
-        const interaction = createInteraction("submit", {
-          value: trimmedValue,
-        });
-        await sendInteraction(interaction);
-      } else {
-        console.log("⚠️ FloatingBar: Empty submission ignored");
-      }
+      const interaction = createInteraction("submit", {
+        value: barState.inputValue,
+      });
+      await sendInteraction(interaction);
     },
     [barState.inputValue]
   );
 
-  /**
-   * Handle focus events - Demonstrates state-aware interactions
-   */
   const handleFocus = useCallback(async () => {
-    const interaction = createInteraction("focus", { is_focused: true });
+    const interaction = createInteraction("focus");
     await sendInteraction(interaction);
   }, []);
 
-  /**
-   * Handle blur events - Demonstrates state-aware interactions
-   */
   const handleBlur = useCallback(async () => {
-    const interaction = createInteraction("blur", { is_focused: false });
+    const interaction = createInteraction("blur");
     await sendInteraction(interaction);
   }, []);
 
-  // === UI STATE CALCULATIONS ===
+  // === COMPUTED VALUES ===
 
   const currentUiState = barState.barState;
-  const isCompact = ["default", "dictation_ready"].includes(currentUiState);
+  const isCompact = [
+    UI.BAR_STATES_DEFAULT,
+    UI.BAR_STATES_DICTATION_READY,
+  ].includes(currentUiState as any);
   const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
   const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
@@ -324,7 +310,10 @@ export function FloatingBar() {
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
-    const clickable = ["default", "dictation_ready"].includes(currentUiState)
+    const clickable = [
+      UI.BAR_STATES_DEFAULT,
+      UI.BAR_STATES_DICTATION_READY,
+    ].includes(currentUiState as any)
       ? "cursor-pointer"
       : "";
 
@@ -346,25 +335,25 @@ export function FloatingBar() {
    */
   const getMainIcon = () => {
     switch (currentUiState) {
-      case "listening":
+      case UI.BAR_STATES_LISTENING:
         return <Mic size={14} className="text-blue-400" />;
-      case "transcribing":
+      case UI.BAR_STATES_TRANSCRIBING:
         return <Mic size={14} className="animate-pulse text-blue-400" />;
-      case "speaking":
+      case UI.BAR_STATES_SPEAKING:
         return <Volume2 size={14} className="text-green-400" />;
-      case "loading":
-      case "submitting":
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
         return <Loader2 size={14} className="animate-spin text-yellow-400" />;
-      case "input":
-      case "expanding":
+      case UI.BAR_STATES_INPUT:
+      case UI.BAR_STATES_EXPANDING:
         return <Sparkles size={14} className="text-white" />;
-      case "dictation_ready":
+      case UI.BAR_STATES_DICTATION_READY:
         return <Type size={14} className="text-orange-400" />;
-      case "always_listening":
+      case UI.BAR_STATES_ALWAYS_LISTENING:
         return <Mic size={14} className="text-blue-400 animate-pulse" />;
-      case "error":
+      case UI.BAR_STATES_ERROR:
         return <AlertCircle size={14} className="text-red-400" />;
-      case "success":
+      case UI.BAR_STATES_SUCCESS:
         return <Check size={14} className="text-green-400" />;
       default:
         return <Brain size={14} className="text-white" />;
@@ -377,9 +366,11 @@ export function FloatingBar() {
    */
   const AudioLevelIndicator = ({ audioLevel }: { audioLevel: number }) => {
     if (
-      !["listening", "transcribing", "always_listening"].includes(
-        currentUiState
-      )
+      ![
+        UI.BAR_STATES_LISTENING,
+        UI.BAR_STATES_TRANSCRIBING,
+        UI.BAR_STATES_ALWAYS_LISTENING,
+      ].includes(currentUiState as any)
     ) {
       return null;
     }
@@ -413,7 +404,9 @@ export function FloatingBar() {
           height: `${currentHeight}px`,
         }}
         onClick={
-          ["default", "dictation_ready"].includes(currentUiState)
+          [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+            currentUiState as any
+          )
             ? handleClick
             : undefined
         }
@@ -430,12 +423,12 @@ export function FloatingBar() {
 
         {/* Active States with Audio Feedback */}
         {[
-          "listening",
-          "transcribing",
-          "speaking",
-          "dictating",
-          "agent_responding",
-        ].includes(currentUiState) && (
+          UI.BAR_STATES_LISTENING,
+          UI.BAR_STATES_TRANSCRIBING,
+          UI.BAR_STATES_SPEAKING,
+          UI.BAR_STATES_DICTATING,
+          UI.BAR_STATES_AGENT_RESPONDING,
+        ].includes(currentUiState as any) && (
           <div
             className="flex items-center justify-between w-full h-full"
             data-tauri-drag-region
@@ -446,11 +439,15 @@ export function FloatingBar() {
                 className="text-sm font-medium truncate"
                 data-tauri-drag-region
               >
-                {currentUiState === "listening" && "Listening..."}
-                {currentUiState === "transcribing" && "Converting speech..."}
-                {currentUiState === "speaking" && "Playing response..."}
-                {currentUiState === "dictating" && "Dictating text..."}
-                {currentUiState === "agent_responding" && "Agent working..."}
+                {currentUiState === UI.BAR_STATES_LISTENING && "Listening..."}
+                {currentUiState === UI.BAR_STATES_TRANSCRIBING &&
+                  "Converting speech..."}
+                {currentUiState === UI.BAR_STATES_SPEAKING &&
+                  "Playing response..."}
+                {currentUiState === UI.BAR_STATES_DICTATING &&
+                  "Dictating text..."}
+                {currentUiState === UI.BAR_STATES_AGENT_RESPONDING &&
+                  "Agent working..."}
               </span>
             </div>
             <AudioLevelIndicator audioLevel={barState.audioLevel} />
@@ -458,13 +455,16 @@ export function FloatingBar() {
         )}
 
         {/* Input State - Interactive Form */}
-        {(currentUiState === "expanding" || currentUiState === "input") && (
+        {(currentUiState === UI.BAR_STATES_EXPANDING ||
+          currentUiState === UI.BAR_STATES_INPUT) && (
           <form
             onSubmit={handleSubmit}
             className={cn(
               "flex items-center justify-between w-full h-full gap-3",
               "transition-opacity duration-300 ease-in-out",
-              currentUiState === "input" ? "opacity-100" : "opacity-0"
+              currentUiState === UI.BAR_STATES_INPUT
+                ? "opacity-100"
+                : "opacity-0"
             )}
             data-tauri-drag-region
           >
@@ -481,13 +481,13 @@ export function FloatingBar() {
                 onBlur={handleBlur}
                 placeholder="Ask me anything..."
                 className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-                disabled={currentUiState !== "input"}
+                disabled={currentUiState !== UI.BAR_STATES_INPUT}
               />
             </div>
             <button
               type="submit"
               className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-              disabled={currentUiState !== "input"}
+              disabled={currentUiState !== UI.BAR_STATES_INPUT}
             >
               <Send size={14} />
             </button>
@@ -496,13 +496,13 @@ export function FloatingBar() {
 
         {/* Status States - Loading, Error, Success */}
         {[
-          "submitting",
-          "loading",
-          "error",
-          "success",
-          "shrinking",
-          "finishing",
-        ].includes(currentUiState) && (
+          UI.BAR_STATES_SUBMITTING,
+          UI.BAR_STATES_LOADING,
+          UI.BAR_STATES_ERROR,
+          UI.BAR_STATES_SUCCESS,
+          UI.BAR_STATES_SHRINKING,
+          UI.BAR_STATES_FINISHING,
+        ].includes(currentUiState as any) && (
           <div
             className="flex items-center justify-center w-full h-full"
             data-tauri-drag-region
@@ -510,13 +510,13 @@ export function FloatingBar() {
             <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon()}
               <span className="text-sm font-medium" data-tauri-drag-region>
-                {currentUiState === "submitting" && "Sending..."}
-                {currentUiState === "loading" && "Processing..."}
-                {currentUiState === "finishing" && "Finishing..."}
-                {currentUiState === "error" &&
+                {currentUiState === UI.BAR_STATES_SUBMITTING && "Sending..."}
+                {currentUiState === UI.BAR_STATES_LOADING && "Processing..."}
+                {currentUiState === UI.BAR_STATES_FINISHING && "Finishing..."}
+                {currentUiState === UI.BAR_STATES_ERROR &&
                   (barState.currentError || "Error occurred")}
-                {currentUiState === "success" && "Complete!"}
-                {currentUiState === "shrinking" && ""}
+                {currentUiState === UI.BAR_STATES_SUCCESS && "Complete!"}
+                {currentUiState === UI.BAR_STATES_SHRINKING && ""}
               </span>
             </div>
           </div>
@@ -540,9 +540,9 @@ export function FloatingBar() {
  *    - Comprehensive error handling
  *
  * ✅ Type Safety & Backend Alignment:
- *    - Types match backend exactly (underscore notation)
+ *    - Types use generated constants from backend
  *    - Interface structure mirrors backend emission
- *    - Inline type definitions (no external dependencies)
+ *    - Centralized constants prevent sync issues
  *
  * ✅ Robust Error Handling:
  *    - Try/catch on all backend calls
@@ -558,6 +558,7 @@ export function FloatingBar() {
  *    - Clear separation of concerns
  *    - Reusable interaction patterns
  *    - Comprehensive documentation
+ *    - Centralized constants management
  *
  * This component serves as the reference implementation for all
  * floating UI components in the Juno application.

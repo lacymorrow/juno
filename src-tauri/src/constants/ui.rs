@@ -10,6 +10,62 @@ pub mod window_labels {
     pub const SETTINGS: &str = "settings";
 }
 
+/// UI state constants for bar state management
+/// These values are used by the backend BarState enum and must match frontend expectations
+pub mod bar_states {
+    pub const DEFAULT: &str = "default";
+    pub const EXPANDING: &str = "expanding";
+    pub const INPUT: &str = "input";
+    pub const SHRINKING: &str = "shrinking";
+    pub const SUBMITTING: &str = "submitting";
+    pub const LOADING: &str = "loading";
+    pub const SUCCESS: &str = "success";
+    pub const ERROR: &str = "error";
+    pub const SPEAKING: &str = "speaking";
+    pub const LISTENING: &str = "listening";
+    pub const TRANSCRIBING: &str = "transcribing";
+    pub const DICTATING: &str = "dictating";
+    pub const DICTATION_READY: &str = "dictation_ready";
+    pub const ALWAYS_LISTENING: &str = "always_listening";
+    pub const FINISHING: &str = "finishing";
+    pub const AGENT_RESPONDING: &str = "agent_responding";
+}
+
+/// Voice mode constants
+/// These values are used by the frontend VoiceContext and must match frontend expectations
+pub mod voice_modes {
+    pub const IDLE: &str = "idle";
+    pub const AGENT: &str = "agent";
+    pub const DICTATION: &str = "dictation";
+}
+
+/// Agent status constants
+/// These values are used by the frontend agent state management and must match frontend expectations
+pub mod agent_status {
+    pub const IDLE: &str = "idle";
+    pub const LISTENING: &str = "listening";
+    pub const THINKING: &str = "thinking";
+    pub const RESPONDING: &str = "responding";
+    pub const ERROR: &str = "error";
+    pub const WORKING: &str = "working";
+    pub const FINISHED: &str = "finished";
+    pub const FAILED: &str = "failed";
+    pub const CANCELLED: &str = "cancelled";
+    pub const OFFLINE: &str = "offline";
+    pub const PROCESSING: &str = "processing";
+}
+
+/// UI interaction types
+/// These values are used by the frontend UI interaction handlers
+pub mod interaction_types {
+    pub const CLICK: &str = "click";
+    pub const FOCUS: &str = "focus";
+    pub const BLUR: &str = "blur";
+    pub const HOVER: &str = "hover";
+    pub const INPUT: &str = "input";
+    pub const SUBMIT: &str = "submit";
+}
+
 // UI layout constants (moved from frontend constants.ts)
 pub const MOBILE_BREAKPOINT: i32 = 768;
 pub const PERCENTAGE_MULTIPLIER: f64 = 100.0;

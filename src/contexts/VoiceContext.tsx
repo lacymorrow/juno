@@ -6,9 +6,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { EVENTS, UI } from "@/lib/constants.generated";
 
 export interface VoiceState {
-  mode: "dictation" | "agent" | "idle";
+  mode:
+    | typeof UI.VOICE_MODES_DICTATION
+    | typeof UI.VOICE_MODES_AGENT
+    | typeof UI.VOICE_MODES_IDLE;
   isListening: boolean;
   isTranscribing: boolean;
   isSpeaking: boolean;
@@ -18,7 +22,12 @@ export interface VoiceState {
 }
 
 export interface AgentState {
-  status: "idle" | "listening" | "thinking" | "responding" | "error";
+  status:
+    | typeof UI.AGENT_STATUS_IDLE
+    | typeof UI.AGENT_STATUS_LISTENING
+    | typeof UI.AGENT_STATUS_THINKING
+    | typeof UI.AGENT_STATUS_RESPONDING
+    | typeof UI.AGENT_STATUS_ERROR;
   currentResponse?: string;
   error?: string;
 }
@@ -39,17 +48,7 @@ interface VoiceContextType {
   resetTranscription: () => void;
 }
 
-const initialVoiceState: VoiceState = {
-  mode: "idle",
-  isListening: false,
-  isTranscribing: false,
-  isSpeaking: false,
-  audioLevel: 0,
-};
-
-const initialAgentState: AgentState = {
-  status: "idle",
-};
+// Removed unused initial state constants since they were duplicates of the useState defaults
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
@@ -58,50 +57,27 @@ interface VoiceProviderProps {
 }
 
 export function VoiceProvider({ children }: VoiceProviderProps) {
-  const [voiceState, setVoiceState] = useState<VoiceState>(initialVoiceState);
-  const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
+  const [voiceState, setVoiceState] = useState<VoiceState>({
+    mode: UI.VOICE_MODES_IDLE,
+    isListening: false,
+    isTranscribing: false,
+    isSpeaking: false,
+    audioLevel: 0,
+  });
+
+  const [agentState, setAgentState] = useState<AgentState>({
+    status: UI.AGENT_STATUS_IDLE,
+  });
+
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
 
-  // Set up all voice-related event listeners in one place
   useEffect(() => {
-    let unlistenCallbacks: (() => void)[] = [];
+    const unlistenCallbacks: Array<() => void> = [];
 
     const setupListeners = async () => {
-      // Voice mode events
+      // Voice transcription events
       unlistenCallbacks.push(
-        await listen("dictation-active", (event) => {
-          const isActive = event.payload as boolean;
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: isActive ? "dictation" : "idle",
-            isListening: isActive,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("app-dictation-started", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: "agent",
-            isListening: true,
-          }));
-          setAgentState((prev) => ({ ...prev, status: "listening" }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("app-dictation-finished", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isListening: false,
-          }));
-        })
-      );
-
-      // Transcription events
-      unlistenCallbacks.push(
-        await listen("dictation-transcription-partial", (event) => {
+        await listen(EVENTS.VOICE_TRANSCRIPTION_PARTIAL_RESULT, (event) => {
           const text = event.payload as string;
           setVoiceState((prev) => ({
             ...prev,
@@ -112,7 +88,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
       );
 
       unlistenCallbacks.push(
-        await listen("dictation-transcription-final", (event) => {
+        await listen(EVENTS.VOICE_TRANSCRIPTION_FINAL_RESULT, (event) => {
           const text = event.payload as string;
           setVoiceState((prev) => ({
             ...prev,
@@ -134,7 +110,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
 
       // TTS events
       unlistenCallbacks.push(
-        await listen("tts-started", () => {
+        await listen(EVENTS.TTS_AUDIO_READY, () => {
           setVoiceState((prev) => ({
             ...prev,
             isSpeaking: true,
@@ -143,7 +119,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
       );
 
       unlistenCallbacks.push(
-        await listen("tts-finished", () => {
+        await listen(EVENTS.TTS_STOP_REQUESTED, () => {
           setVoiceState((prev) => ({
             ...prev,
             isSpeaking: false,
@@ -161,9 +137,9 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
         })
       );
 
-      // Error handling
+      // Error handling - using voice transcription error event
       unlistenCallbacks.push(
-        await listen<string>("voice-error", (event) => {
+        await listen<string>(EVENTS.VOICE_TRANSCRIPTION_ERROR, (event) => {
           const error = event.payload;
           setVoiceState((prev) => ({
             ...prev,
@@ -171,42 +147,50 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
             isListening: false,
             isTranscribing: false,
           }));
-          setAgentState((prev) => ({ ...prev, status: "error", error }));
+          setAgentState((prev) => ({
+            ...prev,
+            status: UI.AGENT_STATUS_ERROR,
+            error,
+          }));
         })
       );
 
-      // Agent-specific events
+      // Agent-specific events - using correct event names
       unlistenCallbacks.push(
-        await listen("agent-started", () => {
-          setAgentState((prev) => ({ ...prev, status: "listening" }));
+        await listen(EVENTS.AGENT_ACTIVE, () => {
+          setAgentState((prev) => ({
+            ...prev,
+            status: UI.AGENT_STATUS_LISTENING,
+          }));
         })
       );
 
       unlistenCallbacks.push(
-        await listen("agent-thinking", () => {
-          setAgentState((prev) => ({ ...prev, status: "thinking" }));
+        await listen(EVENTS.AGENT_THOUGHT_PROCESS, () => {
+          setAgentState((prev) => ({
+            ...prev,
+            status: UI.AGENT_STATUS_THINKING,
+          }));
         })
       );
 
-      unlistenCallbacks.push(
-        await listen("agent-responding", () => {
-          setAgentState((prev) => ({ ...prev, status: "responding" }));
-        })
-      );
+      // Note: "agent-responding" event doesn't exist in backend - this is handled by streaming events
+      // Instead, we should listen to streaming events to detect when agent is responding
 
-      // AI response streaming
+      // AI response streaming - using correct event names
       unlistenCallbacks.push(
-        await listen("streaming-text", (event) => {
+        await listen(EVENTS.STREAMING_TEXT_STREAM, (event) => {
           const chunk = event.payload as { chunk: string; message_id: string };
           setAgentState((prev) => ({
             ...prev,
+            status: UI.AGENT_STATUS_RESPONDING,
             currentResponse: (prev.currentResponse || "") + chunk.chunk,
           }));
         })
       );
 
       unlistenCallbacks.push(
-        await listen("stream-end", (event) => {
+        await listen(EVENTS.STREAMING_STREAM_END, (event) => {
           const data = event.payload as {
             message_id: string;
             complete_text: string;
@@ -225,7 +209,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
           setAgentState((prev) => ({
             ...prev,
             currentResponse: undefined,
-            status: "idle",
+            status: UI.AGENT_STATUS_IDLE,
           }));
         })
       );

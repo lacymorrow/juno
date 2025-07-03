@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { UI } from "@/lib/constants.generated";
 
 export type AppState =
   | "idle"
-  | "listening"
+  | typeof UI.BAR_STATES_LISTENING
   | "processing"
-  | "speaking"
-  | "error"
-  | "success";
+  | typeof UI.BAR_STATES_SPEAKING
+  | typeof UI.BAR_STATES_ERROR
+  | typeof UI.BAR_STATES_SUCCESS;
 
 export interface AudioVisualizerProps {
   /** Current application state */
@@ -145,7 +146,7 @@ export default function AudioVisualizer({
           return Math.abs(spatialWave) + baseAmplitude * 0.6;
         }
 
-        case "listening": {
+        case UI.BAR_STATES_LISTENING: {
           // Active, responsive pattern with more energy
           const pulse = Math.sin(time * 1.2) * 0.6 + 1;
           const flowPhase = time * 0.5;
@@ -184,7 +185,7 @@ export default function AudioVisualizer({
           );
         }
 
-        case "speaking": {
+        case UI.BAR_STATES_SPEAKING: {
           // Dynamic, expressive pattern - like speech cadence
           const speech1 = Math.sin(time * 1.8) * 0.7 + 1;
           const speech2 = Math.sin(time * 2.3) * 0.5 + 1;
@@ -200,55 +201,66 @@ export default function AudioVisualizer({
             Math.sin(i * 0.07 + flowPhase * 0.8) *
             30 *
             speech2 *
-            styleMultiplier;
-          return Math.abs(spatialWave1 + spatialWave2) + baseAmplitude * 1.4;
-        }
-
-        case "error": {
-          // Sharp, jagged pattern - indicates problems
-          const error1 = Math.sign(Math.sin(time * 4.2)) * 0.8 + 1;
-          const error2 = Math.sign(Math.sin(time * 5.7)) * 0.6 + 1;
-          const glitch =
-            animationStyle === "sharp"
-              ? Math.random() * 0.5 + 0.75
-              : Math.random() * 0.3 + 0.85;
-          const flowPhase = time * 1.2;
-          const spatialWave1 =
-            Math.sin(i * 0.18 + flowPhase) *
-            32 *
-            error1 *
-            glitch *
-            styleMultiplier;
-          const spatialWave2 =
-            Math.sin(i * 0.13 + flowPhase * 0.7) *
-            24 *
-            error2 *
-            styleMultiplier;
-          return Math.abs(spatialWave1 + spatialWave2) + baseAmplitude * 0.8;
-        }
-
-        case "success": {
-          // Bright, celebratory pattern - positive confirmation
-          const success1 = Math.sin(time * 1.5) * 0.6 + 1;
-          const success2 = Math.sin(time * 2.1) * 0.4 + 1;
-          const sparkle = Math.sin(time * 8.3) * 0.2 + 1;
-          const flowPhase = time * 0.4;
-          const spatialWave1 =
-            Math.sin(i * 0.09 + flowPhase) *
-            35 *
-            success1 *
-            sparkle *
-            styleMultiplier;
-          const spatialWave2 =
-            Math.sin(i * 0.14 + flowPhase * 0.5) *
-            28 *
-            success2 *
+            emphasis *
             styleMultiplier;
           return Math.abs(spatialWave1 + spatialWave2) + baseAmplitude * 1.1;
         }
 
+        case UI.BAR_STATES_ERROR: {
+          // Sharp, irregular pattern - distress signal
+          const jitter1 = Math.sin(time * 4.2) * 0.6 + 1;
+          const jitter2 = Math.sin(time * 5.7) * 0.4 + 1;
+          const alarm = Math.sin(time * 2.0) * 0.5 + 1;
+          const flowPhase = time * 1.2;
+          const spatialWave1 =
+            Math.sin(i * 0.18 + flowPhase) *
+            35 *
+            jitter1 *
+            alarm *
+            styleMultiplier;
+          const spatialWave2 =
+            Math.sin(i * 0.13 + flowPhase * 1.3) *
+            25 *
+            jitter2 *
+            alarm *
+            styleMultiplier;
+          const noise = (Math.random() - 0.5) * 15 * alarm * styleMultiplier;
+          return (
+            Math.abs(spatialWave1 + spatialWave2 + noise) + baseAmplitude * 0.8
+          );
+        }
+
+        case UI.BAR_STATES_SUCCESS: {
+          // Celebration pattern - triumphant and flowing
+          const triumph1 = Math.sin(time * 1.5) * 0.8 + 1;
+          const triumph2 = Math.sin(time * 2.1) * 0.6 + 1;
+          const sparkle = Math.sin(time * 3.3) * 0.4 + 1;
+          const flowPhase = time * 0.4;
+          const spatialWave1 =
+            Math.sin(i * 0.09 + flowPhase) *
+            45 *
+            triumph1 *
+            sparkle *
+            styleMultiplier;
+          const spatialWave2 =
+            Math.sin(i * 0.06 + flowPhase * 0.7) *
+            35 *
+            triumph2 *
+            sparkle *
+            styleMultiplier;
+          const celebration =
+            Math.sin(i * 0.04 + flowPhase * 1.5) *
+            25 *
+            sparkle *
+            styleMultiplier;
+          return (
+            Math.abs(spatialWave1 + spatialWave2 + celebration) +
+            baseAmplitude * 1.3
+          );
+        }
+
         default:
-          return baseAmplitude;
+          return baseAmplitude * 0.5;
       }
     },
     [intensity, animationStyle]
@@ -303,7 +315,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case "listening":
+        case UI.BAR_STATES_LISTENING:
           return [
             {
               color,
@@ -391,7 +403,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case "speaking":
+        case UI.BAR_STATES_SPEAKING:
           return [
             {
               color,
@@ -435,7 +447,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case "error":
+        case UI.BAR_STATES_ERROR:
           return [
             {
               color,
@@ -474,7 +486,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case "success":
+        case UI.BAR_STATES_SUCCESS:
           return [
             {
               color,
@@ -640,7 +652,7 @@ export default function AudioVisualizer({
       isActive &&
       analyserRef.current &&
       dataArrayRef.current &&
-      currentState === "listening"
+      currentState === UI.BAR_STATES_LISTENING
     ) {
       analyserRef.current.getByteFrequencyData(dataArrayRef.current);
       // Enhanced microphone processing for more dramatic but smooth effects
@@ -793,11 +805,11 @@ export default function AudioVisualizer({
 
           // State-specific intensity modifiers
           let intensityMultiplier = 1.0;
-          if (state === "listening") intensityMultiplier = 1.3;
-          else if (state === "speaking") intensityMultiplier = 1.5;
+          if (state === UI.BAR_STATES_LISTENING) intensityMultiplier = 1.3;
+          else if (state === UI.BAR_STATES_SPEAKING) intensityMultiplier = 1.5;
           else if (state === "processing") intensityMultiplier = 1.1;
-          else if (state === "error") intensityMultiplier = 0.9;
-          else if (state === "success") intensityMultiplier = 1.2;
+          else if (state === UI.BAR_STATES_ERROR) intensityMultiplier = 0.9;
+          else if (state === UI.BAR_STATES_SUCCESS) intensityMultiplier = 1.2;
           else if (state === "idle") intensityMultiplier = 0.7;
 
           const gradient = ctx.createRadialGradient(
@@ -938,7 +950,7 @@ export default function AudioVisualizer({
             }
 
             const audioInfluence =
-              isActive && currentState === "listening"
+              isActive && currentState === UI.BAR_STATES_LISTENING
                 ? (audioValue / 255) *
                   height *
                   (0.35 + depth * 0.25) *
@@ -1006,7 +1018,11 @@ export default function AudioVisualizer({
           ctx.fill();
 
           // Add state-specific effects
-          if ((state === "speaking" || state === "success") && depth > 0.7) {
+          if (
+            (state === UI.BAR_STATES_SPEAKING ||
+              state === UI.BAR_STATES_SUCCESS) &&
+            depth > 0.7
+          ) {
             ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${
               0.3 * depth
             })`;
@@ -1034,9 +1050,13 @@ export default function AudioVisualizer({
 
   // Handle microphone
   useEffect(() => {
-    if (enableMicrophone && currentState === "listening" && !isActive) {
+    if (
+      enableMicrophone &&
+      currentState === UI.BAR_STATES_LISTENING &&
+      !isActive
+    ) {
       startAudioCapture();
-    } else if (!enableMicrophone || currentState !== "listening") {
+    } else if (!enableMicrophone || currentState !== UI.BAR_STATES_LISTENING) {
       stopAudioCapture();
     }
   }, [
@@ -1075,7 +1095,8 @@ export default function AudioVisualizer({
         style={{
           background: "transparent",
           filter:
-            currentState === "listening" || currentState === "speaking"
+            currentState === UI.BAR_STATES_LISTENING ||
+            currentState === UI.BAR_STATES_SPEAKING
               ? "brightness(1.15) saturate(1.3)"
               : "brightness(0.95)",
         }}
