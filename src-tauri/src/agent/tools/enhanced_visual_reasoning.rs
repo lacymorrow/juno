@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::agent::core::{AgentError, Message, Role};
-use tracing::{debug, info, warn, error};
+use crate::agent::core::AgentError;
+use tracing::{debug, info};
 
 /// Research Foundation: Enhanced Visual Reasoning System (CVPR 2025)
 /// Advanced visual reasoning capabilities for complex GUI understanding

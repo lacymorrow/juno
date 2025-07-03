@@ -1,13 +1,12 @@
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::agent::core::{AgentError, Message, Role};
-use tracing::{debug, error, info, warn};
+use crate::agent::core::AgentError;
+use tracing::{debug, error, info};
 
 /// Research Foundation: ComfyBench (CVPR 2025)
 /// Advanced Collaborative AI System Design for autonomous workflow orchestration
@@ -343,7 +342,7 @@ impl CollaborativeAIDesigner {
 
     async fn build_agent_contributions_map(
         &self,
-        design_id: &str,
+        _design_id: &str,
         total_time: Duration,
     ) -> HashMap<String, AgentContribution> {
         let mut contributions = HashMap::new();
@@ -750,7 +749,7 @@ impl RetrieveAgent {
 
     pub async fn gather_domain_knowledge(
         &self,
-        requirements: &SystemRequirements,
+        _requirements: &SystemRequirements,
     ) -> Result<KnowledgeContext, AgentError> {
         debug!("RetrieveAgent gathering domain knowledge");
 
@@ -818,7 +817,7 @@ impl StrategyGenerator {
     pub async fn generate_strategy(
         &self,
         requirements: &SystemRequirements,
-        knowledge: &KnowledgeContext,
+        _knowledge: &KnowledgeContext,
     ) -> Result<DesignStrategy, AgentError> {
         // Generate workflow code based on requirements
         let code = format!(
@@ -934,7 +933,7 @@ impl WorkflowIntegrator {
     pub async fn integrate(
         &self,
         workflow: &WorkflowDesign,
-        knowledge: &KnowledgeContext,
+        _knowledge: &KnowledgeContext,
     ) -> Result<WorkflowDesign, AgentError> {
         let mut integrated_workflow = workflow.clone();
 

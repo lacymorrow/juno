@@ -1211,7 +1211,7 @@ impl AdvancedMemoryManager {
 #[async_trait]
 impl MemoryManager for AdvancedMemoryManager {
     async fn add_message(&mut self, mut message: Message) -> Result<(), AgentError> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
 
         // Process screenshots BEFORE adding to memory (critical for token optimization)
         self.process_message_screenshots(&mut message).await?;

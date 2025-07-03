@@ -1,9 +1,9 @@
-use crate::cloud::commands::CommandResult;
+
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// Comprehensive testing framework for computer use AI agents
 /// Based on industry standards from OSWorld, Anthropic, and latest research

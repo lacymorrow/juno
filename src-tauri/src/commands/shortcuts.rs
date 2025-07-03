@@ -2,8 +2,8 @@
 
 use crate::state::{AppState, KeyboardShortcuts};
 use crate::settings::manager::SettingsManager;
-use tauri::{State, AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
+use tauri::{State, AppHandle};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tracing::{info, error, warn};
 use serde_json;
 

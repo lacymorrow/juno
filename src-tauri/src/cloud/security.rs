@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use super::types::{CloudError, CloudCommand, CloudCommandType};
-use super::config::{CloudConfig, SecurityLevel};
+use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 use crate::utils::current_timestamp_secs;
 

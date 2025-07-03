@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager, State};
+
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use crate::constants::events;
