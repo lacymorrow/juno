@@ -4,12 +4,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { UI } from "@/lib/constants.generated";
 
 export type AppState =
-  | "idle"
-  | typeof UI.BAR_STATES_LISTENING
-  | "processing"
-  | typeof UI.BAR_STATES_SPEAKING
-  | typeof UI.BAR_STATES_ERROR
-  | typeof UI.BAR_STATES_SUCCESS;
+  | typeof UI.AGENT_STATUS_IDLE
+  | typeof UI.AGENT_STATUS_LISTENING
+  | typeof UI.AGENT_STATUS_PROCESSING
+  | typeof UI.AGENT_STATUS_RESPONDING
+  | typeof UI.AGENT_STATUS_ERROR
+  | typeof UI.AGENT_STATUS_FINISHED;
 
 export interface AudioVisualizerProps {
   /** Current application state */
@@ -35,7 +35,7 @@ export interface AudioVisualizerProps {
 }
 
 export default function AudioVisualizer({
-  appState = "idle",
+  appState = UI.AGENT_STATUS_IDLE,
   width = 400,
   height = 100,
   enableMicrophone = false,
@@ -56,10 +56,12 @@ export default function AudioVisualizer({
   // Use refs for animation state to avoid re-renders
   const transitionProgressRef = useRef(1);
   const transitionStartTimeRef = useRef(0);
-  const previousStateRef = useRef<AppState>("idle");
+  const previousStateRef = useRef<AppState>(UI.AGENT_STATUS_IDLE);
 
   const [isActive, setIsActive] = useState(false);
-  const [currentState, setCurrentState] = useState<AppState>("idle");
+  const [currentState, setCurrentState] = useState<AppState>(
+    UI.AGENT_STATUS_IDLE
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Update current state when appState prop changes
@@ -137,7 +139,7 @@ export default function AudioVisualizer({
           : 1.0;
 
       switch (state) {
-        case "idle": {
+        case UI.AGENT_STATUS_IDLE: {
           // Gentle, slow breathing pattern - calm and waiting
           const breathe = Math.sin(time * 0.4) * 0.3 + 1;
           const flowPhase = time * 0.2;
@@ -146,7 +148,7 @@ export default function AudioVisualizer({
           return Math.abs(spatialWave) + baseAmplitude * 0.6;
         }
 
-        case UI.BAR_STATES_LISTENING: {
+        case UI.AGENT_STATUS_LISTENING: {
           // Active, responsive pattern with more energy
           const pulse = Math.sin(time * 1.2) * 0.6 + 1;
           const flowPhase = time * 0.5;
@@ -161,7 +163,7 @@ export default function AudioVisualizer({
           return Math.abs(spatialWave1 + spatialWave2) + baseAmplitude * 1.2;
         }
 
-        case "processing": {
+        case UI.AGENT_STATUS_PROCESSING: {
           // Rhythmic, analytical pattern - like thinking
           const process1 = Math.sin(time * 2.5) * 0.4 + 1;
           const process2 = Math.sin(time * 3.7) * 0.3 + 1;
@@ -185,7 +187,7 @@ export default function AudioVisualizer({
           );
         }
 
-        case UI.BAR_STATES_SPEAKING: {
+        case UI.AGENT_STATUS_RESPONDING: {
           // Dynamic, expressive pattern - like speech cadence
           const speech1 = Math.sin(time * 1.8) * 0.7 + 1;
           const speech2 = Math.sin(time * 2.3) * 0.5 + 1;
@@ -206,7 +208,7 @@ export default function AudioVisualizer({
           return Math.abs(spatialWave1 + spatialWave2) + baseAmplitude * 1.1;
         }
 
-        case UI.BAR_STATES_ERROR: {
+        case UI.AGENT_STATUS_ERROR: {
           // Sharp, irregular pattern - distress signal
           const jitter1 = Math.sin(time * 4.2) * 0.6 + 1;
           const jitter2 = Math.sin(time * 5.7) * 0.4 + 1;
@@ -230,7 +232,7 @@ export default function AudioVisualizer({
           );
         }
 
-        case UI.BAR_STATES_SUCCESS: {
+        case UI.AGENT_STATUS_FINISHED: {
           // Celebration pattern - triumphant and flowing
           const triumph1 = Math.sin(time * 1.5) * 0.8 + 1;
           const triumph2 = Math.sin(time * 2.1) * 0.6 + 1;
@@ -268,19 +270,30 @@ export default function AudioVisualizer({
 
   const getStateLayerConfig = useCallback(
     (state: AppState) => {
+      const stateColors = {
+        [UI.AGENT_STATUS_IDLE]: { r: 100, g: 116, b: 139 },
+        [UI.AGENT_STATUS_LISTENING]: { r: 30, g: 80, b: 190 },
+        [UI.AGENT_STATUS_PROCESSING]: { r: 168, g: 85, b: 247 },
+        [UI.AGENT_STATUS_RESPONDING]: { r: 34, g: 197, b: 94 },
+        [UI.AGENT_STATUS_ERROR]: { r: 239, g: 68, b: 68 },
+        [UI.AGENT_STATUS_FINISHED]: { r: 16, g: 185, b: 129 },
+      };
+
       const defaultColors = {
         idle: { r: 100, g: 116, b: 139 },
         listening: { r: 30, g: 80, b: 190 },
         processing: { r: 168, g: 85, b: 247 },
-        speaking: { r: 34, g: 197, b: 94 },
+        responding: { r: 34, g: 197, b: 94 },
         error: { r: 239, g: 68, b: 68 },
-        success: { r: 16, g: 185, b: 129 },
+        finished: { r: 16, g: 185, b: 129 },
       };
 
-      const color = stateColors?.[state] || defaultColors[state];
+      const color =
+        stateColors[state] ||
+        defaultColors[state as keyof typeof defaultColors];
 
       switch (state) {
-        case "idle":
+        case UI.AGENT_STATUS_IDLE:
           return [
             {
               color,
@@ -315,7 +328,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case UI.BAR_STATES_LISTENING:
+        case UI.AGENT_STATUS_LISTENING:
           return [
             {
               color,
@@ -359,7 +372,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case "processing":
+        case UI.AGENT_STATUS_PROCESSING:
           return [
             {
               color,
@@ -403,7 +416,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case UI.BAR_STATES_SPEAKING:
+        case UI.AGENT_STATUS_RESPONDING:
           return [
             {
               color,
@@ -447,7 +460,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case UI.BAR_STATES_ERROR:
+        case UI.AGENT_STATUS_ERROR:
           return [
             {
               color,
@@ -486,7 +499,7 @@ export default function AudioVisualizer({
             },
           ];
 
-        case UI.BAR_STATES_SUCCESS:
+        case UI.AGENT_STATUS_FINISHED:
           return [
             {
               color,
@@ -555,23 +568,55 @@ export default function AudioVisualizer({
     (fromState: AppState, toState: AppState) => {
       // Different transition speeds based on state changes
       const stateSpeeds = {
-        idle: 2000,
-        listening: 800,
-        processing: 1200,
-        speaking: 600,
-        error: 400, // Quick for immediate feedback
-        success: 1000,
+        [UI.AGENT_STATUS_IDLE]: 1000,
+        [UI.AGENT_STATUS_LISTENING]: 800,
+        [UI.AGENT_STATUS_PROCESSING]: 1200,
+        [UI.AGENT_STATUS_RESPONDING]: 600,
+        [UI.AGENT_STATUS_ERROR]: 400,
+        [UI.AGENT_STATUS_FINISHED]: 1000,
       };
 
+      const defaultSpeeds = {
+        idle: 1000,
+        listening: 800,
+        processing: 1200,
+        responding: 600,
+        error: 400,
+        finished: 1000,
+      };
+
+      const fromSpeed =
+        stateSpeeds[fromState] ||
+        defaultSpeeds[fromState as keyof typeof defaultSpeeds] ||
+        1000;
+      const toSpeed =
+        stateSpeeds[toState] ||
+        defaultSpeeds[toState as keyof typeof defaultSpeeds] ||
+        1000;
+
       // Special case transitions
-      if (fromState === "error" || toState === "error") return 300; // Very fast error states
-      if (fromState === "success" && toState === "idle") return 2000; // Slow fade from success
-      if (fromState === "idle" && toState === "listening") return 600; // Quick activation
-      if (fromState === "processing" && toState === "speaking") return 400; // Quick response
+      if (
+        fromState === UI.AGENT_STATUS_ERROR ||
+        toState === UI.AGENT_STATUS_ERROR
+      )
+        return 300; // Very fast error states
+      if (
+        fromState === UI.AGENT_STATUS_FINISHED &&
+        toState === UI.AGENT_STATUS_IDLE
+      )
+        return 2000; // Slow fade from success
+      if (
+        fromState === UI.AGENT_STATUS_IDLE &&
+        toState === UI.AGENT_STATUS_LISTENING
+      )
+        return 600; // Quick activation
+      if (
+        fromState === UI.AGENT_STATUS_PROCESSING &&
+        toState === UI.AGENT_STATUS_RESPONDING
+      )
+        return 400; // Quick response
 
       // Use average of both states
-      const fromSpeed = stateSpeeds[fromState] || 1000;
-      const toSpeed = stateSpeeds[toState] || 1000;
       return (fromSpeed + toSpeed) / 2;
     },
     []
@@ -580,22 +625,25 @@ export default function AudioVisualizer({
   const getTransitionEasing = useCallback(
     (fromState: AppState, toState: AppState, t: number) => {
       // Different easing for different state transitions
-      if (fromState === "error" || toState === "error") {
+      if (
+        fromState === UI.AGENT_STATUS_ERROR ||
+        toState === UI.AGENT_STATUS_ERROR
+      ) {
         // Sharp, immediate transitions for errors
         return t < 0.3 ? 4 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       }
 
-      if (fromState === "success") {
+      if (fromState === UI.AGENT_STATUS_FINISHED) {
         // Gentle fade out from success
         return Math.sin((t * Math.PI) / 2);
       }
 
-      if (toState === "listening") {
+      if (toState === UI.AGENT_STATUS_LISTENING) {
         // Quick ramp up to listening
         return t * t;
       }
 
-      if (toState === "processing") {
+      if (toState === UI.AGENT_STATUS_PROCESSING) {
         // Smooth into processing
         return t * t * t * (t * (t * 6 - 15) + 10);
       }
@@ -652,7 +700,7 @@ export default function AudioVisualizer({
       isActive &&
       analyserRef.current &&
       dataArrayRef.current &&
-      currentState === UI.BAR_STATES_LISTENING
+      currentState === UI.AGENT_STATUS_LISTENING
     ) {
       analyserRef.current.getByteFrequencyData(dataArrayRef.current);
       // Enhanced microphone processing for more dramatic but smooth effects
@@ -805,12 +853,15 @@ export default function AudioVisualizer({
 
           // State-specific intensity modifiers
           let intensityMultiplier = 1.0;
-          if (state === UI.BAR_STATES_LISTENING) intensityMultiplier = 1.3;
-          else if (state === UI.BAR_STATES_SPEAKING) intensityMultiplier = 1.5;
-          else if (state === "processing") intensityMultiplier = 1.1;
-          else if (state === UI.BAR_STATES_ERROR) intensityMultiplier = 0.9;
-          else if (state === UI.BAR_STATES_SUCCESS) intensityMultiplier = 1.2;
-          else if (state === "idle") intensityMultiplier = 0.7;
+          if (state === UI.AGENT_STATUS_LISTENING) intensityMultiplier = 1.3;
+          else if (state === UI.AGENT_STATUS_RESPONDING)
+            intensityMultiplier = 1.5;
+          else if (state === UI.AGENT_STATUS_PROCESSING)
+            intensityMultiplier = 1.1;
+          else if (state === UI.AGENT_STATUS_ERROR) intensityMultiplier = 0.9;
+          else if (state === UI.AGENT_STATUS_FINISHED)
+            intensityMultiplier = 1.2;
+          else if (state === UI.AGENT_STATUS_IDLE) intensityMultiplier = 0.7;
 
           const gradient = ctx.createRadialGradient(
             width / 2,
@@ -950,7 +1001,7 @@ export default function AudioVisualizer({
             }
 
             const audioInfluence =
-              isActive && currentState === UI.BAR_STATES_LISTENING
+              isActive && currentState === UI.AGENT_STATUS_LISTENING
                 ? (audioValue / 255) *
                   height *
                   (0.35 + depth * 0.25) *
@@ -1019,8 +1070,8 @@ export default function AudioVisualizer({
 
           // Add state-specific effects
           if (
-            (state === UI.BAR_STATES_SPEAKING ||
-              state === UI.BAR_STATES_SUCCESS) &&
+            (state === UI.AGENT_STATUS_RESPONDING ||
+              state === UI.AGENT_STATUS_FINISHED) &&
             depth > 0.7
           ) {
             ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${
@@ -1052,11 +1103,14 @@ export default function AudioVisualizer({
   useEffect(() => {
     if (
       enableMicrophone &&
-      currentState === UI.BAR_STATES_LISTENING &&
+      currentState === UI.AGENT_STATUS_LISTENING &&
       !isActive
     ) {
       startAudioCapture();
-    } else if (!enableMicrophone || currentState !== UI.BAR_STATES_LISTENING) {
+    } else if (
+      !enableMicrophone ||
+      currentState !== UI.AGENT_STATUS_LISTENING
+    ) {
       stopAudioCapture();
     }
   }, [
@@ -1095,8 +1149,8 @@ export default function AudioVisualizer({
         style={{
           background: "transparent",
           filter:
-            currentState === UI.BAR_STATES_LISTENING ||
-            currentState === UI.BAR_STATES_SPEAKING
+            currentState === UI.AGENT_STATUS_LISTENING ||
+            currentState === UI.AGENT_STATUS_RESPONDING
               ? "brightness(1.15) saturate(1.3)"
               : "brightness(0.95)",
         }}

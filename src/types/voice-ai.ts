@@ -2,13 +2,11 @@ import { UI } from "@/lib/constants.generated";
 
 export type AssistantState =
 	| typeof UI.AGENT_STATUS_IDLE
-	| typeof UI.BAR_STATES_LISTENING
+	| typeof UI.AGENT_STATUS_LISTENING
 	| typeof UI.AGENT_STATUS_PROCESSING
-	| typeof UI.BAR_STATES_SPEAKING
-	| typeof UI.BAR_STATES_ERROR
-	| typeof UI.BAR_STATES_SUCCESS
-	| typeof UI.BAR_STATES_INPUT
-	| typeof UI.AGENT_STATUS_RESPONDING;
+	| typeof UI.AGENT_STATUS_RESPONDING
+	| typeof UI.AGENT_STATUS_ERROR
+	| typeof UI.AGENT_STATUS_FINISHED;
 
 export type ContentType = "text" | "code" | "component" | "image" | "video";
 

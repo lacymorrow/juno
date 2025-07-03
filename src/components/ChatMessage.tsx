@@ -1,4 +1,3 @@
-import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,8 +18,13 @@ import {
   Volume2,
   ChevronDown,
   ChevronRight,
+  Brain,
+  CheckCircle,
+  XCircle,
+  WifiOff,
 } from "lucide-react";
 import { useState } from "react";
+import { UI } from "@/lib/constants.generated";
 
 // Type for conversation messages (imported from App.tsx)
 export type ChatMessage = {
@@ -28,7 +32,7 @@ export type ChatMessage = {
     | "user"
     | "assistant"
     | "system"
-    | "thinking"
+    | typeof UI.AGENT_STATUS_THINKING
     | "tool_call_request"
     | "tool_call_result";
   content: string;
@@ -142,13 +146,20 @@ export function ChatMessageComponent({
   onSaveResponse,
 }: ChatMessageProps) {
   // Handle special message types with existing components
-  if (msg.role === "thinking") {
+  if (msg.role === UI.AGENT_STATUS_THINKING) {
     return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} />
+      <div className="flex justify-start">
+        <div className="flex items-start gap-3 max-w-[80%]">
+          <div className="bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-lg p-3 min-w-[40px] flex items-center justify-center">
+            <Brain className="h-5 w-5" />
+          </div>
+          <div className="bg-gradient-to-br from-orange-100 to-red-100 text-orange-900 rounded-lg p-3 border border-orange-200">
+            <div className="text-sm font-medium mb-1">Agent Thinking</div>
+            <div className="text-sm opacity-90 whitespace-pre-wrap">
+              {msg.content}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -202,31 +213,31 @@ export function ChatMessageComponent({
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
           <span className="text-muted-foreground italic flex items-center gap-2">
-            {msg.agent_state === "Finished" ? (
-              <>
-                <span>✓</span>
-                <span>Task completed successfully</span>
-              </>
-            ) : msg.agent_state === "Failed" ? (
-              <>
-                <span className="text-red-500">✗</span>
-                <span className="text-red-500">Task failed</span>
-              </>
-            ) : msg.agent_state === "Cancelled" ? (
-              <>
-                <span className="text-yellow-500">⊘</span>
-                <span className="text-yellow-500">Task cancelled</span>
-              </>
-            ) : msg.agent_state === "Offline" ? (
-              <>
-                <span className="text-orange-500">⚠</span>
-                <span className="text-orange-500">Connection unavailable</span>
-              </>
+            {msg.agent_state === UI.AGENT_STATUS_FINISHED ? (
+              <div className="flex items-center gap-1.5 text-green-600">
+                <CheckCircle className="h-3 w-3" />
+                <span className="text-xs">Complete</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_FAILED ? (
+              <div className="flex items-center gap-1.5 text-red-600">
+                <XCircle className="h-3 w-3" />
+                <span className="text-xs">Failed</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_CANCELLED ? (
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <XCircle className="h-3 w-3" />
+                <span className="text-xs">Cancelled</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_OFFLINE ? (
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <WifiOff className="h-3 w-3" />
+                <span className="text-xs">Offline</span>
+              </div>
             ) : (
-              <>
-                <span>✓</span>
-                <span>Task completed</span>
-              </>
+              <div className="flex items-center gap-1.5 text-green-600">
+                <CheckCircle className="h-3 w-3" />
+                <span className="text-xs">Complete</span>
+              </div>
             )}
           </span>
         ) : msg.isJsx ||

@@ -228,10 +228,10 @@ export function AppBar() {
     let bgColor = "bg-black/90";
 
     switch (currentState?.voiceMode) {
-      case "dictation":
+      case UI.VOICE_MODES_DICTATION:
         bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
         break;
-      case "agent":
+      case UI.VOICE_MODES_AGENT:
         bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
         break;
       default:
@@ -299,7 +299,7 @@ export function AppBar() {
           <div className="flex items-center gap-2" data-tauri-drag-region>
             {getMainIcon(currentState?.uiState || UI.BAR_STATES_DEFAULT)}
             {uiConfig.showVoiceIndicator &&
-              (currentState?.voiceMode !== "idle" ||
+              (currentState?.voiceMode !== UI.VOICE_MODES_IDLE ||
                 currentState?.isDictationMode ||
                 currentState?.isAgentWorking) && (
                 <VoiceStatusIndicator variant="compact" className="ml-1" />
