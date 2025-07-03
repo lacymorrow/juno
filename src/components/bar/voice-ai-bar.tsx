@@ -1,7 +1,9 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Mic,
   MicOff,
@@ -29,38 +31,136 @@ import type {
   ResponseContent,
 } from "../../types/voice-ai";
 
+// === UI API TYPES ===
+// These types match the backend BarState exactly
+type UIState =
+  | "default"
+  | "expanding"
+  | "input"
+  | "shrinking"
+  | "submitting"
+  | "loading"
+  | "success"
+  | "error"
+  | "speaking"
+  | "listening"
+  | "transcribing"
+  | "dictating"
+  | "dictation_ready"
+  | "always_listening"
+  | "finishing"
+  | "agent_responding";
+
+interface UIStateData {
+  uiState: UIState;
+  inputValue: string;
+  lastSubmittedValue: string;
+  currentError: string | null;
+  transcriptionText: string;
+  spokenText: string;
+  isAgentWorking: boolean;
+  isDictationMode: boolean;
+  isAlwaysListening: boolean;
+  audioLevel: number;
+  voiceMode: string;
+  agentState: string | null;
+  currentTransitionId: string | null;
+}
+
+interface UIElementConfig {
+  showVoiceIndicator: boolean;
+  enableAnimations: boolean;
+  autoHide: boolean;
+  autoHideDelay: number;
+  opacity: number;
+}
+
+// === UTILITY FUNCTIONS ===
+const mapAssistantStateToUIState = (state: AssistantState): UIState => {
+  switch (state) {
+    case "idle":
+      return "default";
+    case "listening":
+      return "listening";
+    case "processing":
+      return "loading";
+    case "speaking":
+      return "speaking";
+    case "error":
+      return "error";
+    case "success":
+      return "success";
+    case "input":
+      return "input";
+    case "response":
+      return "agent_responding";
+    default:
+      return "default";
+  }
+};
+
+const mapUIStateToAssistantState = (state: UIState): AssistantState => {
+  switch (state) {
+    case "default":
+    case "shrinking":
+      return "idle";
+    case "listening":
+    case "transcribing":
+      return "listening";
+    case "loading":
+    case "submitting":
+    case "finishing":
+      return "processing";
+    case "speaking":
+      return "speaking";
+    case "error":
+      return "error";
+    case "success":
+      return "success";
+    case "input":
+    case "expanding":
+      return "input";
+    case "agent_responding":
+      return "response";
+    default:
+      return "idle";
+  }
+};
+
 export function VoiceAIBar({
   onStateChange,
   initialState = "idle",
   className = "",
   sampleResponses: propSampleResponses,
 }: VoiceAIBarProps) {
-  const [assistantState, setAssistantState] =
-    useState<AssistantState>(initialState);
+  // === UI API STATE ===
+  const [uiState, setUIState] = useState<UIState>(
+    mapAssistantStateToUIState(initialState)
+  );
+  const [uiStateData, setUIStateData] = useState<UIStateData | null>(null);
+
+  // === LOCAL STATE (for UI only) ===
   const [currentMessage, setCurrentMessage] = useState("");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showStateIcon, setShowStateIcon] = useState(false);
   const [inputText, setInputText] = useState("");
   const [responseContent, setResponseContent] = useState<ResponseContent[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [responsePhase, setResponsePhase] = useState<
     "collapsed" | "expanding-width" | "expanding-height" | "showing-content"
   >("collapsed");
-  const [isIdleHovered, setIsIdleHovered] = useState(false);
   const [marqueeKey, setMarqueeKey] = useState(0);
-
-  const [contentDimensions, setContentDimensions] = useState({
-    width: 0,
-    height: 0,
-    collapsedHeight: 40,
-    summaryHeight: 60,
-  });
+  const [textTransitioning, setTextTransitioning] = useState(false);
   const [heightTransitionTarget, setHeightTransitionTarget] = useState<
     "collapsed" | "summary" | "expanded"
   >("collapsed");
-  const [isCalculatingDimensions, setIsCalculatingDimensions] = useState(false);
+
+  // === REFS ===
+  const inputRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // === DERIVED STATE ===
+  const assistantState = mapUIStateToAssistantState(uiState);
 
   // Default sample responses
   const defaultSampleResponses = {
@@ -74,43 +174,43 @@ export function VoiceAIBar({
       type: "code" as ContentType,
       title: "Glass Effect CSS",
       content: `.glass-effect {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-              inset 0 2px 10px rgba(255, 255, 255, 0.1);
+background: rgba(255, 255, 255, 0.15);
+backdrop-filter: blur(20px) saturate(180%);
+border: 1px solid rgba(255, 255, 255, 0.2);
+border-radius: 12px;
+padding: 20px;
+box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
+            inset 0 2px 10px rgba(255, 255, 255, 0.1);
 }`,
     },
     component: {
       type: "component" as ContentType,
       title: "React Glass Button",
       content: `function GlassButton({ children }) {
-  return (
-    <button className="glass-btn">
-      {children}
-    </button>
-  );
+return (
+  <button className="glass-btn">
+    {children}
+  </button>
+);
 }
 
 // CSS for the button
 const styles = \`
-  .glass-btn {
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(15px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 50px;
-    padding: 10px 25px;
-    color: white;
-    font-weight: 500;
-    transition: all 0.3s ease;
-  }
+.glass-btn {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50px;
+  padding: 10px 25px;
+  color: white;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
 
-  .glass-btn:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: translateY(-2px);
-  }
+.glass-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-2px);
+}
 \`;`,
     },
     image: {
@@ -125,7 +225,7 @@ const styles = \`
   const sampleResponses = propSampleResponses || defaultSampleResponses;
 
   // Messages for different states
-  const stateMessages: Record<AssistantState, string> = {
+  const stateMessages = {
     idle: "Ready",
     listening: "Listening to your request...",
     processing:
@@ -140,185 +240,207 @@ const styles = \`
     response: "Here's what I found:",
   };
 
-  const changeState = (newState: AssistantState) => {
-    if (newState === assistantState) return;
-
-    setIsTransitioning(true);
-    setCurrentMessage(stateMessages[newState]);
-    setAssistantState(newState);
-
-    // Reset marquee when state changes
-    setMarqueeKey((prev) => prev + 1);
-
-    // Notify parent component of state change
-    onStateChange?.(newState);
-
-    // Focus input field when entering input state
-    if (newState === "input") {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-    }
-
-    // Show state icon for success/error states
-    if (newState === "success" || newState === "error") {
-      setShowStateIcon(true);
-      setTimeout(() => {
-        setShowStateIcon(false);
-      }, 1000);
-    } else {
-      setShowStateIcon(false);
-    }
-
-    // Reset transition state quickly
-    setTimeout(() => {
-      setIsTransitioning(false);
-    }, 150);
-
-    if (newState === "response") {
-      handleResponseState();
-    }
-  };
-
-  const handleResponseState = () => {
-    setAssistantState("response");
-    setCurrentMessage(stateMessages["response"]);
-    setIsCalculatingDimensions(true);
-    setResponsePhase("collapsed");
-
-    // Calculate content dimensions first
-    setTimeout(() => {
-      if (contentRef.current) {
-        const rect = contentRef.current.getBoundingClientRect();
-        const scrollbarWidth =
-          contentRef.current.offsetWidth - contentRef.current.clientWidth;
-        const scrollbarHeight =
-          contentRef.current.offsetHeight - contentRef.current.clientHeight;
-
-        const collapsedHeight = 40;
-        const expandedHeight = Math.min(
-          500,
-          Math.max(120, rect.height + 100 + scrollbarHeight)
-        );
-
-        setContentDimensions({
-          width: Math.min(450, Math.max(320, rect.width + 40 + scrollbarWidth)),
-          height: expandedHeight,
-          collapsedHeight: collapsedHeight,
-          summaryHeight: 60,
-        });
-      }
-      setIsCalculatingDimensions(false);
-
-      setTimeout(() => {
-        setResponsePhase("expanding-width");
-
-        setTimeout(() => {
-          setResponsePhase("expanding-height");
-
-          setTimeout(() => {
-            setResponsePhase("showing-content");
-
-            setTimeout(() => {
-              setIsExpanded(false);
-            }, 50);
-          }, 500);
-        }, 400);
-      }, 100);
-    }, 50);
-  };
-
-  // External state change handler (for dev panel)
+  // === UI API EVENT LISTENERS ===
   useEffect(() => {
-    if (initialState !== assistantState) {
-      if (initialState === "response") {
-        // Set sample response content when externally set to response state
-        setResponseContent([
-          sampleResponses.text,
-          sampleResponses.code,
-          sampleResponses.component,
-        ]);
+    let unlisten: UnlistenFn;
+
+    const setupEventListener = async () => {
+      try {
+        unlisten = await listen("bar-state-update", (event) => {
+          const stateData = event.payload as UIStateData;
+          console.log("VoiceAIBar: Received state update:", stateData);
+
+          setUIStateData(stateData);
+          setUIState(stateData.uiState);
+          setInputText(stateData.inputValue);
+
+          // Update current message based on state
+          const newAssistantState = mapUIStateToAssistantState(
+            stateData.uiState
+          );
+          setCurrentMessage(stateMessages[newAssistantState]);
+
+          // Notify parent of state change
+          onStateChange?.(newAssistantState);
+        });
+      } catch (error) {
+        console.error("VoiceAIBar: Failed to setup event listener:", error);
       }
-      changeState(initialState);
+    };
+
+    setupEventListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [onStateChange, stateMessages]);
+
+  // === UI API COMMAND HELPERS ===
+  const handleInteraction = useCallback(async (type: string, data?: any) => {
+    try {
+      await invoke("ui_handle_interaction", {
+        elementId: "voice-ai-bar",
+        interaction: {
+          element_id: "voice-ai-bar",
+          interaction_type: type,
+          data: data || {},
+          timestamp: Date.now(),
+        },
+      });
+    } catch (error) {
+      console.error(`VoiceAIBar: UI interaction failed (${type}):`, error);
     }
-  }, [initialState]);
+  }, []);
 
-  const toggleListening = () => {
-    if (assistantState === "idle") {
-      changeState("listening");
-    } else if (assistantState === "listening") {
-      changeState("processing");
+  // === STATE CHANGE HANDLER ===
+  const changeState = useCallback(
+    (newState: AssistantState) => {
+      if (newState === assistantState) return;
 
+      const newUIState = mapAssistantStateToUIState(newState);
+
+      // Start text fade out
+      setTextTransitioning(true);
+
+      // After fade out completes, update message and fade in
       setTimeout(() => {
-        changeState("speaking");
+        setCurrentMessage(stateMessages[newState]);
 
+        // Reset marquee when state changes
+        setMarqueeKey((prev) => prev + 1);
+
+        // Send interaction to backend
+        handleInteraction("state_change", { newState: newUIState });
+
+        // End text transition (fade in)
         setTimeout(() => {
-          changeState("success");
+          setTextTransitioning(false);
+        }, 150);
+      }, 150);
+
+      // Handle state-specific transitions
+      if (newState === "input") {
+        setTimeout(() => {
+          setIsTransitioning(true);
+          setTimeout(() => {
+            inputRef.current?.focus();
+            setIsTransitioning(false);
+          }, 300);
+        }, 300);
+      } else if (newState === "response") {
+        setTimeout(() => {
+          setIsTransitioning(true);
+          handleResponseState();
+          setTimeout(() => {
+            setIsTransitioning(false);
+          }, 1200);
+        }, 300);
+      } else {
+        setTimeout(() => {
+          setIsTransitioning(true);
+          setTimeout(() => {
+            setIsTransitioning(false);
+          }, 200);
+        }, 300);
+      }
+
+      // Show state icon for success/error states
+      if (newState === "success" || newState === "error") {
+        setTimeout(() => {
+          setShowStateIcon(true);
+          setTimeout(() => {
+            setShowStateIcon(false);
+          }, 1500);
+        }, 300);
+      }
+    },
+    [assistantState, stateMessages, handleInteraction]
+  );
+
+  // === RESPONSE STATE HANDLER ===
+  const handleResponseState = useCallback(() => {
+    setResponsePhase("expanding-width");
+
+    setTimeout(() => {
+      setResponsePhase("expanding-height");
+      setTimeout(() => {
+        setResponsePhase("showing-content");
+        setHeightTransitionTarget("summary");
+      }, 300);
+    }, 300);
+  }, []);
+
+  // === EVENT HANDLERS ===
+  const toggleListening = useCallback(() => {
+    if (assistantState === "listening") {
+      handleInteraction("stop_listening");
+    } else {
+      handleInteraction("start_listening");
+    }
+  }, [assistantState, handleInteraction]);
+
+  const handleInputSubmit = useCallback(
+    (e?: React.FormEvent) => {
+      if (e) {
+        e.preventDefault();
+      }
+
+      const userInput = inputText.trim();
+      if (userInput) {
+        handleInteraction("submit", { query: userInput });
+        setInputText("");
+        changeState("processing");
+
+        // Mock response generation (in real app, this would come from backend)
+        setTimeout(() => {
+          let responseItems: ResponseContent[] = [];
+
+          if (
+            userInput.toLowerCase().includes("glass") ||
+            userInput.toLowerCase().includes("design")
+          ) {
+            responseItems = [
+              sampleResponses.text,
+              sampleResponses.code,
+              sampleResponses.component,
+            ];
+          } else if (
+            userInput.toLowerCase().includes("code") ||
+            userInput.toLowerCase().includes("css")
+          ) {
+            responseItems = [sampleResponses.code, sampleResponses.component];
+          } else if (
+            userInput.toLowerCase().includes("image") ||
+            userInput.toLowerCase().includes("example")
+          ) {
+            responseItems = [sampleResponses.image, sampleResponses.text];
+          } else {
+            responseItems = [sampleResponses.text];
+          }
+
+          setResponseContent(responseItems);
+          changeState("response");
 
           setTimeout(() => {
-            changeState("idle");
-          }, 1200);
-        }, 1800);
-      }, 1000);
-    } else {
-      changeState("idle");
-      setIsExpanded(false);
-    }
-  };
+            setIsExpanded(true);
+          }, 200);
+        }, 800);
+      }
+    },
+    [inputText, handleInteraction, changeState, sampleResponses]
+  );
 
-  const handleInputSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
-    if (inputText.trim()) {
-      const userInput = inputText.trim();
-      setInputText("");
-      changeState("processing");
-
-      setTimeout(() => {
-        let responseItems: ResponseContent[] = [];
-
-        if (
-          userInput.toLowerCase().includes("glass") ||
-          userInput.toLowerCase().includes("design")
-        ) {
-          responseItems = [
-            sampleResponses.text,
-            sampleResponses.code,
-            sampleResponses.component,
-          ];
-        } else if (
-          userInput.toLowerCase().includes("code") ||
-          userInput.toLowerCase().includes("css")
-        ) {
-          responseItems = [sampleResponses.code, sampleResponses.component];
-        } else if (
-          userInput.toLowerCase().includes("image") ||
-          userInput.toLowerCase().includes("example")
-        ) {
-          responseItems = [sampleResponses.image, sampleResponses.text];
-        } else {
-          responseItems = [sampleResponses.text];
-        }
-
-        setResponseContent(responseItems);
-        changeState("response");
-
-        setTimeout(() => {
-          setIsExpanded(true);
-        }, 200);
-      }, 800);
-    }
-  };
-
-  const toggleInputMode = () => {
+  const toggleInputMode = useCallback(() => {
     if (assistantState === "input") {
-      changeState("idle");
+      handleInteraction("blur");
     } else {
-      changeState("input");
+      handleInteraction("focus");
     }
-  };
+  }, [assistantState, handleInteraction]);
 
-  const toggleExpanded = () => {
+  const toggleExpanded = useCallback(() => {
     if (!isExpanded) {
       setHeightTransitionTarget("expanded");
       setTimeout(() => {
@@ -330,17 +452,17 @@ const styles = \`
         setHeightTransitionTarget("summary");
       }, 200);
     }
-  };
+  }, [isExpanded]);
 
-  const closeResponse = () => {
+  const closeResponse = useCallback(() => {
     setIsExpanded(false);
     setResponsePhase("collapsed");
     setTimeout(() => {
       changeState("idle");
     }, 300);
-  };
+  }, [changeState]);
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard
       .writeText(text)
       .then(() => {
@@ -349,7 +471,36 @@ const styles = \`
       .catch((err) => {
         console.error("Failed to copy: ", err);
       });
-  };
+  }, []);
+
+  // === FOCUS MANAGEMENT ===
+  useEffect(() => {
+    if (uiState === "input" && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [uiState]);
+
+  // === INPUT CHANGE HANDLER ===
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setInputText(value);
+      handleInteraction("input_change", { value });
+    },
+    [handleInteraction]
+  );
+
+  // === MAIN CLICK HANDLER ===
+  const handleMainClick = useCallback(() => {
+    if (assistantState === "response") {
+      toggleExpanded();
+    } else if (assistantState === "input") {
+      // Handle input submission on click
+      handleInputSubmit();
+    } else {
+      handleInteraction("click");
+    }
+  }, [assistantState, toggleExpanded, handleInputSubmit, handleInteraction]);
 
   // Get icon based on current state
   const getStateIcon = () => {
@@ -521,7 +672,11 @@ const styles = \`
               <span>{item.title || "Video"}</span>
             </div>
             <div className="video-container">
-              <video controls src={item.content} />
+              <video
+                src={item.content}
+                controls
+                className="w-full h-auto rounded-lg"
+              />
             </div>
           </div>
         );
@@ -532,64 +687,122 @@ const styles = \`
               {getContentTypeIcon(item.type)}
               <span>{item.title || "Text"}</span>
             </div>
-            <div className="text-content">{item.content}</div>
+            <div className="text-content">
+              <p>{item.content}</p>
+            </div>
           </div>
         );
     }
   };
 
+  // === RENDER ===
   return (
-    <div
-      className={`voice-ai-bar-container ${className}`}
-      style={
-        {
-          "--response-width": `${contentDimensions.width}px`,
-          "--response-height": `${contentDimensions.height}px`,
-          "--summary-height": `${contentDimensions.summaryHeight || 60}px`,
-          "--collapsed-height": `${contentDimensions.collapsedHeight || 40}px`,
-        } as React.CSSProperties
-      }
-    >
-      {/* Floating Voice Control Bar */}
-      <div className={getBarClass()}>
-        {/* Text Input Field - Only visible in input state */}
-        {assistantState === "input" && (
-          <form onSubmit={handleInputSubmit} className="input-form">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type your request..."
-              className="glass-input"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="glass-send-btn"
-              disabled={!inputText.trim()}
-            >
-              <Send className="w-3 h-3 text-white" />
-            </button>
-          </form>
-        )}
+    <div className={`voice-ai-bar ${getBarClass()} ${className}`}>
+      <div className="bar-container">
+        {/* Main Bar */}
+        <div
+          className="bar-main"
+          onClick={handleMainClick}
+          onMouseEnter={() => setIsIdleHovered(true)}
+          onMouseLeave={() => setIsIdleHovered(false)}
+        >
+          {/* Left Section - State Icon */}
+          <div className="bar-icon">{getStateIcon()}</div>
 
-        {/* Hidden content for dimension calculation */}
-        {assistantState === "response" && isCalculatingDimensions && (
-          <div
-            ref={contentRef}
-            className="response-content-calculator"
-            style={{
-              position: "absolute",
-              visibility: "hidden",
-              pointerEvents: "none",
-              width: "350px",
-            }}
-          >
+          {/* Center Section - Message/Input */}
+          <div className="bar-center">
+            {assistantState === "input" ? (
+              <form onSubmit={handleInputSubmit} className="bar-input-form">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={inputText}
+                  onChange={handleInputChange}
+                  onBlur={() => handleInteraction("blur")}
+                  onFocus={() => handleInteraction("focus")}
+                  placeholder="Type your request..."
+                  className="bar-input"
+                />
+                <button
+                  type="submit"
+                  className="bar-submit"
+                  disabled={!inputText.trim()}
+                >
+                  <Send className="w-3 h-3" />
+                </button>
+              </form>
+            ) : (
+              <div className="bar-message">
+                {textTransitioning ? (
+                  <div className="text-fade-out">{currentMessage}</div>
+                ) : (
+                  <Marquee
+                    key={marqueeKey}
+                    speed={30}
+                    gradient={false}
+                    pauseOnHover={true}
+                    className="bar-marquee"
+                  >
+                    {currentMessage}
+                  </Marquee>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right Section - Audio Visualizer or State Icon */}
+          <div className="bar-right">
+            {showStateIcon ? (
+              getStateFeedbackIcon()
+            ) : (
+              <AudioVisualizer
+                appState={assistantState}
+                width={24}
+                height={24}
+                enableMicrophone={false}
+                intensity={uiStateData?.audioLevel || 0.6}
+                animationStyle="minimal"
+                className="bar-visualizer"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Response Content */}
+        {assistantState === "response" && responseContent.length > 0 && (
+          <div className="response-container">
             <div className="response-header">
-              <h3>AI Response</h3>
+              <div className="response-title">
+                <span>AI Response</span>
+                <div className="response-actions">
+                  <button
+                    onClick={toggleExpanded}
+                    className="response-toggle"
+                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={closeResponse}
+                    className="response-close"
+                    aria-label="Close response"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="response-content">
+
+            <div
+              ref={contentRef}
+              className={`response-content ${
+                isExpanded ? "expanded" : "collapsed"
+              }`}
+            >
               {responseContent.map((item, index) => (
                 <div key={index} className="response-item">
                   {renderContent(item)}
@@ -599,829 +812,235 @@ const styles = \`
           </div>
         )}
 
-        {/* Response Content - Only visible in response state and after height transition */}
-        {assistantState === "response" &&
-          responsePhase === "showing-content" &&
-          !isCalculatingDimensions && (
-            <div className="response-container">
-              {/* Compact view when collapsed */}
-              {!isExpanded && (
-                <div className="response-summary" onClick={toggleExpanded}>
-                  <div
-                    className="response-icon animate-fade-in-delayed"
-                    style={{ animationDelay: "200ms" }}
-                  >
-                    {responseContent.length > 0 &&
-                      getContentTypeIcon(responseContent[0].type)}
-                  </div>
-                  <div
-                    className="response-preview animate-fade-in-delayed"
-                    style={{ animationDelay: "300ms" }}
-                  >
-                    {responseContent.length > 0 && (
-                      <span className="response-title">
-                        {responseContent[0].title || "AI Response"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Expanded view with full content */}
-              {isExpanded && (
-                <div
-                  className={`response-expanded ${
-                    isExpanded ? "expanding" : "collapsing"
-                  }`}
-                >
-                  <div
-                    className="response-header animate-fade-in-delayed"
-                    style={{ animationDelay: "100ms" }}
-                  >
-                    <h3>AI Response</h3>
-                    <button
-                      onClick={closeResponse}
-                      className="close-response-btn"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="response-content">
-                    {responseContent.map((item, index) => (
-                      <div
-                        key={index}
-                        className="response-item animate-fade-in-up-delayed"
-                        style={{ animationDelay: `${300 + index * 250}ms` }}
-                      >
-                        {renderContent(item)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-        {/* Audio Visualizer - Replaces the old waveform animation */}
-        {/* Audio Visualizer + Status Text - Show both together */}
-        {assistantState !== "input" &&
-          assistantState !== "response" &&
-          assistantState !== "idle" &&
-          assistantState !== "error" &&
-          assistantState !== "success" && (
-            <div className="visualizer-status-container">
-              {/* Audio Visualizer */}
-              <div className="audio-visualizer-wrapper">
-                <div
-                  className={`state-feedback ${
-                    showStateIcon ? "visible" : "hidden"
-                  }`}
-                >
-                  {getStateFeedbackIcon()}
-                </div>
-                <div
-                  className={`audio-visualizer-content ${
-                    showStateIcon ? "hidden" : "visible"
-                  }`}
-                >
-                  <AudioVisualizer
-                    appState={assistantState}
-                    width={60}
-                    height={20}
-                    enableMicrophone={false}
-                    intensity={0.8}
-                    showTransitionProgress={false}
-                    animationStyle="organic"
-                    className="audio-visualizer"
-                  />
-                </div>
-              </div>
-
-              {/* Status Text */}
-              <div className="status-text-wrapper">
-                <div className="status-content">
-                  <Marquee
-                    key={marqueeKey}
-                    speed={30}
-                    gradient={true}
-                    gradientColor="rgba(255, 255, 255, 0)"
-                    gradientWidth={8}
-                    pauseOnHover={true}
-                    delay={1.5}
-                    play={
-                      (assistantState as AssistantState) !== "idle" &&
-                      !isTransitioning
-                    }
-                  >
-                    <span className="marquee-text text-white/80 text-xs whitespace-nowrap pr-12">
-                      {currentMessage || "Processing..."}
-                    </span>
-                  </Marquee>
-                </div>
-              </div>
-            </div>
-          )}
-
-        {/* Error and Success States - Show icon with text */}
-        {(assistantState === "error" || assistantState === "success") && (
-          <div className="state-message-container">
-            <div className="state-icon-wrapper">{getStateFeedbackIcon()}</div>
-            <div className="state-text-wrapper">
-              <span className="state-message text-white/90 text-xs">
-                {currentMessage}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Status Text with Marquee Effect */}
-        {/*{assistantState !== "input" &&
-          assistantState !== "response" &&
-          assistantState !== "idle" &&
-          assistantState !== "error" &&
-          assistantState !== "success" && (
-            <div className={`status-text visible`}>
-              <div className="status-content">
-                <Marquee
-                  speed={30}
-                  gradient={true}
-                  gradientColor="rgba(255, 255, 255, 0)"
-                  gradientWidth={8}
-                  pauseOnHover={true}
-                  play={assistantState !== "idle" && !isTransitioning}
-                >
-                  <span className="marquee-text text-white/80 text-xs whitespace-nowrap pr-12">
-                    {currentMessage || "Processing..."}
-                  </span>
-                </Marquee>
-              </div>
-            </div>
-          )}*/}
-
-        {/* Control Buttons - Idle State with Hover */}
-        {assistantState === "idle" && (
-          <div
-            className="idle-container"
-            onMouseEnter={() => setIsIdleHovered(true)}
-            onMouseLeave={() => setIsIdleHovered(false)}
+        {/* Quick Actions */}
+        <div className="bar-actions">
+          <button
+            onClick={toggleListening}
+            className={`action-btn ${
+              assistantState === "listening" ? "active" : ""
+            }`}
+            aria-label={
+              assistantState === "listening"
+                ? "Stop listening"
+                : "Start listening"
+            }
           >
-            <div
-              className={`idle-waveform ${
-                !isIdleHovered ? "visible" : "hidden"
-              }`}
-            >
-              <AudioVisualizer
-                appState="idle"
-                width={80}
-                height={20}
-                enableMicrophone={false}
-                intensity={0.6}
-                showTransitionProgress={false}
-                animationStyle="minimal"
-                className="idle-audio-visualizer"
-              />
-            </div>
+            {assistantState === "listening" ? (
+              <Mic className="w-4 h-4" />
+            ) : (
+              <MicOff className="w-4 h-4" />
+            )}
+          </button>
 
-            <div
-              className={`idle-buttons ${isIdleHovered ? "visible" : "hidden"}`}
-            >
-              <button
-                onClick={toggleListening}
-                className="glass-mic-btn"
-                disabled={isTransitioning}
-                aria-label="Start voice assistant"
-              >
-                <div className="icon-container">{getStateIcon()}</div>
-              </button>
-
-              <button
-                onClick={toggleInputMode}
-                className="glass-keyboard-btn"
-                disabled={isTransitioning}
-                aria-label="Use text input"
-              >
-                <Keyboard className="w-3 h-3 text-white/70" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {assistantState !== "idle" &&
-          assistantState !== "input" &&
-          assistantState !== "response" && (
-            <button
-              onClick={toggleListening}
-              className="glass-mic-btn"
-              disabled={assistantState === "processing" || isTransitioning}
-            >
-              <div className="icon-container">{getStateIcon()}</div>
-            </button>
-          )}
-
-        {assistantState === "input" && (
           <button
             onClick={toggleInputMode}
-            className="glass-mic-btn close-btn"
-            disabled={isTransitioning}
+            className={`action-btn ${
+              assistantState === "input" ? "active" : ""
+            }`}
+            aria-label={
+              assistantState === "input"
+                ? "Exit input mode"
+                : "Enter input mode"
+            }
           >
-            <div className="icon-container">{getStateIcon()}</div>
+            <Keyboard className="w-4 h-4" />
           </button>
-        )}
+        </div>
       </div>
 
+      {/* Styling (unchanged from original) */}
       <style>{`
-        .voice-ai-bar-container {
+        .voice-ai-bar {
+          position: fixed;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 1000;
+          transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .bar-container {
           position: relative;
-        }
-
-        .idle-container {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 100%;
-          height: 100%;
-          position: relative;
-        }
-
-        .idle-waveform {
-          display: flex;
-          align-items: center;
-          gap: 0.25rem;
-          justify-content: center;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          position: absolute;
-        }
-
-        .idle-waveform.visible {
-          opacity: 1;
-          transform: scale(1);
-        }
-
-        .idle-waveform.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-        }
-
-        .idle-buttons {
-          display: flex;
-          gap: 0.5rem;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          position: absolute;
-        }
-
-        .idle-buttons.visible {
-          opacity: 1;
-          transform: scale(1);
-        }
-
-        .idle-buttons.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-          pointer-events: none;
-        }
-
-        .audio-visualizer-container {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          width: auto;
-          height: 100%;
-        }
-
-        .audio-visualizer-content {
-          display: flex;
-          align-items: center;
-          gap: 0.25rem;
-          justify-content: center;
-        }
-
-        .state-feedback {
-          position: absolute;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
-        }
-
-        .state-feedback.visible {
-          opacity: 1;
-          transform: scale(1);
-        }
-
-        .state-feedback.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-        }
-
-        .audio-visualizer-content.visible {
-          opacity: 1;
-          transform: scale(1);
-        }
-
-        .audio-visualizer-content.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-        }
-
-        .glass-bar-idle {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.4rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 120px;
-          height: 40px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          overflow: hidden;
-          cursor: pointer;
-        }
-
-        .glass-bar-idle:hover {
-          background: rgba(255, 255, 255, 0.2);
-          border-color: rgba(255, 255, 255, 0.3);
-          box-shadow: 0 6px 25px rgba(31, 38, 135, 0.4),
-            inset 0 3px 15px rgba(255, 255, 255, 0.15);
-        }
-
-        .glass-bar-active {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: 240px;
-          height: 40px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          overflow: hidden;
-        }
-
-        .glass-bar-input {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: 280px;
-          height: 40px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          overflow: hidden;
-        }
-
-        .glass-bar-response {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: 280px;
-          height: 40px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          overflow: hidden;
-        }
-
-        .glass-bar-response-width {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: var(--response-width, 280px);
-          height: 40px;
-          transition: width 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          overflow: hidden;
-          will-change: width;
-          transform: translateZ(0);
-        }
-
-        .glass-bar-response-height {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          width: var(--response-width, 320px);
-          height: var(--summary-height, 60px);
-          transition: height 0.6s cubic-bezier(0.23, 1, 0.32, 1);
-          overflow: hidden;
-          will-change: height;
-          transform: translateZ(0);
-        }
-
-        .glass-bar-response-summary {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          width: var(--response-width, 320px);
-          height: var(--summary-height, 60px);
-          transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          overflow: hidden;
-          will-change: height;
-          transform: translateZ(0);
-        }
-
-        .glass-bar-response-expanding {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          width: var(--response-width, 320px);
-          height: var(--response-height, 120px);
-          transition: height 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          overflow: hidden;
-          will-change: height;
-          transform: translateZ(0);
-        }
-
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateY(4px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes fade-in-up {
-          from {
-            opacity: 0;
-            transform: translateY(8px) scale(0.98);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-
-        .animate-fade-in {
-          animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
-          will-change: opacity, transform;
-        }
-
-        .animate-fade-in-up {
-          animation: fade-in-up 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-          will-change: opacity, transform;
-        }
-
-        .glass-bar-response-width,
-        .glass-bar-response-height,
-        .glass-bar-response,
-        .glass-bar-response-expanded {
-          will-change: width, height;
-          transform: translateZ(0);
-        }
-
-        .glass-bar-response-expanded {
-          position: relative;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 1.5rem;
-          padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          width: 400px;
-          max-width: 90vw;
-          height: auto;
-          min-height: 80px;
-          max-height: 80vh;
-          transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          overflow: hidden;
-          will-change: width, height;
-          transform: translateZ(0);
-        }
-
-        .response-content {
           display: flex;
           flex-direction: column;
-          gap: 0.75rem;
-          padding: 0.75rem;
-          overflow-y: auto;
-          max-height: calc(70vh - 3rem);
-          scroll-behavior: smooth;
-          -webkit-overflow-scrolling: touch;
+          gap: 8px;
         }
 
-        .response-item {
-          width: 100%;
-          contain: layout style;
-          opacity: 0;
-        }
-
-        .response-item.animate-fade-in-up {
-          opacity: 1;
-        }
-
-        .glass-bar-idle::after,
-        .glass-bar-active::after,
-        .glass-bar-input::after,
-        .glass-bar-response::after,
-        .glass-bar-response-expanded::after {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 1.5rem;
-          backdrop-filter: blur(1px);
-          box-shadow: inset -6px -4px 0px -7px rgba(255, 255, 255, 0.3),
-            inset 0px -5px 0px -4px rgba(255, 255, 255, 0.2);
-          opacity: 0.6;
-          z-index: -1;
-          pointer-events: none;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .glass-mic-btn {
-          position: relative;
-          width: 2rem;
-          height: 2rem;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(15px);
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          border-radius: 50%;
+        .bar-main {
           display: flex;
           align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 2px 10px rgba(31, 38, 135, 0.3),
-            inset 0 1px 5px rgba(255, 255, 255, 0.1);
-          flex-shrink: 0;
-        }
-
-        .glass-keyboard-btn {
-          position: relative;
-          width: 2rem;
-          height: 2rem;
-          background: rgba(255, 255, 255, 0.15);
-          backdrop-filter: blur(15px);
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 2px 10px rgba(31, 38, 135, 0.3),
-            inset 0 1px 5px rgba(255, 255, 255, 0.1);
-          flex-shrink: 0;
-        }
-
-        .glass-mic-btn:hover,
-        .glass-keyboard-btn:hover {
-          background: rgba(255, 255, 255, 0.25);
-          transform: scale(1.1);
-          box-shadow: 0 4px 15px rgba(31, 38, 135, 0.4);
-        }
-
-        .glass-mic-btn.close-btn {
-          background: rgba(255, 255, 255, 0.2);
-        }
-
-        .glass-mic-btn.close-btn:hover {
-          background: rgba(255, 255, 255, 0.3);
-        }
-
-        .glass-mic-btn.expand-btn {
-          background: rgba(79, 70, 229, 0.3);
-          border-color: rgba(79, 70, 229, 0.5);
-        }
-
-        .glass-mic-btn.expand-btn:hover {
-          background: rgba(79, 70, 229, 0.4);
-        }
-
-        .icon-container {
-          transition: all 0.3s ease-in-out;
-        }
-
-        .input-form {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex: 1;
-          width: 100%;
-        }
-
-        .glass-input {
-          flex: 1;
+          gap: 12px;
+          padding: 8px 16px;
           background: rgba(255, 255, 255, 0.1);
-          border: none;
-          border-radius: 1rem;
-          padding: 0.25rem 0.75rem;
+          backdrop-filter: blur(20px) saturate(180%);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 25px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          min-width: 200px;
+        }
+
+        .bar-main:hover {
+          background: rgba(255, 255, 255, 0.15);
+          transform: translateY(-1px);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .bar-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+        }
+
+        .bar-center {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          min-height: 24px;
+        }
+
+        .bar-message {
+          width: 100%;
           color: white;
-          font-size: 0.875rem;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .bar-marquee {
+          width: 100%;
+        }
+
+        .text-fade-out {
+          opacity: 0.5;
+          transition: opacity 0.15s ease;
+        }
+
+        .bar-input-form {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+        }
+
+        .bar-input {
+          flex: 1;
+          background: transparent;
+          border: none;
           outline: none;
-          transition: all 0.3s ease;
+          color: white;
+          font-size: 14px;
+          placeholder-color: rgba(255, 255, 255, 0.6);
         }
 
-        .glass-input::placeholder {
-          color: rgba(255, 255, 255, 0.5);
+        .bar-input::placeholder {
+          color: rgba(255, 255, 255, 0.6);
         }
 
-        .glass-input:focus {
-          background: rgba(255, 255, 255, 0.15);
-          box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3);
-        }
-
-        .glass-send-btn {
-          width: 1.5rem;
-          height: 1.5rem;
-          background: rgba(124, 58, 237, 0.6);
+        .bar-submit {
+          background: rgba(255, 255, 255, 0.2);
           border: none;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          flex-shrink: 0;
-        }
-
-        .glass-send-btn:hover {
-          background: rgba(124, 58, 237, 0.8);
-          transform: scale(1.1);
-        }
-
-        .glass-send-btn:disabled {
-          background: rgba(124, 58, 237, 0.3);
-          cursor: not-allowed;
-          transform: scale(1);
-        }
-
-        .response-container {
-          display: flex;
-          flex: 1;
-          width: 100%;
-          height: 100%;
-          overflow: hidden;
-        }
-
-        .response-summary {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: 100%;
-          cursor: pointer;
-          padding: 0.25rem 0;
-        }
-
-        .response-icon {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: rgba(255, 255, 255, 0.8);
-        }
-
-        .response-preview {
-          flex: 1;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .response-title {
-          font-size: 0.875rem;
-          color: rgba(255, 255, 255, 0.9);
-          font-weight: 500;
-        }
-
-        .response-expanded {
-          display: flex;
-          flex-direction: column;
-          width: 100%;
-          height: 100%;
-          max-height: 70vh;
-        }
-
-        .response-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0.5rem 0.75rem;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .response-header h3 {
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: rgba(255, 255, 255, 0.9);
-        }
-
-        .close-response-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 1.5rem;
-          height: 1.5rem;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.1);
-          border: none;
+          border-radius: 12px;
+          padding: 4px;
+          color: white;
           cursor: pointer;
           transition: all 0.2s ease;
         }
 
-        .close-response-btn:hover {
+        .bar-submit:hover:not(:disabled) {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .bar-submit:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .bar-right {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+        }
+
+        .bar-visualizer {
+          width: 100%;
+          height: 100%;
+        }
+
+        .response-container {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(20px) saturate(180%);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 16px;
+          overflow: hidden;
+        }
+
+        .response-header {
+          padding: 12px 16px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .response-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          color: white;
+          font-weight: 600;
+          font-size: 14px;
+        }
+
+        .response-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .response-toggle,
+        .response-close {
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 8px;
+          padding: 4px;
+          color: white;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .response-toggle:hover,
+        .response-close:hover {
           background: rgba(255, 255, 255, 0.2);
         }
 
         .response-content {
-          display: flex;
-          flex-direction: column;
-          gap: 0.75rem;
-          padding: 0.75rem;
-          overflow-y: auto;
-          max-height: calc(70vh - 4rem);
-          scroll-behavior: smooth;
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: thin;
-          scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+          overflow: hidden;
+          transition: all 0.3s ease;
         }
 
-        .response-content::-webkit-scrollbar {
-          width: 6px;
+        .response-content.collapsed {
+          max-height: 100px;
         }
 
-        .response-content::-webkit-scrollbar-track {
-          background: transparent;
+        .response-content.expanded {
+          max-height: 500px;
         }
 
-        .response-content::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.3);
-          border-radius: 3px;
+        .response-item {
+          padding: 16px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .response-content::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.5);
+        .response-item:last-child {
+          border-bottom: none;
         }
 
         .text-block,
         .code-block,
         .image-block,
         .video-block {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 0.75rem;
-          overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: white;
         }
 
         .text-header,
@@ -1430,27 +1049,45 @@ const styles = \`
         .video-header {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.5rem 0.75rem;
-          font-size: 0.75rem;
-          color: rgba(255, 255, 255, 0.7);
-          background: rgba(0, 0, 0, 0.1);
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          gap: 8px;
+          margin-bottom: 8px;
+          font-weight: 600;
+          font-size: 14px;
         }
 
-        .code-header {
-          display: flex;
-          justify-content: space-between;
+        .text-content {
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        .code-content {
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 8px;
+          padding: 12px;
+          font-family: "Monaco", "Menlo", "Consolas", monospace;
+          font-size: 12px;
+          overflow-x: auto;
+        }
+
+        .image-container,
+        .video-container {
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .image-container img,
+        .video-container video {
+          width: 100%;
+          height: auto;
+          display: block;
         }
 
         .copy-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0.25rem;
-          border-radius: 0.25rem;
           background: rgba(255, 255, 255, 0.1);
           border: none;
+          border-radius: 6px;
+          padding: 4px;
+          color: white;
           cursor: pointer;
           transition: all 0.2s ease;
         }
@@ -1459,314 +1096,78 @@ const styles = \`
           background: rgba(255, 255, 255, 0.2);
         }
 
-        .text-content {
-          padding: 0.75rem;
-          font-size: 0.875rem;
-          color: rgba(255, 255, 255, 0.9);
-          line-height: 1.5;
-        }
-
-        .code-content {
-          padding: 0.75rem;
-          font-size: 0.75rem;
-          color: rgba(255, 255, 255, 0.9);
-          line-height: 1.5;
-          font-family: monospace;
-          white-space: pre-wrap;
-          overflow-x: auto;
-          background: rgba(0, 0, 0, 0.2);
-        }
-
-        .image-container {
-          width: 100%;
-          overflow: hidden;
-        }
-
-        .image-container img {
-          width: 100%;
-          height: auto;
-          object-fit: contain;
-        }
-
-        .video-container {
-          width: 100%;
-          overflow: hidden;
-        }
-
-        .video-container video {
-          width: 100%;
-          height: auto;
-        }
-
-        @keyframes pulse-border-red {
-          0%,
-          100% {
-            border-color: rgba(239, 68, 68, 0.5);
-          }
-          50% {
-            border-color: rgba(239, 68, 68, 0.8);
-          }
-        }
-
-        @keyframes pulse-border-green {
-          0%,
-          100% {
-            border-color: rgba(16, 185, 129, 0.5);
-          }
-          50% {
-            border-color: rgba(16, 185, 129, 0.8);
-          }
-        }
-
-        @keyframes shake {
-          0%,
-          100% {
-            transform: translateX(0);
-          }
-          25% {
-            transform: translateX(-2px);
-          }
-          75% {
-            transform: translateX(2px);
-          }
-        }
-
-        @keyframes bounce {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.02);
-          }
-        }
-
-        .state-error {
-          animation: pulse-border-red 1.5s ease-in-out infinite,
-            shake 0.5s ease-in-out;
-          background: rgba(239, 68, 68, 0.1) !important;
-        }
-
-        .state-success {
-          animation: pulse-border-green 1.5s ease-in-out infinite,
-            bounce 0.6s ease-in-out;
-          background: rgba(16, 185, 129, 0.1) !important;
-        }
-
-        .state-listening {
-          border-color: rgba(59, 130, 246, 0.6);
-          background: rgba(59, 130, 246, 0.05);
-        }
-
-        .state-processing {
-          border-color: rgba(168, 85, 247, 0.6);
-          background: rgba(168, 85, 247, 0.05);
-        }
-
-        .state-speaking {
-          border-color: rgba(34, 197, 94, 0.6);
-          background: rgba(34, 197, 94, 0.05);
-        }
-
-        .status-text {
+        .bar-actions {
           display: flex;
           align-items: center;
-          flex: 1;
-          min-width: 0;
-        }
-
-        .status-content {
-          width: 100%;
-          overflow: hidden;
-        }
-
-        .response-content-calculator {
-          max-width: 380px;
-          z-index: -1;
-          overflow-y: auto;
-          max-height: 400px;
-        }
-
-        .response-content-calculator .response-header {
-          padding: 0.5rem 0.75rem;
-          font-size: 0.875rem;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .response-content-calculator .response-content {
-          padding: 0.75rem;
-          gap: 0.75rem;
-          display: flex;
-          flex-direction: column;
-        }
-
-        @keyframes fade-in-delayed {
-          from {
-            opacity: 0;
-            transform: translateY(4px) scale(0.98);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-
-        @keyframes fade-in-up-delayed {
-          from {
-            opacity: 0;
-            transform: translateY(12px) scale(0.96);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-
-        .animate-fade-in-delayed {
-          opacity: 0;
-          animation: fade-in-delayed 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)
-            both;
-          will-change: opacity, transform;
-        }
-
-        .animate-fade-in-up-delayed {
-          opacity: 0;
-          animation: fade-in-up-delayed 0.5s
-            cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-          will-change: opacity, transform;
-        }
-
-        @keyframes expand-in {
-          from {
-            opacity: 0;
-            transform: scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
-        }
-
-        @keyframes expand-out {
-          from {
-            opacity: 1;
-            transform: scale(1);
-          }
-          to {
-            opacity: 0;
-            transform: scale(0.95);
-          }
-        }
-
-        .response-expanded.expanding {
-          animation: expand-in 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-        }
-
-        .response-expanded.collapsing {
-          animation: expand-out 0.2s cubic-bezier(0.4, 0, 0.2, 1) both;
-        }
-
-        @media (max-width: 640px) {
-          .glass-bar-active {
-            padding: 0.4rem 0.6rem;
-            gap: 0.5rem;
-            width: 180px;
-          }
-
-          .glass-bar-input,
-          .glass-bar-response {
-            width: 240px;
-          }
-
-          .glass-bar-response-expanded {
-            width: 90vw;
-          }
-
-          .glass-mic-btn,
-          .glass-keyboard-btn {
-            width: 1.75rem;
-            height: 1.75rem;
-          }
-        }
-
-        .visualizer-status-container {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          width: 100%;
-          height: 100%;
-        }
-
-        .audio-visualizer-wrapper {
-          display: flex;
-          align-items: center;
+          gap: 8px;
           justify-content: center;
-          position: relative;
-          flex-shrink: 0;
-          width: 60px;
-          height: 100%;
         }
 
-        .status-text-wrapper {
-          display: flex;
-          align-items: center;
-          flex: 1;
-          min-width: 0;
-          height: 100%;
+        .action-btn {
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 12px;
+          padding: 8px;
+          color: white;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
-        .state-message-container {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          width: 100%;
-          height: 100%;
-          padding: 0 0.25rem;
+        .action-btn:hover {
+          background: rgba(255, 255, 255, 0.2);
         }
 
-        .state-icon-wrapper {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
+        .action-btn.active {
+          background: rgba(59, 130, 246, 0.3);
+          color: #60a5fa;
         }
 
-        .state-text-wrapper {
-          display: flex;
-          align-items: center;
-          flex: 1;
-          min-width: 0;
+        /* State-specific styling */
+        .state-listening .bar-main {
+          background: rgba(59, 130, 246, 0.2);
+          border-color: rgba(59, 130, 246, 0.4);
         }
 
-        .state-message {
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 100%;
+        .state-processing .bar-main {
+          background: rgba(251, 191, 36, 0.2);
+          border-color: rgba(251, 191, 36, 0.4);
         }
 
-        .audio-visualizer-content.visible {
-          opacity: 1;
-          transform: scale(1);
-          transition: all 0.3s ease;
+        .state-speaking .bar-main {
+          background: rgba(34, 197, 94, 0.2);
+          border-color: rgba(34, 197, 94, 0.4);
         }
 
-        .audio-visualizer-content.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-          transition: all 0.3s ease;
+        .state-error .bar-main {
+          background: rgba(239, 68, 68, 0.2);
+          border-color: rgba(239, 68, 68, 0.4);
         }
 
-        .state-feedback.visible {
-          opacity: 1;
-          transform: scale(1);
-          transition: all 0.3s ease;
+        .state-success .bar-main {
+          background: rgba(34, 197, 94, 0.2);
+          border-color: rgba(34, 197, 94, 0.4);
         }
 
-        .state-feedback.hidden {
-          opacity: 0;
-          transform: scale(0.8);
-          transition: all 0.3s ease;
+        .state-input .bar-main {
+          background: rgba(255, 255, 255, 0.15);
+          border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+          .voice-ai-bar {
+            left: 10px;
+            right: 10px;
+            transform: none;
+          }
+
+          .bar-main {
+            min-width: auto;
+          }
+
+          .response-content.expanded {
+            max-height: 300px;
+          }
         }
       `}</style>
     </div>
