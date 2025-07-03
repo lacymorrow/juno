@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/constants.generated";
 
 interface CommandInfo {
   id: number;
@@ -10,7 +11,12 @@ interface CommandInfo {
   error?: string;
 }
 
-interface CommandEventPayload {
+interface CommandStartPayload {
+  id?: number;
+  command?: string;
+}
+
+interface CommandEndPayload {
   id?: number;
   command?: string;
   success?: boolean;
@@ -23,30 +29,74 @@ export default function CommandOverlay() {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    const unlisten = listen<CommandEventPayload>("command-event", (event) => {
-      const { id, command, success, error, duration } = event.payload;
-      const timestamp = Date.now();
+    // Listen for command execution start
+    const unlistenStart = listen<CommandStartPayload>(
+      EVENTS.TOOLS_COMMAND_EXECUTION_START,
+      (event) => {
+        const { id, command } = event.payload;
+        const timestamp = Date.now();
+        const commandId = id || timestamp;
+        const newCommand: CommandInfo = {
+          id: commandId,
+          command: command || "Unknown command",
+          timestamp,
+          status: "executing",
+        };
+        setCommands((prev) => [...prev, newCommand]);
+        setIsVisible(true);
+        setTimeout(() => {
+          setIsVisible(false);
+        }, 5000);
+      }
+    );
 
-      const newCommand: CommandInfo = {
-        id: id || timestamp,
-        command: command || "Unknown command",
-        timestamp,
-        status: success ? "completed" : "failed",
-        duration: duration || 0,
-        error: error || undefined,
-      };
-
-      setCommands((prev) => [...prev, newCommand]);
-      setIsVisible(true);
-
-      // Auto-hide after 5 seconds
-      setTimeout(() => {
-        setIsVisible(false);
-      }, 5000);
-    });
+    // Listen for command execution end
+    const unlistenEnd = listen<CommandEndPayload>(
+      EVENTS.TOOLS_COMMAND_EXECUTION_END,
+      (event) => {
+        const { id, command, success, error, duration } = event.payload;
+        const commandId = id;
+        setCommands((prev) => {
+          // Try to find and update the matching command by id
+          let updated = false;
+          const updatedCommands = prev.map((cmd) => {
+            if (commandId && cmd.id === commandId) {
+              updated = true;
+              return {
+                ...cmd,
+                status: success ? "completed" : "failed",
+                duration: duration || 0,
+                error: error || undefined,
+              };
+            }
+            return cmd;
+          });
+          // If not found, add as new (fallback for out-of-order events)
+          if (!updated) {
+            return [
+              ...prev,
+              {
+                id: commandId || Date.now(),
+                command: command || "Unknown command",
+                timestamp: Date.now(),
+                status: success ? "completed" : "failed",
+                duration: duration || 0,
+                error: error || undefined,
+              },
+            ];
+          }
+          return updatedCommands;
+        });
+        setIsVisible(true);
+        setTimeout(() => {
+          setIsVisible(false);
+        }, 5000);
+      }
+    );
 
     return () => {
-      unlisten.then((f) => f());
+      unlistenStart.then((f) => f());
+      unlistenEnd.then((f) => f());
     };
   }, []);
 

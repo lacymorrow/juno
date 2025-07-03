@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { UI } from "@/lib/constants.generated";
+import { ThinkingMessage } from "./ThinkingMessage";
 
 // Type for conversation messages (imported from App.tsx)
 export type ChatMessage = {
@@ -145,18 +146,11 @@ export function ChatMessageComponent({
   // Handle special message types with existing components
   if (msg.role === "thinking") {
     return (
-      <div className="flex justify-start">
-        <div className="flex items-start gap-3 max-w-[80%]">
-          <div className="bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-lg p-3 min-w-[40px] flex items-center justify-center">
-            <Brain className="h-5 w-5" />
-          </div>
-          <div className="bg-gradient-to-br from-orange-100 to-red-100 text-orange-900 rounded-lg p-3 border border-orange-200">
-            <div className="text-sm font-medium mb-1">Agent Thinking</div>
-            <div className="text-sm opacity-90 whitespace-pre-wrap">
-              {msg.content}
-            </div>
-          </div>
-        </div>
+      <div
+        key={`msg-${index}-${msg.timestamp || Date.now()}`}
+        className="flex justify-start"
+      >
+        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} />
       </div>
     );
   }
