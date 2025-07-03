@@ -104,47 +104,15 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
-                                // Clone for error handling since submit_query will move app_handle_clone
-                                let app_handle_for_error = app_handle_clone.clone();
-
-                                // Set up timeout for agent processing to prevent stuck UI states
-                                let app_handle_for_timeout = app_handle_for_error.clone();
-                                let timeout_task = tokio::time::timeout(
-                                    std::time::Duration::from_secs(300), // 5 minutes timeout
-                                    crate::anthropic::submit_query(
-                                        trimmed_query.to_string(),
-                                        app_state,
-                                        app_handle_clone
-                                    )
-                                );
-
-                                                                 match timeout_task.await {
-                                     Ok(Ok(_)) => {
-                                         info!("[Agent Mode] Agent query submitted successfully");
-                                     }
-                                     Ok(Err(e)) => {
-                                         error!("[Agent Mode] Failed to submit query to agent: {}", e);
-
-                                         // Reset UI state when agent processing fails
-                                         let app_handle_for_ui_reset = app_handle_for_error.clone();
-                                         crate::utils::async_runtime::safe_spawn_async_task(move || async move {
-                                             crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_ui_reset).await;
-                                         });
-
-                                         crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
-                                     }
-                                     Err(_) => {
-                                         error!("[Agent Mode] Agent processing timed out after 5 minutes");
-
-                                         // Reset UI state when agent processing times out
-                                         let app_handle_for_ui_reset = app_handle_for_timeout.clone();
-                                         crate::utils::async_runtime::safe_spawn_async_task(move || async move {
-                                             crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_ui_reset).await;
-                                         });
-
-                                         crate::error_handling::utils::handle_agent_error(&app_handle_for_timeout, "Agent processing timed out after 5 minutes").await;
-                                     }
-                                 }
+                                // Submit the query to the agent system
+                                if let Err(e) = crate::anthropic::submit_query(
+                                    trimmed_query.to_string(),
+                                    app_state,
+                                    app_handle_clone.clone()
+                                ).await {
+                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
                             }
@@ -367,39 +335,19 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 
                     // Only activate agent if we have meaningful content
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
-                        // Submit the query to the agent system with timeout
-                        let timeout_task = tokio::time::timeout(
-                            std::time::Duration::from_secs(300), // 5 minutes timeout
-                            crate::anthropic::submit_query(
-                                trimmed_text.to_string(),
-                                app_state,
-                                app_handle.clone(),
-                            )
-                        );
-
-                        match timeout_task.await {
-                            Ok(Ok(_)) => {
-                                info!("[AlwaysListening] Agent query submitted successfully");
-                            }
-                            Ok(Err(e)) => {
-                                crate::error_handling::utils::log_and_emit_error(
-                                    app_handle,
-                                    "AlwaysListening",
-                                    "agent_query_submission",
-                                    &e.to_string(),
-                                    true,
-                                );
-                            }
-                            Err(_) => {
-                                error!("[AlwaysListening] Agent processing timed out after 5 minutes");
-                                crate::error_handling::utils::log_and_emit_error(
-                                    app_handle,
-                                    "AlwaysListening",
-                                    "agent_processing_timeout",
-                                    "Agent processing timed out after 5 minutes",
-                                    true,
-                                );
-                            }
+                        // Submit the query to the agent system
+                        if let Err(e) = crate::anthropic::submit_query(
+                            trimmed_text.to_string(),
+                            app_state,
+                            app_handle.clone(),
+                        ).await {
+                            crate::error_handling::utils::log_and_emit_error(
+                                app_handle,
+                                "AlwaysListening",
+                                "agent_query_submission",
+                                &e.to_string(),
+                                true,
+                            );
                         }
                     } else {
                         info!("[AlwaysListening] Transcribed text was empty or too short - ignoring: '{}'", trimmed_text);
