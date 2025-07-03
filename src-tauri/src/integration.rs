@@ -563,14 +563,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 Ok(()) => {
                     info!("[Agent Mode] Started agent transcription successfully");
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         true,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -584,14 +584,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change after error: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change after error: {}", e);
                     }
                 }
             }
@@ -602,14 +602,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use coordinate_state_change to update UI manager AND emit event
-            if let Err(e) = utils::coordinate_state_change(
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
                 app_handle,
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
             ).await {
-                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -630,7 +630,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
-                    // Note: We don't call coordinate_state_change(false) here because the agent will continue
+                    // Note: We don't call synchronize_component_state(false) here because the agent will continue
                     // processing the transcribed text. The agent-active false will be handled
                     // after the agent completes processing the query.
                 }
@@ -640,14 +640,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change after transcription stop failure: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change after transcription stop failure: {}", e);
                     }
                 }
             }
@@ -658,14 +658,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use coordinate_state_change to update UI manager AND emit event
-            if let Err(e) = utils::coordinate_state_change(
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
                 app_handle,
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
             ).await {
-                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -685,14 +685,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -701,14 +701,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change after stop failure: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change after stop failure: {}", e);
                     }
                 }
             }
@@ -719,14 +719,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use coordinate_state_change to update UI manager AND emit event
-            if let Err(e) = utils::coordinate_state_change(
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
                 app_handle,
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
             ).await {
-                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -746,14 +746,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -762,14 +762,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use coordinate_state_change to update UI manager AND emit event
-                    if let Err(e) = utils::coordinate_state_change(
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
                     ).await {
-                        error!("[Agent Mode] Failed to coordinate agent state change after cancel failure: {}", e);
+                        error!("[Agent Mode] Failed to synchronize agent state change after cancel failure: {}", e);
                     }
                 }
             }
@@ -782,14 +782,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use coordinate_state_change to update UI manager AND emit event
-            if let Err(e) = utils::coordinate_state_change(
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
                 app_handle,
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
             ).await {
-                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -815,14 +815,14 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Reset agent input monitor state
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    // Use coordinate_state_change to update UI manager AND emit event
-    if let Err(e) = utils::coordinate_state_change(
+    // Use synchronize_component_state to update UI manager AND emit event
+    if let Err(e) = utils::synchronize_component_state(
         app_handle,
         "agent",
         false,
         Some(constants::events::agent::ACTIVE),
     ).await {
-        error!("[Agent Mode] Failed to coordinate agent state change during force stop: {}", e);
+        error!("[Agent Mode] Failed to synchronize agent state change during force stop: {}", e);
     }
 
     info!("[Agent Mode] Force stopped agent mode successfully");
@@ -875,15 +875,15 @@ fn setup_development_integration(app_handle: &AppHandle) {
 pub mod utils {
     use super::*;
 
-    /// Coordinate state changes across multiple components
-    pub async fn coordinate_state_change(
+    /// Synchronize component state changes across multiple systems
+    pub async fn synchronize_component_state(
         app_handle: &AppHandle,
         component: &str,
         new_state: bool,
         emit_event: Option<&str>,
     ) -> Result<(), String> {
         info!(
-            "🔄 Coordinating state change for {}: {}",
+            "🔄 Synchronizing state change for {}: {}",
             component, new_state
         );
 
