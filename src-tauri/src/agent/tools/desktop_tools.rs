@@ -69,152 +69,21 @@ use std::time::Duration;
 /// - `left_mouse_down`: Press left mouse button down at coordinates
 /// - `left_mouse_up`: Release left mouse button at coordinates
 /// - `triple_click`: Perform triple-click at coordinates
-// Stub function to resolve compilation error
+// REMOVED: Redundant tools eliminated to prevent conflicts with official Anthropic Computer Use API
+//
+// The following tools have been REMOVED as they duplicate functionality in the unified 'computer' tool:
+// - scroll -> Use: computer tool with {"action": "scroll", "coordinate": [x, y], "scroll_direction": "up/down/left/right", "scroll_amount": 3}
+// - wait -> Use: computer tool with {"action": "wait", "seconds": 2.5}
+// - release_key -> Mouse operations automatically release keys, use computer tool with hold_key + duration for timed holds
+//
+// This eliminates redundancy and ensures 100% compliance with the official Anthropic Computer Use API specification.
+// Agents should use the unified 'computer' tool for ALL screen interactions.
+
 async fn register_additional_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("Registering additional computer use tools...");
-
-    // --- Scroll Tool ---
-    #[derive(serde::Deserialize)]
-    struct ScrollInput {
-        // Define coordinates if needed, or use window scroll
-        direction: String,
-        amount: i32, // Keep as i32? Docs use f64, engine uses f64, command uses f64. Let's use f64.
-        // Optional coordinates - if not provided, scroll focused window/element?
-        // For now, let's align with the existing registration using dev_scroll_window
-        // which doesn't seem to take coordinates directly in the agent tool registration
-        // but might internally. Let's omit x,y for now based on existing registration.
-        // x: Option<f64>,
-        // y: Option<f64>,
-    }
-
-    let scroll_def = ToolDefinition {
-        name: "scroll".to_string(),
-        description: "Scrolls the currently active window/element. Requires accessibility permissions.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Direction to scroll." },
-                "amount": { "type": "number", "description": "Amount to scroll (e.g., pixels or lines depending on context)." },
-                // "x": { "type": "number", "description": "Optional X coordinate for targeted scroll." },
-                // "y": { "type": "number", "description": "Optional Y coordinate for targeted scroll." },
-            },
-            "required": ["direction", "amount"]
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let scroll_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-         async move {
-             let state_manager = app.state::<AppState>();
-             let args = serde_json::from_value::<ScrollInput>(input)
-                 .map_err(|e| format!("Failed to parse scroll input: {}", e))?;
-
-             // Note: dev_scroll_window signature might differ slightly from engine's scroll_at_position
-             // It takes Optional x,y. We pass None for now.
-             let inner_result = tokio::task::block_in_place(|| {
-                 let rt = tokio::runtime::Handle::current();
-                 rt.block_on(async {
-                     // Use the window command as seen elsewhere in this file
-                     window::scroll_window(args.direction, args.amount as f64, None, None, app.clone(), state_manager)
-                         .await
-                 })
-             });
-
-             inner_result.map_err(|e| format!("Error scrolling: {}", e))?;
-             Ok(json!({"success": true}))
-         }
-    };
-    provider.register_async_tool(scroll_def, scroll_exec).await;
-    info!("Registered tool: scroll");
-
-    // --- Wait Tool ---
-    #[derive(serde::Deserialize)]
-    struct WaitInput { duration_ms: u64 } // Match engine spec
-
-    let wait_def = ToolDefinition {
-        name: "wait".to_string(),
-        description: "Pauses execution for a specified duration.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "duration_ms": { "type": "integer", "description": "Duration to wait in milliseconds." }
-            },
-            "required": ["duration_ms"]
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let wait_exec = move |input: Value| {
-         let app = app_handle_clone.clone(); // Not strictly needed for wait, but keep pattern
-         async move {
-            let state_manager = app.state::<AppState>(); // Not strictly needed for wait
-             let args = serde_json::from_value::<WaitInput>(input)
-                 .map_err(|e| format!("Failed to parse wait input: {}", e))?;
-
-             // Directly call the engine's wait method
-             match state_manager.desktop.wait(args.duration_ms) {
-                 Ok(_) => Ok(json!({"success": true})),
-                 Err(e) => Err(format!("Error waiting: {}", e)),
-             }
-         }
-    };
-    provider.register_async_tool(wait_def, wait_exec).await;
-    info!("Registered tool: wait");
-
-    // NOTE: Keyboard tools (press_key, hold_key) have been REMOVED to eliminate redundancy
-    // Use the official Anthropic Computer Use API via the 'computer' tool instead:
-    // - computer -> {"action": "key", "text": "Return"}
-    // - computer -> {"action": "hold_key", "text": "shift", "duration": 2000}
-    // - computer -> {"action": "type", "text": "hello world"}
-    //
-    // This ensures compliance with the official Anthropic specification and eliminates
-    // tool confusion where agents had multiple ways to perform the same keyboard operations.
-
-    // --- Release Key Tool ---
-    // NOTE: This tool is KEPT as it provides functionality not available in the official Anthropic API
-    // Use this for releasing keys that were held indefinitely (without duration)
-    #[derive(serde::Deserialize)]
-    struct ReleaseKeyInput { key: String } // Match engine spec
-
-    let release_key_def = ToolDefinition {
-        name: "release_key".to_string(),
-        description: "Releases a previously held key. Use this for keys held indefinitely (without duration). For timed key holds, use computer tool with hold_key action and duration parameter.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "Key to release (e.g., 'Shift', 'Control')." }
-            },
-            "required": ["key"]
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
-
-    let app_handle_clone = app_handle.clone(); // Keep pattern
-    let release_key_exec = move |input: Value| {
-        let app = app_handle_clone.clone(); // Not strictly needed here
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<ReleaseKeyInput>(input)
-                .map_err(|e| format!("Failed to parse release_key input: {}", e))?;
-
-            // Directly call the engine's release_key method
-            match state_manager.desktop.release_key(&args.key) {
-                 Ok(_) => Ok(json!({"success": true})),
-                 Err(e) => Err(format!("Error releasing key '{}': {}", args.key, e)),
-            }
-        }
-    };
-    provider.register_async_tool(release_key_def, release_key_exec).await;
-    info!("Registered tool: release_key");
+    info!("Additional computer use tools: All redundant tools removed for clean API compliance");
 
 
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
@@ -649,82 +518,7 @@ pub async fn register_desktop_tools(
 
     // Compound tool for executing shell commands and capturing output.
     // Used by: Development workflows, system administration, automated testing
-    #[derive(serde::Deserialize)]
-    struct ExecuteCommandArgs {
-        command: String,
-        timeout_seconds: Option<u64>,
-        working_directory: Option<String>,
-    }
 
-    let execute_command_def = ToolDefinition {
-        name: "execute_command".to_string(),
-        description: "Execute a shell command and return the output, error, and exit code. Combines command execution with result capture.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
-                "timeout_seconds": {
-                    "type": "number",
-                    "description": "Maximum time to wait for command completion (default: 30 seconds)"
-                },
-                "working_directory": {
-                    "type": "string",
-                    "description": "Directory to execute the command in (optional)"
-                }
-            },
-            "required": ["command"]
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let execute_command_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<ExecuteCommandArgs>(input)
-                .map_err(|e| format!("Failed to parse execute_command input: {}", e))?;
-
-            // Use existing bash_command implementation
-            let result = commands::shell::bash_command(
-                app.clone(),
-                state_manager,
-                args.command.clone(),
-                args.timeout_seconds,
-                None, // restart parameter
-                Some(true), // Enable debug mode for agent usage
-            ).await;
-
-            match result {
-                Ok(bash_result) => {
-                    let output = bash_result.get_output();
-                    info!("Command executed successfully: {}", args.command);
-                    Ok(json!({
-                        "success": true,
-                        "command": args.command,
-                        "output": output,
-                        "exit_code": 0,
-                        "is_restart": bash_result.is_restart()
-                    }))
-                }
-                Err(e) => {
-                    warn!("Command execution failed: {}", e);
-                    Ok(json!({
-                        "success": false,
-                        "command": args.command,
-                        "error": e.to_string(),
-                        "exit_code": 1
-                    }))
-                }
-            }
-        }
-    };
-    provider.register_async_tool(execute_command_def, execute_command_exec).await;
-    info!("Registered compound tool: execute_command");
 
     // Compound tool for opening a file and typing content into it.
     // Used by: File editing workflows, content creation, automated document generation
