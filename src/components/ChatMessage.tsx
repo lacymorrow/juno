@@ -32,7 +32,6 @@ export type ChatMessage = {
     | "user"
     | "assistant"
     | "system"
-    | typeof UI.AGENT_STATUS_THINKING
     | "tool_call_request"
     | "tool_call_result";
   content: string;
