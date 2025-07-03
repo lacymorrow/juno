@@ -484,13 +484,7 @@ impl ToolConfigManager {
             (tool_names::STR_REPLACE_BASED_EDIT_TOOL, "Create, view, and edit files with precise text operations"),
             (tool_names::BASH, "Execute bash commands and shell operations"),
             (tool_names::SCREENSHOT, "Take a screenshot of the current screen"),
-            (tool_names::LEFT_CLICK, "Click on screen coordinates"),
-            (tool_names::TYPE, "Type text into the focused application"),
-            (tool_names::KEY, "Press keyboard keys and combinations"),
-            (tool_names::SCROLL, "Scroll in a direction"),
             (tool_names::WAIT, "Wait for a specified duration"),
-            (tool_names::MOUSE_MOVE, "Move mouse to coordinates"),
-            (tool_names::LEFT_CLICK_DRAG, "Drag from one coordinate to another"),
         ];
 
         // Essential tools that are required for core functionality
@@ -589,13 +583,12 @@ impl ToolConfigManager {
     fn add_default_basic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let basic_tools = vec![
             // NOTE: READ_FILE tool removed - use str_replace_based_edit_tool instead
-    // (tool_names::READ_FILE, "Read file contents"),
-            (tool_names::WRITE_FILE, "Write content to file"),
+            // NOTE: WRITE_FILE tool removed - use str_replace_based_edit_tool instead
+            // NOTE: EXECUTE_SHELL_COMMAND tool removed - use bash tool instead
             (tool_names::LIST_DIRECTORY, "List directory contents"),
             (tool_names::CREATE_DIRECTORY, "Create directories"),
             (tool_names::DELETE_FILE, "Delete files"),
             (tool_names::TEXT_EDITOR_EDIT, "Edit text files"),
-            (tool_names::EXECUTE_SHELL_COMMAND, "Execute shell commands"),
         ];
 
         for (name, description) in basic_tools {

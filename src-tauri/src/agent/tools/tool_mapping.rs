@@ -103,20 +103,21 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::ACCESSIBILITY_CLICK, ToolCategory::Desktop);
 
     // Basic tools (file operations, commands, etc.)
-    map.insert(tool_names::BASH_COMMAND, ToolCategory::Basic);
+    // REMOVED: Redundant tool mappings for deleted constants
+    // map.insert(tool_names::BASH_COMMAND, ToolCategory::Basic);
+    // map.insert(tool_names::GET_FILE_CONTENT, ToolCategory::Basic);
+    // map.insert(tool_names::SET_FILE_CONTENT, ToolCategory::Basic);
+    // map.insert(tool_names::SYSTEM_EXEC, ToolCategory::Basic);
+    // map.insert(tool_names::SYSTEM_WRITE_FILE, ToolCategory::Basic);
+    // map.insert(tool_names::DEV_SET_FILE_CONTENT, ToolCategory::Basic);
+
     map.insert(tool_names::LIST_FILES, ToolCategory::Basic);
-    map.insert(tool_names::GET_FILE_CONTENT, ToolCategory::Basic);
-    map.insert(tool_names::SET_FILE_CONTENT, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_VIEW, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_CREATE, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_STR_REPLACE, ToolCategory::Basic);
-    map.insert(tool_names::SYSTEM_EXEC, ToolCategory::Basic);
-    map.insert(tool_names::SYSTEM_LIST_FILES, ToolCategory::Basic);
+    map.insert(tool_names::DEV_LIST_FILES, ToolCategory::Basic);
     // NOTE: Removed redundant file reading tool mappings - use str_replace_based_edit_tool instead
     // Removed: SYSTEM_READ_FILE, DEV_GET_FILE_CONTENT (redundant with official tools)
-    map.insert(tool_names::SYSTEM_WRITE_FILE, ToolCategory::Basic);
-    map.insert(tool_names::DEV_LIST_FILES, ToolCategory::Basic);
-    map.insert(tool_names::DEV_SET_FILE_CONTENT, ToolCategory::Basic);
     // NOTE: Removed redundant tool mappings - these constants no longer exist
     // Removed: FILE_READ, FILE_WRITE, FILE_CREATE, FILE_DELETE (use str_replace_based_edit_tool)
     // Removed: COMMAND_EXECUTE, SHELL_EXECUTE, BASH_EXECUTE (use bash_command)
@@ -395,4 +396,20 @@ mod tests {
         assert_eq!(ToolMappingService::get_agent_confidence_for_tool(tool_names::BROWSER_NAVIGATE, &AgentType::DesktopExpert), confidence_scores::NO_CONFIDENCE);
         assert!(ToolMappingService::get_agent_confidence_for_tool(tool_names::SCREENSHOT, &AgentType::BrowserExpert) > confidence_scores::NO_CONFIDENCE);
     }
+
+    // Test basic tool mappings
+    // REMOVED: Tests for redundant constants that were deleted
+    // assert_eq!(ToolMappingService::get_tool_category(tool_names::BASH_COMMAND), Some(ToolCategory::Basic));
+    // assert_eq!(ToolMappingService::get_tool_category(tool_names::GET_FILE_CONTENT), Some(ToolCategory::Basic));
+    // assert_eq!(ToolMappingService::get_tool_category(tool_names::SET_FILE_CONTENT), Some(ToolCategory::Basic));
+
+    assert_eq!(ToolMappingService::get_tool_category(tool_names::LIST_FILES), Some(ToolCategory::Basic));
+    assert_eq!(ToolMappingService::get_tool_category(tool_names::DEV_TEXT_EDITOR_VIEW), Some(ToolCategory::Basic));
+
+    // Test agent delegation mappings
+    // REMOVED: Tests for redundant constants that were deleted
+    // assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::BASH_COMMAND), Some(AgentType::CodingExpert));
+    // assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::GET_FILE_CONTENT), Some(AgentType::CodingExpert));
+
+    assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::LIST_FILES), Some(AgentType::CodingExpert));
 }

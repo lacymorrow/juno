@@ -534,8 +534,9 @@ pub fn run() {
             bash_command,
             // Production filesystem functions with debug capabilities
             list_files,
-            get_file_content,
-            set_file_content,
+            // REMOVED: Redundant file operation commands - use str_replace_based_edit_tool instead
+            // get_file_content → text_editor_view
+            // set_file_content → text_editor_create/text_editor_str_replace
             save_agent_response,
             // Production text editor functions with debug capabilities
             text_editor_view,

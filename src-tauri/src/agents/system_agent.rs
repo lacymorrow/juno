@@ -47,46 +47,6 @@ impl SystemAgent {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
-            "bash_command" | "system_exec" => {
-                let command = tool_call
-                    .input
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'command' parameter".to_string())
-                    })?;
-                let timeout_seconds = tool_call
-                    .input
-                    .get("timeout_seconds")
-                    .and_then(|v| v.as_u64());
-                let restart = tool_call.input.get("restart").and_then(|v| v.as_bool());
-
-                let result = commands::shell::bash_command(
-                    self.app_handle.clone(),
-                    state,
-                    command.to_string(),
-                    timeout_seconds,
-                    restart,
-                    Some(true), // Enable debug mode for agent usage
-                )
-                .await;
-
-                match result {
-                    Ok(bash_result) => {
-                        let output = bash_result.get_output();
-                        Ok(ToolResult {
-                            call_id: tool_call.id.clone(),
-                            output: serde_json::json!({
-                                "success": true,
-                                "output": output,
-                                "command": command,
-                                "is_restart": bash_result.is_restart()
-                            }),
-                        })
-                    }
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
             "list_files" | "system_list_files" => {
                 let path = tool_call
                     .input
@@ -109,76 +69,6 @@ impl SystemAgent {
                             "success": true,
                             "files": files_json,
                             "path": path
-                        }),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
-            "get_file_content" | "system_read_file" => {
-                let file_path = tool_call
-                    .input
-                    .get("file_path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError(
-                            "Missing or invalid 'file_path' parameter".to_string(),
-                        )
-                    })?;
-
-                let result = commands::filesystem::get_file_content(
-                    self.app_handle.clone(),
-                    state,
-                    file_path.to_string(),
-                    Some(true), // Enable debug mode for agent usage
-                )
-                .await;
-
-                match result {
-                    Ok(content) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({
-                            "success": true,
-                            "content": content,
-                            "file_path": file_path
-                        }),
-                    }),
-                    Err(e) => Err(AgentError::ToolError(e)),
-                }
-            }
-            "set_file_content" | "system_write_file" => {
-                let file_path = tool_call
-                    .input
-                    .get("file_path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError(
-                            "Missing or invalid 'file_path' parameter".to_string(),
-                        )
-                    })?;
-                let content = tool_call
-                    .input
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AgentError::InputError("Missing or invalid 'content' parameter".to_string())
-                    })?;
-
-                let result = commands::filesystem::set_file_content(
-                    self.app_handle.clone(),
-                    state,
-                    file_path.to_string(),
-                    content.to_string(),
-                    Some(true), // Enable debug mode for agent usage
-                )
-                .await;
-
-                match result {
-                    Ok(_) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({
-                            "success": true,
-                            "file_path": file_path,
-                            "bytes_written": content.len()
                         }),
                     }),
                     Err(e) => Err(AgentError::ToolError(e)),
