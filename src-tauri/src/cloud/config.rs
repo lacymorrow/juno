@@ -87,7 +87,6 @@ impl Default for CloudConfig {
                 "get_system_info".to_string(),
                 "get_capabilities".to_string(),
                 "heartbeat".to_string(),
-                "run_terminal_command".to_string(),
                 "read_file".to_string(),
                 "write_file".to_string(),
                 "execute_script".to_string(),

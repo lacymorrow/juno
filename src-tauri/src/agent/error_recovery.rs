@@ -656,7 +656,7 @@ impl ErrorRecoveryManager {
         match tool_call.name.as_str() {
             "browser_navigate" | "left_click" | "right_click" | "type_text" | "key_combination" => true,
             "file_write" | "file_delete" | "directory_create" | "directory_delete" => true,
-            "execute_command" => true,
+            "bash" => true, // Use official bash command for high-risk operations
             _ => false,
         }
     }
