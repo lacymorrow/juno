@@ -141,14 +141,8 @@ impl AgentExecutionQueue {
                     }
                     Err(e) => {
                         error!("Agent execution failed for query {}: {}", query.id, e);
-
-                        // CRITICAL: Ensure UI state gets reset when agent execution fails
-                        // This handles cases where execute_agent_internal fails early before
-                        // reaching its own UI cleanup logic
-                        let app_handle_for_cleanup = query.app_handle.clone();
-                        crate::utils::async_runtime::safe_spawn_async_task(move || async move {
-                            crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_cleanup).await;
-                        });
+                        // NOTE: UI cleanup is handled within execute_agent_internal for all scenarios
+                        // No additional cleanup needed here to avoid race conditions
                     }
                 }
 
@@ -990,10 +984,7 @@ async fn execute_agent_internal(
     let agent_state_for_bar = final_response.agent_state.clone();
     let text_for_bar = final_response.text.clone();
     tauri::async_runtime::spawn(async move {
-        // First notify that the agent has stopped working
-        crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar).await;
-
-        // Then provide the completion details
+        // Provide the completion details (agent stop already notified above)
         crate::commands::ui_commands::handle_backend_response(
             &app_handle_for_bar,
             Some(text_for_bar),
