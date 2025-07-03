@@ -14,6 +14,10 @@ invoke("test_cloud_backend_connection"); // hard coded
 
 ✅ COMPLETED: Redundant timestamp functions eliminated
 
+dictation_ready, agent_responding, always_listening
+
+shouldnt ai providers share most of the same code?
+
 If an agent is asked to do multiple things in quick succession, we need to handle that.
 
 TTS called late

@@ -514,9 +514,49 @@ impl UIElementImpl for MacOSUIElement {
         // Implementation adapted from interaction::click_mouse_simulation
         match self.bounds() {
             Ok((x, y, width, height)) => {
+                // Apply the same coordinate adjustment logic as in click_mouse_simulation
+                let attrs = self.attributes();
+                debug!(
+                    "Element for right-click: role='{}', label='{:?}', bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+                    attrs.role, attrs.label, x, y, width, height
+                );
+
                 let center_x = x + width / 2.0;
                 let center_y = y + height / 2.0;
-                let point = CGPoint::new(center_x, center_y);
+
+                // Apply same coordinate adjustment as in click_mouse_simulation
+                let (adjusted_center_x, adjusted_center_y) = match attrs.role.as_str() {
+                    "AXButton" | "AXMenuItem" | "AXMenuBarItem" => {
+                        let adjusted_y = if height > 10.0 {
+                            center_y - (height * 0.1).min(3.0)
+                        } else {
+                            center_y
+                        };
+                        (center_x, adjusted_y)
+                    },
+                    "AXTextField" | "AXTextArea" | "AXSecureTextField" => {
+                        (center_x, center_y)
+                    },
+                    "AXWindow" => {
+                        let adjusted_y = if height > 30.0 {
+                            y + (height * 0.3).min(20.0)
+                        } else {
+                            center_y
+                        };
+                        (center_x, adjusted_y)
+                    },
+                    _ => {
+                        let adjusted_y = center_y - 2.0; // Slight upward adjustment
+                        (center_x, adjusted_y)
+                    }
+                };
+
+                debug!(
+                    "Right-click coordinates: original_center=({:.1}, {:.1}), adjusted=({:.1}, {:.1})",
+                    center_x, center_y, adjusted_center_x, adjusted_center_y
+                );
+
+                let point = CGPoint::new(adjusted_center_x, adjusted_center_y);
                 let source =
                     CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
                         AutomationError::PlatformError("Failed to create event source for right-click".to_string())
@@ -536,7 +576,7 @@ impl UIElementImpl for MacOSUIElement {
                 std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
 
                 // Right Mouse Down
-                debug!("Right mouse down at ({}, {})", center_x, center_y);
+                debug!("Right mouse down at ({:.1}, {:.1})", adjusted_center_x, adjusted_center_y);
                 let mouse_down = CGEvent::new_mouse_event(
                     source.clone(),
                     CGEventType::RightMouseDown,
@@ -550,7 +590,7 @@ impl UIElementImpl for MacOSUIElement {
                 std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
 
                 // Right Mouse Up
-                debug!("Right mouse up at ({}, {})", center_x, center_y);
+                debug!("Right mouse up at ({:.1}, {:.1})", adjusted_center_x, adjusted_center_y);
                 let mouse_up = CGEvent::new_mouse_event(
                     source,
                     CGEventType::RightMouseUp,
@@ -563,8 +603,8 @@ impl UIElementImpl for MacOSUIElement {
                 mouse_up.post(CGEventTapLocation::HID);
 
                 debug!(
-                    "Performed simulated right mouse click at ({}, {})",
-                    center_x, center_y
+                    "Performed simulated right mouse click at ({:.1}, {:.1}) for element role='{}'",
+                    adjusted_center_x, adjusted_center_y, attrs.role
                 );
                 Ok(())
             }
@@ -579,9 +619,49 @@ impl UIElementImpl for MacOSUIElement {
         // Implementation adapted from interaction::click_mouse_simulation
         match self.bounds() {
             Ok((x, y, width, height)) => {
+                // Apply the same coordinate adjustment logic as in click_mouse_simulation
+                let attrs = self.attributes();
+                debug!(
+                    "Element for hover: role='{}', label='{:?}', bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+                    attrs.role, attrs.label, x, y, width, height
+                );
+
                 let center_x = x + width / 2.0;
                 let center_y = y + height / 2.0;
-                let point = CGPoint::new(center_x, center_y);
+
+                // Apply same coordinate adjustment as in click_mouse_simulation
+                let (adjusted_center_x, adjusted_center_y) = match attrs.role.as_str() {
+                    "AXButton" | "AXMenuItem" | "AXMenuBarItem" => {
+                        let adjusted_y = if height > 10.0 {
+                            center_y - (height * 0.1).min(3.0)
+                        } else {
+                            center_y
+                        };
+                        (center_x, adjusted_y)
+                    },
+                    "AXTextField" | "AXTextArea" | "AXSecureTextField" => {
+                        (center_x, center_y)
+                    },
+                    "AXWindow" => {
+                        let adjusted_y = if height > 30.0 {
+                            y + (height * 0.3).min(20.0)
+                        } else {
+                            center_y
+                        };
+                        (center_x, adjusted_y)
+                    },
+                    _ => {
+                        let adjusted_y = center_y - 2.0; // Slight upward adjustment
+                        (center_x, adjusted_y)
+                    }
+                };
+
+                debug!(
+                    "Hover coordinates: original_center=({:.1}, {:.1}), adjusted=({:.1}, {:.1})",
+                    center_x, center_y, adjusted_center_x, adjusted_center_y
+                );
+
+                let point = CGPoint::new(adjusted_center_x, adjusted_center_y);
                 let source =
                     CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
                         AutomationError::PlatformError("Failed to create event source for hover".to_string())
@@ -601,7 +681,10 @@ impl UIElementImpl for MacOSUIElement {
                  // Maybe a small delay is good practice even for hover
                 std::thread::sleep(std::time::Duration::from_millis(20));
 
-                debug!("Performed simulated hover at ({}, {})", center_x, center_y);
+                debug!(
+                    "Performed simulated hover at ({:.1}, {:.1}) for element role='{}'",
+                    adjusted_center_x, adjusted_center_y, attrs.role
+                );
                 Ok(())
             }
              Err(e) => Err(AutomationError::PlatformError(format!(

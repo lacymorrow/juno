@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
-import { isJsxContent } from "@/components/ui/jsx-message-renderer";
 import type { ChatMessage } from "@/components/ChatMessage";
 
 // Type definitions for backend events
@@ -126,7 +125,6 @@ export function useBackendEvents({
 					const assistantMessage: ChatMessage = {
 						role: "assistant",
 						content: response.text,
-						isJsx: isJsxContent(response.text),
 						screenshot_base64: response.screenshot_base64,
 						timestamp: Date.now(),
 					};
@@ -443,20 +441,25 @@ export function useBackendEvents({
 				console.log("Stream ended:", event.payload);
 				const { message_id, complete_text, agent_state } = event.payload;
 
-				setConversationWithPruning((prev) =>
-					prev.map((msg) => {
-						if (msg.messageId === message_id && msg.isStreaming) {
-							return {
-								...msg,
-								content: complete_text,
-								isJsx: isJsxContent(complete_text),
-								isStreaming: false,
-								agent_state,
-							};
-						}
-						return msg;
-					})
-				);
+				setConversationWithPruning((prev) => {
+					const lastMessage = prev[prev.length - 1];
+					if (lastMessage && lastMessage.role === "assistant" && lastMessage.isStreaming) {
+						return prev.map((msg, idx) =>
+							idx === prev.length - 1
+								? {
+									...msg,
+									content: complete_text,
+									isStreaming: false,
+									agent_state: agent_state || msg.agent_state,
+								}
+								: msg
+						);
+					} else {
+						// Fallback for when stream start isn't caught, or initial message wasn't streaming
+						console.warn("Stream end without a corresponding streaming message or invalid last message.");
+						return [...prev, { role: "assistant", content: complete_text, isStreaming: false, agent_state: agent_state, timestamp: Date.now() }];
+					}
+				});
 
 				setIsProcessing(false);
 			}

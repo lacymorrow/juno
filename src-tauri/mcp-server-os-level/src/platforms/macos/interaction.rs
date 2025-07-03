@@ -172,9 +172,59 @@ pub(crate) fn click_mouse_simulation(
 ) -> Result<ClickResult, AutomationError> {
     match element.bounds() {
         Ok((x, y, width, height)) => {
+            // CRITICAL FIX: Add validation and adjustment for coordinate precision
+            // Log element details for debugging
+            let attrs = element.attributes();
+            debug!(
+                "Element for click: role='{}', label='{:?}', bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+                attrs.role, attrs.label, x, y, width, height
+            );
+
+            // Calculate center coordinates with improved precision
             let center_x = x + width / 2.0;
             let center_y = y + height / 2.0;
-            let point = CGPoint::new(center_x, center_y);
+
+            // CRITICAL FIX: For certain UI elements, adjust the click point to account for common offset issues
+            let (adjusted_center_x, adjusted_center_y) = match attrs.role.as_str() {
+                // For buttons and menu items, clicks should be slightly higher to avoid title bar issues
+                "AXButton" | "AXMenuItem" | "AXMenuBarItem" => {
+                    let adjusted_y = if height > 10.0 {
+                        // For taller elements, click slightly above center to avoid potential bottom padding/borders
+                        center_y - (height * 0.1).min(3.0)
+                    } else {
+                        center_y
+                    };
+                    (center_x, adjusted_y)
+                },
+                // For text fields and other input elements, click in the exact center
+                "AXTextField" | "AXTextArea" | "AXSecureTextField" => {
+                    (center_x, center_y)
+                },
+                // For window elements, be more careful about title bars
+                "AXWindow" => {
+                    // Click slightly below the top to avoid title bar clicks
+                    let adjusted_y = if height > 30.0 {
+                        y + (height * 0.3).min(20.0) // Click in upper 30% but avoid very top
+                    } else {
+                        center_y
+                    };
+                    (center_x, adjusted_y)
+                },
+                // For all other elements, use center but apply a small upward adjustment
+                // to compensate for the observed 5-10px downward offset
+                _ => {
+                    let adjusted_y = center_y - 2.0; // Slight upward adjustment
+                    (center_x, adjusted_y)
+                }
+            };
+
+            debug!(
+                "Click coordinates: original_center=({:.1}, {:.1}), adjusted=({:.1}, {:.1}), adjustment=({:.1}, {:.1})",
+                center_x, center_y, adjusted_center_x, adjusted_center_y,
+                adjusted_center_x - center_x, adjusted_center_y - center_y
+            );
+
+            let point = CGPoint::new(adjusted_center_x, adjusted_center_y);
             let source =
                 CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
                     AutomationError::PlatformError("Failed to create event source".to_string())
@@ -192,7 +242,7 @@ pub(crate) fn click_mouse_simulation(
             mouse_move.post(CGEventTapLocation::HID);
             std::thread::sleep(std::time::Duration::from_millis(50));
 
-            debug!("Mouse down at ({}, {})", center_x, center_y);
+            debug!("Mouse down at ({:.1}, {:.1})", adjusted_center_x, adjusted_center_y);
             let mouse_down = CGEvent::new_mouse_event(
                 source.clone(),
                 CGEventType::LeftMouseDown,
@@ -205,7 +255,7 @@ pub(crate) fn click_mouse_simulation(
             mouse_down.post(CGEventTapLocation::HID);
             std::thread::sleep(std::time::Duration::from_millis(50));
 
-            debug!("Mouse up at ({}, {})", center_x, center_y);
+            debug!("Mouse up at ({:.1}, {:.1})", adjusted_center_x, adjusted_center_y);
             let mouse_up = CGEvent::new_mouse_event(
                 source,
                 CGEventType::LeftMouseUp,
@@ -218,15 +268,16 @@ pub(crate) fn click_mouse_simulation(
             mouse_up.post(CGEventTapLocation::HID);
 
             debug!(
-                "Performed simulated mouse click at ({}, {})",
-                center_x, center_y
+                "Performed simulated mouse click at ({:.1}, {:.1}) for element role='{}' with original bounds ({:.1}, {:.1}, {:.1}, {:.1})",
+                adjusted_center_x, adjusted_center_y, attrs.role, x, y, width, height
             );
             Ok(ClickResult {
                 method: "MouseSimulation".to_string(),
-                coordinates: Some((center_x, center_y)),
+                coordinates: Some((adjusted_center_x, adjusted_center_y)),
                 details: format!(
-                    "Used mouse simulation at coordinates ({:.1}, {:.1}), element bounds: ({:.1}, {:.1}, {:.1}, {:.1})",
-                    center_x, center_y, x, y, width, height
+                    "Used mouse simulation at adjusted coordinates ({:.1}, {:.1}), element bounds: ({:.1}, {:.1}, {:.1}, {:.1}), role: {}, adjustment: ({:.1}, {:.1})",
+                    adjusted_center_x, adjusted_center_y, x, y, width, height, attrs.role,
+                    adjusted_center_x - center_x, adjusted_center_y - center_y
                 ),
             })
         }
@@ -1003,8 +1054,48 @@ pub(crate) fn scroll(
 ) -> Result<(), AutomationError> {
     element.focus()?; // Ensure the element or its container is focused
     let (x, y, width, height) = element.bounds()?;
+
+    // Apply the same coordinate adjustment logic as in click_mouse_simulation
+    let attrs = element.attributes();
+    debug!(
+        "Element for scroll: role='{}', label='{:?}', bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+        attrs.role, attrs.label, x, y, width, height
+    );
+
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
+
+    // Apply same coordinate adjustment as in click_mouse_simulation
+    let (adjusted_center_x, adjusted_center_y) = match attrs.role.as_str() {
+        "AXButton" | "AXMenuItem" | "AXMenuBarItem" => {
+            let adjusted_y = if height > 10.0 {
+                center_y - (height * 0.1).min(3.0)
+            } else {
+                center_y
+            };
+            (center_x, adjusted_y)
+        },
+        "AXTextField" | "AXTextArea" | "AXSecureTextField" => {
+            (center_x, center_y)
+        },
+        "AXWindow" => {
+            let adjusted_y = if height > 30.0 {
+                y + (height * 0.3).min(20.0)
+            } else {
+                center_y
+            };
+            (center_x, adjusted_y)
+        },
+        _ => {
+            let adjusted_y = center_y - 2.0; // Slight upward adjustment
+            (center_x, adjusted_y)
+        }
+    };
+
+    debug!(
+        "Scroll coordinates: original_center=({:.1}, {:.1}), adjusted=({:.1}, {:.1})",
+        center_x, center_y, adjusted_center_x, adjusted_center_y
+    );
 
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
@@ -1027,7 +1118,7 @@ pub(crate) fn scroll(
     let move_event = CGEvent::new_mouse_event(
         source.clone(), // Clone here to avoid move
         CGEventType::MouseMoved,
-        CGPoint::new(center_x, center_y),
+        CGPoint::new(adjusted_center_x, adjusted_center_y),
         CGMouseButton::Left
     ).map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
 
@@ -1038,13 +1129,13 @@ pub(crate) fn scroll(
     let scroll_event = CGEvent::new(source.clone()) // Clone source again here
         .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
 
-    // Constants for scroll wheel event
+    // Constants for scroll wheel event types
     const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
     const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll mode
 
-    // Set event type to scroll wheel - use transmute instead of from_type_id
+    // Set event type to scroll wheel using transmute for safety
     scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
 
     // Set the line scroll bit
@@ -1054,8 +1145,12 @@ pub(crate) fn scroll(
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, scroll_y as i64);
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, scroll_x as i64);
 
+    // Post the scroll event
     scroll_event.post(CGEventTapLocation::HID);
-
+    debug!(
+        "scrolled {} by {} at element center ({}, {})",
+        direction, amount, center_x, center_y
+    );
     Ok(())
 }
 
