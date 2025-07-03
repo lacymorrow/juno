@@ -145,7 +145,7 @@ export function ChatMessageComponent({
   onSaveResponse,
 }: ChatMessageProps) {
   // Handle special message types with existing components
-  if (msg.role === UI.AGENT_STATUS_THINKING) {
+  if (msg.agent_state === UI.AGENT_STATUS_THINKING) {
     return (
       <div className="flex justify-start">
         <div className="flex items-start gap-3 max-w-[80%]">
