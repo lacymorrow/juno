@@ -2,7 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
-import { FloatingBar } from "./components/FloatingBar";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import { Toaster } from "./components/ui/sonner";
 import { VoiceProvider } from "./contexts/VoiceContext";
@@ -11,6 +10,7 @@ import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
 import "./styles/globals.css";
 import { AppBar } from "./components/AppBar";
+import { VoiceAIBar } from "./components/bar/voice-ai-bar";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -20,7 +20,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/" element={<App />} />
           <Route path="/settings" element={<ModularSettingsWindow />} />
           <Route path="/app-bar" element={<AppBar />} />
-          <Route path="/floating-bar" element={<FloatingBar />} />
+          <Route path="/floating-bar" element={<VoiceAIBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
           <Route
