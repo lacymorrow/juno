@@ -134,8 +134,22 @@ impl AgentExecutionQueue {
                 // Release the semaphore
                 drop(permit);
 
-                if let Err(e) = result {
-                    error!("Agent execution failed for query {}: {}", query.id, e);
+                // Handle execution result - ensure UI cleanup happens on failure
+                match result {
+                    Ok(()) => {
+                        info!("Agent execution completed successfully for query ID: {}", query.id);
+                    }
+                    Err(e) => {
+                        error!("Agent execution failed for query {}: {}", query.id, e);
+
+                        // CRITICAL: Ensure UI state gets reset when agent execution fails
+                        // This handles cases where execute_agent_internal fails early before
+                        // reaching its own UI cleanup logic
+                        let app_handle_for_cleanup = query.app_handle.clone();
+                        crate::utils::async_runtime::safe_spawn_async_task(move || async move {
+                            crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_cleanup).await;
+                        });
+                    }
                 }
 
                 return Some(query);
@@ -1271,18 +1285,6 @@ async fn execute_specialized_agent_task(
         let memory_guard = memory_manager_arc.lock().await;
         memory_guard.clone()
     };
-
-    // Clean up any orphaned tool calls that might exist from previous failed executions
-    // This provides additional safety against conversation state issues
-
-    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
-    // let mut cloned_memory = specialist_memory;
-    // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
-    //     warn!(
-    //         "Failed to clean orphaned tool calls for {} agent: {}",
-    //         agent_type, e
-    //     );
-    // }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
