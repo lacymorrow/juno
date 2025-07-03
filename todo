@@ -14,7 +14,7 @@ invoke("test_cloud_backend_connection"); // hard coded
 
 ✅ COMPLETED: Redundant timestamp functions eliminated
 
-dictation_ready, agent_responding, always_listening
+Seems like our app makes an incorrect state transition of the tray icon to dictation active after dictation finishes. Look at these logs.
 
 shouldnt ai providers share most of the same code?
 
