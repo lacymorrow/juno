@@ -387,13 +387,6 @@ const availableComponents = {
   VisualDemo,
 } as Record<string, React.ComponentType<any>>;
 
-// Helper function to detect if content contains JSX
-export function isJsxContent(content: string): boolean {
-  // Check for JSX-like content
-  const jsxPattern = /<[A-Z][A-Za-z0-9]*\s*[^>]*>|<\/[A-Z][A-Za-z0-9]*>/;
-  return jsxPattern.test(content.trim());
-}
-
 export function JsxMessageRenderer({
   jsx,
   className,
