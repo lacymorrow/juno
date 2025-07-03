@@ -107,19 +107,44 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 // Clone for error handling since submit_query will move app_handle_clone
                                 let app_handle_for_error = app_handle_clone.clone();
 
-                                match crate::anthropic::submit_query(
-                                    trimmed_query.to_string(),
-                                    app_state,
-                                    app_handle_clone
-                                ).await {
-                                    Ok(_) => {
-                                        info!("[Agent Mode] Agent query submitted successfully");
-                                    }
-                                    Err(e) => {
-                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
-                                    }
-                                }
+                                // Set up timeout for agent processing to prevent stuck UI states
+                                let app_handle_for_timeout = app_handle_for_error.clone();
+                                let timeout_task = tokio::time::timeout(
+                                    std::time::Duration::from_secs(300), // 5 minutes timeout
+                                    crate::anthropic::submit_query(
+                                        trimmed_query.to_string(),
+                                        app_state,
+                                        app_handle_clone
+                                    )
+                                );
+
+                                                                 match timeout_task.await {
+                                     Ok(Ok(_)) => {
+                                         info!("[Agent Mode] Agent query submitted successfully");
+                                     }
+                                     Ok(Err(e)) => {
+                                         error!("[Agent Mode] Failed to submit query to agent: {}", e);
+
+                                         // Reset UI state when agent processing fails
+                                         let app_handle_for_ui_reset = app_handle_for_error.clone();
+                                         crate::utils::async_runtime::safe_spawn_async_task(move || async move {
+                                             crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_ui_reset).await;
+                                         });
+
+                                         crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
+                                     }
+                                     Err(_) => {
+                                         error!("[Agent Mode] Agent processing timed out after 5 minutes");
+
+                                         // Reset UI state when agent processing times out
+                                         let app_handle_for_ui_reset = app_handle_for_timeout.clone();
+                                         crate::utils::async_runtime::safe_spawn_async_task(move || async move {
+                                             crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_ui_reset).await;
+                                         });
+
+                                         crate::error_handling::utils::handle_agent_error(&app_handle_for_timeout, "Agent processing timed out after 5 minutes").await;
+                                     }
+                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
                             }
@@ -342,23 +367,36 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 
                     // Only activate agent if we have meaningful content
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
-                        // Submit the query to the agent system
-                        match crate::anthropic::submit_query(
-                            trimmed_text.to_string(),
-                            app_state,
-                            app_handle.clone(),
-                        )
-                        .await
-                        {
-                            Ok(_) => {
+                        // Submit the query to the agent system with timeout
+                        let timeout_task = tokio::time::timeout(
+                            std::time::Duration::from_secs(300), // 5 minutes timeout
+                            crate::anthropic::submit_query(
+                                trimmed_text.to_string(),
+                                app_state,
+                                app_handle.clone(),
+                            )
+                        );
+
+                        match timeout_task.await {
+                            Ok(Ok(_)) => {
                                 info!("[AlwaysListening] Agent query submitted successfully");
                             }
-                            Err(e) => {
+                            Ok(Err(e)) => {
                                 crate::error_handling::utils::log_and_emit_error(
                                     app_handle,
                                     "AlwaysListening",
                                     "agent_query_submission",
                                     &e.to_string(),
+                                    true,
+                                );
+                            }
+                            Err(_) => {
+                                error!("[AlwaysListening] Agent processing timed out after 5 minutes");
+                                crate::error_handling::utils::log_and_emit_error(
+                                    app_handle,
+                                    "AlwaysListening",
+                                    "agent_processing_timeout",
+                                    "Agent processing timed out after 5 minutes",
                                     true,
                                 );
                             }
@@ -577,8 +615,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 Ok(()) => {
                     info!("[Agent Mode] Started agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, true) {
-                        tracing::error!("{} Failed to emit agent-active event: {}", prefixes::AGENT_MODE, e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        true,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -591,6 +635,16 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
 
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
+
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change after error: {}", e);
+                    }
                 }
             }
         }
@@ -600,8 +654,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use coordinate_state_change to update UI manager AND emit event
+            if let Err(e) = utils::coordinate_state_change(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
             }
         }
     }
@@ -622,8 +682,8 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
-                    // Note: We don't emit agent-active false here because the agent will continue
-                    // processing the transcribed text. The agent-active false will be emitted
+                    // Note: We don't call coordinate_state_change(false) here because the agent will continue
+                    // processing the transcribed text. The agent-active false will be handled
                     // after the agent completes processing the query.
                 }
                 Err(e) => {
@@ -632,8 +692,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change after transcription stop failure: {}", e);
                     }
                 }
             }
@@ -644,8 +710,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use coordinate_state_change to update UI manager AND emit event
+            if let Err(e) = utils::coordinate_state_change(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
             }
         }
     }
@@ -665,8 +737,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -675,8 +753,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change after stop failure: {}", e);
                     }
                 }
             }
@@ -687,8 +771,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use coordinate_state_change to update UI manager AND emit event
+            if let Err(e) = utils::coordinate_state_change(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
             }
         }
     }
@@ -708,8 +798,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -718,8 +814,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use coordinate_state_change to update UI manager AND emit event
+                    if let Err(e) = utils::coordinate_state_change(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to coordinate agent state change after cancel failure: {}", e);
                     }
                 }
             }
@@ -732,8 +834,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use coordinate_state_change to update UI manager AND emit event
+            if let Err(e) = utils::coordinate_state_change(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to coordinate agent state change: {}", e);
             }
         }
     }
@@ -759,8 +867,14 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Reset agent input monitor state
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+    // Use coordinate_state_change to update UI manager AND emit event
+    if let Err(e) = utils::coordinate_state_change(
+        app_handle,
+        "agent",
+        false,
+        Some(constants::events::agent::ACTIVE),
+    ).await {
+        error!("[Agent Mode] Failed to coordinate agent state change during force stop: {}", e);
     }
 
     info!("[Agent Mode] Force stopped agent mode successfully");
