@@ -90,7 +90,7 @@ docs/bug-tracking/
 
 - `src/App.tsx` (lines 1459-1555: streaming logic, line 2620: message rendering)
 - `src-tauri/src/agent/tool_logger.rs` (streaming event emission)
-- `src/components/jsx-message-renderer.tsx` (`isJsxContent()` function)
+- `src/components/jsx-message-renderer.tsx`
 - `src-tauri/src/anthropic.rs` (main agent orchestration)
 - `src-tauri/src/agent/tools/` (tool implementations)
 
