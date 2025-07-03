@@ -98,7 +98,6 @@ Based on documented regressions, specifically test:
 
 - [ ] **Chat Interface Disable Bug**: Verify interface re-enables after agent execution
 - [ ] **Streaming Event Names**: Ensure backend emits correct event names (`agent-stream-start`, `agent-text-stream`, `agent-stream-end`)
-- [ ] **Streaming/JSX Conflict**: Verify `isJsxContent()` not called during streaming
 - [ ] **Permission Detection**: Test both `computer_use_ai_sdk` and fallback mechanisms
 - [ ] **Event Handler Cleanup**: Ensure proper listener cleanup on component unmount
 - [ ] **State Management**: Verify streaming state flags are properly managed
