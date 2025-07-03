@@ -1,4 +1,3 @@
-import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
 import { JsxMessageRenderer } from "@/components/ui/jsx-message-renderer";
@@ -16,8 +15,14 @@ import {
   Volume2,
   ChevronDown,
   ChevronRight,
+  Brain,
+  CheckCircle,
+  XCircle,
+  WifiOff,
 } from "lucide-react";
 import { useState } from "react";
+import { UI } from "@/lib/constants.generated";
+import { ThinkingMessage } from "./ThinkingMessage";
 
 // Type for conversation messages (imported from App.tsx)
 export type ChatMessage = {
@@ -25,9 +30,9 @@ export type ChatMessage = {
     | "user"
     | "assistant"
     | "system"
-    | "thinking"
     | "tool_call_request"
-    | "tool_call_result";
+    | "tool_call_result"
+    | "thinking";
   content: string;
   isJsx?: boolean;
   screenshot_base64?: string;
@@ -199,31 +204,31 @@ export function ChatMessageComponent({
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
           <span className="text-muted-foreground italic flex items-center gap-2">
-            {msg.agent_state === "Finished" ? (
-              <>
-                <span>✓</span>
-                <span>Task completed successfully</span>
-              </>
-            ) : msg.agent_state === "Failed" ? (
-              <>
-                <span className="text-red-500">✗</span>
-                <span className="text-red-500">Task failed</span>
-              </>
-            ) : msg.agent_state === "Cancelled" ? (
-              <>
-                <span className="text-yellow-500">⊘</span>
-                <span className="text-yellow-500">Task cancelled</span>
-              </>
-            ) : msg.agent_state === "Offline" ? (
-              <>
-                <span className="text-orange-500">⚠</span>
-                <span className="text-orange-500">Connection unavailable</span>
-              </>
+            {msg.agent_state === UI.AGENT_STATUS_FINISHED ? (
+              <div className="flex items-center gap-1.5 text-green-600">
+                <CheckCircle className="h-3 w-3" />
+                <span className="text-xs">Complete</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_FAILED ? (
+              <div className="flex items-center gap-1.5 text-red-600">
+                <XCircle className="h-3 w-3" />
+                <span className="text-xs">Failed</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_CANCELLED ? (
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <XCircle className="h-3 w-3" />
+                <span className="text-xs">Cancelled</span>
+              </div>
+            ) : msg.agent_state === UI.AGENT_STATUS_OFFLINE ? (
+              <div className="flex items-center gap-1.5 text-gray-600">
+                <WifiOff className="h-3 w-3" />
+                <span className="text-xs">Offline</span>
+              </div>
             ) : (
-              <>
-                <span>✓</span>
-                <span>Task completed</span>
-              </>
+              <div className="flex items-center gap-1.5 text-green-600">
+                <CheckCircle className="h-3 w-3" />
+                <span className="text-xs">Complete</span>
+              </div>
             )}
           </span>
         ) : msg.isJsx ? (

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { LoadingStates } from "@/types/devtools";
+import { EVENTS } from "@/lib/constants.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -109,7 +110,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     try {
       // Listen for always listening events
       const unlistenAlwaysListening = await listen<AlwaysListeningEvent>(
-        "always-listening-event",
+        EVENTS.ALWAYS_LISTENING_EVENT,
         (event) => {
           const { type, payload } = event.payload;
           const timestamp = new Date().toLocaleTimeString();
@@ -143,7 +144,9 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
               break;
             case "error":
               addEvent(
-                `❌ Error: ${payload?.message || "Unknown error"} at ${timestamp}`
+                `❌ Error: ${
+                  payload?.message || "Unknown error"
+                } at ${timestamp}`
               );
               break;
             case "transcription_debug":
@@ -180,15 +183,15 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
       );
 
       return () => {
-        if (typeof unlistenAlwaysListening === 'function') {
+        if (typeof unlistenAlwaysListening === "function") {
           unlistenAlwaysListening();
         }
-        if (typeof unlistenVolume === 'function') {
+        if (typeof unlistenVolume === "function") {
           unlistenVolume();
         }
       };
     } catch (error) {
-      console.error('Failed to setup event listeners:', error);
+      console.error("Failed to setup event listeners:", error);
       return () => {}; // Return a no-op function if setup fails
     }
   };

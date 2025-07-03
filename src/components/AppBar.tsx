@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, FormEvent } from "react";
 import { Mic, Zap, Volume2, MessageCircle, Keyboard, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { UI } from "@/lib/constants.generated";
 
 // === UI API IMPORTS ===
 import {
@@ -15,21 +16,21 @@ import {
 
 const getMainIcon = (uiState: UIState) => {
   switch (uiState) {
-    case "listening":
+    case UI.BAR_STATES_LISTENING:
       return <Mic size={14} className="text-blue-400" />;
-    case "transcribing":
+    case UI.BAR_STATES_TRANSCRIBING:
       return <Mic size={14} className="animate-pulse text-blue-400" />;
-    case "speaking":
+    case UI.BAR_STATES_SPEAKING:
       return <Volume2 size={14} className="text-green-400" />;
-    case "loading":
-    case "submitting":
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_SUBMITTING:
       return <Zap size={14} className="animate-pulse text-yellow-400" />;
-    case "input":
-    case "expanding":
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
       return <MessageCircle size={14} className="text-white" />;
-    case "dictation-ready":
+    case UI.BAR_STATES_DICTATION_READY:
       return <Keyboard size={14} className="text-orange-400" />;
-    case "always-listening":
+    case UI.BAR_STATES_ALWAYS_LISTENING:
       return <Mic size={14} className="text-blue-400 animate-pulse" />;
     default:
       return <Zap size={14} className="text-white" />;
@@ -42,31 +43,31 @@ const getStatusText = (uiState: UIState, currentError: string | null) => {
   }
 
   switch (uiState) {
-    case "default":
+    case UI.BAR_STATES_DEFAULT:
       return "Click to start or use voice commands";
-    case "expanding":
+    case UI.BAR_STATES_EXPANDING:
       return "Preparing input field...";
-    case "input":
+    case UI.BAR_STATES_INPUT:
       return "Type your request or use voice input";
-    case "submitting":
+    case UI.BAR_STATES_SUBMITTING:
       return "Sending your request...";
-    case "loading":
+    case UI.BAR_STATES_LOADING:
       return "Processing your request...";
-    case "speaking":
+    case UI.BAR_STATES_SPEAKING:
       return "Speaking response...";
-    case "listening":
+    case UI.BAR_STATES_LISTENING:
       return "Listening for your voice...";
-    case "transcribing":
+    case UI.BAR_STATES_TRANSCRIBING:
       return "Converting speech to text...";
-    case "success":
+    case UI.BAR_STATES_SUCCESS:
       return "Task completed successfully!";
-    case "error":
+    case UI.BAR_STATES_ERROR:
       return currentError || "An error occurred";
-    case "finishing":
+    case UI.BAR_STATES_FINISHING:
       return "Finalizing response...";
-    case "dictation-ready":
+    case UI.BAR_STATES_DICTATION_READY:
       return "Ready for dictation mode";
-    case "always-listening":
+    case UI.BAR_STATES_ALWAYS_LISTENING:
       return "Always listening for wake words...";
     default:
       return "Ready";
@@ -80,7 +81,13 @@ const AudioLevelIndicator = ({
   uiState: UIState;
   audioLevel: number;
 }) => {
-  if (!["listening", "transcribing", "always-listening"].includes(uiState)) {
+  if (
+    ![
+      UI.BAR_STATES_LISTENING,
+      UI.BAR_STATES_TRANSCRIBING,
+      UI.BAR_STATES_ALWAYS_LISTENING,
+    ].includes(uiState as any)
+  ) {
     return null;
   }
 
@@ -161,7 +168,7 @@ export function AppBar() {
 
   // === FOCUS MANAGEMENT ===
   useEffect(() => {
-    if (currentState?.uiState === "input" && inputRef.current) {
+    if (currentState?.uiState === UI.BAR_STATES_INPUT && inputRef.current) {
       inputRef.current.focus();
     }
   }, [currentState?.uiState]);
@@ -221,10 +228,10 @@ export function AppBar() {
     let bgColor = "bg-black/90";
 
     switch (currentState?.voiceMode) {
-      case "dictation":
+      case UI.VOICE_MODES_DICTATION:
         bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
         break;
-      case "agent":
+      case UI.VOICE_MODES_AGENT:
         bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
         break;
       default:
@@ -237,26 +244,29 @@ export function AppBar() {
     }
 
     // Override for specific states
-    if (currentState?.uiState === "error") {
+    if (currentState?.uiState === UI.BAR_STATES_ERROR) {
       bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
-    } else if (currentState?.uiState === "success") {
+    } else if (currentState?.uiState === UI.BAR_STATES_SUCCESS) {
       bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
-    } else if (currentState?.uiState === "always-listening") {
+    } else if (currentState?.uiState === UI.BAR_STATES_ALWAYS_LISTENING) {
       bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
-    const sizeStyles = ["default"].includes(currentState?.uiState || "default")
+    const sizeStyles = [UI.BAR_STATES_DEFAULT].includes(
+      (currentState?.uiState || UI.BAR_STATES_DEFAULT) as any
+    )
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
     const hoverEffect =
-      currentState?.uiState === "default" && isWindowHovered
+      currentState?.uiState === UI.BAR_STATES_DEFAULT && isWindowHovered
         ? "ring-2 ring-white/30"
         : "";
 
-    const clickable = ["default", "dictation-ready"].includes(
-      currentState?.uiState || "default"
-    )
+    const clickable = [
+      UI.BAR_STATES_DEFAULT,
+      UI.BAR_STATES_DICTATION_READY,
+    ].includes((currentState?.uiState || UI.BAR_STATES_DEFAULT) as any)
       ? "cursor-pointer"
       : "";
 
@@ -275,21 +285,21 @@ export function AppBar() {
         className={getContainerStyles()}
         style={{ opacity: uiConfig.opacity }}
         onClick={
-          ["default", "dictation-ready"].includes(
-            currentState?.uiState || "default"
+          [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+            (currentState?.uiState || UI.BAR_STATES_DEFAULT) as any
           )
             ? handleBarClick
             : undefined
         }
       >
         {/* Default State */}
-        {(currentState?.uiState === "default" ||
-          currentState?.uiState === "dictation-ready" ||
-          currentState?.uiState === "finishing") && (
+        {(currentState?.uiState === UI.BAR_STATES_DEFAULT ||
+          currentState?.uiState === UI.BAR_STATES_DICTATION_READY ||
+          currentState?.uiState === UI.BAR_STATES_FINISHING) && (
           <div className="flex items-center gap-2" data-tauri-drag-region>
-            {getMainIcon(currentState?.uiState || "default")}
+            {getMainIcon(currentState?.uiState || UI.BAR_STATES_DEFAULT)}
             {uiConfig.showVoiceIndicator &&
-              (currentState?.voiceMode !== "idle" ||
+              (currentState?.voiceMode !== UI.VOICE_MODES_IDLE ||
                 currentState?.isDictationMode ||
                 currentState?.isAgentWorking) && (
                 <VoiceStatusIndicator variant="compact" className="ml-1" />
@@ -304,19 +314,21 @@ export function AppBar() {
         )}
 
         {/* Input State */}
-        {(currentState?.uiState === "expanding" ||
-          currentState?.uiState === "input") && (
+        {(currentState?.uiState === UI.BAR_STATES_EXPANDING ||
+          currentState?.uiState === UI.BAR_STATES_INPUT) && (
           <form
             onSubmit={handleSubmit}
             className={cn(
               "flex items-center justify-between w-full h-full gap-3",
               "transition-opacity duration-300 ease-in-out",
-              currentState?.uiState === "input" ? "opacity-100" : "opacity-0"
+              currentState?.uiState === UI.BAR_STATES_INPUT
+                ? "opacity-100"
+                : "opacity-0"
             )}
             data-tauri-drag-region
           >
             <div className="flex items-center gap-2" data-tauri-drag-region>
-              {getMainIcon(currentState?.uiState || "input")}
+              {getMainIcon(currentState?.uiState || UI.BAR_STATES_INPUT)}
               <input
                 ref={inputRef}
                 type="text"
@@ -326,13 +338,13 @@ export function AppBar() {
                 onBlur={handleInputBlur}
                 placeholder="Ask me anything..."
                 className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-                disabled={currentState?.uiState !== "input"}
+                disabled={currentState?.uiState !== UI.BAR_STATES_INPUT}
               />
             </div>
             <button
               type="submit"
               className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-              disabled={currentState?.uiState !== "input"}
+              disabled={currentState?.uiState !== UI.BAR_STATES_INPUT}
             >
               <Send size={14} />
             </button>
@@ -341,32 +353,32 @@ export function AppBar() {
 
         {/* Active States */}
         {[
-          "submitting",
-          "loading",
-          "speaking",
-          "dictating",
-          "transcribing",
-          "agent-responding",
-          "listening",
-        ].includes(currentState?.uiState || "") && (
+          UI.BAR_STATES_SUBMITTING,
+          UI.BAR_STATES_LOADING,
+          UI.BAR_STATES_SPEAKING,
+          UI.BAR_STATES_DICTATING,
+          UI.BAR_STATES_TRANSCRIBING,
+          UI.BAR_STATES_AGENT_RESPONDING,
+          UI.BAR_STATES_LISTENING,
+        ].includes((currentState?.uiState || UI.BAR_STATES_DEFAULT) as any) && (
           <div
             className="flex items-center justify-between w-full h-full"
             data-tauri-drag-region
           >
             <div className="flex items-center gap-2" data-tauri-drag-region>
-              {getMainIcon(currentState?.uiState || "default")}
+              {getMainIcon(currentState?.uiState || UI.BAR_STATES_DEFAULT)}
               <span
                 className="text-sm font-medium truncate"
                 data-tauri-drag-region
               >
                 {getStatusText(
-                  currentState?.uiState || "default",
+                  currentState?.uiState || UI.BAR_STATES_DEFAULT,
                   currentError
                 )}
               </span>
             </div>
             <AudioLevelIndicator
-              uiState={currentState?.uiState || "default"}
+              uiState={currentState?.uiState || UI.BAR_STATES_DEFAULT}
               audioLevel={audioLevel}
             />
           </div>

@@ -16,7 +16,7 @@ import {
 export type AppView = "chat" | "devtools" | "permissions";
 
 interface AppHeaderProps {
-  serverStatus: "connected" | "error" | "connecting";
+  serverStatus: "connected" | "connecting" | "error";
   isProcessing: boolean;
   currentView: AppView;
   isDevPanelOpen: boolean;

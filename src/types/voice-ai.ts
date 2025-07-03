@@ -1,12 +1,17 @@
+import { UI } from "@/lib/constants.generated";
+
 export type AssistantState =
-	| "idle"
-	| "listening"
-	| "processing"
-	| "speaking"
-	| "error"
-	| "success"
-	| "input"
-	| "response"
+	| typeof UI.AGENT_STATUS_IDLE
+	| typeof UI.AGENT_STATUS_DICTATING
+	| typeof UI.AGENT_STATUS_LISTENING
+	| typeof UI.AGENT_STATUS_THINKING
+	| typeof UI.AGENT_STATUS_RESPONDING
+	| typeof UI.AGENT_STATUS_ERROR
+	| typeof UI.AGENT_STATUS_FINISHED
+	| typeof UI.AGENT_STATUS_FAILED
+	| typeof UI.AGENT_STATUS_CANCELLED
+	| typeof UI.AGENT_STATUS_OFFLINE
+	| typeof UI.AGENT_STATUS_PROCESSING;
 
 export type ContentType = "text" | "code" | "component" | "image" | "video"
 

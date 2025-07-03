@@ -7,29 +7,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { useState, useEffect } from "react";
+import { UI } from "./constants.generated";
 
 // === Core UI Types ===
 
 export type UIElementType = "bar" | "panel" | "chat" | "overlay" | "modal";
 
 export type UIState =
-    | "default"
-    | "expanding"
-    | "expanded"
-    | "input"
-    | "shrinking"
-    | "submitting"
-    | "loading"
-    | "finishing"
-    | "success"
-    | "listening"
-    | "error"
-    | "transcribing"
-    | "speaking"
-    | "dictating"
-    | "always-listening"
-    | "agent-responding"
-    | "dictation-ready";
+    | typeof UI.BAR_STATES_DEFAULT
+    | typeof UI.BAR_STATES_EXPANDING
+    | typeof UI.BAR_STATES_INPUT
+    | typeof UI.BAR_STATES_SHRINKING
+    | typeof UI.BAR_STATES_SUBMITTING
+    | typeof UI.BAR_STATES_LOADING
+    | typeof UI.BAR_STATES_FINISHING
+    | typeof UI.BAR_STATES_SUCCESS
+    | typeof UI.BAR_STATES_LISTENING
+    | typeof UI.BAR_STATES_ERROR
+    | typeof UI.BAR_STATES_TRANSCRIBING
+    | typeof UI.BAR_STATES_SPEAKING
+    | typeof UI.BAR_STATES_DICTATING
+    | typeof UI.BAR_STATES_ALWAYS_LISTENING
+    | typeof UI.BAR_STATES_AGENT_RESPONDING
+    | typeof UI.BAR_STATES_DICTATION_READY;
 
 export type VoiceMode = "idle" | "agent" | "dictation";
 
@@ -369,26 +369,26 @@ export function createUIElement(elementId: string, elementType: UIElementType): 
 
 export function getStateIcon(state: UIState, voiceMode: VoiceMode = "idle"): string {
     switch (state) {
-        case "default":
+        case UI.BAR_STATES_DEFAULT:
             return "✨";
-        case "dictating":
+        case UI.BAR_STATES_DICTATING:
             return "📝";
-        case "listening":
+        case UI.BAR_STATES_LISTENING:
             return voiceMode === "dictation" ? "📝" : "🎤";
-        case "transcribing":
+        case UI.BAR_STATES_TRANSCRIBING:
             return "🔄";
-        case "loading":
-        case "submitting":
+        case UI.BAR_STATES_LOADING:
+        case UI.BAR_STATES_SUBMITTING:
             return "⏳";
-        case "agent-responding":
+        case UI.BAR_STATES_AGENT_RESPONDING:
             return "🧠";
-        case "speaking":
+        case UI.BAR_STATES_SPEAKING:
             return "🔊";
-        case "success":
+        case UI.BAR_STATES_SUCCESS:
             return "✅";
-        case "error":
+        case UI.BAR_STATES_ERROR:
             return "❌";
-        case "always-listening":
+        case UI.BAR_STATES_ALWAYS_LISTENING:
             return "👂";
         default:
             return "💫";
@@ -397,22 +397,22 @@ export function getStateIcon(state: UIState, voiceMode: VoiceMode = "idle"): str
 
 export function getStateColor(state: UIState, voiceMode: VoiceMode = "idle"): string {
     switch (state) {
-        case "dictating":
-        case "transcribing":
+        case UI.BAR_STATES_DICTATING:
+        case UI.BAR_STATES_TRANSCRIBING:
             return voiceMode === "dictation" ? "orange" : "blue";
-        case "listening":
+        case UI.BAR_STATES_LISTENING:
             return voiceMode === "dictation" ? "orange" : "blue";
-        case "loading":
-        case "submitting":
-        case "agent-responding":
+        case UI.BAR_STATES_LOADING:
+        case UI.BAR_STATES_SUBMITTING:
+        case UI.BAR_STATES_AGENT_RESPONDING:
             return "blue";
-        case "speaking":
+        case UI.BAR_STATES_SPEAKING:
             return "purple";
-        case "success":
+        case UI.BAR_STATES_SUCCESS:
             return "green";
-        case "error":
+        case UI.BAR_STATES_ERROR:
             return "red";
-        case "always-listening":
+        case UI.BAR_STATES_ALWAYS_LISTENING:
             return "cyan";
         default:
             return "gray";
@@ -426,30 +426,30 @@ export function getStateDescription(
     error?: string
 ): string {
     switch (state) {
-        case "default":
+        case UI.BAR_STATES_DEFAULT:
             return "Ready";
-        case "dictating":
+        case UI.BAR_STATES_DICTATING:
             return voiceMode === "dictation" ? "Dictating..." : "Listening for command...";
-        case "listening":
+        case UI.BAR_STATES_LISTENING:
             return "Listening...";
-        case "transcribing":
+        case UI.BAR_STATES_TRANSCRIBING:
             return "Processing...";
-        case "loading":
+        case UI.BAR_STATES_LOADING:
             return "AI thinking...";
-        case "submitting":
+        case UI.BAR_STATES_SUBMITTING:
             return "Submitting...";
-        case "agent-responding":
+        case UI.BAR_STATES_AGENT_RESPONDING:
             return "AI responding...";
-        case "speaking":
+        case UI.BAR_STATES_SPEAKING:
             return "Speaking...";
-        case "success":
+        case UI.BAR_STATES_SUCCESS:
             if (agentStatus === "failed") return "Task failed";
             if (agentStatus === "cancelled") return "Task cancelled";
             if (agentStatus === "offline") return "Connection unavailable";
             return "Task completed";
-        case "error":
+        case UI.BAR_STATES_ERROR:
             return error || "Error occurred";
-        case "always-listening":
+        case UI.BAR_STATES_ALWAYS_LISTENING:
             return "Always listening...";
         default:
             return "Ready";

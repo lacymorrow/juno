@@ -1,263 +1,151 @@
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/constants.generated";
 
-type CommandStatus = "executing" | "completed" | "failed";
-
-type CommandInfo = {
-  command: string;
-  status: CommandStatus;
+interface CommandInfo {
   id: number;
+  command: string;
   timestamp: number;
+  status: "executing" | "completed" | "failed";
   duration?: number;
   error?: string;
-};
+}
 
-const CommandOverlay = () => {
+interface CommandStartPayload {
+  id?: number;
+  command?: string;
+}
+
+interface CommandEndPayload {
+  id?: number;
+  command?: string;
+  success?: boolean;
+  error?: string;
+  duration?: number;
+}
+
+export default function CommandOverlay() {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
-  const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem("juno-show-command-overlay") === "true"
-  );
-
-  // Check localStorage periodically for setting changes
-  useEffect(() => {
-    const checkSettings = () => {
-      const enabled =
-        localStorage.getItem("juno-show-command-overlay") === "true";
-      setIsEnabled(enabled);
-    };
-
-    // Check immediately and then every second
-    checkSettings();
-    const interval = setInterval(checkSettings, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    // Only listen for events if overlay is enabled
-    if (!isEnabled) return;
-
-    // Listen for command execution start events
-    const unlistenStart = listen<{ command: string; id: number }>(
-      "command-execution-start",
+    // Listen for command execution start
+    const unlistenStart = listen<CommandStartPayload>(
+      EVENTS.TOOLS_COMMAND_EXECUTION_START,
       (event) => {
-        const { command, id } = event.payload;
+        const { id, command } = event.payload;
+        const timestamp = Date.now();
+        const commandId = id || timestamp;
         const newCommand: CommandInfo = {
-          command,
+          id: commandId,
+          command: command || "Unknown command",
+          timestamp,
           status: "executing",
-          id,
-          timestamp: Date.now(),
         };
-
-        setCommands((prevCommands) => [...prevCommands, newCommand]);
+        setCommands((prev) => [...prev, newCommand]);
+        setIsVisible(true);
+        setTimeout(() => {
+          setIsVisible(false);
+        }, 5000);
       }
     );
 
-    // Listen for command execution end events
-    const unlistenEnd = listen<{
-      id: number;
-      success: boolean;
-      duration?: number;
-      error?: string;
-    }>("command-execution-end", (event) => {
-      const { id, success, duration, error } = event.payload;
-
-      setCommands((prevCommands) =>
-        prevCommands.map((cmd) =>
-          cmd.id === id
-            ? {
+    // Listen for command execution end
+    const unlistenEnd = listen<CommandEndPayload>(
+      EVENTS.TOOLS_COMMAND_EXECUTION_END,
+      (event) => {
+        const { id, command, success, error, duration } = event.payload;
+        const commandId = id;
+        setCommands((prev) => {
+          // Try to find and update the matching command by id
+          let updated = false;
+          const updatedCommands = prev.map((cmd) => {
+            if (commandId && cmd.id === commandId) {
+              updated = true;
+              return {
                 ...cmd,
                 status: success ? "completed" : "failed",
-                duration,
-                error,
-              }
-            : cmd
-        )
-      );
-    });
+                duration: duration || 0,
+                error: error || undefined,
+              };
+            }
+            return cmd;
+          });
+          // If not found, add as new (fallback for out-of-order events)
+          if (!updated) {
+            return [
+              ...prev,
+              {
+                id: commandId || Date.now(),
+                command: command || "Unknown command",
+                timestamp: Date.now(),
+                status: success ? "completed" : "failed",
+                duration: duration || 0,
+                error: error || undefined,
+              },
+            ];
+          }
+          return updatedCommands;
+        });
+        setIsVisible(true);
+        setTimeout(() => {
+          setIsVisible(false);
+        }, 5000);
+      }
+    );
 
     return () => {
-      // Cleanup listeners when component unmounts or is disabled
-      Promise.all([unlistenStart, unlistenEnd]).then(
-        ([unlistenStartFn, unlistenEndFn]) => {
-          unlistenStartFn();
-          unlistenEndFn();
-        }
-      );
+      unlistenStart.then((f) => f());
+      unlistenEnd.then((f) => f());
     };
-  }, [isEnabled]);
+  }, []);
 
-  // Clean up old commands (remove completed/failed commands after delay)
-  useEffect(() => {
-    if (commands.length === 0 || !isEnabled) return;
-
-    const cleanupTimeout = setTimeout(() => {
-      const now = Date.now();
-      setCommands((prevCommands) =>
-        prevCommands.filter((cmd) => {
-          // Keep executing commands
-          if (cmd.status === "executing") return true;
-          // Remove completed/failed commands older than 3 seconds
-          return now - cmd.timestamp < 3000;
-        })
-      );
-    }, 100);
-
-    return () => clearTimeout(cleanupTimeout);
-  }, [commands, isEnabled]);
-
-  // Don't render anything if disabled
-  if (!isEnabled) {
-    return null;
-  }
-
-  // Get status icon and color
-  const getStatusDisplay = (status: CommandStatus) => {
+  const getStatusDisplay = (status: string) => {
     switch (status) {
       case "executing":
-        return {
-          icon: "⏳",
-          color: "#3b82f6",
-          bgColor: "rgba(59, 130, 246, 0.1)",
-        };
+        return { icon: "⏳", color: "text-blue-600", bgColor: "bg-blue-50" };
       case "completed":
-        return {
-          icon: "✅",
-          color: "#10b981",
-          bgColor: "rgba(16, 185, 129, 0.1)",
-        };
+        return { icon: "✅", color: "text-green-600", bgColor: "bg-green-50" };
       case "failed":
-        return {
-          icon: "❌",
-          color: "#ef4444",
-          bgColor: "rgba(239, 68, 68, 0.1)",
-        };
+        return { icon: "❌", color: "text-red-600", bgColor: "bg-red-50" };
+      default:
+        return { icon: "⏳", color: "text-gray-600", bgColor: "bg-gray-50" };
     }
   };
 
-  // Format command name for display
-  const formatCommandName = (command: string) => {
-    // Remove common prefixes and make more readable
-    return command
-      .replace(/^(dev_|qa_|test_)/, "")
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (l) => l.toUpperCase());
-  };
+  if (!isVisible || commands.length === 0) {
+    return null;
+  }
 
   return (
-    <div
-      className="command-overlay"
-      style={{
-        position: "fixed",
-        top: "20px",
-        left: "20px",
-        pointerEvents: "none", // Allow clicks to pass through
-        zIndex: 999997, // High z-index but below key press overlay
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        maxWidth: "280px",
-      }}
-    >
-      {commands.map((command, index) => {
-        const { icon, color } = getStatusDisplay(command.status);
+    <div className="fixed top-4 right-4 z-50 space-y-2">
+      {commands.slice(-5).map((command) => {
+        const statusDisplay = getStatusDisplay(command.status);
         return (
           <div
             key={command.id}
-            className="command-indicator"
-            style={{
-              backgroundColor: "rgba(0, 0, 0, 0.85)",
-              color: "white",
-              padding: "8px 12px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              fontFamily: "ui-sans-serif, system-ui, sans-serif",
-              border: `1px solid ${color}`,
-              animation:
-                command.status === "executing"
-                  ? "command-pulse 2s infinite ease-in-out"
-                  : `command-fade-out 3s ease-out forwards`,
-              animationDelay: `${index * 100}ms`,
-              backdropFilter: "blur(6px)",
-              boxShadow: `0 2px 8px ${color}20`,
-            }}
+            className={`
+              p-3 rounded-lg border shadow-lg
+              ${statusDisplay.bgColor} ${statusDisplay.color}
+              animate-in slide-in-from-top-2
+            `}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>{icon}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontWeight: "500",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {formatCommandName(command.command)}
-                </div>
-                {command.duration && (
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      opacity: 0.7,
-                      marginTop: "2px",
-                    }}
-                  >
-                    {command.duration}ms
-                  </div>
-                )}
-                {command.error && (
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#fca5a5",
-                      marginTop: "2px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {command.error}
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                {statusDisplay.icon} {command.command}
+              </span>
+              {command.duration !== undefined && command.duration > 0 && (
+                <span className="text-xs opacity-75">
+                  ({command.duration}ms)
+                </span>
+              )}
             </div>
+            {command.error && (
+              <div className="text-xs text-red-600 mt-1">{command.error}</div>
+            )}
           </div>
         );
       })}
-      <style>{`
-        @keyframes command-pulse {
-          0% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.8;
-            transform: scale(1.02);
-          }
-          100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-        }
-
-        @keyframes command-fade-out {
-          0% {
-            opacity: 1;
-            transform: translateX(0);
-          }
-          70% {
-            opacity: 1;
-            transform: translateX(0);
-          }
-          100% {
-            opacity: 0;
-            transform: translateX(-20px);
-          }
-        }
-      `}</style>
     </div>
   );
-};
-
-export default CommandOverlay;
+}
