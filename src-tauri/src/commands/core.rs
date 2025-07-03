@@ -12,7 +12,7 @@ use crate::settings::{manager::SettingsManager, AgentSettings, AudioSettings};
 use crate::utils::coordinates;
 
 #[cfg(target_os = "macos")]
-use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
+
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
 
@@ -21,7 +21,7 @@ use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consist
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
     use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
-    use image::{ImageReader, DynamicImage, ImageFormat};
+    use image::{ImageReader, ImageFormat};
     use std::io::Cursor;
     use base64::Engine;
 
@@ -99,7 +99,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 
                             // Fallback: assume the screenshot is already properly sized
                             // This maintains some level of functionality even if display detection fails
-                            let (fallback_standard_width, fallback_standard_height) =
+                            let (_fallback_standard_width, _fallback_standard_height) =
                                 crate::constants::ui::standard_resolutions::XGA; // Default to XGA
 
                             coordinates::update_standard_resolution_scaling(
@@ -149,7 +149,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 /// NEW: Now detects cursor position and returns info for the display containing the cursor
 #[cfg(target_os = "macos")]
 fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
-    use computer_use_ai_sdk::platforms::macos::display::{get_main_display, find_display_containing_point, get_active_displays};
+    use computer_use_ai_sdk::platforms::macos::display::{get_main_display, find_display_containing_point};
     use core_graphics::event::CGEvent;
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 

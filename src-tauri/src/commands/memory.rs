@@ -3,7 +3,7 @@ use tauri::{Manager, State};
 
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
-use crate::agent::implementations::memory_manager::{AdvancedMemoryManager, VisualContextConfig, VisualContextSummary};
+use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]

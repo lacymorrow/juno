@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 
 use super::tool_config::ToolCategory;
-use crate::constants::agent::{tool_names, intent_keywords, tool_prefixes, test_strings, confidence_scores};
+use crate::constants::agent::{tool_names, intent_keywords, tool_prefixes, confidence_scores};
 
 /// Maps tool names to their proper categories
 /// This replaces all the brittle string matching throughout the codebase

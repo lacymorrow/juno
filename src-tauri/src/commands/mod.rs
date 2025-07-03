@@ -2,9 +2,9 @@
 
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tracing::{info, warn};
+use tauri::{Emitter, State};
 use crate::constants::events;
+
 
 // Declare the submodules
 pub mod accessibility;
@@ -84,10 +84,8 @@ pub use self::dictation_state_manager::{
     update_dictation_component_state,
 };
 // Exports from dev2 branch - preserving existing functionality
-pub use self::element::*;
-pub use self::keyboard::*;
-pub use self::text_editor::*;
-pub use self::window::*;
+// Note: Specific exports from element, keyboard, text_editor, window modules
+// are not publicly re-exported as they don't have pub visibility
 // Exports from main branch - new features
 pub use self::enhanced_visual_reasoning_commands::*;
 pub use self::error_recovery::*;

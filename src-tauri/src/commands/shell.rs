@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use tauri::{AppHandle, State};
 use std::process::{Command, Stdio, Child};
-use std::io::{Write, BufReader};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
