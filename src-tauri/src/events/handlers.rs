@@ -243,24 +243,20 @@ async fn handle_agent_mode_result(
 ) {
     info!("[Event] Processing final result for AI Agent Mode");
 
-    // Update floating bar manager for agent mode query
-    if let Some(text) = &extracted_text {
-        let query_text = text.clone();
-        crate::commands::ui_commands::handle_dictation_finished(&app_handle, Some(query_text))
-            .await;
-    }
-
-    // Transform the payload format
+    // Transform and emit the event for the integration layer to handle
+    // This ensures a single, clean path for agent submission
     match serde_json::from_str::<serde_json::Value>(&payload_str) {
         Ok(payload_json) => {
             if let Some(text_value) = payload_json.get("text") {
                 let transformed_payload = serde_json::json!({
                     "query": text_value
                 });
+
+                info!("[Event] Emitting app-dictation-finished event for agent processing");
                 if let Err(e) =
                     app_handle.emit(constants::events::dictation::FINISHED, transformed_payload)
                 {
-                    error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                    error!("[Event] Failed to emit app-dictation-finished event: {}", e);
                 }
             } else {
                 error!(
@@ -276,7 +272,7 @@ async fn handle_agent_mode_result(
             );
             if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, payload_str) {
                 error!(
-                    "[Event] Failed to rebroadcast final-result event (fallback): {}",
+                    "[Event] Failed to emit app-dictation-finished event (fallback): {}",
                     e
                 );
             }
