@@ -656,7 +656,7 @@ impl ErrorRecoveryManager {
         match tool_call.name.as_str() {
             "browser_navigate" | "left_click" | "right_click" | "type_text" | "key_combination" => true,
             // NOTE: file_write/file_delete error recovery removed - use str_replace_based_edit_tool instead
-        "str_replace_based_edit_tool" | "directory_create" | "directory_delete" => true,
+            "str_replace_based_edit_tool" | "directory_create" | "directory_delete" => true,
             "bash" => true, // Use official bash command for high-risk operations
             _ => false,
         }
