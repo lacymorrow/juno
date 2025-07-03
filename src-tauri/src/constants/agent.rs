@@ -89,16 +89,12 @@ pub mod tool_names {
     pub const DEV_LIST_FILES: &str = "dev_list_files";
     pub const DEV_GET_FILE_CONTENT: &str = "dev_get_file_content";
     pub const DEV_SET_FILE_CONTENT: &str = "dev_set_file_content";
-    pub const FILE_READ: &str = "file_read";
-    pub const FILE_WRITE: &str = "file_write";
-    pub const FILE_CREATE: &str = "file_create";
-    pub const FILE_DELETE: &str = "file_delete";
-    pub const COMMAND_EXECUTE: &str = "command_execute";
-    pub const SHELL_EXECUTE: &str = "shell_execute";
-    pub const BASH_EXECUTE: &str = "bash_execute";
+    // NOTE: Removed redundant file operation constants - use str_replace_based_edit_tool instead
+    // Removed: FILE_READ, FILE_WRITE, FILE_CREATE, FILE_DELETE (redundant with official tools)
+    // Removed: COMMAND_EXECUTE, SHELL_EXECUTE, BASH_EXECUTE (redundant with bash_command)
 
     // Basic file and directory operations (standardized names)
-    pub const READ_FILE: &str = "read_file";
+    // NOTE: READ_FILE constant removed - use str_replace_based_edit_tool instead
     pub const WRITE_FILE: &str = "write_file";
     pub const LIST_DIRECTORY: &str = "list_directory";
     pub const CREATE_DIRECTORY: &str = "create_directory";

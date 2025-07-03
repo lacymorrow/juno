@@ -588,7 +588,8 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_basic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let basic_tools = vec![
-            (tool_names::READ_FILE, "Read file contents"),
+            // NOTE: READ_FILE tool removed - use str_replace_based_edit_tool instead
+    // (tool_names::READ_FILE, "Read file contents"),
             (tool_names::WRITE_FILE, "Write content to file"),
             (tool_names::LIST_DIRECTORY, "List directory contents"),
             (tool_names::CREATE_DIRECTORY, "Create directories"),

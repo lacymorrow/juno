@@ -134,7 +134,7 @@ pub async fn register_desktop_tools(
     provider: &mut LocalToolProvider,
     _state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) {
+) -> Result<(), String> {
     info!("Registering desktop tools...");
 
     // --- Element Tools ---
@@ -177,84 +177,21 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_focused_def, get_focused_exec).await;
     info!("Registered tool: get_focused_element_info");
 
-    // Tool for capturing full desktop screenshots.
-    // Used by: Computer use agents, visual analysis, UI state documentation
-    // capture_screenshot
-    let capture_screenshot_def = ToolDefinition {
-        name: "capture_screenshot".to_string(),
-        description: "Captures a screenshot of the entire desktop screen.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
+    // REMOVED: capture_screenshot tool - Use computer tool with action: "screenshot" instead
+    // This tool has been consolidated into the official Anthropic Computer Use API.
+    // Use: {"name": "computer", "input": {"action": "screenshot"}}
+    // This eliminates redundancy and ensures 100% compliance with the official specification.
+    //
+    // For browser-specific screenshots, use the browser_screenshot tool instead.
+    // For Safari-specific screenshots, use Safari tools for faster AppleScript automation.
 
-    let app_handle_clone = app_handle.clone();
-    let capture_screenshot_exec = move |_input: Value| {
-        let app_handle = app_handle_clone.clone(); // Clone for this specific async move block
-         async move {
-            // Validate screen recording permission before taking screenshot
-            if let Err(e) = validate_permission(&app_handle, RequiredPermission::ScreenRecording, "capture_screenshot").await {
-                return Err(e.to_string());
-            }
-
-            let block_result: Result<String, String> = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    crate::capture_screenshot_command(app_handle.clone()).await // Clone app_handle for the inner async block
-                })
-            });
-
-            // Handle error from capture_screenshot_command (and map its format if desired)
-            let base64_string: String =
-                block_result.map_err(|e| format!("Error from screenshot command: {}", e))?;
-
-            Ok(Value::String(base64_string)) // Return as Value::String
-         }
-    };
-    provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;
-    info!("Registered tool: capture_screenshot");
-
-    // Tool for capturing screenshots of specific UI elements.
-    // Used by: Element-focused automation, accessibility testing, targeted analysis
-    // capture_element_screenshot
-    let capture_element_screenshot_def = ToolDefinition {
-        name: "capture_element_screenshot".to_string(),
-        description: "Captures a screenshot of the currently focused UI element on the desktop.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        }),
-        api_type: None,
-        beta_flag: None,
-    };
-
-    let app_handle_clone = app_handle.clone();
-    let capture_element_screenshot_exec = move |_input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            // Validate accessibility permission before capturing element screenshot
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "capture_element_screenshot").await {
-                return Err(e.to_string());
-            }
-
-            let state_manager = app.state::<AppState>();
-            let result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::element::capture_element_screenshot_command(app.clone(), state_manager)
-                        .await
-                })
-            }).map_err(|e| format!("Error capturing element screenshot: {}", e))?;
-            Ok(json!(result))
-        }
-    };
-    provider.register_async_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
-    info!("Registered tool: capture_element_screenshot");
+    // REMOVED: capture_element_screenshot tool - Use computer tool with screenshot then crop, or use accessibility tools
+    // This specialized tool has been consolidated for API compliance.
+    // Alternative approaches:
+    // 1. Use computer tool screenshot + image processing to crop elements
+    // 2. Use accessibility_interface tool to get element bounds then computer screenshot with coordinates
+    // 3. Use browser_screenshot for web elements with CSS selector support
+    // This eliminates tool redundancy and ensures 100% compliance with the official specification.
 
     // REMOVED: type_text tool - Use computer tool with action: "type" instead
     // This tool has been consolidated into the official Anthropic Computer Use API.
@@ -880,6 +817,8 @@ pub async fn register_desktop_tools(
     info!("All compound tools registered successfully.");
 
     info!("Desktop tool registration completed.");
+
+    Ok(())
 }
 
 /// Sets up the complete tool provider with desktop tools and MCP integration.
