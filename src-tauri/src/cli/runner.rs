@@ -5,7 +5,7 @@ use crate::state::AppState;
 use crate::tts;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use computer_use_ai_sdk::Desktop; // Import Desktop
-use std::fs;
+
 use std::io::Write;
 use std::process::Command;
 use tauri::{AppHandle, Manager};

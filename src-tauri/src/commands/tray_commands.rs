@@ -5,7 +5,7 @@
 //! and debugging purposes.
 
 use tauri::command;
-use tracing::{info, error};
+use tracing::info;
 use crate::menu::tray_menu::{TrayIconState, update_tray_icon_state, set_tray_icon_state};
 
 /// Set the tray icon to default state

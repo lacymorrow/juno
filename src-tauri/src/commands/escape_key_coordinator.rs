@@ -1,13 +1,13 @@
-use std::sync::{Arc, atomic::{AtomicI32, AtomicBool, Ordering}};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
+use std::time::Instant;
+use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
 use tracing::{info, warn, error, debug};
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
 
-use crate::commands::stop_coordinator::get_stop_coordinator;
+
 
 /// Simplified escape key coordinator with reference counting
 pub struct EscapeKeyCoordinator {
