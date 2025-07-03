@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
-import { EVENTS } from "@/lib/constants.generated";
 
 interface CommandInfo {
-  id: string;
+  id: number;
   command: string;
   timestamp: number;
   status: "executing" | "completed" | "failed";
@@ -12,146 +10,60 @@ interface CommandInfo {
   error?: string;
 }
 
-interface CommandStartPayload {
-  id: string;
-  command: string;
-}
-
-interface CommandEndPayload {
-  id: string;
-  success: boolean;
-  duration?: number;
+interface CommandEventPayload {
+  id?: number;
+  command?: string;
+  success?: boolean;
   error?: string;
+  duration?: number;
 }
 
 export default function CommandOverlay() {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [isVisible, setIsVisible] = useState(false);
-  const [showCommandOverlay, setShowCommandOverlay] = useState(true);
 
-  // Load settings on mount
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        // For now, using a simple approach - could be extended to use centralized settings
-        const enabled = await invoke<boolean>(
-          "get_command_overlay_enabled"
-        ).catch(() => true);
-        setShowCommandOverlay(enabled);
-      } catch (error) {
-        console.warn(
-          "Failed to load command overlay settings, using default (enabled):",
-          error
-        );
-        setShowCommandOverlay(true);
-      }
-    };
+    const unlisten = listen<CommandEventPayload>("command-event", (event) => {
+      const { id, command, success, error, duration } = event.payload;
+      const timestamp = Date.now();
 
-    loadSettings();
-  }, []);
+      const newCommand: CommandInfo = {
+        id: id || timestamp,
+        command: command || "Unknown command",
+        timestamp,
+        status: success ? "completed" : "failed",
+        duration: duration || 0,
+        error: error || undefined,
+      };
 
-  // Listen for command execution events
-  useEffect(() => {
-    if (!showCommandOverlay) return;
+      setCommands((prev) => [...prev, newCommand]);
+      setIsVisible(true);
 
-    let unlistenStart: (() => void) | null = null;
-    let unlistenEnd: (() => void) | null = null;
-
-    const setupListeners = async () => {
-      // Listen for command execution start
-      unlistenStart = await listen<CommandStartPayload>(
-        EVENTS.TOOLS_COMMAND_EXECUTION_START,
-        (event) => {
-          const { id, command } = event.payload;
-          const newCommand: CommandInfo = {
-            id,
-            command,
-            timestamp: Date.now(),
-            status: "executing",
-          };
-
-          setCommands((prev) => {
-            // Remove any existing command with same ID and add new one
-            const filtered = prev.filter((cmd) => cmd.id !== id);
-            return [...filtered, newCommand];
-          });
-
-          setIsVisible(true);
-        }
-      );
-
-      // Listen for command execution end
-      unlistenEnd = await listen<CommandEndPayload>(
-        EVENTS.TOOLS_COMMAND_EXECUTION_END,
-        (event) => {
-          const { id, success, duration, error } = event.payload;
-
-          setCommands((prev) =>
-            prev.map((cmd) =>
-              cmd.id === id
-                ? {
-                    ...cmd,
-                    status: success ? "completed" : "failed",
-                    duration,
-                    error: error || undefined,
-                  }
-                : cmd
-            )
-          );
-
-          // Auto-hide after 5 seconds for completed/failed commands
-          setTimeout(() => {
-            setCommands((prev) => {
-              const filtered = prev.filter((cmd) => cmd.id !== id);
-              if (filtered.length === 0) {
-                setIsVisible(false);
-              }
-              return filtered;
-            });
-          }, 5000);
-        }
-      );
-    };
-
-    setupListeners();
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        setIsVisible(false);
+      }, 5000);
+    });
 
     return () => {
-      if (unlistenStart) unlistenStart();
-      if (unlistenEnd) unlistenEnd();
+      unlisten.then((f) => f());
     };
-  }, [showCommandOverlay]);
+  }, []);
 
   const getStatusDisplay = (status: string) => {
     switch (status) {
       case "executing":
-        return {
-          icon: "⏳",
-          color: "text-blue-600",
-          bgColor: "bg-blue-50 border-blue-200",
-        };
+        return { icon: "⏳", color: "text-blue-600", bgColor: "bg-blue-50" };
       case "completed":
-        return {
-          icon: "✅",
-          color: "text-green-600",
-          bgColor: "bg-green-50 border-green-200",
-        };
+        return { icon: "✅", color: "text-green-600", bgColor: "bg-green-50" };
       case "failed":
-        return {
-          icon: "❌",
-          color: "text-red-600",
-          bgColor: "bg-red-50 border-red-200",
-        };
+        return { icon: "❌", color: "text-red-600", bgColor: "bg-red-50" };
       default:
-        return {
-          icon: "⏳",
-          color: "text-gray-600",
-          bgColor: "bg-gray-50 border-gray-200",
-        };
+        return { icon: "⏳", color: "text-gray-600", bgColor: "bg-gray-50" };
     }
   };
 
-  // Don't render if disabled or no commands
-  if (!showCommandOverlay || !isVisible || commands.length === 0) {
+  if (!isVisible || commands.length === 0) {
     return null;
   }
 
@@ -165,8 +77,7 @@ export default function CommandOverlay() {
             className={`
               p-3 rounded-lg border shadow-lg
               ${statusDisplay.bgColor} ${statusDisplay.color}
-              animate-in slide-in-from-top-2 duration-200
-              max-w-sm
+              animate-in slide-in-from-top-2
             `}
           >
             <div className="flex items-center gap-2">
@@ -180,9 +91,7 @@ export default function CommandOverlay() {
               )}
             </div>
             {command.error && (
-              <div className="text-xs text-red-600 mt-1 max-w-xs truncate">
-                {command.error}
-              </div>
+              <div className="text-xs text-red-600 mt-1">{command.error}</div>
             )}
           </div>
         );

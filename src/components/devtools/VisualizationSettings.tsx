@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -17,13 +17,14 @@ import {
   MousePointer,
 } from "lucide-react";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
 
 const VisualizationSettings = () => {
   const [showKeyPressOverlay, setShowKeyPressOverlay] = useState(
     localStorage.getItem("juno-show-key-press-overlay") === "true"
   );
-  const [showCommandOverlay, setShowCommandOverlay] = useState(true);
+  const [showCommandOverlay, setShowCommandOverlay] = useState(
+    localStorage.getItem("juno-show-command-overlay") === "true"
+  );
   const [showClickVisualization, setShowClickVisualization] = useState(
     localStorage.getItem("juno-show-click-visualization") !== "false" // Default to true
   );
@@ -31,21 +32,6 @@ const VisualizationSettings = () => {
     useState(
       localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false" // Default to true
     );
-
-  // Load command overlay setting from Tauri settings
-  useEffect(() => {
-    const loadCommandOverlaySetting = async () => {
-      try {
-        const enabled = await invoke<boolean>("get_command_overlay_enabled");
-        setShowCommandOverlay(enabled);
-      } catch (error) {
-        console.warn("Failed to load command overlay setting:", error);
-        setShowCommandOverlay(true); // Default to enabled
-      }
-    };
-
-    loadCommandOverlaySetting();
-  }, []);
 
   const visualizationSettings = [
     {
@@ -57,18 +43,16 @@ const VisualizationSettings = () => {
       setValue: setShowKeyPressOverlay,
       location: "Top-right corner",
       icon: <Eye className="h-4 w-4" />,
-      useLocalStorage: true,
     },
     {
       key: "command",
       title: "Command Execution",
       description: "Display active command status during tool execution",
-      storageKey: "", // Not used for Tauri settings
+      storageKey: "juno-show-command-overlay",
       value: showCommandOverlay,
       setValue: setShowCommandOverlay,
       location: "Top-left corner",
       icon: <MonitorSpeaker className="h-4 w-4" />,
-      useLocalStorage: false, // Uses Tauri settings
     },
     {
       key: "click",
@@ -79,7 +63,6 @@ const VisualizationSettings = () => {
       setValue: setShowClickVisualization,
       location: "At click locations",
       icon: <TestTube className="h-4 w-4" />,
-      useLocalStorage: true,
     },
     {
       key: "desktop-cursor",
@@ -91,28 +74,14 @@ const VisualizationSettings = () => {
       setValue: setShowDesktopCursorVisualization,
       location: "Desktop-wide overlay",
       icon: <MousePointer className="h-4 w-4" />,
-      useLocalStorage: true,
     },
   ];
 
-  const handleToggleSetting = async (
+  const handleToggleSetting = (
     setting: (typeof visualizationSettings)[0],
     enabled: boolean
   ) => {
-    if (setting.useLocalStorage) {
-      // Use localStorage for settings that don't have backend commands yet
-      localStorage.setItem(setting.storageKey, enabled.toString());
-    } else {
-      // Use Tauri settings for command overlay
-      try {
-        await invoke("set_command_overlay_enabled", { enabled });
-      } catch (error) {
-        console.error("Failed to save command overlay setting:", error);
-        toast.error("Failed to save setting");
-        return;
-      }
-    }
-
+    localStorage.setItem(setting.storageKey, enabled.toString());
     setting.setValue(enabled);
     toast.success(`${setting.title} ${enabled ? "enabled" : "disabled"}`);
   };

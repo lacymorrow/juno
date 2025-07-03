@@ -159,8 +159,6 @@ macro_rules! generate_invoke_handler {
             reset_settings,
             export_settings,
             import_settings,
-            get_command_overlay_enabled,
-            set_command_overlay_enabled,
 
             // Provider management
             get_providers,
