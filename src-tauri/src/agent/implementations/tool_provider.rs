@@ -1165,8 +1165,7 @@ impl LocalToolProvider {
         match tool_name {
             "computer" => self.validate_computer_tool_output(tool_result).await?,
             "browser" => self.validate_browser_tool_output(tool_result).await?,
-            // NOTE: file_read/file_write validation removed - use str_replace_based_edit_tool instead
-            "str_replace_based_edit_tool" => self.validate_file_tool_output(tool_result).await?,
+            "file_read" | "file_write" => self.validate_file_tool_output(tool_result).await?,
             _ => {} // Generic validation only for other tools
         }
 

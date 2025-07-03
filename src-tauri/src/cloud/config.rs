@@ -87,8 +87,7 @@ impl Default for CloudConfig {
                 "get_system_info".to_string(),
                 "get_capabilities".to_string(),
                 "heartbeat".to_string(),
-                // NOTE: read_file removed - use str_replace_based_edit_tool instead
-                "str_replace_based_edit_tool".to_string(),
+                "read_file".to_string(),
                 "write_file".to_string(),
                 "execute_script".to_string(),
                 "browser_automation".to_string(),

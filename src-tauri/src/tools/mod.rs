@@ -260,8 +260,7 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         // --- Standard Tools (Potentially Missing or Custom Implemented) ---
         ToolDefinition {
-            // NOTE: read_file removed - use str_replace_based_edit_tool instead
-    name: "str_replace_based_edit_tool".to_string(),
+            name: "read_file".to_string(),
             description: "Reads the content of a file at the specified path.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),

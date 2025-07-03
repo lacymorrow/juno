@@ -354,8 +354,7 @@ pub async fn test_dynamic_tool_categorization() -> Result<Value, String> {
         ("screenshot", "Take a screenshot of the desktop"),
         ("safari_navigate", "Navigate to a URL in Safari browser"),
         ("set_timer", "Set a timer for a specific duration"),
-                    // NOTE: read_file removed - use str_replace_based_edit_tool instead
-            // ("read_file", "Read contents of a file"),
+        ("read_file", "Read contents of a file"),
         ("get_window_list", "Get list of all open windows"),
         ("mcp_server_tool", "External MCP server tool"),
         ("click", "Click at coordinates on screen"),
