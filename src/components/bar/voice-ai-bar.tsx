@@ -23,7 +23,7 @@ import {
   Copy,
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
-import AudioVisualizer from "./audio-visualizer";
+import AudioVisualizer, { type AppState } from "./audio-visualizer";
 import type {
   VoiceAIBarProps,
   AssistantState,
@@ -65,14 +65,6 @@ interface UIStateData {
   voiceMode: string;
   agentState: string | null;
   currentTransitionId: string | null;
-}
-
-interface UIElementConfig {
-  showVoiceIndicator: boolean;
-  enableAnimations: boolean;
-  autoHide: boolean;
-  autoHideDelay: number;
-  opacity: number;
 }
 
 // === UTILITY FUNCTIONS ===
@@ -127,6 +119,30 @@ const mapUIStateToAssistantState = (state: UIState): AssistantState => {
   }
 };
 
+// Convert AssistantState to AppState for AudioVisualizer
+const mapAssistantStateToAppState = (state: AssistantState): AppState => {
+  switch (state) {
+    case "idle":
+      return "idle";
+    case "listening":
+      return "listening";
+    case "processing":
+      return "processing";
+    case "speaking":
+      return "speaking";
+    case "error":
+      return "error";
+    case "success":
+      return "success";
+    case "input":
+      return "idle"; // Input mode should show idle state in visualizer
+    case "response":
+      return "speaking"; // Response mode should show speaking state in visualizer
+    default:
+      return "idle";
+  }
+};
+
 export function VoiceAIBar({
   onStateChange,
   initialState = "idle",
@@ -161,6 +177,7 @@ export function VoiceAIBar({
 
   // === DERIVED STATE ===
   const assistantState = mapUIStateToAssistantState(uiState);
+  const visualizerState = mapAssistantStateToAppState(assistantState);
 
   // Default sample responses
   const defaultSampleResponses = {
@@ -700,12 +717,7 @@ const styles = \`
     <div className={`voice-ai-bar ${getBarClass()} ${className}`}>
       <div className="bar-container">
         {/* Main Bar */}
-        <div
-          className="bar-main"
-          onClick={handleMainClick}
-          onMouseEnter={() => setIsIdleHovered(true)}
-          onMouseLeave={() => setIsIdleHovered(false)}
-        >
+        <div className="bar-main" onClick={handleMainClick}>
           {/* Left Section - State Icon */}
           <div className="bar-icon">{getStateIcon()}</div>
 
@@ -756,7 +768,7 @@ const styles = \`
               getStateFeedbackIcon()
             ) : (
               <AudioVisualizer
-                appState={assistantState}
+                appState={visualizerState}
                 width={24}
                 height={24}
                 enableMicrophone={false}
