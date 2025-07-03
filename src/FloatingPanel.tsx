@@ -37,9 +37,9 @@ function getWindowDimensionsForMode(
 export default function FloatingPanel() {
   const [isHovered, setIsHovered] = useState(false);
   const [windowReady, setWindowReady] = useState(false);
-  const [panelMode] = useState<"compact" | "expanded" | "chat" | "settings">(
-    "compact"
-  );
+  const [panelMode, setPanelMode] = useState<
+    "compact" | "expanded" | "chat" | "settings"
+  >("compact");
 
   useEffect(() => {
     const setupWindow = async () => {
@@ -182,6 +182,7 @@ export default function FloatingPanel() {
               isHovered ? UI.AGENT_STATUS_LISTENING : UI.AGENT_STATUS_IDLE
             }
             message="Panel is ready"
+            onModeChange={setPanelMode}
           />
         </div>
       )}

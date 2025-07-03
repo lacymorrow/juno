@@ -12,12 +12,14 @@ interface FloatingPanelProps {
     | typeof UI.AGENT_STATUS_RESPONDING
     | typeof UI.AGENT_STATUS_ERROR;
   message?: string;
+  onModeChange?: (mode: "compact" | "expanded" | "chat" | "settings") => void;
 }
 
 const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
   isVisible,
   agentStatus = UI.AGENT_STATUS_IDLE,
   message,
+  onModeChange,
 }) => {
   const [mode, setMode] = useState<
     "compact" | "expanded" | "chat" | "settings"
@@ -54,6 +56,7 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
     newMode: "compact" | "expanded" | "chat" | "settings"
   ) => {
     setMode(newMode);
+    onModeChange?.(newMode);
   };
 
   // Handle panel interaction
