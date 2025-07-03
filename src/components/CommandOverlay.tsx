@@ -15,6 +15,7 @@ interface CommandEventPayload {
   command?: string;
   success?: boolean;
   error?: string;
+  duration?: number;
 }
 
 export default function CommandOverlay() {
@@ -23,7 +24,7 @@ export default function CommandOverlay() {
 
   useEffect(() => {
     const unlisten = listen<CommandEventPayload>("command-event", (event) => {
-      const { id, command, success, error } = event.payload;
+      const { id, command, success, error, duration } = event.payload;
       const timestamp = Date.now();
 
       const newCommand: CommandInfo = {
@@ -31,7 +32,7 @@ export default function CommandOverlay() {
         command: command || "Unknown command",
         timestamp,
         status: success ? "completed" : "failed",
-        duration: Date.now() - timestamp,
+        duration: duration || 0,
         error: error || undefined,
       };
 
@@ -83,6 +84,11 @@ export default function CommandOverlay() {
               <span className="text-sm font-medium">
                 {statusDisplay.icon} {command.command}
               </span>
+              {command.duration !== undefined && command.duration > 0 && (
+                <span className="text-xs opacity-75">
+                  ({command.duration}ms)
+                </span>
+              )}
             </div>
             {command.error && (
               <div className="text-xs text-red-600 mt-1">{command.error}</div>
