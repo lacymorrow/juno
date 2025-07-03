@@ -261,16 +261,56 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         // --- Standard Tools (Potentially Missing or Custom Implemented) ---
         ToolDefinition {
             // NOTE: read_file removed - use str_replace_based_edit_tool instead
-    name: "str_replace_based_edit_tool".to_string(),
-            description: "Reads the content of a file at the specified path.".to_string(),
+            name: "str_replace_based_edit_tool".to_string(),
+            description: "Edit files using string replacement operations. This tool provides safe file editing capabilities with security validation.
+
+Supports these commands:
+- view: Read file content with optional line range
+- str_replace: Replace exact string matches in files
+- create: Create new files with specified content
+
+The tool includes security features:
+- Path traversal protection
+- File extension validation
+- File size limits
+- Safe file operations
+
+Example usage:
+- View file: {\"command\": \"view\", \"path\": \"file.txt\"}
+- View range: {\"command\": \"view\", \"path\": \"file.txt\", \"view_range\": [1, 10]}
+- Replace text: {\"command\": \"str_replace\", \"path\": \"file.txt\", \"old_str\": \"old text\", \"new_str\": \"new text\"}
+- Create file: {\"command\": \"create\", \"path\": \"new_file.txt\", \"file_text\": \"content\"}".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
-                    props.insert("path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file.".to_string() });
+                    props.insert("command".to_string(), ToolParameter {
+                        type_: "string".to_string(),
+                        description: "The operation to perform: view, str_replace, or create".to_string()
+                    });
+                    props.insert("path".to_string(), ToolParameter {
+                        type_: "string".to_string(),
+                        description: "Path to the file".to_string()
+                    });
+                    props.insert("view_range".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional [start_line, end_line] for view command".to_string()
+                    });
+                    props.insert("old_str".to_string(), ToolParameter {
+                        type_: "string".to_string(),
+                        description: "String to replace (for str_replace command)".to_string()
+                    });
+                    props.insert("new_str".to_string(), ToolParameter {
+                        type_: "string".to_string(),
+                        description: "Replacement string (for str_replace command)".to_string()
+                    });
+                    props.insert("file_text".to_string(), ToolParameter {
+                        type_: "string".to_string(),
+                        description: "Content for new file (for create command)".to_string()
+                    });
                     props
                 },
-                required: vec!["path".to_string()],
+                required: vec!["command".to_string(), "path".to_string()],
             },
         },
         ToolDefinition {

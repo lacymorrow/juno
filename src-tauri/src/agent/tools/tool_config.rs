@@ -483,12 +483,10 @@ impl ToolConfigManager {
             (tool_names::ACCESSIBILITY_INTERFACE, "Use macOS accessibility APIs for precise UI interaction (preferred method)"),
             (tool_names::STR_REPLACE_BASED_EDIT_TOOL, "Create, view, and edit files with precise text operations"),
             (tool_names::BASH, "Execute bash commands and shell operations"),
-            (tool_names::SCREENSHOT, "Take a screenshot of the current screen"),
-            (tool_names::WAIT, "Wait for a specified duration"),
         ];
 
         // Essential tools that are required for core functionality
-        let essential_tools = [tool_names::COMPUTER, tool_names::SCREENSHOT, tool_names::BASH];
+        let essential_tools = [tool_names::COMPUTER, tool_names::BASH];
 
         for (name, description) in anthropic_tools {
             let mut config = ToolConfig::new(
