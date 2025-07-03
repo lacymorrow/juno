@@ -1286,6 +1286,18 @@ async fn execute_specialized_agent_task(
         memory_guard.clone()
     };
 
+    // Clean up any orphaned tool calls that might exist from previous failed executions
+    // This provides additional safety against conversation state issues
+
+    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
+    // let mut cloned_memory = specialist_memory;
+    // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
+    //     warn!(
+    //         "Failed to clean orphaned tool calls for {} agent: {}",
+    //         agent_type, e
+    //     );
+    // }
+
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
     let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt) {
