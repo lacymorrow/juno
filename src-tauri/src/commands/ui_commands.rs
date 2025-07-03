@@ -343,8 +343,12 @@ impl UIManager {
 
         self.set_bar_state(BarState::Submitting).await;
 
-        // Emit query submission event for processing
-                    if let Err(e) = self.app_handle.emit("query-submitted", query) {
+                // Emit query through the clean app-dictation-finished event path
+        let query_payload = serde_json::json!({
+            "query": query
+        });
+
+        if let Err(e) = self.app_handle.emit("app-dictation-finished", query_payload) {
             error!("Failed to emit query submission: {}", e);
             return Err(format!("Failed to submit query: {}", e));
         }
@@ -1135,19 +1139,5 @@ pub async fn handle_dictation_finished(app_handle: &AppHandle, query: Option<Str
         if let Err(e) = manager.handle_dictation_finished(query).await {
             error!("Failed to handle dictation finished: {}", e);
         }
-    }
-}
-
-// === BACKWARD COMPATIBILITY HELPERS ===
-
-pub async fn get_bar_manager(app_handle: &AppHandle) -> Option<Arc<TokioMutex<UIManager>>> {
-    // Return the UI manager for backward compatibility
-    get_ui_manager().await
-}
-
-pub async fn initialize_bar_manager(app_handle: AppHandle) {
-    // Initialize the full UI manager for backward compatibility
-    if let Err(e) = initialize_ui_manager(app_handle).await {
-        error!("Failed to initialize UI manager: {}", e);
     }
 }
