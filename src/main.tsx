@@ -10,7 +10,6 @@ import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
 import "./styles/globals.css";
 import { AppBar } from "./components/AppBar";
-import { VoiceAIBar } from "./components/bar/voice-ai-bar";
 import { FloatingBar } from "./components/FloatingBar";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
