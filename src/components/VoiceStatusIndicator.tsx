@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { AlertCircle, Brain, Mic, MicOff, Type, Volume2 } from "lucide-react";
 import { useVoiceState } from "@/contexts/VoiceContext";
+import { UI } from "@/lib/constants.generated";
 
 interface VoiceStatusIndicatorProps {
   className?: string;
@@ -30,9 +31,9 @@ export function VoiceStatusIndicator({
     }
 
     switch (voiceState.mode) {
-      case "dictation":
+      case UI.VOICE_MODES_DICTATION:
         return <Type className="h-4 w-4 text-orange-500" />;
-      case "agent":
+      case UI.VOICE_MODES_AGENT:
         return <Brain className="h-4 w-4 text-blue-500" />;
       default:
         return <Mic className="h-4 w-4 text-green-500" />;
@@ -50,11 +51,15 @@ export function VoiceStatusIndicator({
     }
 
     if (voiceState.isTranscribing) {
-      return voiceState.mode === "dictation" ? "Dictating" : "Transcribing";
+      return voiceState.mode === UI.VOICE_MODES_DICTATION
+        ? "Dictating"
+        : "Transcribing";
     }
 
     if (voiceState.isListening) {
-      return voiceState.mode === "dictation" ? "Hold to Dictate" : "Listening";
+      return voiceState.mode === UI.VOICE_MODES_DICTATION
+        ? "Hold to Dictate"
+        : "Listening";
     }
 
     return "Voice Ready";
@@ -71,11 +76,11 @@ export function VoiceStatusIndicator({
     }
 
     switch (voiceState.mode) {
-      case "dictation":
+      case UI.VOICE_MODES_DICTATION:
         return voiceState.isListening || voiceState.isTranscribing
           ? "text-orange-500 border-orange-200 bg-orange-50"
           : "text-muted-foreground border-muted bg-muted/20";
-      case "agent":
+      case UI.VOICE_MODES_AGENT:
         return voiceState.isListening || voiceState.isTranscribing
           ? "text-blue-500 border-blue-200 bg-blue-50"
           : "text-muted-foreground border-muted bg-muted/20";
@@ -86,7 +91,8 @@ export function VoiceStatusIndicator({
 
   // Audio level visualization
   const AudioLevelBar = () => {
-    if (!voiceState.isListening || voiceState.mode === "idle") return null;
+    if (!voiceState.isListening || voiceState.mode === UI.VOICE_MODES_IDLE)
+      return null;
 
     return (
       <div className="flex items-center gap-1">
@@ -153,16 +159,18 @@ export function VoiceStatusIndicator({
       <AudioLevelBar />
 
       {/* Mode indicator badge */}
-      {voiceState.mode !== "idle" && (
+      {voiceState.mode !== UI.VOICE_MODES_IDLE && (
         <div
           className={cn(
             "px-2 py-1 rounded-full text-xs font-medium border",
-            voiceState.mode === "dictation"
+            voiceState.mode === UI.VOICE_MODES_DICTATION
               ? "bg-orange-100 text-orange-700 border-orange-200"
               : "bg-blue-100 text-blue-700 border-blue-200"
           )}
         >
-          {voiceState.mode === "dictation" ? "Dictation" : "AI Agent"}
+          {voiceState.mode === UI.VOICE_MODES_DICTATION
+            ? "Dictation"
+            : "AI Agent"}
         </div>
       )}
     </div>
