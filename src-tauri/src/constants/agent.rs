@@ -13,6 +13,13 @@ pub mod tool_names {
     pub const COMPUTER: &str = "computer";
     pub const BASH: &str = "bash";
     pub const STR_REPLACE_BASED_EDIT_TOOL: &str = "str_replace_based_edit_tool";
+    pub const SCREENSHOT: &str = "screenshot";
+    pub const LEFT_CLICK: &str = "left_click";
+    pub const TYPE: &str = "type";
+    pub const KEY: &str = "key";
+    pub const SCROLL: &str = "scroll";
+    pub const LEFT_CLICK_DRAG: &str = "left_click_drag";
+    pub const MOUSE_MOVE: &str = "mouse_move";
     pub const ACCESSIBILITY_INTERFACE: &str = "accessibility_interface";
 
     // Text editor tools
@@ -68,23 +75,64 @@ pub mod tool_names {
     pub const ACCESSIBILITY_CLICK: &str = "accessibility_click";
 
     // Basic tools (file operations, commands, etc.)
+    pub const BASH_COMMAND: &str = "bash_command";
     pub const LIST_FILES: &str = "list_files";
+    pub const GET_FILE_CONTENT: &str = "get_file_content";
+    pub const SET_FILE_CONTENT: &str = "set_file_content";
     pub const DEV_TEXT_EDITOR_VIEW: &str = "dev_text_editor_view";
     pub const DEV_TEXT_EDITOR_CREATE: &str = "dev_text_editor_create";
     pub const DEV_TEXT_EDITOR_STR_REPLACE: &str = "dev_text_editor_str_replace";
+    pub const SYSTEM_EXEC: &str = "system_exec";
+    pub const SYSTEM_LIST_FILES: &str = "system_list_files";
+    pub const SYSTEM_READ_FILE: &str = "system_read_file";
+    pub const SYSTEM_WRITE_FILE: &str = "system_write_file";
     pub const DEV_LIST_FILES: &str = "dev_list_files";
+    pub const DEV_GET_FILE_CONTENT: &str = "dev_get_file_content";
+    pub const DEV_SET_FILE_CONTENT: &str = "dev_set_file_content";
+    // NOTE: Removed redundant file operation constants - use str_replace_based_edit_tool instead
+    // Removed: FILE_READ, FILE_WRITE, FILE_CREATE, FILE_DELETE (redundant with official tools)
+    // Removed: COMMAND_EXECUTE, SHELL_EXECUTE, BASH_EXECUTE (redundant with bash_command)
 
     // Basic file and directory operations (standardized names)
+    // NOTE: READ_FILE constant removed - use str_replace_based_edit_tool instead
+    pub const WRITE_FILE: &str = "write_file";
     pub const LIST_DIRECTORY: &str = "list_directory";
     pub const CREATE_DIRECTORY: &str = "create_directory";
     pub const DELETE_FILE: &str = "delete_file";
     pub const TEXT_EDITOR_EDIT: &str = "text_editor_edit";
+    pub const EXECUTE_SHELL_COMMAND: &str = "execute_shell_command";
 
-    // Timer tools (standardized to match actual implementations)
-    pub const SET_TIMER: &str = "set_timer";
+    // Timer tools standardized names
     pub const LIST_TIMERS: &str = "list_timers";
     pub const CANCEL_TIMER: &str = "cancel_timer";
     pub const TIMER_STATUS: &str = "timer_status";
+
+    // Timer tools
+    pub const TIMER_CREATE: &str = "timer_create";
+    pub const TIMER_START: &str = "timer_start";
+    pub const TIMER_STOP: &str = "timer_stop";
+    pub const TIMER_PAUSE: &str = "timer_pause";
+    pub const TIMER_RESUME: &str = "timer_resume";
+    pub const TIMER_GET_STATUS: &str = "timer_get_status";
+    pub const TIMER_LIST: &str = "timer_list";
+    pub const TIMER_DELETE: &str = "timer_delete";
+    pub const CREATE_TIMER: &str = "create_timer";
+
+    // Computer use actions
+    pub const ACTION_SCREENSHOT: &str = "screenshot";
+    pub const ACTION_LEFT_CLICK: &str = "left_click";
+    pub const ACTION_TYPE: &str = "type";
+    pub const ACTION_KEY: &str = "key";
+    pub const ACTION_SCROLL: &str = "scroll";
+    pub const ACTION_WAIT: &str = "wait";
+
+    // Extended computer use actions
+    pub const ACTION_RIGHT_CLICK: &str = "right_click";
+    pub const ACTION_MIDDLE_CLICK: &str = "middle_click";
+    pub const ACTION_DOUBLE_CLICK: &str = "double_click";
+    pub const ACTION_TRIPLE_CLICK: &str = "triple_click";
+    pub const ACTION_HOLD_KEY: &str = "hold_key";
+    pub const WAIT: &str = "wait";
 }
 
 // Intent keywords for user request analysis
@@ -205,7 +253,7 @@ pub mod config {
 // Monitor session settings
 pub mod monitor_sessions {
     pub const HOLD_DURATION_MS: u64 = 300;
-    pub const IMMEDIATE_START_MS: u64 = 15; // Small delay to prevent race conditions with quick releases
+    pub const IMMEDIATE_START_MS: u64 = 0;
 
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds

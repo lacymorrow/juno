@@ -10,7 +10,14 @@ use crate::constants::agent::{tool_names, intent_keywords, tool_prefixes, confid
 static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(|| {
     let mut map = HashMap::new();
 
-    // Anthropic Computer Use tools (core tools only)
+    // Anthropic Computer Use tools
+    map.insert(tool_names::SCREENSHOT, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::LEFT_CLICK, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::TYPE, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::KEY, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::SCROLL, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::LEFT_CLICK_DRAG, ToolCategory::AnthropicComputerUse);
+    map.insert(tool_names::MOUSE_MOVE, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::COMPUTER, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::BASH, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::STR_REPLACE_BASED_EDIT_TOOL, ToolCategory::AnthropicComputerUse);
@@ -40,7 +47,19 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
 
     // Desktop tools
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
+    // dev_left_click, desktop_click, left_click → computer tool with computer_actions::LEFT_CLICK
+    // dev_right_click, right_click → computer tool with computer_actions::RIGHT_CLICK
+    // dev_middle_click, middle_click → computer tool with computer_actions::MIDDLE_CLICK
+    // dev_double_click, double_click → computer tool with computer_actions::DOUBLE_CLICK
+    // dev_triple_click, triple_click → computer tool with computer_actions::TRIPLE_CLICK
+    // dev_left_click_drag, left_click_drag → computer tool with computer_actions::LEFT_CLICK_DRAG
+// dev_left_mouse_down, left_mouse_down → computer tool with computer_actions::LEFT_MOUSE_DOWN
+// dev_left_mouse_up, left_mouse_up → computer tool with computer_actions::LEFT_MOUSE_UP
+// mouse_move → computer tool with computer_actions::MOUSE_MOVE
     // REMOVED: 4 redundant keyboard tools - Use computer tool instead
+    // dev_type_text, desktop_type → computer tool with computer_actions::TYPE
+    // dev_global_type_text → computer tool with computer_actions::TYPE
+    // dev_press_key → computer tool with computer_actions::KEY
     // This eliminates 15 redundant tools total and ensures 100% compliance with the official specification.
 
     map.insert(tool_names::OPEN_APPLICATION, ToolCategory::Desktop);
@@ -84,20 +103,35 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::ACCESSIBILITY_CLICK, ToolCategory::Desktop);
 
     // Basic tools (file operations, commands, etc.)
-    // REMOVED: Redundant tool mappings for deleted constants
-
+    map.insert(tool_names::BASH_COMMAND, ToolCategory::Basic);
     map.insert(tool_names::LIST_FILES, ToolCategory::Basic);
+    map.insert(tool_names::GET_FILE_CONTENT, ToolCategory::Basic);
+    map.insert(tool_names::SET_FILE_CONTENT, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_VIEW, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_CREATE, ToolCategory::Basic);
     map.insert(tool_names::DEV_TEXT_EDITOR_STR_REPLACE, ToolCategory::Basic);
-    map.insert(tool_names::DEV_LIST_FILES, ToolCategory::Basic);
+    map.insert(tool_names::SYSTEM_EXEC, ToolCategory::Basic);
+    map.insert(tool_names::SYSTEM_LIST_FILES, ToolCategory::Basic);
     // NOTE: Removed redundant file reading tool mappings - use str_replace_based_edit_tool instead
+    // Removed: SYSTEM_READ_FILE, DEV_GET_FILE_CONTENT (redundant with official tools)
+    map.insert(tool_names::SYSTEM_WRITE_FILE, ToolCategory::Basic);
+    map.insert(tool_names::DEV_LIST_FILES, ToolCategory::Basic);
+    map.insert(tool_names::DEV_SET_FILE_CONTENT, ToolCategory::Basic);
+    // NOTE: Removed redundant tool mappings - these constants no longer exist
+    // Removed: FILE_READ, FILE_WRITE, FILE_CREATE, FILE_DELETE (use str_replace_based_edit_tool)
+    // Removed: COMMAND_EXECUTE, SHELL_EXECUTE, BASH_EXECUTE (use bash_command)
 
-    // Timer tools (standardized to match actual implementations)
-    map.insert(tool_names::SET_TIMER, ToolCategory::Timer);
-    map.insert(tool_names::LIST_TIMERS, ToolCategory::Timer);
-    map.insert(tool_names::CANCEL_TIMER, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_STATUS, ToolCategory::Timer);
+    // NOTE: read_file tool mapping removed - use str_replace_based_edit_tool instead
+
+    // Timer tools
+    map.insert(tool_names::TIMER_CREATE, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_START, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_STOP, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_PAUSE, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_RESUME, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_GET_STATUS, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_LIST, ToolCategory::Timer);
+    map.insert(tool_names::TIMER_DELETE, ToolCategory::Timer);
 
     // Additional timer tools that are actually registered
     map.insert("set_timer", ToolCategory::Timer);
@@ -319,17 +353,18 @@ mod tests {
     #[test]
     fn test_tool_categorization() {
         assert_eq!(ToolMappingService::get_tool_category(tool_names::BROWSER_NAVIGATE), Some(ToolCategory::Browser));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::COMPUTER), Some(ToolCategory::AnthropicComputerUse));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::LIST_FILES), Some(ToolCategory::Basic));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::SET_TIMER), Some(ToolCategory::Timer));
+        assert_eq!(ToolMappingService::get_tool_category(tool_names::COMPUTER), Some(ToolCategory::AnthropicComputerUse)); // Test production tool instead of dev_left_click
+        assert_eq!(ToolMappingService::get_tool_category(tool_names::BASH_COMMAND), Some(ToolCategory::Basic));
+        assert_eq!(ToolMappingService::get_tool_category(tool_names::TIMER_CREATE), Some(ToolCategory::Timer));
+        assert_eq!(ToolMappingService::get_tool_category(tool_names::SCREENSHOT), Some(ToolCategory::AnthropicComputerUse));
     }
 
     #[test]
     fn test_agent_routing() {
         assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::BROWSER_NAVIGATE), Some(AgentType::BrowserExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::COMPUTER), Some(AgentType::DesktopExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::LIST_FILES), Some(AgentType::CodingExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::SET_TIMER), Some(AgentType::GeneralExpert));
+        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::COMPUTER), Some(AgentType::DesktopExpert)); // Test production tool instead of dev_left_click
+        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::BASH_COMMAND), Some(AgentType::CodingExpert));
+        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::TIMER_CREATE), Some(AgentType::GeneralExpert));
     }
 
     #[test]
@@ -344,21 +379,20 @@ mod tests {
     fn test_category_matching() {
         assert!(ToolMappingService::is_tool_in_category(tool_names::BROWSER_NAVIGATE, &ToolCategory::Browser));
         assert!(!ToolMappingService::is_tool_in_category(tool_names::BROWSER_NAVIGATE, &ToolCategory::Desktop));
-        assert!(ToolMappingService::is_tool_in_category(tool_names::COMPUTER, &ToolCategory::AnthropicComputerUse));
+        assert!(ToolMappingService::is_tool_in_category(tool_names::COMPUTER, &ToolCategory::AnthropicComputerUse)); // Test production tool instead of dev_left_click
     }
 
     #[test]
     fn test_agent_capability() {
         assert!(ToolMappingService::can_agent_handle_tool(tool_names::BROWSER_NAVIGATE, &AgentType::BrowserExpert));
         assert!(!ToolMappingService::can_agent_handle_tool(tool_names::BROWSER_NAVIGATE, &AgentType::DesktopExpert));
-        assert!(ToolMappingService::can_agent_handle_tool(tool_names::COMPUTER, &AgentType::DesktopExpert));
+        assert!(ToolMappingService::can_agent_handle_tool(tool_names::COMPUTER, &AgentType::DesktopExpert)); // Test production tool instead of dev_left_click
     }
 
     #[test]
     fn test_confidence_scoring() {
         assert_eq!(ToolMappingService::get_agent_confidence_for_tool(tool_names::BROWSER_NAVIGATE, &AgentType::BrowserExpert), confidence_scores::HIGH_CONFIDENCE);
         assert_eq!(ToolMappingService::get_agent_confidence_for_tool(tool_names::BROWSER_NAVIGATE, &AgentType::DesktopExpert), confidence_scores::NO_CONFIDENCE);
-        // Test that computer use tools have some relevance to browser expert
-        assert!(ToolMappingService::get_agent_confidence_for_tool(tool_names::COMPUTER, &AgentType::BrowserExpert) > confidence_scores::NO_CONFIDENCE);
+        assert!(ToolMappingService::get_agent_confidence_for_tool(tool_names::SCREENSHOT, &AgentType::BrowserExpert) > confidence_scores::NO_CONFIDENCE);
     }
 }
