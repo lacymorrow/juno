@@ -134,8 +134,16 @@ impl AgentExecutionQueue {
                 // Release the semaphore
                 drop(permit);
 
-                if let Err(e) = result {
-                    error!("Agent execution failed for query {}: {}", query.id, e);
+                // Handle execution result - ensure UI cleanup happens on failure
+                match result {
+                    Ok(()) => {
+                        info!("Agent execution completed successfully for query ID: {}", query.id);
+                    }
+                    Err(e) => {
+                        error!("Agent execution failed for query {}: {}", query.id, e);
+                        // NOTE: UI cleanup is handled within execute_agent_internal for all scenarios
+                        // No additional cleanup needed here to avoid race conditions
+                    }
                 }
 
                 return Some(query);
@@ -976,10 +984,7 @@ async fn execute_agent_internal(
     let agent_state_for_bar = final_response.agent_state.clone();
     let text_for_bar = final_response.text.clone();
     tauri::async_runtime::spawn(async move {
-        // First notify that the agent has stopped working
-        crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar).await;
-
-        // Then provide the completion details
+        // Provide the completion details (agent stop already notified above)
         crate::commands::ui_commands::handle_backend_response(
             &app_handle_for_bar,
             Some(text_for_bar),

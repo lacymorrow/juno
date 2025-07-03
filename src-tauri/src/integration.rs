@@ -44,34 +44,12 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// Setup specialized voice transcription event listeners for enhanced integration
+/// Setup voice transcription event listeners for specialized behavior
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
-    info!("🎤 Setting up specialized voice transcription listeners...");
-
-    // Listen for dictation started events from the plugin (additional handlers)
+    // Listen for voice transcription start events
     let app_handle_for_listener = app_handle.clone();
-
-    app_handle.listen("voice-transcription:dictation-started", move |event| {
-        info!("[Event] Received voice-transcription:dictation-started event");
-
-        // Register escape key for dictation cancellation
-        let app_handle_clone = app_handle_for_listener.clone();
-        safe_spawn_async_task(move || async move {
-            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone).await {
-                warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
-            }
-        });
-
-        // Play voice start sound automatically when dictation starts
-        let app_handle_clone = app_handle_for_listener.clone();
-        safe_spawn_async_task(move || async move {
-            let state = app_handle_clone.state::<crate::state::AppState>();
-            if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_clone.clone(), state).await {
-                warn!("Failed to play voice start sound: {}", e);
-            }
-        });
-
-        // Check if this is dictation mode and update floating bar manager accordingly
+    app_handle.listen("voice-transcription:started", move |event| {
+        info!("[Event] Received voice-transcription:started event");
         let app_handle_clone = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
             // Check if Dictation Mode is active
@@ -86,14 +64,9 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
             // Then handle the dictation started event
             commands::ui_commands::handle_dictation_started(&app_handle_clone).await;
         });
-
-        // Rebroadcast the event as app-dictation-started for backward compatibility
-        if let Err(e) = app_handle_for_listener.emit(events::dictation::STARTED, event.payload()) {
-            tracing::error!("{} Failed to emit dictation-started event: {}", prefixes::EVENT, e);
-        }
     });
 
-    // Listen for app-dictation-finished events to trigger the agent (CRITICAL FOR AGENT MODE)
+    // Listen for app-dictation-finished events to trigger the agent
     let app_handle_for_agent_listener = app_handle.clone();
     app_handle.listen("app-dictation-finished", move |event| {
         info!("[Event] Received app-dictation-finished event - triggering agent");
@@ -126,28 +99,19 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 let app_handle_for_state = app_handle_clone.clone();
                                 let app_state = app_handle_for_state.state::<crate::state::AppState>();
 
-                                // CRITICAL: Register escape key IMMEDIATELY when agent processing starts
-                                // This ensures escape key is captured during the processing gap between
-                                // dictation finishing and agent execution beginning
+                                // Register escape key when agent processing starts
                                 if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
-                                // Clone for error handling since submit_query will move app_handle_clone
-                                let app_handle_for_error = app_handle_clone.clone();
-
-                                match crate::anthropic::submit_query(
+                                // Submit the query to the agent system
+                                if let Err(e) = crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
-                                    app_handle_clone
+                                    app_handle_clone.clone()
                                 ).await {
-                                    Ok(_) => {
-                                        info!("[Agent Mode] Agent query submitted successfully");
-                                    }
-                                    Err(e) => {
-                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_for_error, &format!("Failed to submit query: {}", e)).await;
-                                    }
+                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
@@ -166,67 +130,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
     });
 
-    // Listen for query-submitted events from FloatingBar to trigger the agent
-    let app_handle_for_bar_listener = app_handle.clone();
-    app_handle.listen("query-submitted", move |event| {
-        info!("[Event] Received query-submitted event from FloatingBar - triggering agent");
-
-        let app_handle_clone = app_handle_for_bar_listener.clone();
-        safe_spawn_async_task(move || async move {
-            // Parse the query from the event payload (JSON-encoded string)
-            let payload_str = event.payload();
-            match serde_json::from_str::<String>(payload_str) {
-                Ok(query_text) => {
-                    let trimmed_query = query_text.trim();
-
-                    if !trimmed_query.is_empty() {
-                info!("[FloatingBar] Submitting query to agent: '{}'", trimmed_query);
-
-                // Emit user message event for frontend to add to conversation
-                let user_message_data = serde_json::json!({
-                    "content": trimmed_query,
-                    "timestamp": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64
-                });
-                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
-                    error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);
-                }
-
-                // Submit the query to the agent system
-                let app_state = app_handle_clone.state::<crate::state::AppState>();
-
-                // Register escape key for agent processing
-                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
-                    warn!("[FloatingBar] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
-                }
-
-                match crate::anthropic::submit_query(
-                    trimmed_query.to_string(),
-                    app_state,
-                    app_handle_clone.clone()
-                ).await {
-                    Ok(_) => {
-                        info!("[FloatingBar] Agent query submitted successfully");
-                    }
-                    Err(e) => {
-                        error!("[FloatingBar] Failed to submit query to agent: {}", e);
-                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
-                    }
-                }
-                    } else {
-                        info!("[FloatingBar] Query text was empty - ignoring");
-                    }
-                }
-                Err(e) => {
-                    error!("[FloatingBar] Failed to parse query-submitted payload as string: {}", e);
-                }
-            }
-        });
-    });
-
-    // Listen for partial result events from the plugin
+    // Listen for voice transcription partial results
     let app_handle_for_listener = app_handle.clone();
     app_handle.listen("voice-transcription:partial-result", move |event| {
         info!(
@@ -250,13 +154,6 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                     });
                 }
             }
-        }
-
-        // Rebroadcast the event as app-dictation-partial-result for backward compatibility
-        if let Err(e) =
-            app_handle_for_listener.emit(events::dictation::PARTIAL_RESULT, event.payload())
-        {
-            tracing::error!("{} Failed to emit partial-result event: {}", prefixes::EVENT, e);
         }
     });
 
@@ -439,25 +336,18 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                     // Only activate agent if we have meaningful content
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
                         // Submit the query to the agent system
-                        match crate::anthropic::submit_query(
+                        if let Err(e) = crate::anthropic::submit_query(
                             trimmed_text.to_string(),
                             app_state,
                             app_handle.clone(),
-                        )
-                        .await
-                        {
-                            Ok(_) => {
-                                info!("[AlwaysListening] Agent query submitted successfully");
-                            }
-                            Err(e) => {
-                                crate::error_handling::utils::log_and_emit_error(
-                                    app_handle,
-                                    "AlwaysListening",
-                                    "agent_query_submission",
-                                    &e.to_string(),
-                                    true,
-                                );
-                            }
+                        ).await {
+                            crate::error_handling::utils::log_and_emit_error(
+                                app_handle,
+                                "AlwaysListening",
+                                "agent_query_submission",
+                                &e.to_string(),
+                                true,
+                            );
                         }
                     } else {
                         info!("[AlwaysListening] Transcribed text was empty or too short - ignoring: '{}'", trimmed_text);
@@ -673,8 +563,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 Ok(()) => {
                     info!("[Agent Mode] Started agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, true) {
-                        tracing::error!("{} Failed to emit agent-active event: {}", prefixes::AGENT_MODE, e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        true,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -687,6 +583,16 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
 
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
+
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change after error: {}", e);
+                    }
                 }
             }
         }
@@ -696,8 +602,14 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -718,8 +630,8 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
-                    // Note: We don't emit agent-active false here because the agent will continue
-                    // processing the transcribed text. The agent-active false will be emitted
+                    // Note: We don't call synchronize_component_state(false) here because the agent will continue
+                    // processing the transcribed text. The agent-active false will be handled
                     // after the agent completes processing the query.
                 }
                 Err(e) => {
@@ -728,8 +640,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change after transcription stop failure: {}", e);
                     }
                 }
             }
@@ -740,8 +658,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -761,8 +685,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -771,8 +701,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change after stop failure: {}", e);
                     }
                 }
             }
@@ -783,8 +719,14 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -804,8 +746,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                     }
                 }
                 Err(e) => {
@@ -814,8 +762,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    // Use synchronize_component_state to update UI manager AND emit event
+                    if let Err(e) = utils::synchronize_component_state(
+                        app_handle,
+                        "agent",
+                        false,
+                        Some(constants::events::agent::ACTIVE),
+                    ).await {
+                        error!("[Agent Mode] Failed to synchronize agent state change after cancel failure: {}", e);
                     }
                 }
             }
@@ -828,8 +782,14 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+            // Use synchronize_component_state to update UI manager AND emit event
+            if let Err(e) = utils::synchronize_component_state(
+                app_handle,
+                "agent",
+                false,
+                Some(constants::events::agent::ACTIVE),
+            ).await {
+                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
             }
         }
     }
@@ -855,8 +815,14 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Reset agent input monitor state
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
-        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+    // Use synchronize_component_state to update UI manager AND emit event
+    if let Err(e) = utils::synchronize_component_state(
+        app_handle,
+        "agent",
+        false,
+        Some(constants::events::agent::ACTIVE),
+    ).await {
+        error!("[Agent Mode] Failed to synchronize agent state change during force stop: {}", e);
     }
 
     info!("[Agent Mode] Force stopped agent mode successfully");
@@ -909,15 +875,15 @@ fn setup_development_integration(app_handle: &AppHandle) {
 pub mod utils {
     use super::*;
 
-    /// Coordinate state changes across multiple components
-    pub async fn coordinate_state_change(
+    /// Synchronize component state changes across multiple systems
+    pub async fn synchronize_component_state(
         app_handle: &AppHandle,
         component: &str,
         new_state: bool,
         emit_event: Option<&str>,
     ) -> Result<(), String> {
         info!(
-            "🔄 Coordinating state change for {}: {}",
+            "🔄 Synchronizing state change for {}: {}",
             component, new_state
         );
 

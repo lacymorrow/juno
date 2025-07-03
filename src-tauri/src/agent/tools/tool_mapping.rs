@@ -94,7 +94,6 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert("cursor_position", ToolCategory::Desktop);
     map.insert("list_windows", ToolCategory::Desktop);
     map.insert("get_window_info", ToolCategory::Desktop);
-    map.insert("execute_command", ToolCategory::Desktop);
     map.insert("open_file_and_type", ToolCategory::Desktop);
     map.insert("save_and_close_file", ToolCategory::Desktop);
     map.insert("copy_to_clipboard_and_paste", ToolCategory::Desktop);
@@ -128,7 +127,6 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
 
     // Additional basic tools that are actually registered
     map.insert("read_file", ToolCategory::Basic);
-    map.insert("run_terminal_command", ToolCategory::Basic);
 
     // Timer tools
     map.insert(tool_names::TIMER_CREATE, ToolCategory::Timer);

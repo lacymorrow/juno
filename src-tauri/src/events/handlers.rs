@@ -243,24 +243,20 @@ async fn handle_agent_mode_result(
 ) {
     info!("[Event] Processing final result for AI Agent Mode");
 
-    // Update floating bar manager for agent mode query
-    if let Some(text) = &extracted_text {
-        let query_text = text.clone();
-        crate::commands::ui_commands::handle_dictation_finished(&app_handle, Some(query_text))
-            .await;
-    }
-
-    // Transform the payload format
+    // Transform and emit the event for the integration layer to handle
+    // This ensures a single, clean path for agent submission
     match serde_json::from_str::<serde_json::Value>(&payload_str) {
         Ok(payload_json) => {
             if let Some(text_value) = payload_json.get("text") {
                 let transformed_payload = serde_json::json!({
                     "query": text_value
                 });
+
+                info!("[Event] Emitting app-dictation-finished event for agent processing");
                 if let Err(e) =
                     app_handle.emit(constants::events::dictation::FINISHED, transformed_payload)
                 {
-                    error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                    error!("[Event] Failed to emit app-dictation-finished event: {}", e);
                 }
             } else {
                 error!(
@@ -276,7 +272,7 @@ async fn handle_agent_mode_result(
             );
             if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, payload_str) {
                 error!(
-                    "[Event] Failed to rebroadcast final-result event (fallback): {}",
+                    "[Event] Failed to emit app-dictation-finished event (fallback): {}",
                     e
                 );
             }
@@ -429,6 +425,30 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
             warn!("Failed to reset dictation active state: {}", e);
         }
     }
+
+    // Force reset dictation monitor state to prevent any stuck state scenarios
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+    // Update floating bar manager (was missing - this is critical for UI sync)
+    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
+
+    // Emit dictation-active false event for UI components (was missing)
+    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
+        error!(
+            "[Dictation Cancel] Failed to emit dictation-active event: {}",
+            e
+        );
+    }
+
+    // Unregister escape key handler (was missing)
+    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+        warn!(
+            "[Dictation Cancel] Failed to unregister escape key after cancellation: {} - continuing anyway",
+            e
+        );
+    }
+
+    info!("[Dictation Cancel] Cleanup completed successfully");
 }
 
 async fn handle_dictation_stop(app_handle: AppHandle) {

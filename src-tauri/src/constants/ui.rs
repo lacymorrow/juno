@@ -43,6 +43,7 @@ pub mod voice_modes {
 /// These values are used by the frontend agent state management and must match frontend expectations
 pub mod agent_status {
     pub const IDLE: &str = "idle";
+    pub const DICTATING: &str = "dictating";
     pub const LISTENING: &str = "listening";
     pub const THINKING: &str = "thinking";
     pub const RESPONDING: &str = "responding";

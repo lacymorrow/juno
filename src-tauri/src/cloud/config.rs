@@ -22,6 +22,7 @@
 //! Configuration: Managed by centralized settings system
 
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 use super::types::CloudError;
 use tracing::info;
@@ -32,6 +33,64 @@ pub const PRODUCTION_WS_URL: &str = "wss://juno-cloud-backend.fly.dev/ws";
 pub const PRODUCTION_API_URL: &str = "https://juno-cloud-backend.fly.dev/api";
 pub const PRODUCTION_HEALTH_URL: &str = "https://juno-cloud-backend.fly.dev/health";
 pub const PRODUCTION_METRICS_URL: &str = "https://juno-cloud-backend.fly.dev/metrics";
+
+/// Static denied commands list - only truly destructive commands
+static DENIED_COMMANDS: &[&str] = &[
+    "rm -rf /",
+    "sudo rm -rf /",
+    "format",
+    "mkfs",
+    "fdisk",
+    "parted",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "init 0",
+    "init 6",
+    "chmod 777 /",
+    "chown root /",
+    "passwd root",
+    ":(){ :|:& };:",
+    ":(){:|:&};:",
+    "dd if=/dev/zero of=/dev/sda",
+    "> /etc/passwd",
+    "> /etc/shadow",
+];
+
+/// Static allowed commands list - comprehensive command allowlist
+static ALLOWED_COMMANDS: &[&str] = &[
+    "text_query",
+    "voice_query",
+    "status_request",
+    "screenshot",
+    "system_command",
+    "config_update",
+    "file_operations",
+    "web_browsing",
+    "system_automation",
+    "voice_transcription",
+    "text_processing",
+    "get_system_info",
+    "get_capabilities",
+    "heartbeat",
+    "read_file",
+    "write_file",
+    "execute_script",
+    "browser_automation",
+    "desktop_automation",
+    "anthropic_computer_use",
+];
+
+/// Lazy-initialized Vec<String> for denied commands
+static DENIED_COMMANDS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
+    DENIED_COMMANDS.iter().map(|&s| s.to_string()).collect()
+});
+
+/// Lazy-initialized Vec<String> for allowed commands
+static ALLOWED_COMMANDS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
+    ALLOWED_COMMANDS.iter().map(|&s| s.to_string()).collect()
+});
 
 /// Cloud configuration settings - maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,54 +130,8 @@ impl Default for CloudConfig {
             heartbeat_interval: 60,
             command_timeout: 600, // Increased from 300 to 600 seconds (10 minutes)
             security_level: SecurityLevel::Low, // Changed from Medium to Low (maximally permissive)
-            allowed_commands: vec![
-                // Allow ALL command types by default - comprehensive list
-                "text_query".to_string(),
-                "voice_query".to_string(),
-                "status_request".to_string(),
-                "screenshot".to_string(),
-                "system_command".to_string(),
-                "config_update".to_string(),
-                "file_operations".to_string(),
-                "web_browsing".to_string(),
-                "system_automation".to_string(),
-                "voice_transcription".to_string(),
-                "text_processing".to_string(),
-                "get_system_info".to_string(),
-                "get_capabilities".to_string(),
-                "heartbeat".to_string(),
-                "run_terminal_command".to_string(),
-                "read_file".to_string(),
-                "write_file".to_string(),
-                "execute_script".to_string(),
-                "browser_automation".to_string(),
-                "desktop_automation".to_string(),
-                "anthropic_computer_use".to_string(),
-                // Allow all other commands - this is now permissive by default
-            ],
-            denied_commands: vec![
-                // Only truly destructive commands that could cause irreversible damage
-                "rm -rf /".to_string(),
-                "sudo rm -rf /".to_string(),
-                "format".to_string(),
-                "mkfs".to_string(),
-                "fdisk".to_string(),
-                "parted".to_string(),
-                "shutdown".to_string(),
-                "reboot".to_string(),
-                "halt".to_string(),
-                "poweroff".to_string(),
-                "init 0".to_string(),
-                "init 6".to_string(),
-                "chmod 777 /".to_string(),
-                "chown root /".to_string(),
-                "passwd root".to_string(),
-                ":(){ :|:& };:".to_string(),
-                ":(){:|:&};:".to_string(),
-                "dd if=/dev/zero of=/dev/sda".to_string(),
-                "> /etc/passwd".to_string(),
-                "> /etc/shadow".to_string(),
-            ],
+            allowed_commands: ALLOWED_COMMANDS_VEC.clone(), // Use lazy-initialized static
+            denied_commands: DENIED_COMMANDS_VEC.clone(),   // Use lazy-initialized static
         }
     }
 }
@@ -151,29 +164,8 @@ impl CloudConfig {
         // Ensure we're using Low security (maximally permissive)
         self.security_level = SecurityLevel::Low;
 
-        // Update denied commands to only truly destructive ones
-        self.denied_commands = vec![
-            "rm -rf /".to_string(),
-            "sudo rm -rf /".to_string(),
-            "format".to_string(),
-            "mkfs".to_string(),
-            "fdisk".to_string(),
-            "parted".to_string(),
-            "shutdown".to_string(),
-            "reboot".to_string(),
-            "halt".to_string(),
-            "poweroff".to_string(),
-            "init 0".to_string(),
-            "init 6".to_string(),
-            "chmod 777 /".to_string(),
-            "chown root /".to_string(),
-            "passwd root".to_string(),
-            ":(){ :|:& };:".to_string(),
-            ":(){:|:&};:".to_string(),
-            "dd if=/dev/zero of=/dev/sda".to_string(),
-            "> /etc/passwd".to_string(),
-            "> /etc/shadow".to_string(),
-        ];
+        // Update denied commands to only truly destructive ones (use static reference)
+        self.denied_commands = DENIED_COMMANDS_VEC.clone();
 
         // Ensure generous timeout
         if self.command_timeout < 600 {
@@ -253,10 +245,11 @@ impl CloudConfig {
         self.save_to_centralized_settings(settings_manager).await
     }
 
-    /// Check if a command is allowed - now maximally permissive
+    /// Check if a command is allowed - now maximally permissive with optimized string matching
     pub fn is_command_allowed(&self, command: &str) -> bool {
         // First check if it's in the denied list (only truly destructive commands)
-        for denied_cmd in &self.denied_commands {
+        // Use static slice for faster iteration
+        for &denied_cmd in DENIED_COMMANDS.iter() {
             if command.contains(denied_cmd) {
                 log::warn!("🚫 Command '{}' blocked due to destructive pattern: '{}'", command, denied_cmd);
                 return false;
@@ -272,7 +265,8 @@ impl CloudConfig {
     /// Check if a command is considered safe - now almost everything is safe
     fn is_safe_command(&self, command: &str) -> bool {
         // Check against denied list - if not denied, it's safe
-        !self.denied_commands.iter().any(|denied| command.contains(denied))
+        // Use static slice for faster iteration
+        !DENIED_COMMANDS.iter().any(|&denied| command.contains(denied))
     }
 
     /// Get the corresponding API URL for the WebSocket URL
@@ -339,9 +333,9 @@ impl CloudConfig {
                 "high" => SecurityLevel::High,
                 _ => SecurityLevel::Low, // Default to low (maximally permissive)
             },
-            // Set default values for fields not in CloudSettings
-            allowed_commands: Self::default().allowed_commands,
-            denied_commands: Self::default().denied_commands,
+            // Set default values for fields not in CloudSettings (use static references)
+            allowed_commands: ALLOWED_COMMANDS_VEC.clone(),
+            denied_commands: DENIED_COMMANDS_VEC.clone(),
         }
     }
 }
