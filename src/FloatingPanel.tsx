@@ -2,6 +2,7 @@ import TransparentFloatingPanel from "@/components/TransparentFloatingPanel";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { UI } from "@/lib/constants.generated";
 import "./styles/globals.css";
 
 // Constants for all panel sizes - these should match the TransparentFloatingPanel component
@@ -176,10 +177,12 @@ export default function FloatingPanel() {
           }}
         >
           <TransparentFloatingPanel
-            isWindowHovered={isHovered}
-            disableWindowManagement={true}
+            isVisible={true}
+            agentStatus={
+              isHovered ? UI.AGENT_STATUS_LISTENING : UI.AGENT_STATUS_IDLE
+            }
+            message="Panel is ready"
             onModeChange={setPanelMode}
-            className="h-full w-full"
           />
         </div>
       )}
