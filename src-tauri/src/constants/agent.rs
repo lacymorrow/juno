@@ -257,7 +257,7 @@ pub mod config {
 // Monitor session settings
 pub mod monitor_sessions {
     pub const HOLD_DURATION_MS: u64 = 300;
-    pub const IMMEDIATE_START_MS: u64 = 15; // Small delay to prevent race conditions with quick releases
+    pub const IMMEDIATE_START_MS: u64 = 15;
 
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
