@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
 import AudioVisualizer, { type AppState } from "./audio-visualizer";
+import { UI } from "@/lib/constants.generated";
 import type {
   VoiceAIBarProps,
   AssistantState,
@@ -70,15 +71,15 @@ interface UIStateData {
 // === UTILITY FUNCTIONS ===
 const mapAssistantStateToUIState = (state: AssistantState): UIState => {
   switch (state) {
-    case "idle":
+    case UI.AGENT_STATUS_IDLE:
       return "default";
-    case "listening":
+    case UI.AGENT_STATUS_LISTENING:
       return "listening";
-    case "processing":
+    case UI.AGENT_STATUS_PROCESSING:
       return "loading";
     case "speaking":
       return "speaking";
-    case "error":
+    case UI.AGENT_STATUS_ERROR:
       return "error";
     case "success":
       return "success";
@@ -86,6 +87,20 @@ const mapAssistantStateToUIState = (state: AssistantState): UIState => {
       return "input";
     case "response":
       return "agent_responding";
+    case UI.AGENT_STATUS_DICTATING:
+      return "dictating";
+    case UI.AGENT_STATUS_THINKING:
+      return "loading";
+    case UI.AGENT_STATUS_RESPONDING:
+      return "agent_responding";
+    case UI.AGENT_STATUS_FINISHED:
+      return "success";
+    case UI.AGENT_STATUS_FAILED:
+      return "error";
+    case UI.AGENT_STATUS_CANCELLED:
+      return "default";
+    case UI.AGENT_STATUS_OFFLINE:
+      return "error";
     default:
       return "default";
   }
@@ -95,18 +110,18 @@ const mapUIStateToAssistantState = (state: UIState): AssistantState => {
   switch (state) {
     case "default":
     case "shrinking":
-      return "idle";
+      return UI.AGENT_STATUS_IDLE;
     case "listening":
     case "transcribing":
-      return "listening";
+      return UI.AGENT_STATUS_LISTENING;
     case "loading":
     case "submitting":
     case "finishing":
-      return "processing";
+      return UI.AGENT_STATUS_PROCESSING;
     case "speaking":
       return "speaking";
     case "error":
-      return "error";
+      return UI.AGENT_STATUS_ERROR;
     case "success":
       return "success";
     case "input":
@@ -114,32 +129,40 @@ const mapUIStateToAssistantState = (state: UIState): AssistantState => {
       return "input";
     case "agent_responding":
       return "response";
+    case "dictating":
+      return UI.AGENT_STATUS_DICTATING;
     default:
-      return "idle";
+      return UI.AGENT_STATUS_IDLE;
   }
 };
 
 // Convert AssistantState to AppState for AudioVisualizer
 const mapAssistantStateToAppState = (state: AssistantState): AppState => {
   switch (state) {
-    case "idle":
-      return "idle";
-    case "listening":
-      return "listening";
-    case "processing":
-      return "processing";
-    case "speaking":
-      return "speaking";
-    case "error":
-      return "error";
-    case "success":
-      return "success";
+    case UI.AGENT_STATUS_IDLE:
     case "input":
-      return "idle"; // Input mode should show idle state in visualizer
+      return UI.AGENT_STATUS_IDLE;
+    case UI.AGENT_STATUS_LISTENING:
+    case UI.AGENT_STATUS_DICTATING:
+      return UI.AGENT_STATUS_LISTENING;
+    case UI.AGENT_STATUS_PROCESSING:
+    case UI.AGENT_STATUS_THINKING:
+      return UI.AGENT_STATUS_PROCESSING;
+    case UI.AGENT_STATUS_RESPONDING:
+    case "speaking":
     case "response":
-      return "speaking"; // Response mode should show speaking state in visualizer
+      return UI.AGENT_STATUS_RESPONDING;
+    case UI.AGENT_STATUS_ERROR:
+    case UI.AGENT_STATUS_FAILED:
+    case UI.AGENT_STATUS_CANCELLED:
+      return UI.AGENT_STATUS_ERROR;
+    case UI.AGENT_STATUS_FINISHED:
+    case "success":
+      return UI.AGENT_STATUS_FINISHED;
+    case UI.AGENT_STATUS_OFFLINE:
+      return UI.AGENT_STATUS_IDLE;
     default:
-      return "idle";
+      return UI.AGENT_STATUS_IDLE;
   }
 };
 
@@ -242,15 +265,22 @@ const styles = \`
   const sampleResponses = propSampleResponses || defaultSampleResponses;
 
   // Messages for different states
-  const stateMessages = {
-    idle: "Ready",
-    listening: "Listening to your request...",
-    processing:
+  const stateMessages: Record<AssistantState, string> = {
+    [UI.AGENT_STATUS_IDLE]: "Ready",
+    [UI.AGENT_STATUS_LISTENING]: "Listening to your request...",
+    [UI.AGENT_STATUS_PROCESSING]:
       "Processing your request, please wait while I analyze your input...",
+    [UI.AGENT_STATUS_ERROR]:
+      "Sorry, I couldn't understand that request. Please try speaking more clearly.",
+    [UI.AGENT_STATUS_DICTATING]: "Dictating...",
+    [UI.AGENT_STATUS_THINKING]: "Thinking...",
+    [UI.AGENT_STATUS_RESPONDING]: "Responding...",
+    [UI.AGENT_STATUS_FINISHED]: "Finished.",
+    [UI.AGENT_STATUS_FAILED]: "Failed.",
+    [UI.AGENT_STATUS_CANCELLED]: "Cancelled.",
+    [UI.AGENT_STATUS_OFFLINE]: "Offline.",
     speaking:
       "Here's what I found for you based on your request and current context...",
-    error:
-      "Sorry, I couldn't understand that request. Please try speaking more clearly.",
     success:
       "Task completed successfully! Is there anything else I can help you with today?",
     input: "Type your request...",

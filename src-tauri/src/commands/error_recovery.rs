@@ -334,7 +334,7 @@ pub async fn test_error_recovery(
 
     // Simulate different error patterns for testing
     use crate::agent::core::AgentError;
-    use crate::agent::error_recovery::ErrorPattern;
+    
 
     let test_error = match error_type.as_str() {
         "element_not_found" => AgentError::ToolError("Element not found on screen".to_string()),

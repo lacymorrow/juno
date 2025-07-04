@@ -833,7 +833,7 @@ async fn execute_agent_internal(
     }
 
     // --- Process Agent Result ---
-    let mut final_response = match agent_result {
+    let final_response = match agent_result {
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 

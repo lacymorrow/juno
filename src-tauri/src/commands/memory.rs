@@ -114,7 +114,7 @@ pub async fn update_visual_config(
 ) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
     let memory_manager = state.get_memory_manager().await;
-    let mut memory_guard = memory_manager.lock().await;
+    let memory_guard = memory_manager.lock().await;
 
     memory_guard.update_visual_config(config).await
         .map_err(|e| format!("Failed to update visual config: {}", e))
@@ -392,7 +392,7 @@ pub async fn force_memory_prune(
 ) -> Result<String, String> {
     let state = app_handle.state::<AppState>();
     let memory_manager = state.get_memory_manager().await;
-    let mut memory_guard = memory_manager.lock().await;
+    let memory_guard = memory_manager.lock().await;
 
     let before_metrics = memory_guard.get_memory_metrics().await;
 
