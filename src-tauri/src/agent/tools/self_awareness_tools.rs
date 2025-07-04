@@ -27,6 +27,7 @@ use std::process::Command;
 use std::path::{Path, PathBuf};
 use std::fs;
 use tracing::{info, error, warn};
+use tauri::AppHandle;
 
 /// Registers self-awareness and introspection tools with the tool provider.
 ///
@@ -37,6 +38,7 @@ use tracing::{info, error, warn};
 ///
 /// # Arguments
 /// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `app_handle` - tauri::AppHandle for the current application
 ///
 /// # Security Note
 /// Tools are only available when `cfg!(debug_assertions)` is true to prevent
@@ -47,7 +49,10 @@ use tracing::{info, error, warn};
 /// - `analyze_source_structure`: Analyze codebase structure and architecture
 /// - `inspect_prompt_system`: Examine prompt configuration and templates
 /// - `get_system_info`: Get system, workspace, and build information
-pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
+pub async fn register_self_awareness_tools(
+    provider: &mut LocalToolProvider,
+    app_handle: AppHandle,
+) {
     info!("Registering self-awareness and introspection tools...");
 
     // Only register these tools in development mode
@@ -146,9 +151,12 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
         beta_flag: None,
     };
 
-    provider.register_async_tool(system_info_def, |_input| {
-        async move { get_system_info_exec().await }
-    }).await;
+    provider
+        .register_async_tool(system_info_def, move |_input| {
+            let app_handle = app_handle.clone();
+            async move { get_system_info_exec(app_handle).await }
+        })
+        .await;
 
     info!("Self-awareness tools registered successfully");
 }
@@ -330,6 +338,9 @@ async fn inspect_prompt_system_exec(input: Value) -> Result<Value, String> {
 ///
 /// Used by: Environment analysis, workspace discovery, debugging, system reporting
 ///
+/// # Arguments
+/// * `app_handle` - tauri::AppHandle for the current application
+///
 /// # Returns
 /// `Result<Value, String>` - System information or error message
 ///
@@ -339,38 +350,44 @@ async fn inspect_prompt_system_exec(input: Value) -> Result<Value, String> {
 /// - Package and version information
 /// - Creator attribution and mission
 /// - Agent architecture details
-async fn get_system_info_exec() -> Result<Value, String> {
-    info!("Getting system information");
+async fn get_system_info_exec(app_handle: AppHandle) -> Result<Value, String> {
+    info!("Executing get_system_info tool");
 
-    // Get current working directory
+    // Use a helper to find workspace root
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "Unknown".to_string());
+        .unwrap_or_else(|_| "unknown".to_string());
 
-    // Get environment variables
-    let cargo_manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| "Unknown".to_string());
-    let cargo_pkg_name = std::env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "Unknown".to_string());
-    let cargo_pkg_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "Unknown".to_string());
+    let tauri_version = env!("CARGO_PKG_VERSION");
 
-    // Detect workspace root (look for Cargo.toml with workspace)
-    let workspace_root = find_workspace_root(&cwd).unwrap_or_else(|| cwd.clone());
+    // Get current agent mode
+    let current_mode = format!(
+        "{:?}",
+        crate::agent::providers::factory::BrainFactory::get_agent_mode_with_app_handle(
+            &app_handle
+        )
+        .await
+    );
+
+    // Get environment information
+    let debug_mode = cfg!(debug_assertions);
 
     Ok(json!({
         "success": true,
         "system": {
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
-            "development_mode": cfg!(debug_assertions)
+            "development_mode": debug_mode
         },
         "workspace": {
             "current_directory": cwd,
-            "workspace_root": workspace_root,
-            "manifest_dir": cargo_manifest_dir,
+            "workspace_root": find_workspace_root(&cwd).unwrap_or_else(|| cwd.clone()),
+            "manifest_dir": "Unknown",
             "source_location": "~/repo/juno"
         },
         "package": {
-            "name": cargo_pkg_name,
-            "version": cargo_pkg_version
+            "name": "Unknown",
+            "version": tauri_version
         },
         "creator_info": {
             "creator": "Lacy",
@@ -381,7 +398,7 @@ async fn get_system_info_exec() -> Result<Value, String> {
             "prompt_location": "src-tauri/src/agent/prompts/templates.rs",
             "main_orchestration": "src-tauri/src/anthropic.rs",
             "agent_modes": ["single", "multi"],
-            "current_mode": crate::agent::providers::factory::BrainFactory::get_agent_mode()
+            "current_mode": current_mode
         }
     }))
 }

@@ -30,23 +30,9 @@ pub enum BashResult {
 }
 
 impl BashResult {
-    /// Convert to string for legacy compatibility
-    pub fn to_output_string(&self) -> String {
-        match self {
-            BashResult::Output(output) => output.clone(),
-            BashResult::Restarted => "tool has been restarted.".to_string(),
-            BashResult::CommandResult { output, .. } => output.clone(),
-        }
-    }
-
     /// Check if this result represents a restart
     pub fn is_restart(&self) -> bool {
         matches!(self, BashResult::Restarted)
-    }
-
-    /// Get the output content regardless of result type
-    pub fn get_output(&self) -> String {
-        self.to_output_string()
     }
 }
 

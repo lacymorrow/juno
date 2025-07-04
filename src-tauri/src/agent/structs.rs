@@ -108,6 +108,19 @@ pub enum AgentState {
     Paused,    // Temporarily stopped, can be resumed
 }
 
+impl Default for AgentState {
+    fn default() -> Self {
+        AgentState::Idle
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct AgentStateUpdate {
+    pub state: AgentState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+}
+
 // Represents the action the agent decided to take next
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentAction {

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 use tracing::{info, warn, error, debug};
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
@@ -14,8 +14,7 @@ use super::types::{
 };
 use super::security::CloudSecurity;
 use crate::state::AppState;
-use crate::constants::permissions;
-use crate::constants::errors::templates;
+use crate::constants::{permissions, errors::templates};
 use crate::commands::shell::BashResult;
 
 // Helper function for error formatting - properly handles template substitution
@@ -225,7 +224,7 @@ impl CloudCommandProcessor {
         info!("Executing text query: {}", query);
 
         // Use the existing orchestrator to handle the query
-        let response = self.submit_query_to_orchestrator(query, "cloud").await?;
+        let response = self.submit_query_to_orchestrator(query, "cloud", None, None).await?;
         Ok(response)
     }
 
@@ -289,7 +288,7 @@ impl CloudCommandProcessor {
         info!("Submitting transcribed query to orchestrator: '{}'", trimmed_transcription);
 
         // Submit the transcribed text to the orchestrator as a text query
-        let orchestrator_response = self.submit_query_to_orchestrator(trimmed_transcription, "cloud_voice").await?;
+        let orchestrator_response = self.submit_query_to_orchestrator(trimmed_transcription, "cloud_voice", None, None).await?;
 
         Ok(format!("Voice query transcribed: '{}' -> {}", trimmed_transcription, orchestrator_response))
     }
@@ -434,98 +433,93 @@ impl CloudCommandProcessor {
 
     /// Execute type command
     async fn execute_type_command(&self, text: &str) -> Result<CommandResult, CloudError> {
-        info!("Executing type command with text: {}", text);
+        info!("Executing type command: {}", text);
 
-        let app_state = self.app_handle.state::<crate::state::AppState>();
-
-        // Use the existing text typing functionality
-        match crate::commands::keyboard::global_type_text(text.to_string(), self.app_handle.clone(), app_state).await {
-            Ok(_) => {
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(format!("Typed text: {}", text)),
-                    error: None,
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("text".to_string(), serde_json::json!(text));
-                        metadata.insert("length".to_string(), serde_json::json!(text.len()));
-                        metadata
-                    }),
-                    screenshot_base64: None,
-                })
-            },
+        match crate::commands::keyboard::type_text(text.to_string()).await {
+            Ok(_) => Ok(CommandResult {
+                success: true,
+                data: Some(format!("Typed: {}", text)),
+                error: None,
+                metadata: None,
+                screenshot_base64: None,
+            }),
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "type command", &e));
-                Err(CloudError::ExecutionFailed(format!("Type failed: {}", e)))
+                let error_msg = format_error(templates::FAILED_TO_EXECUTE, "type command", &e);
+                error!("{}", error_msg);
+                Err(CloudError::ExecutionFailed(error_msg))
             }
         }
     }
 
     /// Execute key press command
     async fn execute_key_command(&self, key: &str) -> Result<CommandResult, CloudError> {
-        info!("Executing key press command: {}", key);
+        info!("Executing key command: {}", key);
+        let app_state = self.app_handle.state::<AppState>();
 
-        let app_state = self.app_handle.state::<crate::state::AppState>();
+        if let Some(perms) = app_state.get_permissions_state().await {
+            if !perms.input_monitoring.granted {
+                let error_msg = "Input monitoring permission not granted".to_string();
+                error!("{}", error_msg);
+                return Err(CloudError::SecurityError(error_msg));
+            }
+        } else {
+            let error_msg = "Could not retrieve permissions state".to_string();
+            error!("{}", error_msg);
+            return Err(CloudError::ExecutionFailed(error_msg));
+        }
 
-        // Use the existing key press functionality
-        match crate::commands::keyboard::press_key(key.to_string(), None, self.app_handle.clone(), app_state).await {
-            Ok(_) => {
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(format!("Pressed key: {}", key)),
-                    error: None,
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("key".to_string(), serde_json::json!(key));
-                        metadata
-                    }),
-                    screenshot_base64: None,
-                })
-            },
+        match crate::commands::keyboard::press_key(key.to_string()).await {
+            Ok(_) => Ok(CommandResult {
+                success: true,
+                data: Some(format!("Key '{}' pressed successfully.", key)),
+                error: None,
+                metadata: None,
+                screenshot_base64: None,
+            }),
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "key press command", &e));
-                Err(CloudError::ExecutionFailed(format!("Key press failed: {}", e)))
+                let error_msg = format!("Failed to press key '{}': {}", key, e);
+                error!("{}", error_msg);
+                Err(CloudError::ExecutionFailed(error_msg))
             }
         }
     }
 
-    /// Execute shell command
     async fn execute_shell_command(&self, command: &str) -> Result<CommandResult, CloudError> {
         info!("Executing shell command: {}", command);
 
-        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let state = self.app_handle.state::<AppState>();
+        let result = crate::commands::shell::bash_command(
+            self.app_handle.clone(),
+            state,
+            command.to_string(),
+            None, // timeout
+            None, // restart
+            None, // debug_mode
+        )
+        .await;
 
-        // Use the existing shell command functionality
-        match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
+        match result {
             Ok(bash_result) => {
-                let output = bash_result.get_output();
-
-                // Properly check the actual command success status
-                let command_success = match &bash_result {
-                    BashResult::Output(_) => true,
-                    BashResult::Restarted => true,
-                    BashResult::CommandResult { success, .. } => *success,
+                let (output, success) = match bash_result {
+                    BashResult::Output(s) => (s, true),
+                    BashResult::CommandResult { output, success } => (output, success),
+                    BashResult::Restarted => ("Shell restarted.".to_string(), true),
                 };
-
                 Ok(CommandResult {
-                    success: command_success,
+                    success,
                     data: Some(output.clone()),
-                    error: if command_success { None } else { Some("Command execution failed".to_string()) },
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("command".to_string(), serde_json::json!(command));
-                        metadata.insert("output_length".to_string(), serde_json::json!(output.len()));
-                        metadata.insert("is_restart".to_string(), serde_json::json!(bash_result.is_restart()));
-                        metadata.insert("command_success".to_string(), serde_json::json!(command_success));
-                        metadata
-                    }),
+                    error: if success { None } else { Some(output) },
+                    metadata: None,
                     screenshot_base64: None,
                 })
-            },
-            Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "shell command", &e));
-                Err(CloudError::ExecutionFailed(format!("Shell command failed: {}", e)))
             }
+            Err(e) => Ok(CommandResult {
+                success: false,
+                data: Some(e.clone()),
+                error: Some(e),
+                metadata: None,
+                screenshot_base64: None,
+            }),
         }
     }
 
@@ -586,18 +580,23 @@ impl CloudCommandProcessor {
     /// Get system information
     async fn get_system_info(&self) -> Result<serde_json::Value, CloudError> {
         let app_state = self.app_handle.state::<AppState>();
+        let settings = app_state.get_settings();
+        let app_version = self.app_handle.package_info().version.to_string();
+        let agent_mode =
+            crate::agent::providers::factory::BrainFactory::get_agent_mode_with_app_handle(
+                &self.app_handle,
+            )
+            .await;
 
-        let system_info = serde_json::json!({
-            "platform": std::env::consts::OS,
-            "architecture": std::env::consts::ARCH,
-            "version": env!("CARGO_PKG_VERSION"),
-            "desktop_available": app_state.is_desktop_available(),
-            "agent_mode": format!("{:?}", crate::agent::providers::factory::BrainFactory::get_agent_mode()),
-            "capabilities": self.get_device_capabilities(),
-            "uptime": "unknown", // TODO: Track application uptime
+        let info = serde_json::json!({
+            "app_version": app_version,
+            "os_version": std::env::consts::OS,
+            "device_id": settings.device_id,
+            "agent_mode": format!("{:?}", agent_mode),
+            "current_model": settings.current_model,
+            "current_provider": settings.current_provider,
         });
-
-        Ok(system_info)
+        Ok(info)
     }
 
     #[allow(dead_code)]
@@ -635,30 +634,25 @@ impl CloudCommandProcessor {
     /// Convert command type to string for logging
     fn command_type_to_string(&self, command_type: &CloudCommandType) -> &'static str {
         match command_type {
-            CloudCommandType::VoiceQuery => "voice_query",
-            CloudCommandType::TextQuery => "text_query",
-            CloudCommandType::SystemCommand => "system_command",
-            CloudCommandType::StatusRequest => "status_request",
-            CloudCommandType::Screenshot => "screenshot",
-            CloudCommandType::ConfigUpdate => "config_update",
+            CloudCommandType::TextQuery => "TextQuery",
+            CloudCommandType::VoiceQuery => "VoiceQuery",
+            CloudCommandType::SystemCommand => "SystemCommand",
+            CloudCommandType::StatusRequest => "StatusRequest",
+            CloudCommandType::Screenshot => "Screenshot",
+            CloudCommandType::ConfigUpdate => "ConfigUpdate",
         }
     }
 
     /// Submit query to the orchestrator agent
-    async fn submit_query_to_orchestrator(&self, query: &str, source: &str) -> Result<String, CloudError> {
-        let app_state = self.app_handle.state::<AppState>();
+    async fn submit_query_to_orchestrator(&self, query: &str, source: &str, app_handle_opt: Option<AppHandle>, state_opt: Option<State<'_, AppState>>) -> Result<String, CloudError> {
+        let app_handle = app_handle_opt.unwrap_or_else(|| self.app_handle.clone());
+        let state: State<AppState> = state_opt.unwrap_or_else(|| self.app_handle.state());
 
-        match crate::anthropic::submit_query(query.to_string(), app_state, self.app_handle.clone()).await {
-            Ok(()) => {
-                // The submit_query function handles the response via events
-                // For cloud response, we return a success message
-                Ok(format!("Query '{}' submitted successfully from {}",
-                    query.chars().take(50).collect::<String>(), source))
-            },
-            Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", &e));
-                Err(CloudError::ExecutionFailed(format!("Query submission failed: {}", e)))
-            }
-        }
+        info!("Submitting query to orchestrator from {}: {}", source, query);
+        crate::anthropic::submit_query(query.to_string(), state, app_handle)
+            .await
+            .map_err(|e| {
+                CloudError::ExecutionFailed(format!("Orchestrator failed: {}", e.to_string()))
+            })
     }
 }

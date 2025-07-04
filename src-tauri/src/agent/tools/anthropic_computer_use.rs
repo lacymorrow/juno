@@ -417,10 +417,9 @@ pub async fn execute_computer_tool(
                 "left_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -433,10 +432,9 @@ pub async fn execute_computer_tool(
                 "right_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -449,10 +447,9 @@ pub async fn execute_computer_tool(
                 "middle_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     handle_anthropic_result!(middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -465,10 +462,9 @@ pub async fn execute_computer_tool(
                 "double_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -481,10 +477,9 @@ pub async fn execute_computer_tool(
                 "triple_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
                     handle_anthropic_result!(triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
@@ -500,20 +495,15 @@ pub async fn execute_computer_tool(
                     let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
                         // Format: start_coordinate + coordinate (end) - explicit start/end coordinates
                         let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "start_coordinate", "coordinate"));
-                        let (start_x, start_y) = start_coord.to_f64();
-                        let (end_x, end_y) = end_coord.to_f64();
-                        (start_x, start_y, end_x, end_y)
+                        (start_coord.x as f64, start_coord.y as f64, end_coord.x as f64, end_coord.y as f64)
                     } else if input.get("end_coordinate").is_some() {
                         // Format: coordinate (start) + end_coordinate - explicit start/end coordinates
                         let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "coordinate", "end_coordinate"));
-                        let (start_x, start_y) = start_coord.to_f64();
-                        let (end_x, end_y) = end_coord.to_f64();
-                        (start_x, start_y, end_x, end_y)
+                        (start_coord.x as f64, start_coord.y as f64, end_coord.x as f64, end_coord.y as f64)
                     } else {
                         // Standard format: single coordinate (end position) - drag from current cursor position
                         // This is the official Anthropic Computer Use API specification behavior
                         let end_coord = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                        let (end_x, end_y) = end_coord.to_f64();
 
                         // Get current cursor position as start point (already in screen coordinates)
                         let (start_x, start_y) = handle_anthropic_result!(crate::commands::mouse::get_cursor_position(
@@ -522,7 +512,7 @@ pub async fn execute_computer_tool(
                         ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e)));
 
                         // Transform only the end coordinates since start coordinates are already screen coordinates
-                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        let (screen_end_x, screen_end_y) = coordinates::transform_standard_to_screen_coordinates(end_coord.x as f64, end_coord.y as f64);
 
                         // Return start coordinates as-is (already screen coordinates) and transformed end coordinates
                         (start_x, start_y, screen_end_x, screen_end_y)
@@ -531,8 +521,8 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates (only for explicit coordinate cases)
                     let (screen_start_x, screen_start_y, screen_end_x, screen_end_y) = if input.get("start_coordinate").is_some() || input.get("end_coordinate").is_some() {
                         // Both coordinates need transformation for explicit coordinate cases
-                        let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
-                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        let (screen_start_x, screen_start_y) = coordinates::transform_standard_to_screen_coordinates(start_x, start_y);
+                        let (screen_end_x, screen_end_y) = coordinates::transform_standard_to_screen_coordinates(end_x, end_y);
                         (screen_start_x, screen_start_y, screen_end_x, screen_end_y)
                     } else {
                         // For cursor position case, coordinates are already handled above
@@ -550,10 +540,9 @@ pub async fn execute_computer_tool(
                 "mouse_move" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes debug logging and validation
                     handle_anthropic_result!(crate::commands::mouse::mouse_move(app_handle.clone(), state_manager, screen_x, screen_y).await
@@ -566,10 +555,9 @@ pub async fn execute_computer_tool(
                 "left_mouse_down" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command which includes debug logging and validation
                     handle_anthropic_result!(crate::commands::mouse::left_mouse_down(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
@@ -582,10 +570,9 @@ pub async fn execute_computer_tool(
                 "left_mouse_up" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-                    let (x, y) = coordinate.to_f64();
 
                     // Transform coordinates from scaled screenshot to screen coordinates
-                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+                    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
                     // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
                     handle_anthropic_result!(crate::commands::mouse::left_mouse_up(app_handle.clone(), state_manager, Some(screen_x), Some(screen_y)).await
@@ -678,7 +665,6 @@ pub async fn execute_computer_tool(
 
             // Strict coordinate validation per Anthropic Computer Use API specification
             let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
-            let (x, y) = coordinate.to_f64();
 
             let scroll_direction = match input["scroll_direction"].as_str() {
                 Some(direction) => direction,
@@ -687,7 +673,7 @@ pub async fn execute_computer_tool(
             let scroll_amount = input["scroll_amount"].as_u64().unwrap_or(3);
 
             // Transform coordinates from scaled screenshot to screen coordinates
-            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(coordinate.x as f64, coordinate.y as f64);
 
             handle_anthropic_result!(crate::commands::window::scroll_window(
                 scroll_direction.to_string(),

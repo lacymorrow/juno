@@ -16,8 +16,10 @@ use uuid::Uuid;
 use super::types::{
     CloudCommand, CloudError, DeviceResponse, DeviceStatus, MessageType, WebSocketMessage,
 };
+use crate::cloud::types::{DeviceState, SystemInfo, HardwareInfo};
 use crate::constants::{api, permissions};
 use crate::constants::events;
+use sysinfo::System;
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -1108,107 +1110,52 @@ impl ProductionCloudConnector {
 
     /// Send heartbeat message to maintain connection
     async fn send_heartbeat(&self) -> Result<(), CloudError> {
-        let ws_message = WebSocketMessage {
-            message_type: MessageType::Heartbeat,
-            data: serde_json::json!({"timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()}),
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        };
-
-        let message_json = serde_json::to_string(&ws_message)?;
-
-        // Send heartbeat using stored WebSocket sender
-        {
-            let mut sender_guard = self.ws_sender.lock().await;
-            if let Some(ref mut sender) = sender_guard.as_mut() {
-                use tokio_tungstenite::tungstenite::Message;
-                sender
-                    .send(Message::Text(message_json))
-                    .await
-                    .map_err(|e| {
-                        CloudError::NetworkError(format!("Failed to send heartbeat: {}", e))
-                    })?;
-            } else {
-                return Err(CloudError::NetworkError(
-                    "WebSocket sender not available".to_string(),
-                ));
-            }
-        }
-
-        Ok(())
+        self.send_status_update().await
     }
 
     /// Status reporting loop
     async fn run_status_loop(&self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-
-            let state = self.connection_state.lock().await;
-            if matches!(*state, ConnectorState::Ready) {
-                drop(state);
-
-                if let Err(_) = self.command_tx.send(ConnectorMessage::UpdateStatus) {
-                    warn!("Failed to queue status update");
-                }
+            if let Err(e) = self.send_status_update().await {
+                error!("Failed to send status update: {}", e);
             }
         }
     }
 
     /// Create device status for reporting
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
-        let _app_state = self.app_handle.state::<crate::state::AppState>();
+        let auth = self.auth.clone();
+        let hardware_info = self.get_hardware_info().await;
+        let capabilities = self.get_device_capabilities();
+        let agent_task = self.get_current_agent_task().await;
+        let permission_status = self.get_permission_status().await;
 
-        let device_id = self
-            .auth
-            .get_credentials()
-            .map(|c| c.device_id.clone())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Get current task from app state if available
-        let current_task = self.get_current_agent_task().await;
-
-        let status = DeviceStatus {
-            device_id,
-            status: crate::cloud::types::DeviceState::Online,
-            current_task,
-            system_info: crate::cloud::types::SystemInfo {
-                platform: std::env::consts::OS.to_string(),
-                permissions: self.get_permission_status().await,
-                agent_mode: format!(
-                    "{:?}",
-                    crate::agent::providers::factory::BrainFactory::get_agent_mode()
-                ),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                capabilities: self.get_device_capabilities(),
-                hardware_info: Some(self.get_hardware_info().await),
-            },
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+        let system = System::new_all();
+        let system_info = SystemInfo {
+            os_name: system.name().unwrap_or_else(|| "Unknown".to_string()),
         };
 
-        Ok(status)
+        let device_state = DeviceState {
+            agent_task,
+            permission_status,
+            capabilities,
+        };
+
+        Ok(DeviceStatus {
+            device_id: auth.get_device_id().await?,
+            system_info,
+            hardware_info,
+            device_state,
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        })
     }
 
     /// Get current agent task from app state
     async fn get_current_agent_task(&self) -> Option<String> {
-        // Try to get current task from agent state
-        // This could be implemented by checking if an agent operation is in progress
-        let app_state = self.app_handle.state::<crate::state::AppState>();
-
-        // Check if any agent is currently active
-        if app_state.is_agent_executing() {
-            Some("Agent interaction in progress".to_string())
-        } else if app_state.is_dictation_active() {
-            Some("Voice dictation active".to_string())
-        } else {
-            None
-        }
+        let agent_state = self.app_handle.state::<crate::state::AppState>().agent_state.lock().await;
+        agent_state.get_current_task()
     }
 
     /// Get permission status
@@ -1245,22 +1192,16 @@ impl ProductionCloudConnector {
     }
 
     /// Get comprehensive hardware information with real system monitoring
-    async fn get_hardware_info(&self) -> crate::cloud::types::HardwareInfo {
-        log::info!("🔍 Collecting real-time hardware information...");
-        let start_time = Instant::now();
-
-        let hardware_info = HardwareMonitor::get_comprehensive_hardware_info().await;
-        let collection_time = start_time.elapsed();
-
-        log::info!(
-            "✅ Hardware information collected in {:?} - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%",
-            collection_time,
-            hardware_info.cpu_usage,
-            hardware_info.memory_usage,
-            hardware_info.disk_usage
-        );
-
-        hardware_info
+    async fn get_hardware_info(&self) -> HardwareInfo {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        HardwareInfo {
+            cpu_usage: sys.global_cpu_info().cpu_usage(),
+            memory_usage: (sys.used_memory() as f64 / sys.total_memory() as f64 * 100.0) as f32,
+            total_memory: sys.total_memory(),
+            used_memory: sys.used_memory(),
+            uptime: sys.boot_time(),
+        }
     }
 
     /// Set connection state and emit events

@@ -73,12 +73,17 @@ impl SystemAgent {
 
                 match result {
                     Ok(bash_result) => {
-                        let output = bash_result.get_output();
+                        let (output_str, success) = match &bash_result {
+                            crate::commands::shell::BashResult::Output(output) => (output.clone(), true),
+                            crate::commands::shell::BashResult::Restarted => ("tool has been restarted.".to_string(), true),
+                            crate::commands::shell::BashResult::CommandResult { output, success } => (output.clone(), *success),
+                        };
+
                         Ok(ToolResult {
                             call_id: tool_call.id.clone(),
                             output: serde_json::json!({
-                                "success": true,
-                                "output": output,
+                                "success": success,
+                                "output": output_str,
                                 "command": command,
                                 "is_restart": bash_result.is_restart()
                             }),

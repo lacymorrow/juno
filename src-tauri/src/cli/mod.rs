@@ -7,7 +7,7 @@ pub mod runner;
 
 
 // Default constants
-const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
+const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
 const DEFAULT_MAX_ITERATIONS: u32 = 10;
 const DEFAULT_BATCH_PARALLELISM: u32 = 4;
 const DEFAULT_VOICE_TIMEOUT: u32 = 60;
@@ -47,23 +47,6 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<Commands>,
-
-    // Legacy CLI flags for backward compatibility
-    /// Optional: Run a test to get focused element info using NSWorkspace (macOS only)
-    #[arg(long, help = "Run focused element test (macOS only)")]
-    pub test_focused_element_ns: bool,
-
-    /// Optional: Run the accessibility check (macOS only)
-    #[arg(long, help = "Run accessibility permissions check (macOS only)")]
-    pub check_accessibility: bool,
-
-    /// Optional: Specify the TTS provider to test (system, elevenlabs, replicate)
-    #[arg(long, requires = "tts_text", help = "TTS provider to test")]
-    pub tts_provider: Option<String>,
-
-    /// Optional: Text to speak for TTS test (defaults to a standard phrase)
-    #[arg(long, help = "Text to speak for TTS test")]
-    pub tts_text: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -653,19 +636,6 @@ impl Cli {
         self.headless || self.command.is_some()
     }
 
-    /// Check if headless mode is required (either explicitly set or legacy flags present)
-    pub fn is_headless_required(&self) -> bool {
-        self.headless || self.has_legacy_flags() || self.command.is_some()
-    }
-
-    /// Check if any legacy CLI flags are used
-    pub fn has_legacy_flags(&self) -> bool {
-        self.test_focused_element_ns
-            || self.check_accessibility
-            || self.tts_provider.is_some()
-            || self.tts_text.is_some()
-    }
-
     /// Get timeout as Duration
     pub fn get_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.timeout)
@@ -780,16 +750,6 @@ mod tests {
         let quiet_args = vec!["juno", "--quiet", "query", "test"];
         let cli_quiet = Cli::parse_from(quiet_args);
         assert!(matches!(cli_quiet.get_verbosity_level(), VerbosityLevel::Quiet));
-    }
-
-    #[test]
-    fn test_parse_legacy_tts_args() {
-        let args = vec!["juno", "--tts-provider", "system", "--tts-text", "Hello world"];
-        let cli = Cli::parse_from(args);
-
-        assert_eq!(cli.tts_provider, Some("system".to_string()));
-        assert_eq!(cli.tts_text, Some("Hello world".to_string()));
-        assert!(cli.has_legacy_flags());
     }
 
     #[test]

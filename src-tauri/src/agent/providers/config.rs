@@ -21,10 +21,11 @@ const CACHE_DURATION: Duration = Duration::from_secs(5); // 5 second cache
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum AgentMode {
-    /// Single agent handles all tasks directly
+    /// Single agent with a specific brain (e.g., OpenAI, Anthropic)
     Single,
-    /// Multi-agent system with specialized agents
+    /// Multi-agent system with an orchestrator
     Multi,
+    Orchestrator,
 }
 
 impl Default for AgentMode {
@@ -38,6 +39,7 @@ impl AgentMode {
         match self {
             AgentMode::Single => "single",
             AgentMode::Multi => "multi",
+            AgentMode::Orchestrator => "orchestrator",
         }
     }
 
@@ -45,6 +47,7 @@ impl AgentMode {
         match s.to_lowercase().as_str() {
             "single" => Some(AgentMode::Single),
             "multi" => Some(AgentMode::Multi),
+            "orchestrator" => Some(AgentMode::Orchestrator),
             _ => None,
         }
     }

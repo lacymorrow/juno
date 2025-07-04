@@ -270,7 +270,7 @@ async fn handle_drag(
     let end_y = end_coords[1];
 
     // Transform end coordinates from screenshot space to screen space to match start coordinates
-    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+    let (screen_end_x, screen_end_y) = coordinates::transform_standard_to_screen_coordinates(end_x, end_y);
 
     crate::commands::mouse::left_click_drag(
         app_handle.clone(),

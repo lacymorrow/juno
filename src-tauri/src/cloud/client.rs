@@ -394,58 +394,38 @@ impl CloudClient {
 
     #[allow(dead_code)]
     async fn handle_auth_response(&self, response: AuthResponse) -> Result<(), CloudError> {
-        info!(
-            "Received authentication response: success={}",
-            response.success
-        );
-
         if response.success {
-            self.set_connection_state(ConnectionState::Authenticated)
-                .await;
-            // Note: Auth credential storage not implemented yet
+            info!("Cloud authentication successful");
+            self.set_connection_state(ConnectionState::Authenticated).await;
+            Ok(())
         } else {
-            let error_msg = response
-                .error
-                .unwrap_or_else(|| "Authentication failed".to_string());
-            error!("Authentication failed: {}", error_msg);
-            return Err(CloudError::AuthenticationFailed(error_msg));
+            let error_msg = response.error.unwrap_or_else(|| "Unknown authentication error".to_string());
+            error!("Cloud authentication failed: {}", error_msg);
+            Err(CloudError::AuthenticationFailed(error_msg))
         }
-
-        Ok(())
     }
 
-    #[allow(dead_code)]
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
-        let _app_state = self.app_handle.state::<crate::state::AppState>();
+        let app_state = self.app_handle.state::<crate::state::AppState>();
 
-        let device_id = self
-            .auth
-            .get_credentials()
-            .map(|c| c.device_id.clone())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let status = DeviceStatus {
-            device_id,
-            status: DeviceState::Online,
-            current_task: None, // TODO: Track current task
-            system_info: SystemInfo {
-                platform: std::env::consts::OS.to_string(),
-                permissions: self.get_permission_status().await,
-                agent_mode: format!(
-                    "{:?}",
-                    crate::agent::providers::factory::BrainFactory::get_agent_mode()
-                ),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                capabilities: self.get_device_capabilities(),
-                hardware_info: Some(self.get_hardware_info().await),
-            },
-            timestamp: crate::utils::current_timestamp_secs(),
+        let system_info = SystemInfo {
+            platform: std::env::consts::OS.to_string(),
+            permissions: self.get_permission_status().await,
+            agent_mode: if app_state.is_agent_active() { "agent".to_string() } else { "idle".to_string() },
+            version: self.app_handle.package_info().version.to_string(),
+            capabilities: self.get_device_capabilities(),
+            hardware_info: Some(self.get_hardware_info().await),
         };
 
-        Ok(status)
+        Ok(DeviceStatus {
+            device_id: self.auth.get_device_id().await.unwrap_or_default(),
+            status: if app_state.is_agent_active() { DeviceState::Busy } else { DeviceState::Online },
+            current_task: app_state.get_current_agent_execution_id(),
+            system_info,
+            timestamp: crate::utils::current_timestamp_secs(),
+        })
     }
 
-    #[allow(dead_code)]
     async fn get_permission_status(&self) -> Vec<String> {
         let app_state = self.app_handle.state::<crate::state::AppState>();
         let mut permissions = Vec::new();

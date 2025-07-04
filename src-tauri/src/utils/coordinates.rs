@@ -321,20 +321,6 @@ pub fn get_current_standard_resolution() -> Result<(u32, u32), String> {
         .map_err(|_| "Failed to acquire read lock on SCREENSHOT_SCALE".to_string())
 }
 
-/// Transforms coordinates from scaled screenshot space to original screen space (LEGACY)
-/// Maintained for backward compatibility - now uses standard resolution scaling
-pub fn transform_to_screen_coordinates(scaled_x: f64, scaled_y: f64) -> (f64, f64) {
-    // For backward compatibility, treat input as standard resolution coordinates
-    transform_standard_to_screen_coordinates(scaled_x, scaled_y)
-}
-
-/// Transforms coordinates from original screen space to scaled screenshot space (LEGACY)
-/// Maintained for backward compatibility - now uses standard resolution scaling
-pub fn transform_to_scaled_coordinates(original_x: f64, original_y: f64) -> (f64, f64) {
-    // For backward compatibility, return standard resolution coordinates
-    transform_screen_to_standard_coordinates(original_x, original_y)
-}
-
 /// Get current scaling information (for debugging/testing)
 pub fn get_scaling_info() -> Result<ScalingInfo, String> {
     SCREENSHOT_SCALE.read()

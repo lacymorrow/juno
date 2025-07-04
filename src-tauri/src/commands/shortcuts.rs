@@ -6,10 +6,8 @@ use tauri::{State, AppHandle};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tracing::{info, error, warn};
 use serde_json;
-
-// Global escape key management
-pub static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+use rand::{seq::SliceRandom, thread_rng, Rng};
+use crate::commands::native_permissions::NativePermissionChecker;
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
@@ -250,6 +248,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
         ("cmd+shift+5", "Screenshot options", true), // macOS screenshot tool
         ("print", "Print screen", false),           // Windows/Linux screenshot
         ("printscreen", "Print screen", false),     // Alternative print screen
+        ("print_screen", "Screenshot", false),      // Windows screenshot
     ];
 
     // Check current platform for more specific warnings
@@ -327,25 +326,13 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
 /// Check for conflicts between shortcuts
 fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state::KeyboardShortcuts, exclude_key: Option<&str>) -> Result<(), String> {
-    let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
+    let shortcuts_map = serde_json::from_str::<std::collections::HashMap<String, String>>(
+        &serde_json::to_string(current_shortcuts).unwrap_or_default()
+    ).unwrap_or_default();
 
-    let shortcuts_to_check = [
-        ("agent_mode_toggle", &current_shortcuts.agent_mode_toggle),
-        ("dictation_input", &current_shortcuts.dictation_input),
-        ("stop_current_task", &current_shortcuts.stop_current_task),
-        ("open_settings", &current_shortcuts.open_settings),
-    ];
-
-    for (key, existing_shortcut) in &shortcuts_to_check {
-        if let Some(exclude) = exclude_key {
-            if *key == exclude {
-                continue; // Skip the one we're currently editing
-            }
-        }
-
-        let normalized_existing = existing_shortcut.to_lowercase().replace(" ", "");
-        if normalized_new == normalized_existing {
-            return Err(format!("Shortcut '{}' is already assigned to '{}'", new_shortcut, get_shortcut_display_name_for_validation(key)));
+    for (key, val) in shortcuts_map.iter() {
+        if Some(key.as_str()) != exclude_key && val.to_lowercase().replace(" ", "") == new_shortcut.to_lowercase().replace(" ", "") {
+            return Err(format!("Shortcut '{}' is already in use by '{}'", new_shortcut, get_shortcut_display_name_for_validation(key)));
         }
     }
 
@@ -355,7 +342,7 @@ fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state
 /// Helper function for validation error messages
 fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
     match shortcut_name {
-        "agent_mode_toggle" => "Agent Mode Toggle",
+        "agent_mode_toggle" => "Toggle Agent Mode",
         "dictation_input" => "Dictation Input",
         "stop_current_task" => "Stop Current Task",
         "open_settings" => "Open Settings",
@@ -363,119 +350,64 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
     }
 }
 
-/// Register the escape key for cancellation (only when something can be cancelled)
-/// This function now delegates to the centralized escape key coordinator
-pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    info!("[EscapeKey] Register escape key handler requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    coordinator.register_escape_user(&app_handle, "legacy_shortcut_handler").await
-}
-
-/// Unregister the escape key (when nothing needs to be cancelled)
-/// This function now delegates to the centralized escape key coordinator
-pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    info!("[EscapeKey] Unregister escape key handler requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    coordinator.unregister_escape_user(&app_handle, "legacy_shortcut_handler").await
-}
-
-/// Get current escape key registration status (for debugging)
-fn get_escape_key_status_internal() -> (bool, u32) {
-    use std::sync::atomic::Ordering;
-    (
-        ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst),
-        ESCAPE_KEY_USERS.load(Ordering::SeqCst)
-    )
-}
-
-/// Get current escape key registration status (for debugging) - Tauri command
-/// This function now delegates to the centralized escape key coordinator
-#[tauri::command]
-pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
-    info!("[EscapeKey] Get escape key status requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    Ok(coordinator.get_status().await)
-}
-
 /// Register global shortcuts with proper error handling for missing permissions
 pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    // Check if we have Input Monitoring permissions first
-    info!("Checking Input Monitoring permissions before registering shortcuts");
+    info!("Updating global keyboard shortcuts...");
 
-    #[cfg(target_os = "macos")]
-    {
-        // On macOS, we need Input Monitoring permissions for global shortcuts
-        // But for now, we'll proceed with registration and handle errors gracefully
-        // TODO: Implement proper IOHIDRequestAccess() check in the future
-        info!("macOS detected - proceeding with shortcut registration (permission check disabled for now)");
+    let shortcuts = state.get_keyboard_shortcuts().map_err(|e| format!("{}", e))?;
+    let global_shortcut = app.global_shortcut();
+
+    // Unregister all existing shortcuts before registering new ones
+    if let Err(e) = global_shortcut.unregister_all() {
+        warn!("Failed to unregister all global shortcuts, continuing anyway: {}", e);
     }
 
-    // Unregister existing shortcuts with error handling
-    if let Err(e) = app.global_shortcut().unregister_all() {
-        warn!("Failed to unregister existing shortcuts (this is often normal): {}", e);
-    }
+    let shortcuts_to_register = vec![
+        ("agent_mode_toggle", shortcuts.agent_mode_toggle.clone()),
+        ("dictation_input", shortcuts.dictation_input.clone()),
+        ("stop_current_task", shortcuts.stop_current_task.clone()),
+        ("open_settings", shortcuts.open_settings.clone()),
+    ];
 
-    let shortcuts = state.get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
+    let mut registered_shortcuts = Vec::new();
 
-    // Import parse_shortcut_string from lib.rs
-    use crate::parse_shortcut_string;
+    for (name, shortcut_str) in shortcuts_to_register {
+        if shortcut_str.is_empty() {
+            warn!("Shortcut for '{}' is empty, skipping registration.", name);
+            continue;
+        }
 
-    // Register the agent mode toggle shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode_toggle) {
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                info!("✅ Successfully registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
-            },
+        match global_shortcut.register(&shortcut_str) {
+            Ok(_) => {
+                info!("Registered global shortcut for '{}': {}", name, shortcut_str);
+                registered_shortcuts.push(shortcut_str);
+            }
             Err(e) => {
-                error!("❌ Failed to register agent mode toggle shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode_toggle, e);
-                // Don't fail - continue with other shortcuts
+                error!(
+                    "Failed to register global shortcut for '{}' ({}): {}. This might be due to a conflict.",
+                    name, shortcut_str, e
+                );
+                // Continue to register other shortcuts even if one fails
             }
         }
-    } else {
-        warn!("Failed to parse agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
     }
 
-    // Register the dictation input shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                info!("✅ Successfully registered dictation input shortcut: {}", shortcuts.dictation_input);
-            },
-            Err(e) => {
-                error!("❌ Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
-                // Don't fail - continue with other shortcuts
-            }
-        }
-    } else {
-        warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
-    }
-
-    // NOTE: Escape key is now registered dynamically only when needed
-    // This prevents capturing it when there's nothing to cancel
-
-    // Note: Settings shortcut is handled by the menu system
-
-    info!("Completed global shortcut registration (escape key will be registered dynamically when needed)");
+    info!("Global shortcuts updated. Registered: {:?}", registered_shortcuts);
     Ok(())
 }
 
-/// Check if input monitoring permissions are granted (macOS only)
-/// This is required for global shortcuts to work
+/// Check if the app has input monitoring permissions (macOS specific).
+/// This is a simplified check. More robust checks might be needed.
 #[cfg(target_os = "macos")]
 pub fn check_input_monitoring_permissions() -> Result<bool, String> {
-    // This is a basic check - in a real implementation you would use proper macOS APIs
-    // For now, we'll assume permissions are needed and return true to avoid blocking
-    // A proper implementation would use IOHIDRequestAccess() or similar APIs
-    Ok(true) // Assume granted for now to avoid blocking the app
+    NativePermissionChecker::check_input_monitoring_permission()
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn check_input_monitoring_permissions() -> Result<bool, String> {
-    Ok(true) // Always true on non-macOS platforms
+    // For non-macOS platforms, we can assume permissions are granted
+    // or are not required in the same way.
+    Ok(true)
 }
 
 /// Validate a keyboard shortcut in real-time (for frontend feedback)
@@ -485,25 +417,20 @@ pub async fn validate_keyboard_shortcut(
     shortcut_value: String,
     shortcut_name: Option<String>,
 ) -> Result<String, String> {
-    if shortcut_value.trim().is_empty() {
-        return Ok("Enter a shortcut combination".to_string());
-    }
-
-    // Validate format
+    // Validate format first
     if let Err(e) = validate_shortcut_format(&shortcut_value) {
         return Err(e);
     }
 
-    // Get current shortcuts for conflict checking
+    // Check for conflicts
     let current_shortcuts = state.get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
-    // Check for conflicts
     if let Err(e) = check_shortcut_conflicts(&shortcut_value, &current_shortcuts, shortcut_name.as_deref()) {
         return Err(e);
     }
 
-    Ok("Valid shortcut".to_string())
+    Ok("Valid".to_string())
 }
 
 /// Get smart shortcut suggestions based on platform and context
@@ -512,170 +439,115 @@ pub async fn get_shortcut_suggestions(
     shortcut_name: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let is_macos = cfg!(target_os = "macos");
+    let base_shortcut = match shortcut_name.as_str() {
+        "agent_mode_toggle" => "Alt+D",
+        "dictation_input" => "Alt+Space",
+        "stop_current_task" => "Escape",
+        _ => "Alt+S",
+    };
 
-    // Get current shortcuts to avoid suggesting conflicts
-    let current_shortcuts = state.get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
+    let modifiers = if cfg!(target_os = "macos") {
+        vec!["Cmd", "Option", "Ctrl", "Shift"]
+    } else {
+        vec!["Ctrl", "Alt", "Shift"]
+    };
 
-    let mut suggestions = Vec::new();
-
-    match shortcut_name.as_str() {
-        "agent_mode_toggle" => {
-            if is_macos {
-                suggestions.extend([
-                    "Option+D".to_string(),
-                    "Option+A".to_string(),
-                    "Cmd+Option+A".to_string(),
-                    "Option+J".to_string(),
-                    "F5".to_string(),
-                    "F6".to_string(),
-                    "Cmd+Shift+A".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+D".to_string(),
-                    "Alt+A".to_string(),
-                    "Ctrl+Alt+A".to_string(),
-                    "Alt+J".to_string(),
-                    "F5".to_string(),
-                    "F6".to_string(),
-                    "Ctrl+Shift+A".to_string(),
-                ]);
-            }
-        },
-        "dictation_input" => {
-            if is_macos {
-                suggestions.extend([
-                    "Option+Space".to_string(),
-                    "Option+V".to_string(),
-                    "Cmd+Option+V".to_string(),
-                    "Option+M".to_string(),
-                    "F7".to_string(),
-                    "F8".to_string(),
-                    "Cmd+Shift+V".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+Space".to_string(),
-                    "Alt+V".to_string(),
-                    "Ctrl+Alt+V".to_string(),
-                    "Alt+M".to_string(),
-                    "F7".to_string(),
-                    "F8".to_string(),
-                    "Ctrl+Shift+V".to_string(),
-                ]);
-            }
-        },
-        "stop_current_task" => {
-            suggestions.extend([
-                "Escape".to_string(),
-                "F12".to_string(),
-                "Ctrl+Shift+Escape".to_string(),
-            ]);
-            if is_macos {
-                suggestions.push("Cmd+.".to_string());
-            } else {
-                suggestions.push("Ctrl+Break".to_string());
-            }
-        },
-        _ => {
-            // Generic suggestions for unknown shortcut types
-            if is_macos {
-                suggestions.extend([
-                    "Option+F1".to_string(),
-                    "Option+F2".to_string(),
-                    "Cmd+Option+F1".to_string(),
-                    "Cmd+Shift+F1".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+F1".to_string(),
-                    "Alt+F2".to_string(),
-                    "Ctrl+Alt+F1".to_string(),
-                    "Ctrl+Shift+F1".to_string(),
-                ]);
-            }
-        }
-    }
-
-    // Filter out suggestions that conflict with current shortcuts
-    let current_values: Vec<String> = vec![
-        current_shortcuts.agent_mode_toggle.clone(),
-        current_shortcuts.dictation_input.clone(),
-        current_shortcuts.stop_current_task.clone(),
-        current_shortcuts.open_settings.clone(),
+    let keys = vec![
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+        "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+        "Space", "Enter", "Tab",
     ];
 
-    suggestions.retain(|suggestion| {
-        let normalized_suggestion = suggestion.to_lowercase().replace(" ", "");
-        !current_values.iter().any(|current| {
-            current.to_lowercase().replace(" ", "") == normalized_suggestion
-        })
-    });
+    let mut suggestions = Vec::new();
+    let mut rng = thread_rng();
 
-    // Validate each suggestion and keep only valid ones
-    let mut valid_suggestions = Vec::new();
-    for suggestion in suggestions {
-        if validate_shortcut_format(&suggestion).is_ok() {
-            valid_suggestions.push(suggestion);
+    // Get current shortcuts to avoid suggesting conflicting ones
+    let current_shortcuts = state.get_keyboard_shortcuts().unwrap_or_default();
+
+    // Add base shortcut if it's not conflicting
+    if validate_keyboard_shortcut(state.clone(), base_shortcut.to_string(), Some(shortcut_name.clone())).await.is_ok() {
+        suggestions.push(base_shortcut.to_string());
+    }
+
+    while suggestions.len() < 5 {
+        let mod1 = modifiers.choose(&mut rng).unwrap();
+        let mod2 = modifiers.choose(&mut rng).unwrap();
+        let key = keys.choose(&mut rng).unwrap();
+
+        let new_shortcut = if mod1 != mod2 && rng.gen() {
+            format!("{}+{}", mod1, key)
+        } else {
+            format!("{}+{}+{}", mod1, mod2, key)
+        };
+
+        if !suggestions.contains(&new_shortcut) {
+             if validate_keyboard_shortcut(state.clone(), new_shortcut.clone(), Some(shortcut_name.clone())).await.is_ok() {
+                suggestions.push(new_shortcut);
+            }
         }
     }
 
-    // Limit to top 5 suggestions
-    valid_suggestions.truncate(5);
-
-    Ok(valid_suggestions)
+    Ok(suggestions)
 }
 
 /// Get platform-specific shortcut recommendations and best practices
 #[tauri::command]
 pub async fn get_shortcut_best_practices() -> Result<serde_json::Value, String> {
-    let is_macos = cfg!(target_os = "macos");
-
-    let best_practices = serde_json::json!({
-        "platform": if is_macos { "macOS" } else { "Windows/Linux" },
-        "recommendations": {
-            "modifiers": {
-                "primary": if is_macos { "Cmd" } else { "Ctrl" },
-                "secondary": if is_macos { "Option" } else { "Alt" },
-                "tertiary": "Shift"
+    let best_practices = if cfg!(target_os = "macos") {
+        serde_json::json!([
+            {
+                "practice": "Use modifier keys",
+                "description": "Combine keys like Cmd, Option, Ctrl, and Shift with a letter or number (e.g., 'Option+D').",
+                "good_examples": ["Option+D", "Cmd+Shift+S"],
+                "bad_examples": ["D", "Space"]
             },
-            "avoid": [
-                "Single letters without modifiers",
-                "Common system shortcuts",
-                "More than 3 modifiers",
-                if is_macos { "Ctrl+C, Ctrl+V (use Cmd instead)" } else { "Cmd+C, Cmd+V (use Ctrl instead)" }
-            ],
-            "good_choices": [
-                if is_macos { "Option + Letter" } else { "Alt + Letter" },
-                "Function keys (F1-F12)",
-                if is_macos { "Cmd + Option + Letter" } else { "Ctrl + Alt + Letter" },
-                "Function keys with modifiers"
-            ],
-            "examples": {
-                "excellent": [
-                    if is_macos { "Option+D" } else { "Alt+D" },
-                    "F5",
-                    if is_macos { "Cmd+Option+Space" } else { "Ctrl+Alt+Space" }
-                ],
-                "good": [
-                    if is_macos { "Cmd+Shift+F1" } else { "Ctrl+Shift+F1" },
-                    if is_macos { "Option+Enter" } else { "Alt+Enter" }
-                ],
-                "avoid": [
-                    "A", "Ctrl+C", "Cmd+Tab", "Alt+Tab", "Space"
-                ]
+            {
+                "practice": "Avoid single-key shortcuts",
+                "description": "Single keys can interfere with typing. Always use at least one modifier.",
+                "good_examples": ["Ctrl+C"],
+                "bad_examples": ["C"]
+            },
+            {
+                "practice": "Be aware of system shortcuts",
+                "description": "Avoid common macOS shortcuts like 'Cmd+Q' (Quit), 'Cmd+W' (Close Window), or 'Cmd+Space' (Spotlight).",
+                "good_examples": ["Option+J"],
+                "bad_examples": ["Cmd+Q", "Cmd+Space"]
+            },
+            {
+                "practice": "Use mnemonics",
+                "description": "Choose letters that relate to the action, like 'D' for Dictation or 'A' for Agent.",
+                "good_examples": ["Option+D for Dictation"],
+                "bad_examples": ["Ctrl+Q for Dictation"]
             }
-        },
-        "tips": [
-            "Test shortcuts in different applications to ensure they work globally",
-            "Use function keys for frequently used actions",
-            "Combine modifiers with less common keys for reliability",
-            "Consider ergonomics - avoid hard-to-reach key combinations",
-            "Keep shortcuts memorable and logical for your workflow"
-        ]
-    });
-
+        ])
+    } else {
+        serde_json::json!([
+            {
+                "practice": "Use modifier keys",
+                "description": "Combine keys like Ctrl, Alt, and Shift with a letter or number (e.g., 'Alt+D').",
+                "good_examples": ["Alt+D", "Ctrl+Shift+S"],
+                "bad_examples": ["D", "Space"]
+            },
+            {
+                "practice": "Avoid single-key shortcuts",
+                "description": "Single keys can interfere with typing. Always use at least one modifier.",
+                "good_examples": ["Ctrl+C"],
+                "bad_examples": ["C"]
+            },
+            {
+                "practice": "Be aware of system shortcuts",
+                "description": "Avoid common Windows/Linux shortcuts like 'Ctrl+C' (Copy), 'Ctrl+V' (Paste), or 'Alt+F4' (Close Window).",
+                "good_examples": ["Alt+J"],
+                "bad_examples": ["Ctrl+C", "Alt+F4"]
+            },
+            {
+                "practice": "Use mnemonics",
+                "description": "Choose letters that relate to the action, like 'D' for Dictation or 'A' for Agent.",
+                "good_examples": ["Alt+D for Dictation"],
+                "bad_examples": ["Ctrl+Q for Dictation"]
+            }
+        ])
+    };
     Ok(best_practices)
 }

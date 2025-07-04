@@ -663,8 +663,8 @@ pub async fn test_coordinate_transformation(
 ) -> Result<serde_json::Value, String> {
     use crate::utils::coordinates;
 
-    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
-    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_to_scaled_coordinates(screen_x, screen_y);
+    let (screen_x, screen_y) = coordinates::transform_standard_to_screen_coordinates(screenshot_x, screenshot_y);
+    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_screen_to_standard_coordinates(screen_x, screen_y);
 
     let roundtrip_error_x = (screenshot_x - back_to_screenshot_x).abs();
     let roundtrip_error_y = (screenshot_y - back_to_screenshot_y).abs();

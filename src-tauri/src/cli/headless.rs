@@ -28,8 +28,6 @@ pub struct HeadlessRuntime {
     timeout_duration: Duration,
 }
 
-
-
 /// Result of a headless operation
 #[derive(Debug, Clone)]
 pub struct HeadlessResult {
@@ -66,10 +64,7 @@ impl HeadlessRuntime {
             info!("Starting headless execution with timeout: {:?}", self.timeout_duration);
         }
 
-        // Check for legacy CLI flags first
-        let result = if cli.has_legacy_flags() {
-            self.execute_legacy_commands(cli).await
-        } else if let Some(command) = &cli.command {
+        let result = if let Some(command) = &cli.command {
             self.execute_subcommand(command).await
         } else {
             return Err(JunoError::ApplicationError("No valid command specified".to_string()));
@@ -99,45 +94,6 @@ impl HeadlessRuntime {
                 }
                 Err(e)
             }
-        }
-    }
-
-    /// Execute legacy CLI commands
-    async fn execute_legacy_commands(&self, cli: &Cli) -> Result<HeadlessResult, JunoError> {
-        if cli.test_focused_element_ns {
-            // Mock implementation for test_focused_element_ns
-            Ok(HeadlessResult {
-                success: true,
-                output: "Focused element test completed".to_string(),
-                error: None,
-                execution_time: Duration::default(),
-                agent_state: Some("Completed".to_string()),
-                screenshot: None,
-            })
-        } else if cli.check_accessibility {
-            // Mock implementation for accessibility check
-            Ok(HeadlessResult {
-                success: true,
-                output: "Accessibility check completed".to_string(),
-                error: None,
-                execution_time: Duration::default(),
-                agent_state: Some("Completed".to_string()),
-                screenshot: None,
-            })
-        } else if cli.tts_provider.is_some() || cli.tts_text.is_some() {
-            // Mock implementation for TTS test
-            let provider = cli.tts_provider.as_deref().unwrap_or("system");
-            let text = cli.tts_text.as_deref().unwrap_or("Test speech");
-            Ok(HeadlessResult {
-                success: true,
-                output: format!("TTS test completed with provider: {}, text: {}", provider, text),
-                error: None,
-                execution_time: Duration::default(),
-                agent_state: Some("Completed".to_string()),
-                screenshot: None,
-            })
-        } else {
-            Err(JunoError::ApplicationError("No valid legacy command specified".to_string()))
         }
     }
 

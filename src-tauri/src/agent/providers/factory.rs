@@ -435,41 +435,36 @@ impl BrainFactory {
         tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
         app_handle: Option<tauri::AppHandle>,
     ) -> Result<AgentRuntime, AgentError> {
-        let config = ProviderConfig::default(); // Use default config when no app_handle available
+        let agent_mode = if let Some(handle) = &app_handle {
+            Self::get_agent_mode_with_app_handle(handle).await
+        } else {
+            Self::get_agent_mode_with_env()
+        };
 
-        match config.get_agent_mode() {
+        info!("Creating agent runtime in {:?} mode", agent_mode);
+
+        match agent_mode {
             AgentMode::Single => {
-                // Create a single agent runtime
-                let brain = Self::create_brain().await?;
-
-                // Convert Arc<dyn ToolProvider> to concrete type if needed
-                let local_tool_provider = if let Some(ref handle) = app_handle {
-                    let provider = LocalToolProvider::with_app_handle(handle.clone());
-                    // Copy tools from the Arc provider to local provider
-                    // This is a simplified approach - you might need to adjust based on your implementation
-                    provider
-                } else {
-                    LocalToolProvider::new()
-                };
-
-                // Create memory manager - need to extract from Arc
-                // This is tricky because we need to move out of Arc
-                // For now, create a new one with same type
-                let memory_impl =
-                    crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
-
-                let runner = DefaultAgentRunner::with_boxed_brain(
-                    memory_impl,
-                    local_tool_provider,
+                let brain = Self::create_brain_with_app_handle(app_handle.as_ref()).await?;
+                let runner = DefaultAgentRunner::new(
                     brain,
-                    crate::constants::agent::config::MAX_ITERATIONS, // max_steps
-                    app_handle.ok_or("AppHandle required for single agent")?,
+                    memory,
+                    tool_provider,
+                    app_handle,
+                    None,
                 );
-
                 Ok(AgentRuntime::Single(Box::new(runner)))
             }
             AgentMode::Multi => {
-                // Create multi-agent orchestrator
+                let orchestrator = Self::create_multi_agent_orchestrator(
+                    memory,
+                    tool_provider,
+                    app_handle.as_ref(),
+                )
+                .await?;
+                Ok(AgentRuntime::Multi(orchestrator))
+            }
+            AgentMode::Orchestrator => {
                 let orchestrator = Self::create_multi_agent_orchestrator(
                     memory,
                     tool_provider,
@@ -484,64 +479,27 @@ impl BrainFactory {
     /// Get current agent mode from configuration
     /// Get current agent mode from centralized settings with app handle
     pub async fn get_agent_mode_with_app_handle(app_handle: &tauri::AppHandle) -> AgentMode {
-        // Use direct store access to avoid deadlocks during agent execution
-        use tauri_plugin_store::StoreExt;
+        let state = app_handle.state::<AppState>();
+        let config = state.get_agent_config().await;
+        config.agent_mode.clone()
+    }
 
-        const SETTINGS_STORE_FILE: &str = "app_settings.json";
-
-        match app_handle.store(SETTINGS_STORE_FILE) {
-            Ok(store) => {
-                // Access nested agent settings structure: { "agent": { "execution_mode": "..." } }
-                match store.get("agent") {
-                    Some(agent_value) => {
-                        if let Some(agent_obj) = agent_value.as_object() {
-                            if let Some(execution_mode_value) = agent_obj.get("execution_mode") {
-                                if let Some(mode_str) = execution_mode_value.as_str() {
-                                    let mode = AgentMode::from_str(mode_str)
-                                        .unwrap_or_else(|| {
-                                            warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
-                                            AgentMode::Multi
-                                        });
-                                    info!("Loaded agent mode from centralized settings: {:?}", mode);
-                                    return mode;
-                                } else {
-                                    warn!("Agent execution mode is not a string in settings. Using default.");
-                                }
-                            } else {
-                                info!("Agent execution mode not found in agent settings object. Using default.");
-                            }
-                        } else {
-                            warn!("Agent settings is not an object in settings store. Using default.");
-                        }
-                    }
-                    None => {
-                        info!("Agent settings not found in settings store. Using default.");
-                    }
+    /// Determines agent mode from environment variable as a fallback.
+    fn get_agent_mode_with_env() -> AgentMode {
+        match env::var("JUNO_AGENT_MODE") {
+            Ok(val) => {
+                info!("Using JUNO_AGENT_MODE from environment: {}", val);
+                if val.eq_ignore_ascii_case("single") {
+                    AgentMode::Single
+                } else {
+                    AgentMode::Orchestrator
                 }
-                AgentMode::Multi
             }
-            Err(e) => {
-                warn!("Failed to access settings store for agent mode: {}. Using environment fallback.", e);
-                Self::get_agent_mode_fallback()
+            Err(_) => {
+                info!("Defaulting to Orchestrator agent mode");
+                AgentMode::Orchestrator
             }
         }
-    }
-
-    /// Fallback method that reads from environment (used when centralized settings unavailable)
-    fn get_agent_mode_fallback() -> AgentMode {
-        let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
-            "multi".to_string() // Default to multi-agent mode for new app
-        });
-        AgentMode::from_str(&mode_str).unwrap_or(AgentMode::Multi)
-    }
-
-    /// Get current agent mode from configuration (legacy method - now tries to use centralized settings)
-    pub fn get_agent_mode() -> AgentMode {
-        // This method is called from contexts where we don't have an app handle
-        // Fall back to environment variable reading for backward compatibility
-        // But log a warning to encourage migration to the new method
-        warn!("get_agent_mode() called without app handle - using environment fallback. Consider using get_agent_mode_with_app_handle() for proper settings integration.");
-        Self::get_agent_mode_fallback()
     }
 
     /// Get the current provider from configuration or environment
@@ -806,8 +764,11 @@ impl BrainFactory {
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
-        // Register self-awareness and introspection tools (per-provider instance, development mode only)
-        crate::agent::tools::register_self_awareness_tools(provider).await;
+        // Register self-awareness tools if in debug mode
+        if cfg!(debug_assertions) {
+            info!("Debug mode enabled, registering self-awareness tools.");
+            crate::agent::tools::register_self_awareness_tools(provider, app_handle.clone()).await;
+        }
 
         // Register native accessibility tools for element-level interaction
         Self::register_accessibility_tools(provider, app_handle.clone()).await?;

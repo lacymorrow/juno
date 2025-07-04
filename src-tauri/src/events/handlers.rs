@@ -282,8 +282,9 @@ async fn handle_agent_mode_result(
 
 async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, payload: String) {
     // Unregister escape key as dictation is complete
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
     if let Err(e) =
-        crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
+        coordinator.unregister_escape_user(&app_handle, "dictation_transcription_stopped").await
     {
         warn!(
             "Failed to unregister escape key after dictation: {} - continuing anyway",
@@ -339,9 +340,10 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                     );
                 }
 
+                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                 // Register escape key to cancel dictation
                 if let Err(e) =
-                    crate::commands::shortcuts::register_escape_key_handler(app_handle.clone())
+                    coordinator.register_escape_user(&app_handle, "dictation_transcription_start")
                         .await
                 {
                     warn!(
@@ -441,7 +443,8 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     }
 
     // Unregister escape key handler (was missing)
-    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    if let Err(e) = coordinator.unregister_escape_user(&app_handle, "dictation_cancel").await {
         warn!(
             "[Dictation Cancel] Failed to unregister escape key after cancellation: {} - continuing anyway",
             e

@@ -99,8 +99,9 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 let app_handle_for_state = app_handle_clone.clone();
                                 let app_state = app_handle_for_state.state::<crate::state::AppState>();
 
+                                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                                 // Register escape key when agent processing starts
-                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                                if let Err(e) = coordinator.register_escape_user(&app_handle_clone, "agent_processing_integration").await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 

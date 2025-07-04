@@ -228,18 +228,24 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
         return handle_headless_cli(&cli, desktop_arc);
     }
 
-    // Handle legacy CLI flags for backward compatibility
-    if cli.has_legacy_flags() {
-        info!("Legacy CLI flags detected, processing with legacy handler");
-        return handle_legacy_cli(&cli, desktop_arc);
-    }
-
     // No CLI commands to process, continue with GUI application
     info!("No CLI commands detected, launching GUI application...");
     Ok(true)
 }
 
 /// Handle headless CLI operations
+fn handle_headless_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+    // Since this is a synchronous context, we need to block on the async headless handler
+    // This is acceptable for CLI operations that terminate the app anyway
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| crate::error_handling::JunoError::Internal(e.to_string()))?;
+
+    runtime.block_on(handle_headless_cli_async(cli, desktop_arc))
+}
+
+/// Handle headless CLI operations asynchronously
 async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     use crate::cli::headless::HeadlessRuntime;
     use crate::error_handling::JunoError;
@@ -261,63 +267,6 @@ async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desk
             Ok(false) // Exit after error
         }
     }
-}
-
-/// Synchronous wrapper for headless CLI handling
-fn handle_headless_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
-    use tokio::runtime::Runtime;
-
-    let rt = Runtime::new().map_err(|e| {
-        crate::error_handling::JunoError::SystemError(format!("Failed to create async runtime: {}", e))
-    })?;
-
-    rt.block_on(handle_headless_cli_async(cli, desktop_arc))
-}
-
-/// Handle legacy CLI flags for backward compatibility
-fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
-    // If handle_cli_commands returns Ok(true), it means a command was executed
-    // and the application should exit.
-    if let Some(desktop_ref) = desktop_arc.as_ref() {
-        match cli::runner::handle_cli_commands(&cli, desktop_ref) {
-            Ok(should_exit) => {
-                if should_exit {
-                    return Ok(false); // Exit early if a CLI command was handled
-                }
-            }
-            Err(e) => {
-                error!("CLI command execution failed: {}", e);
-                return Err(e);
-            }
-        }
-    } else {
-        // Handle CLI commands without desktop instance - create minimal instance for CLI only
-        // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
-        match Desktop::new(false, false) {
-            Ok(minimal_desktop) => {
-                match cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
-                    Ok(should_exit) => {
-                        if should_exit {
-                            return Ok(false);
-                        }
-                    }
-                    Err(e) => {
-                        error!("CLI command execution failed with minimal desktop: {}", e);
-                        return Err(e);
-                    }
-                }
-            },
-            Err(_) => {
-                // If CLI commands require desktop and can't create minimal instance,
-                // only handle non-desktop CLI commands
-                if cli::runner::handle_non_desktop_cli_commands(&cli) {
-                    return Ok(false);
-                }
-            }
-        }
-    }
-
-    Ok(true) // Continue with GUI application
 }
 
 /// Create a minimal Tauri application for CLI operations
@@ -510,67 +459,34 @@ mod tests {
 
     #[test]
     fn test_quick_startup_safety() {
-        // Test that quick startup handles missing permissions gracefully
-        // In test environment, desktop engine may fail, but should not crash
-        match quick_startup() {
-            Ok(_) => println!("Quick startup succeeded"),
-            Err(e) => println!("Quick startup handled error gracefully: {}", e),
-        }
-        assert!(true, "Quick startup should handle errors gracefully");
+        // This test ensures the quick startup sequence can be called without panicking
+        // It doesn't validate functionality, just that it runs to completion
+        let result = quick_startup();
+        assert!(result.is_ok(), "Quick startup should not panic");
     }
 
     #[test]
     fn test_headless_cli_detection() {
-        // Test CLI headless mode detection
-        let cli = cli::Cli::parse_from(vec!["juno", "--headless", "query", "test"]);
-        assert!(cli.is_headless(), "Should detect headless mode");
+        // Test that headless mode is correctly detected
+        let cli_headless = cli::Cli::parse_from(&["juno", "--headless", "query", "test"]);
+        assert!(cli_headless.is_headless(), "Should detect headless flag");
 
-        let cli_with_command = cli::Cli::parse_from(vec!["juno", "agent", "status"]);
-        assert!(cli_with_command.is_headless(), "Should detect headless mode with subcommands");
+        let cli_command = cli::Cli::parse_from(&["juno", "system", "info"]);
+        assert!(cli_command.is_headless(), "Should detect command as headless");
 
-        let cli_gui = cli::Cli::parse_from(vec!["juno"]);
-        assert!(!cli_gui.is_headless(), "Should not detect headless mode for GUI");
+        let cli_normal = cli::Cli::parse_from(&["juno"]);
+        assert!(!cli_normal.is_headless(), "Should not detect headless in normal startup");
     }
 
-    #[test]
-    fn test_legacy_cli_detection() {
-        // Test legacy CLI flag detection
-        let cli = cli::Cli::parse_from(vec!["juno", "--tts-provider", "system", "--tts-text", "test"]);
-        assert!(cli.has_legacy_flags(), "Should detect legacy TTS flags");
+    #[tokio::test]
+    async fn test_create_minimal_tauri_app_logic() {
+        // This test verifies that the minimal Tauri app can be created without panicking
+        let result = create_minimal_tauri_app().await;
+        assert!(result.is_ok(), "Creating minimal Tauri app should not fail");
 
-        let cli_normal = cli::Cli::parse_from(vec!["juno", "query", "test"]);
-        assert!(!cli_normal.has_legacy_flags(), "Should not detect legacy flags in modern CLI");
-    }
-
-    #[test]
-    fn test_create_minimal_tauri_app_logic() {
-        // Test that the create_minimal_tauri_app function logic is sound
-        // We can't run the actual async function in a unit test, but we can verify
-        // the synchronization primitives work correctly
-        use std::sync::{Arc, Mutex};
-        use tokio::sync::oneshot;
-        use crate::error_handling::JunoError;
-
-        // Test the container pattern we use for app handle storage
-        let app_handle_container = Arc::new(Mutex::new(None::<String>)); // Use String as a simple test type
-        let container_clone = app_handle_container.clone();
-
-        // Simulate storing a value
-        {
-            let mut container = container_clone.lock().unwrap();
-            *container = Some("test_handle".to_string());
+        if let Ok(app_handle) = result {
+            // Further checks can be done on the app_handle if needed
+            assert!(!app_handle.windows().is_empty(), "App should have a main window");
         }
-
-        // Simulate retrieving the value
-        {
-            let container = app_handle_container.lock().unwrap();
-            assert!(container.is_some(), "Container should hold the stored value");
-            assert_eq!(container.as_ref().unwrap(), "test_handle");
-        }
-
-        // Test the channel pattern
-        let (tx, _rx) = oneshot::channel::<Result<String, JunoError>>();
-        let send_result = tx.send(Ok("test".to_string()));
-        assert!(send_result.is_ok(), "Channel send should succeed");
     }
 }

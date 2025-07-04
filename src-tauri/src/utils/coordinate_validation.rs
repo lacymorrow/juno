@@ -52,18 +52,6 @@ pub struct ValidatedCoordinate {
     pub y: i64,
 }
 
-impl ValidatedCoordinate {
-    /// Convert to screen coordinates as f64 for legacy compatibility
-    pub fn to_f64(&self) -> (f64, f64) {
-        (self.x as f64, self.y as f64)
-    }
-
-    /// Convert to screen coordinates as integers
-    pub fn to_screen_coords(&self) -> (i64, i64) {
-        (self.x, self.y)
-    }
-}
-
 /// Strict coordinate validation matching Anthropic Computer Use API specification
 ///
 /// Implements exact validation as specified:
