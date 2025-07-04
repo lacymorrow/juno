@@ -4,7 +4,7 @@
 //! including both application menus and tray menus with complete event handling.
 
 use tauri::AppHandle;
-use tracing::{info, error};
+use tracing::info;
 use crate::constants;
 
 pub mod app_menu;

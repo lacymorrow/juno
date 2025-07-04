@@ -62,7 +62,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
 
     // Get current settings to preserve skip count
-    let mut current_settings = settings_manager
+    let current_settings = settings_manager
         .get_onboarding_settings()
         .await
         .map_err(|e| e.to_string())?;

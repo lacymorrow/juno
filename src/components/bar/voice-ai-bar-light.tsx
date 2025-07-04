@@ -22,12 +22,43 @@ import {
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
 import AudioVisualizer from "./audio-visualizer";
+import { UI } from "@/lib/constants.generated";
 import type {
   VoiceAIBarProps,
   AssistantState,
   ContentType,
   ResponseContent,
 } from "../../types/voice-ai";
+import { type AppState } from "./audio-visualizer";
+
+const mapAssistantStateToAppState = (state: AssistantState): AppState => {
+  switch (state) {
+    case UI.AGENT_STATUS_IDLE:
+    case "input":
+      return UI.AGENT_STATUS_IDLE;
+    case UI.AGENT_STATUS_LISTENING:
+    case UI.AGENT_STATUS_DICTATING:
+      return UI.AGENT_STATUS_LISTENING;
+    case UI.AGENT_STATUS_PROCESSING:
+    case UI.AGENT_STATUS_THINKING:
+      return UI.AGENT_STATUS_PROCESSING;
+    case UI.AGENT_STATUS_RESPONDING:
+    case "speaking":
+    case "response":
+      return UI.AGENT_STATUS_RESPONDING;
+    case UI.AGENT_STATUS_ERROR:
+    case UI.AGENT_STATUS_FAILED:
+    case UI.AGENT_STATUS_CANCELLED:
+      return UI.AGENT_STATUS_ERROR;
+    case UI.AGENT_STATUS_FINISHED:
+    case "success":
+      return UI.AGENT_STATUS_FINISHED;
+    case UI.AGENT_STATUS_OFFLINE:
+      return UI.AGENT_STATUS_IDLE;
+    default:
+      return UI.AGENT_STATUS_IDLE;
+  }
+};
 
 export function VoiceAIBar({
   onStateChange,
@@ -126,18 +157,25 @@ const styles = \`
 
   // Messages for different states
   const stateMessages: Record<AssistantState, string> = {
-    idle: "Ready",
-    listening: "Listening to your request...",
-    processing:
+    [UI.AGENT_STATUS_IDLE]: "Ready",
+    [UI.AGENT_STATUS_LISTENING]: "Listening to your request...",
+    [UI.AGENT_STATUS_PROCESSING]:
       "Processing your request, please wait while I analyze your input...",
     speaking:
       "Here's what I found for you based on your request and current context...",
-    error:
+    [UI.AGENT_STATUS_ERROR]:
       "Sorry, I couldn't understand that request. Please try speaking more clearly.",
     success:
       "Task completed successfully! Is there anything else I can help you with today?",
     input: "Type your request...",
     response: "Here's what I found:",
+    [UI.AGENT_STATUS_DICTATING]: "Dictating...",
+    [UI.AGENT_STATUS_THINKING]: "Thinking...",
+    [UI.AGENT_STATUS_RESPONDING]: "Responding...",
+    [UI.AGENT_STATUS_FINISHED]: "Finished.",
+    [UI.AGENT_STATUS_FAILED]: "Failed.",
+    [UI.AGENT_STATUS_CANCELLED]: "Cancelled.",
+    [UI.AGENT_STATUS_OFFLINE]: "Offline.",
   };
 
   const changeState = (newState: AssistantState) => {
@@ -685,10 +723,10 @@ const styles = \`
                   }`}
                 >
                   <AudioVisualizer
-                    appState={assistantState}
-                    width={60}
-                    height={20}
-                    enableMicrophone={false}
+                    appState={mapAssistantStateToAppState(assistantState)}
+                    width={200}
+                    height={40}
+                    enableMicrophone={assistantState === "listening"}
                     intensity={0.8}
                     showTransitionProgress={false}
                     animationStyle="organic"

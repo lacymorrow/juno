@@ -9,7 +9,7 @@ use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info, warn};
 
 use crate::agent::tools::timer_tools::TimerTask;
-use crate::events::timer_handlers::{TimerEventConfig, TimerEventHandler};
+use crate::events::timer_handlers::TimerEventHandler;
 use crate::{constants, state};
 
 /// Setup all event listeners for the application

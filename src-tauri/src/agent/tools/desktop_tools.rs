@@ -28,7 +28,7 @@ use crate::utils::permission_validator::{validate_permission, RequiredPermission
 use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::{info, warn};
-use crate::commands::window; // Add window for scroll command
+ // Add window for scroll command
 use std::sync::Arc;
 
 use tokio;

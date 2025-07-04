@@ -7,16 +7,12 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::{Arc, Mutex, LazyLock};
-use tauri::{AppHandle, Builder, App, Manager, State};
+use tauri::{AppHandle, Manager};
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
-use crate::agent::providers::factory::BrainFactory;
-use crate::constants::timeouts;
-use crate::state::AppState;
-use crate::cli::headless::HeadlessRuntime;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -242,7 +238,7 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
 /// Handle headless CLI operations
 async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     use crate::cli::headless::HeadlessRuntime;
-    use crate::error_handling::JunoError;
+    
 
     // Create minimal Tauri app for CLI operations if needed
     let app_handle = create_minimal_tauri_app().await?;

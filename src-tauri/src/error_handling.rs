@@ -5,7 +5,7 @@
 //! and application-wide error management patterns.
 
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{error, warn, info};
+use tracing::{error, warn};
 use std::fmt;
 use crate::constants::{events, errors::templates};
 

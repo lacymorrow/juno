@@ -24,7 +24,7 @@ pub(crate) fn handle_cli_commands(
     _desktop_instance: &Desktop,
 ) -> Result<bool, JunoError> {
     // Prefix unused desktop_instance with _
-    let mut command_handled = false;
+    let command_handled = false;
 
 
 
