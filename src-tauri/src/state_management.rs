@@ -10,7 +10,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
 
 // Import sound commands for boot sound functionality
-use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
 use crate::constants::events;
 
 /// Initialize all application state components and background tasks

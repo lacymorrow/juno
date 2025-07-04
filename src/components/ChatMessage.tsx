@@ -15,7 +15,6 @@ import {
   Volume2,
   ChevronDown,
   ChevronRight,
-  Brain,
   CheckCircle,
   XCircle,
   WifiOff,

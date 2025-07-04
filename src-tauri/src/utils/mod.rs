@@ -7,7 +7,6 @@ pub mod key_parsing;
 pub mod network;
 pub mod string_cache;
 
-use computer_use_ai_sdk::Desktop;
 
 pub mod log_formatter;
 

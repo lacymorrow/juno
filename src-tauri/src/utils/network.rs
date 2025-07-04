@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 /// TODO: ELIMINATE STRING MATCHING
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Check if the device has internet connectivity
 /// Returns true if online, false if offline
