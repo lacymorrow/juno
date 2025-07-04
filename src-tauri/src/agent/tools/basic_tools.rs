@@ -21,7 +21,6 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 /// Security configuration for basic tools - now with minimal restrictions
 #[derive(Clone)]

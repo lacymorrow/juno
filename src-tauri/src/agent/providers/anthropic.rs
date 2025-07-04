@@ -1141,20 +1141,12 @@ impl AgentBrain for AnthropicBrain {
                 }
                 "end_turn" | "stop_sequence" | "max_tokens" => {
                     if !tool_calls.is_empty() {
-                        log::warn!(
-                            "Stop reason is {}, but tool calls were also found. Prioritizing tool execution over finishing.",
-                            stop_reason
-                        );
-                        if !final_display_text.is_empty() {
-                            log::info!(
-                                "Anthropic response included text before tool use: {}",
-                                final_display_text
-                            );
-                        }
-                        Ok(AgentAction::ExecuteTool(tool_calls))
-                    } else {
-                        Ok(AgentAction::Finish(final_display_text))
+                        log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", stop_reason);
                     }
+
+                    // CRITICAL FIX: Return final display text (either clean content or TTS fallback)
+                    // TTS content was already extracted and processed during streaming
+                    Ok(AgentAction::Finish(final_display_text))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
@@ -1228,20 +1220,12 @@ impl AgentBrain for AnthropicBrain {
                 }
                 "end_turn" | "stop_sequence" | "max_tokens" => {
                     if !tool_calls_to_execute.is_empty() {
-                        log::warn!(
-                            "Stop reason is {}, but tool calls were also found. Prioritizing tool execution over finishing.",
-                            response_body.stop_reason
-                        );
-                        if !response_text.is_empty() {
-                            log::info!(
-                                "Anthropic response included text before tool use: {}",
-                                response_text
-                            );
-                        }
-                        Ok(AgentAction::ExecuteTool(tool_calls_to_execute))
-                    } else {
-                        Ok(AgentAction::Finish(response_text))
+                        log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
                     }
+
+                    // Non-streaming mode: return the response text as-is
+                    // TTS XML processing only works in streaming mode
+                    Ok(AgentAction::Finish(response_text))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",

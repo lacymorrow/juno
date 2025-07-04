@@ -20,7 +20,6 @@ use playwright::api::playwright::Playwright;
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
-use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
 // Import permissions types
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
@@ -31,7 +30,7 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::constants::{app, audio, events, errors::templates};
+use crate::constants::{audio, events, errors::templates};
 use crate::utils::string_cache::format_error_cached;
 
 // Helper function for error formatting - uses cached templates for better performance
@@ -1215,7 +1214,7 @@ impl AppState {
 
         // Add configurations to MCP manager if not already present
         let manager = self.get_mcp_manager().await;
-        let mut manager_guard = manager.lock().await;
+        let manager_guard = manager.lock().await;
 
         for config in &all_mcp_configs {
             // Only add if not already present to avoid duplicates
