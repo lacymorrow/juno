@@ -11,7 +11,11 @@ export type AssistantState =
 	| typeof UI.AGENT_STATUS_FAILED
 	| typeof UI.AGENT_STATUS_CANCELLED
 	| typeof UI.AGENT_STATUS_OFFLINE
-	| typeof UI.AGENT_STATUS_PROCESSING;
+	| typeof UI.AGENT_STATUS_PROCESSING
+	| "speaking"
+	| "input"
+	| "success"
+	| "response";
 
 export type ContentType = "text" | "code" | "component" | "image" | "video"
 

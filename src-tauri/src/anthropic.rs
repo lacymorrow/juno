@@ -501,8 +501,18 @@ async fn execute_agent_internal(
     // Clean up orphaned tool calls before starting
     {
         let mut memory_manager = memory_manager_arc.lock().await;
-        if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
-            warn!("Failed to process clean orphaned tool calls: {}", e);
+
+        // Generate a current execution ID to distinguish between different agent executions
+        let current_execution_id = uuid::Uuid::new_v4().to_string();
+
+        // Mark current execution so new tools won't be considered orphaned
+        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
+            warn!("Failed to set current execution ID for orchestrator: {}", e);
+        }
+
+        // Use the safe clean method that only removes tool calls from previous executions
+        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
+            warn!("Failed to clean orphaned tool calls: {}", e);
         }
 
         // Also clean up orphaned tool results that have no corresponding tool calls
@@ -680,6 +690,19 @@ async fn execute_agent_internal(
                 state.clone(),
                 app_handle.clone(),
             ).await;
+
+            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
+            if let Err(e) = BrainFactory::register_computer_use_tools(
+                &mut specialist_tool_provider,
+                app_handle.clone(),
+            )
+            .await
+            {
+                let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+            info!("✅ Registered full Computer Use tools for specialist mode");
 
             // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
             let specialist_agent_tool_provider = {
@@ -1277,17 +1300,25 @@ async fn execute_specialized_agent_task(
         memory_guard.clone()
     };
 
-    // Clean up any orphaned tool calls that might exist from previous failed executions
-    // This provides additional safety against conversation state issues
+    // Clean up only genuinely orphaned tool calls from previous executions
+    // Generate a current execution ID to distinguish between current and previous sessions
+    let current_execution_id = uuid::Uuid::new_v4().to_string();
+    {
+        let mut memory_manager = specialist_memory.clone();
 
-    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
-    // let mut cloned_memory = specialist_memory;
-    // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
-    //     warn!(
-    //         "Failed to clean orphaned tool calls for {} agent: {}",
-    //         agent_type, e
-    //     );
-    // }
+        // Mark current execution so new tools won't be considered orphaned
+        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
+            warn!("Failed to set current execution ID for {} agent: {}", agent_type, e);
+        }
+
+        // Now safely clean only tools from previous executions
+        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
+            warn!(
+                "Failed to clean orphaned tool calls for {} agent: {}",
+                agent_type, e
+            );
+        }
+    }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;

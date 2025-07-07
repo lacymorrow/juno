@@ -242,7 +242,7 @@ const styles = \`
   const sampleResponses = propSampleResponses || defaultSampleResponses;
 
   // Messages for different states
-  const stateMessages = {
+  const stateMessages: Record<AssistantState, string> = {
     idle: "Ready",
     listening: "Listening to your request...",
     processing:
@@ -255,6 +255,13 @@ const styles = \`
       "Task completed successfully! Is there anything else I can help you with today?",
     input: "Type your request...",
     response: "Here's what I found:",
+    dictating: "Dictating...",
+    thinking: "Thinking...",
+    responding: "Responding...",
+    finished: "Finished.",
+    failed: "Failed.",
+    cancelled: "Cancelled.",
+    offline: "Offline.",
   };
 
   // === UI API EVENT LISTENERS ===

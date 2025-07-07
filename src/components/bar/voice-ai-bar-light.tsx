@@ -138,6 +138,13 @@ const styles = \`
       "Task completed successfully! Is there anything else I can help you with today?",
     input: "Type your request...",
     response: "Here's what I found:",
+    dictating: "Dictating...",
+    thinking: "Thinking...",
+    responding: "Responding...",
+    finished: "Finished!",
+    failed: "Failed.",
+    cancelled: "Cancelled.",
+    offline: "Offline.",
   };
 
   const changeState = (newState: AssistantState) => {
