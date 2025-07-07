@@ -1111,17 +1111,39 @@ where
                             // Count how many tool result messages were added since our assistant message
                             let mut tool_result_count = 0;
                             let mut found_our_assistant_message = false;
+                            let mut assistant_tool_call_ids = Vec::new();
 
-                            // Scan from the end backwards to find our assistant message and count tool results after it
+                            // First pass: Find our assistant message and collect its tool call IDs
                             for msg in messages.iter().rev() {
-                                if matches!(msg.role, Role::Tool) && found_our_assistant_message {
-                                    tool_result_count += 1;
-                                } else if matches!(msg.role, Role::Assistant) &&
-                                         msg.tool_calls.is_some() &&
-                                         msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                                if matches!(msg.role, Role::Assistant) &&
+                                   msg.tool_calls.is_some() &&
+                                   msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
                                     found_our_assistant_message = true;
+                                    // Collect all tool call IDs from this assistant message
+                                    if let Some(tool_calls) = &msg.tool_calls {
+                                        assistant_tool_call_ids = tool_calls.iter()
+                                            .map(|tc| tc.id.clone())
+                                            .collect();
+                                    }
                                     break;
                                 }
+                            }
+
+                            // Second pass: Count tool results that match our assistant's tool call IDs
+                            if found_our_assistant_message {
+                                for msg in messages.iter().rev() {
+                                    if matches!(msg.role, Role::Tool) &&
+                                       msg.tool_call_id.is_some() &&
+                                       assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                                        tool_result_count += 1;
+                                    }
+                                }
+
+                                log::debug!(
+                                    "Found {} tool results out of {} expected for assistant message",
+                                    tool_result_count,
+                                    assistant_tool_call_ids.len()
+                                );
                             }
 
                             // Only remove assistant message if NO tool results were added (complete failure)
@@ -1288,6 +1310,138 @@ mod tests {
         // Next step should equal max (stopping condition)
         let next_step = current_step + 1;
         assert_eq!(next_step, max_steps);
+    }
+
+    #[test]
+    fn test_tool_result_counting_logic() {
+        use crate::agent::core::{Message, Role, ToolCall};
+        use serde_json::json;
+
+        // Create a mock message history
+        let mut messages = Vec::new();
+
+        // Add some initial messages
+        messages.push(Message {
+            role: Role::User,
+            content: "Hello".to_string(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        messages.push(Message {
+            role: Role::Assistant,
+            content: "How can I help?".to_string(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        // Add an assistant message with tool calls
+        let tool_calls = vec![
+            ToolCall {
+                id: "tool1".to_string(),
+                name: "test_tool".to_string(),
+                input: json!({"action": "test"}),
+            },
+            ToolCall {
+                id: "tool2".to_string(),
+                name: "test_tool2".to_string(),
+                input: json!({"action": "test2"}),
+            },
+        ];
+
+        messages.push(Message {
+            role: Role::Assistant,
+            content: "".to_string(),
+            tool_calls: Some(tool_calls.clone()),
+            tool_call_id: None,
+            name: None,
+        });
+
+        // Add tool results for the first tool only (partial execution)
+        messages.push(Message {
+            role: Role::Tool,
+            content: "Tool result".to_string(),
+            tool_calls: None,
+            tool_call_id: Some("tool1".to_string()),
+            name: Some("test_tool".to_string()),
+        });
+
+        // Now manually implement the counting logic from our fix
+        let mut tool_result_count = 0;
+        let mut found_our_assistant_message = false;
+        let mut assistant_tool_call_ids = Vec::new();
+
+        // First pass: Find assistant message and collect tool call IDs
+        for msg in messages.iter().rev() {
+            if matches!(msg.role, Role::Assistant) &&
+               msg.tool_calls.is_some() &&
+               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                found_our_assistant_message = true;
+                if let Some(tool_calls) = &msg.tool_calls {
+                    assistant_tool_call_ids = tool_calls.iter()
+                        .map(|tc| tc.id.clone())
+                        .collect();
+                }
+                break;
+            }
+        }
+
+        // Second pass: Count tool results that match our assistant's tool call IDs
+        if found_our_assistant_message {
+            for msg in messages.iter().rev() {
+                if matches!(msg.role, Role::Tool) &&
+                   msg.tool_call_id.is_some() &&
+                   assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                    tool_result_count += 1;
+                }
+            }
+        }
+
+        // Verify results
+        assert!(found_our_assistant_message, "Should have found the assistant message");
+        assert_eq!(assistant_tool_call_ids.len(), 2, "Should have found 2 tool call IDs");
+        assert_eq!(tool_result_count, 1, "Should have counted 1 tool result");
+
+        // Test case 2: No tool results
+        let mut messages2 = messages.clone();
+        messages2.pop(); // Remove the tool result
+
+        let mut tool_result_count2 = 0;
+        let mut found_our_assistant_message2 = false;
+        let mut assistant_tool_call_ids2 = Vec::new();
+
+        // First pass
+        for msg in messages2.iter().rev() {
+            if matches!(msg.role, Role::Assistant) &&
+               msg.tool_calls.is_some() &&
+               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                found_our_assistant_message2 = true;
+                if let Some(tool_calls) = &msg.tool_calls {
+                    assistant_tool_call_ids2 = tool_calls.iter()
+                        .map(|tc| tc.id.clone())
+                        .collect();
+                }
+                break;
+            }
+        }
+
+        // Second pass
+        if found_our_assistant_message2 {
+            for msg in messages2.iter().rev() {
+                if matches!(msg.role, Role::Tool) &&
+                   msg.tool_call_id.is_some() &&
+                   assistant_tool_call_ids2.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                    tool_result_count2 += 1;
+                }
+            }
+        }
+
+        // Verify results for case 2
+        assert!(found_our_assistant_message2, "Should have found the assistant message");
+        assert_eq!(assistant_tool_call_ids2.len(), 2, "Should have found 2 tool call IDs");
+        assert_eq!(tool_result_count2, 0, "Should have counted 0 tool results");
     }
 
     // MCP Batching Tests
