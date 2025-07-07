@@ -26,8 +26,6 @@ export interface ResponseContent {
 }
 
 export interface VoiceAIBarProps {
-	onStateChange?: (state: AssistantState) => void
-	initialState?: AssistantState
 	className?: string
 	sampleResponses?: Record<string, ResponseContent>
 }

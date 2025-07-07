@@ -17,6 +17,7 @@ use crate::state::CancelReceiver;
 use crate::agent::prompts::PromptManager;
 use crate::agent::tools::ToolMappingService;
 use crate::settings::manager::SettingsManager;
+use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -77,7 +78,7 @@ impl ExpertAgent {
 pub struct MultiAgentOrchestrator {
     pub orchestrator: Arc<dyn AgentBrain + Send + Sync>,
     pub experts: HashMap<AgentType, ExpertAgent>,
-    pub memory: Arc<tokio::sync::Mutex<dyn MemoryManager + Send + Sync>>,
+    pub memory: Arc<tokio::sync::Mutex<AdvancedMemoryManager>>,
     pub current_expert: Option<AgentType>,
     pub prompt_manager: PromptManager,
 }
@@ -139,11 +140,9 @@ impl MultiAgentOrchestrator {
             ExpertAgent::new(AgentType::GeneralExpert, general_brain, general_tools, &prompt_manager)
         );
 
-        // Wrap the memory in a Mutex for thread-safe mutable access
-        let wrapped_memory = Arc::new(tokio::sync::Mutex::new(
-            // Create a new SimpleMemoryManager since we can't move out of Arc
-            crate::agent::implementations::memory_manager::SimpleMemoryManager::new()
-        ));
+        // Initialize AdvancedMemoryManager directly
+        let new_memory = AdvancedMemoryManager::new();
+        let wrapped_memory = Arc::new(tokio::sync::Mutex::new(new_memory));
 
         Ok(Self {
             orchestrator: orchestrator_brain,

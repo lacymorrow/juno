@@ -60,7 +60,10 @@ function App() {
       try {
         await invoke("notify_query_submitted", { query: trimmedQuery });
       } catch (error) {
-        console.warn("Failed to notify floating bar of query submission:", error);
+        console.warn(
+          "Failed to notify floating bar of query submission:",
+          error
+        );
       }
 
       appState.setIsProcessing(true);
@@ -224,7 +227,10 @@ function App() {
         try {
           await invoke("notify_query_submitted", { query: trimmedPrompt });
         } catch (error) {
-          console.warn("Failed to notify floating bar of query submission:", error);
+          console.warn(
+            "Failed to notify floating bar of query submission:",
+            error
+          );
         }
 
         appState.setIsProcessing(true);
