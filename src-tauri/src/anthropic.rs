@@ -1268,26 +1268,40 @@ async fn execute_specialized_agent_task(
 
     info!("Executing {} agent task: {}", agent_type, task);
 
-    // FIXED: Get the orchestrator's memory manager instead of creating a new one
-    // This preserves conversation context and fixes the "yes please" cohesion issue
-    let state = app_handle.state::<AppState>();
-    let memory_manager_arc = state.get_memory_manager().await;
+    // FIXED: Create a completely independent memory manager for specialist agents
+    // This prevents ANY tool calls from being tracked in the orchestrator's memory space
+    // which would cause the "orphaned tool call" API error
     let specialist_memory = {
-        let memory_guard = memory_manager_arc.lock().await;
-        memory_guard.clone()
+        use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
+        use crate::agent::core::{Message, Role};
+
+        // Create a completely fresh memory manager for specialist
+        let mut fresh_memory = AdvancedMemoryManager::new();
+
+        // Extract only minimal context for the specialist
+        // This prevents sharing ANY tool calls between orchestrator and specialist
+        let query = if context.is_empty() {
+            task.to_string()
+        } else {
+            format!("{}\n\nAdditional context: {}", task, context)
+        };
+
+        // Initialize with just the task as user message
+        let user_message = Message {
+            role: Role::User,
+            content: query,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        };
+
+        if let Err(e) = fresh_memory.add_message(user_message).await {
+            warn!("Failed to add task to specialist memory: {}", e);
+        }
+
+        // Return the completely isolated memory manager
+        fresh_memory
     };
-
-    // Clean up any orphaned tool calls that might exist from previous failed executions
-    // This provides additional safety against conversation state issues
-
-    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
-    // let mut cloned_memory = specialist_memory;
-    // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
-    //     warn!(
-    //         "Failed to clean orphaned tool calls for {} agent: {}",
-    //         agent_type, e
-    //     );
-    // }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
@@ -1296,7 +1310,7 @@ async fn execute_specialized_agent_task(
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };
 
-    // Create specialist agent runner with the shared memory (conversation context preserved)
+    // Create specialist agent runner with the isolated memory
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
         specialist_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
@@ -1305,15 +1319,8 @@ async fn execute_specialized_agent_task(
         app_handle,
     );
 
-    // Format the query for the specialist agent
-    let specialist_query = if context.is_empty() {
-        task.to_string()
-    } else {
-        format!("{}\n\nAdditional context: {}", task, context)
-    };
-
     // Execute the specialist agent with proper cancellation signal
-    match specialist_runner.run(specialist_query, cancel_rx).await {
+    match specialist_runner.run(task.to_string(), cancel_rx).await {
         Ok(result) => {
             info!("Specialist {} agent completed successfully", agent_type);
 
@@ -1327,50 +1334,23 @@ async fn execute_specialized_agent_task(
             // 3. The result is not just a simple success/failure indicator
             let user_communication_handled = is_jsx || is_substantial_user_communication(&result);
 
-            if is_jsx {
-                // If the result contains JSX, return it directly to preserve JSX rendering
-                info!(
-                    "Specialist {} agent returned JSX content, preserving for rendering",
-                    agent_type
-                );
-                // Log communication handling for debugging
-                info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
-                Ok(serde_json::json!({
-                    "success": true,
-                    "agent_type": agent_type,
-                    "result": result,
-                    "is_jsx": true,
-                    "user_communication_handled": true, // Signal that specialist handled user communication
-                    "message": format!("{} agent completed the task successfully with visual components", agent_type)
-                }))
-            } else {
-                // Standard non-JSX response - check if it contains meaningful user communication
-                if user_communication_handled {
-                    info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
-                } else {
-                    info!("Specialist {} agent completed background task - orchestrator should provide user feedback", agent_type);
-                }
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "agent_type": agent_type,
-                    "result": result,
-                    "is_jsx": false,
-                    "user_communication_handled": user_communication_handled,
-                    "message": format!("{} agent completed the task successfully", agent_type)
-                }))
-            }
+            // Format a rich result for the orchestrator
+            Ok(serde_json::json!({
+                "success": true,
+                "agent_type": agent_type,
+                "result": result,
+                "jsx_content": is_jsx,
+                "user_communication_handled": user_communication_handled,
+                "message": format!("{} agent completed task successfully", agent_type)
+            }))
         }
         Err(e) => {
-            // Enhanced error handling for different types of failures
-            let error_msg = match &e {
-                AgentError::Terminated => {
-                    format!("{} agent was cancelled or terminated", agent_type)
-                }
+            // Format user-friendly error message based on error type
+            let error_msg = match e {
                 AgentError::MaxStepsReached => {
-                    format!("{} agent reached maximum steps", agent_type)
+                    format!("{} agent ran out of iterations - task was too complex to complete in the allowed number of steps", agent_type)
                 }
-                AgentError::LlmError(msg) if msg.contains("Tool calls without results") => {
+                AgentError::Timeout(_) => {
                     format!("{} agent failed due to timeout - some tool operations did not complete within the time limit", agent_type)
                 }
                 AgentError::LlmError(msg) if msg.contains("timed out") => {
