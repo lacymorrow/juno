@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-use crate::{constants, state};
+use crate::state;
 use crate::constants::{events, errors::templates};
 
 // Helper function for error formatting - properly handles template substitution

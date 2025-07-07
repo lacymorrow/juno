@@ -6,7 +6,6 @@ use tauri::{
 };
 use tracing::{info, error};
 use crate::constants;
-use crate::commands;
 use crate::constants::events;
 use crate::constants::errors::{templates, prefixes};
 

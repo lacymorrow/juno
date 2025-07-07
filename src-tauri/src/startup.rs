@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
 use crate::agent::providers::factory::BrainFactory;
-use crate::constants::timeouts;
+// Remove unused import: use crate::constants::timeouts;
 use crate::state::AppState;
 use crate::cli::headless::HeadlessRuntime;
 

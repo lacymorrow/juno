@@ -124,6 +124,7 @@ pub struct ToolSettings {
     pub tools: HashMap<String, ToolConfig>,
     pub category_enabled: HashMap<String, bool>,
     pub mcp_servers: Vec<MCPServerConfig>,
+    pub smooth_mouse_movement: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +349,7 @@ impl Default for ToolSettings {
             tools: HashMap::new(),
             category_enabled: HashMap::new(),
             mcp_servers: Vec::new(),
+            smooth_mouse_movement: false,
         }
     }
 }

@@ -16,10 +16,18 @@ use crate::utils::coordinates;
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ScreenshotResult {
+    pub base64_image: String,
+    pub original_width: u32,
+    pub original_height: u32,
+    pub resized_width: u32,
+    pub resized_height: u32,
+}
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
+pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<ScreenshotResult, String> {
     use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
     use image::{ImageReader, ImageFormat};
     use std::io::Cursor;
@@ -92,7 +100,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
                                 standard_width, standard_height, display_width, display_height, origin_x, origin_y
                             ))?;
 
-                            Ok(final_base64)
+                            return Ok(ScreenshotResult {
+                                base64_image: final_base64,
+                                original_width: display_width,
+                                original_height: display_height,
+                                resized_width: standard_width,
+                                resized_height: standard_height,
+                            });
                         }
                         Err(e) => {
                             tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
@@ -113,7 +127,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
                                 original_width, original_height);
 
                             send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
-                            Ok(base64_string)
+                            return Ok(ScreenshotResult {
+                                base64_image: base64_string,
+                                original_width,
+                                original_height,
+                                resized_width: original_width, // Fallback: no resize
+                                resized_height: original_height,
+                            });
                         }
                     }
                     } else {
@@ -122,7 +142,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 
                         // Still return the screenshot but without proper scaling
                         send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
-                        Ok(base64_string)
+                        Ok(ScreenshotResult {
+                            base64_image: base64_string,
+                            original_width: 0, // Unknown
+                            original_height: 0, // Unknown
+                            resized_width: 0,
+                            resized_height: 0,
+                        })
                     }
                 } else {
                     let error_msg = "Failed to read image format for standard resolution scaling";
@@ -130,7 +156,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 
                     // Still return the screenshot but without proper scaling
                     send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (format reading unavailable)")?;
-                    Ok(base64_string)
+                    Ok(ScreenshotResult {
+                        base64_image: base64_string,
+                        original_width: 0, // Unknown
+                        original_height: 0, // Unknown
+                        resized_width: 0,
+                        resized_height: 0,
+                    })
                 }
             } else {
                 let error_msg = "Failed to decode base64 screenshot for standard resolution scaling";
@@ -138,7 +170,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String,
 
                 // Still return the screenshot but without proper scaling
                 send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
-                Ok(base64_string)
+                Ok(ScreenshotResult {
+                    base64_image: base64_string,
+                    original_width: 0, // Unknown
+                    original_height: 0, // Unknown
+                    resized_width: 0,
+                    resized_height: 0,
+                })
             }
         }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
@@ -206,7 +244,7 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<String, String> { // Use alias
+pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<ScreenshotResult, String> { // Use alias
     Err("Screenshot capture is only supported on macOS currently.".to_string())
 }
 
