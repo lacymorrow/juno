@@ -59,6 +59,8 @@ use crate::agent::traits::ToolProvider;
 use crate::state::AppState;
 use crate::constants::events;
 use crate::utils::coordinate_validation::{validate_coordinate_parameter, CoordinateValidationError};
+// TARS Integration: Import event types
+use crate::agent::events::JunoAgentEvent;
 // Error recovery will be implemented in future iterations
 
 // Define an async tool function type
@@ -1519,6 +1521,33 @@ impl ToolProvider for LocalToolProvider {
         // Record start time for duration calculation
         let start_time = std::time::Instant::now();
 
+        // TARS Integration: Emit tool call and execution start events
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            
+            // Emit tool call event
+            let tool_call_event = JunoAgentEvent::ToolCall {
+                tool_name: tool_call.name.clone(),
+                args: tool_call.input.clone(),
+                id: tool_call.id.clone(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                session_id: None,
+            };
+            if let Err(e) = state.emit_agent_event(tool_call_event).await {
+                warn!("Failed to emit tool call event: {}", e);
+            }
+
+            // Emit tool execution start event
+            let execution_start_event = JunoAgentEvent::ToolExecutionStart {
+                tool_name: tool_call.name.clone(),
+                tool_call_id: tool_call.id.clone(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            };
+            if let Err(e) = state.emit_agent_event(execution_start_event).await {
+                warn!("Failed to emit tool execution start event: {}", e);
+            }
+        }
+
         // Emit command execution start event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
             if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_START, serde_json::json!({
@@ -1572,11 +1601,49 @@ impl ToolProvider for LocalToolProvider {
             return Err(validation_error);
         }
 
+        // Store values we need before moving tool_call
+        let tool_call_id = tool_call.id.clone();
+        let tool_name_for_events = tool_call.name.clone();
+
         // 2. Execute tool with error recovery
         let result = self.execute_tool_with_recovery(tool_call).await;
 
         // Calculate execution duration
         let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        // TARS Integration: Emit tool result and execution end events
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            
+            // Emit tool result event
+            let tool_result_event = JunoAgentEvent::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                result: match &result {
+                    Ok(tool_result) => tool_result.output.clone(),
+                    Err(e) => serde_json::json!({
+                        "error": e.to_string(),
+                        "success": false
+                    }),
+                },
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                success: result.is_ok(),
+                execution_time_ms: Some(duration_ms),
+            };
+            if let Err(e) = state.emit_agent_event(tool_result_event).await {
+                warn!("Failed to emit tool result event: {}", e);
+            }
+
+            // Emit tool execution end event
+            let execution_end_event = JunoAgentEvent::ToolExecutionEnd {
+                tool_name: tool_name_for_events,
+                tool_call_id: tool_call_id,
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                success: result.is_ok(),
+            };
+            if let Err(e) = state.emit_agent_event(execution_end_event).await {
+                warn!("Failed to emit tool execution end event: {}", e);
+            }
+        }
 
         // Emit command execution end event if app handle is available
         if let Some(ref app_handle) = self.app_handle {

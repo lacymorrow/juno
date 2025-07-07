@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::Weak;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, error, info, warn};
 
@@ -31,6 +31,9 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+// Import event system for TARS integration
+use crate::agent::events::{EventProcessor, EventProcessorConfig, JunoAgentEvent, LoggingSubscriber, EventBus, EventBusConfig};
+use crate::agent::{AgentStateMachine, StateMachineConfig};
 use crate::constants::{app, audio, events, errors::templates};
 use crate::utils::string_cache::format_error_cached;
 
@@ -300,6 +303,13 @@ pub struct AppState {
     pub mcp_manager: Arc<TokioMutex<MCPManager>>,
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
+    
+    // TARS Integration: Event-driven architecture (initialized later with AppHandle)
+    pub event_processor: Arc<TokioMutex<Option<EventProcessor>>>,
+    
+    // Event-driven refactor: Core event bus and state machine
+    pub event_bus: Arc<TokioMutex<Option<Arc<EventBus>>>>,
+    pub agent_state_machine: Arc<TokioMutex<AgentStateMachine>>,
 
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
@@ -366,6 +376,18 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            
+            // TARS Integration: Initialize event processor as None (will be set when AppHandle available)
+            event_processor: Arc::new(TokioMutex::new(None)),
+            
+            // Event-driven refactor: Initialize event bus and state machine
+            event_bus: Arc::new(TokioMutex::new(None)), // Will be initialized with AppHandle
+            agent_state_machine: Arc::new(TokioMutex::new(AgentStateMachine::with_config(
+                StateMachineConfig {
+                    max_history: 200, // Larger history for debugging
+                    log_transitions: true,
+                }
+            ))),
 
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
@@ -373,6 +395,104 @@ impl AppState {
 
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
+        }
+    }
+
+    /// Initialize event processor with real app handle (TARS Integration)
+    /// This should be called after the Tauri app is fully initialized
+    pub async fn init_event_processor(&self, app_handle: AppHandle) -> Result<(), String> {
+        info!("Initializing TARS event processor with real app handle");
+        
+        let config = EventProcessorConfig {
+            max_events: 10000,
+            emit_to_frontend: true,
+            persist_events: false,
+            max_emission_failures: 5,
+        };
+        
+        let new_processor = EventProcessor::new(app_handle, Some(config));
+        
+        // Add logging subscriber to the new processor
+        new_processor.subscribe(Box::new(LoggingSubscriber)).await;
+        
+        // Set the real processor (replacing None)
+        {
+            let mut processor_guard = self.event_processor.lock().await;
+            *processor_guard = Some(new_processor);
+        }
+        
+        info!("TARS event processor initialized successfully");
+        Ok(())
+    }
+
+    /// Initialize the EventBus for event-driven architecture
+    pub async fn init_event_bus(&self, app_handle: AppHandle) -> Result<(), String> {
+        info!("Initializing EventBus for event-driven architecture");
+        
+        let config = EventBusConfig {
+            max_stored_events: 5000,
+            emit_to_frontend: true,
+            max_recursion_depth: 8,
+            debug_logging: cfg!(debug_assertions),
+        };
+        
+        let event_bus = Arc::new(EventBus::with_config(app_handle, config));
+        
+        // Store the event bus
+        {
+            let mut bus_guard = self.event_bus.lock().await;
+            *bus_guard = Some(event_bus);
+        }
+        
+        info!("EventBus initialized successfully");
+        Ok(())
+    }
+    
+    /// Get the EventBus
+    pub async fn get_event_bus(&self) -> Result<Arc<EventBus>, String> {
+        let bus_guard = self.event_bus.lock().await;
+        if let Some(ref bus) = *bus_guard {
+            Ok(bus.clone())
+        } else {
+            Err("EventBus not initialized".to_string())
+        }
+    }
+    
+    /// Emit an event through the EventBus (preferred method for event-driven architecture)
+    pub async fn emit_event(&self, event: JunoAgentEvent) -> Result<(), String> {
+        let bus_guard = self.event_bus.lock().await;
+        if let Some(ref bus) = *bus_guard {
+            bus.emit(event).await
+        } else {
+            warn!("EventBus not initialized yet, falling back to legacy event processor");
+            self.emit_agent_event(event).await
+        }
+    }
+
+    /// Emit an agent event (TARS Integration)
+    pub async fn emit_agent_event(&self, event: JunoAgentEvent) -> Result<(), String> {
+        let processor_guard = self.event_processor.lock().await;
+        if let Some(ref processor) = *processor_guard {
+            processor.send_event(event).await
+        } else {
+            // Event processor not yet initialized, log a warning
+            warn!("Event processor not initialized yet, dropping event: {:?}", event);
+            Ok(())
+        }
+    }
+    
+    /// Get the event processor (TARS Integration)
+    pub async fn get_event_processor(&self) -> Arc<TokioMutex<Option<EventProcessor>>> {
+        self.event_processor.clone()
+    }
+    
+    /// Subscribe to events (TARS Integration)
+    pub async fn subscribe_to_events(&self, subscriber: Box<dyn crate::agent::events::EventSubscriber + Send + Sync>) {
+        let processor_guard = self.event_processor.lock().await;
+        if let Some(ref processor) = *processor_guard {
+            processor.subscribe(subscriber).await;
+        } else {
+            warn!("Event processor not initialized yet, cannot subscribe to events");
         }
     }
 

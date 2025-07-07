@@ -8,14 +8,39 @@ use crate::state::AppState;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
+use std::sync::Arc;
 
 // Import sound commands for boot sound functionality
 use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
 use crate::constants::events;
+// Import event handlers for registration
+use crate::agent::{UserInputHandler, AgentOrchestrator};
 
 /// Initialize all application state components and background tasks
 pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), String> {
     info!("🚀 Initializing comprehensive application state management...");
+
+    // TARS Integration: Initialize event processor with real app handle
+    let app_state = app_handle.state::<AppState>();
+    if let Err(e) = app_state.init_event_processor(app_handle.clone()).await {
+        error!("Failed to initialize TARS event processor: {}", e);
+        return Err(format!("Event processor initialization failed: {}", e));
+    }
+    info!("✅ TARS event processor initialized successfully");
+    
+    // Event-driven refactor: Initialize EventBus
+    if let Err(e) = app_state.init_event_bus(app_handle.clone()).await {
+        error!("Failed to initialize EventBus: {}", e);
+        return Err(format!("EventBus initialization failed: {}", e));
+    }
+    info!("✅ EventBus initialized successfully");
+    
+    // Register event handlers
+    if let Err(e) = register_event_handlers(&app_state, app_handle).await {
+        error!("Failed to register event handlers: {}", e);
+        return Err(format!("Event handler registration failed: {}", e));
+    }
+    info!("✅ Event handlers registered successfully");
 
     // Initialize core state components in parallel
     let (
@@ -609,6 +634,28 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
     }
 
     Ok(issues)
+}
+
+/// Register event handlers with the EventBus
+async fn register_event_handlers(app_state: &AppState, app_handle: &AppHandle) -> Result<(), String> {
+    info!("Registering event handlers with EventBus...");
+    
+    // Get the EventBus
+    let event_bus = app_state.get_event_bus().await?;
+    
+    // Register UserInputHandler
+    let user_input_handler = Arc::new(UserInputHandler::new());
+    event_bus.register_handler(user_input_handler).await;
+    
+    // Register AgentOrchestrator (now fixed)
+    let agent_orchestrator = Arc::new(AgentOrchestrator::new(
+        Arc::new(app_state.clone()),
+        app_handle.clone()
+    ));
+    event_bus.register_handler(agent_orchestrator).await;
+    
+    info!("Event handlers registered successfully");
+    Ok(())
 }
 
 #[cfg(test)]
