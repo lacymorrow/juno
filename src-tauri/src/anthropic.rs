@@ -499,8 +499,26 @@ async fn execute_agent_internal(
     // --- Setup Tool Provider Based on Agent Mode ---
     let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
+    
+    // TEMPORARY DEBUG FIX: Force single agent mode for computer use tasks
+    // This ensures direct tool access instead of delegation
+    let contains_computer_keywords = trimmed_query.to_lowercase().contains("click") 
+        || trimmed_query.to_lowercase().contains("drag") 
+        || trimmed_query.to_lowercase().contains("mouse")
+        || trimmed_query.to_lowercase().contains("screenshot")
+        || trimmed_query.to_lowercase().contains("computer")
+        || trimmed_query.to_lowercase().contains("spiral")
+        || trimmed_query.to_lowercase().contains("draw");
+        
+    let effective_agent_mode = if contains_computer_keywords {
+        warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
+        AgentMode::Single
+    } else {
+        agent_mode
+    };
+    info!("Effective agent mode: {:?}", effective_agent_mode);
 
-    let agent_result = match agent_mode {
+    let agent_result = match effective_agent_mode {
         AgentMode::Single => {
             info!("🔧 Setting up SINGLE AGENT mode with direct tools (no delegation)");
 
