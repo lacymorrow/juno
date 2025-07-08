@@ -13,14 +13,16 @@ use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, error, info, warn};
 
 pub mod desktop_wrapper;
+pub mod event_driven_state;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
+pub use event_driven_state::{EventDrivenStateManager, ApplicationState};
 use playwright::api::playwright::Playwright;
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
-use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
+use crate::agent::{EventMemoryManager, EventMemoryConfig};
 // Import permissions types
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
@@ -294,7 +296,7 @@ pub struct AppState {
     // Async state that needs TokioMutex
     playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
-    pub memory_manager: Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>>,
+    pub memory_manager: Arc<TokioMutex<Option<EventMemoryManager>>>,
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
@@ -343,31 +345,7 @@ impl AppState {
             // Initialize async state
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
-            memory_manager: Arc::new(TokioMutex::new({
-            // Use AdvancedMemoryManager but with reduced features to prevent deadlocks
-            use crate::agent::implementations::memory_manager::{AdvancedMemoryManager, MemoryConfig, VisualContextConfig};
-
-            let memory_config = MemoryConfig {
-                max_messages: 200, // INCREASED: Maximum memory capacity (was 150)
-                max_tokens: 120000, // INCREASED: Higher token limit for complex conversations (was 80000)
-                min_messages_to_keep: 30, // INCREASED: Keep even more context (was 20)
-                auto_prune: true, // RE-ENABLED: Safe auto-pruning with higher limits
-                enable_summarization: true, // RE-ENABLED: Summarization for better memory management
-                summarization_batch_size: 15, // INCREASED: More efficient batching (was 12)
-                enable_metrics: true, // ENABLED: Enhanced tracking with error handling
-                enable_summary_cache: true, // RE-ENABLED: Cache for better performance
-            };
-
-            let visual_config = VisualContextConfig {
-                enable_screenshot_compression: true, // RE-ENABLED: Visual compression for memory efficiency
-                screenshot_retention_seconds: 1800, // INCREASED: Even longer retention (30 minutes, was 15)
-                immediate_compression: true, // RE-ENABLED: With safer async handling
-                max_base64_screenshots: 12, // INCREASED: More visual context (was 8)
-                fallback_to_generic_description: true,
-            };
-
-            AdvancedMemoryManager::with_config(memory_config).with_visual_config(visual_config)
-        })),
+            memory_manager: Arc::new(TokioMutex::new(None)),
             permissions_state: Arc::new(TokioMutex::new(None)),
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             cloud_client: Arc::new(TokioMutex::new(None)),
@@ -445,6 +423,40 @@ impl AppState {
         }
         
         info!("EventBus initialized successfully");
+        Ok(())
+    }
+
+    /// Initialize EventMemoryManager after EventBus is ready
+    pub async fn init_memory_manager(&self) -> Result<(), String> {
+        info!("Initializing EventMemoryManager for TARS Phase 3");
+        
+        // Get the event bus (it should be initialized by now)
+        let event_bus = {
+            let bus_guard = self.event_bus.lock().await;
+            bus_guard.clone().ok_or("EventBus not initialized - call init_event_bus first")?
+        };
+        
+        // Create memory manager configuration optimized for the new architecture
+        let config = EventMemoryConfig {
+            max_events: 1000,           // Max events to keep
+            auto_prune: true,           // Enable automatic pruning
+            token_limit: 120000,        // Token limit before emergency pruning
+            min_events_after_prune: 50, // Min events to keep after pruning
+            enable_persistence: true,   // Enable enhanced persistence (Phase 3.5)
+            persistence_config: Some(crate::agent::memory::PersistenceConfig::default()),
+        };
+        
+        // Create the event memory manager
+        let memory_manager = EventMemoryManager::with_config(event_bus, config).await
+            .map_err(|e| format!("Failed to create EventMemoryManager: {}", e))?;
+        
+        // Store the memory manager
+        {
+            let mut manager_guard = self.memory_manager.lock().await;
+            *manager_guard = Some(memory_manager);
+        }
+        
+        info!("EventMemoryManager initialized successfully");
         Ok(())
     }
     
@@ -1017,8 +1029,9 @@ impl AppState {
     }
 
     // Method to get the persistent memory manager
-    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>> {
-        self.memory_manager.clone()
+    pub async fn get_memory_manager(&self) -> Option<EventMemoryManager> {
+        let manager_guard = self.memory_manager.lock().await;
+        manager_guard.clone()
     }
 
     // Insert a component into the state

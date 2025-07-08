@@ -201,6 +201,39 @@ impl EventBus {
             .collect()
     }
     
+    /// Get all conversation-related events (messages, tool calls, etc.)
+    pub async fn get_conversation_events(&self) -> Result<Vec<JunoAgentEvent>, String> {
+        let store = self.event_store.read().await;
+        let conversation_events = store.iter()
+            .filter(|event| {
+                matches!(event, 
+                    JunoAgentEvent::UserMessage { .. } |
+                    JunoAgentEvent::AssistantMessage { .. } |
+                    JunoAgentEvent::AssistantStreamingMessage { .. } |
+                    JunoAgentEvent::ToolCall { .. } |
+                    JunoAgentEvent::ToolResult { .. } |
+                    JunoAgentEvent::SystemMessage { .. } |
+                    JunoAgentEvent::VoiceTranscriptionEnd { .. }
+                )
+            })
+            .cloned()
+            .collect();
+        Ok(conversation_events)
+    }
+    
+    /// Prune old events, keeping only the most recent N events
+    pub async fn prune_old_events(&self, keep_count: usize) -> Result<bool, String> {
+        let mut store = self.event_store.write().await;
+        if store.len() > keep_count {
+            let remove_count = store.len() - keep_count;
+            store.drain(0..remove_count);
+            info!("Pruned {} old events from event bus", remove_count);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+    
     /// Clear all stored events
     pub async fn clear_events(&self) {
         let mut store = self.event_store.write().await;
@@ -214,8 +247,17 @@ impl EventBus {
         let handlers = self.handlers.read().await;
         
         let mut event_type_counts = HashMap::new();
+        let mut total_memory_usage = 0;
+        let mut total_tokens = 0;
+        
         for event in store.iter() {
             *event_type_counts.entry(event.event_type().to_string()).or_insert(0) += 1;
+            total_memory_usage += self.estimate_event_memory_usage(event);
+            
+            // Only count conversation events for token estimation
+            if self.is_conversation_event(event) {
+                total_tokens += self.estimate_event_tokens(event);
+            }
         }
         
         let total_handlers = handlers.values().map(|v| v.len()).sum();
@@ -225,7 +267,82 @@ impl EventBus {
             total_handlers,
             event_type_counts,
             handler_types: handlers.keys().cloned().collect(),
+            memory_usage: total_memory_usage,
+            estimated_tokens: total_tokens,
         }
+    }
+    
+    /// Get estimated token count for conversation events only
+    pub async fn estimate_conversation_tokens(&self) -> usize {
+        let store = self.event_store.read().await;
+        
+        store.iter()
+            .filter(|event| self.is_conversation_event(event))
+            .map(|event| self.estimate_event_tokens(event))
+            .sum()
+    }
+    
+    /// Check if event is part of conversation history
+    fn is_conversation_event(&self, event: &JunoAgentEvent) -> bool {
+        matches!(event,
+            JunoAgentEvent::UserMessage { .. } |
+            JunoAgentEvent::AssistantMessage { .. } |
+            JunoAgentEvent::AssistantStreamingMessage { is_partial: false, .. } |
+            JunoAgentEvent::ToolCall { .. } |
+            JunoAgentEvent::ToolResult { .. }
+        )
+    }
+    
+    /// Estimate token count for a single event
+    fn estimate_event_tokens(&self, event: &JunoAgentEvent) -> usize {
+        match event {
+            JunoAgentEvent::UserMessage { content, .. } |
+            JunoAgentEvent::AssistantMessage { content, .. } |
+            JunoAgentEvent::AssistantStreamingMessage { content, .. } => {
+                // Rough estimate: 4 characters per token
+                content.len() / 4 + 10 // base overhead
+            },
+            JunoAgentEvent::ToolCall { tool_name, args, .. } => {
+                let tool_name_tokens = tool_name.len() / 4;
+                let args_tokens = serde_json::to_string(args)
+                    .unwrap_or_default()
+                    .len() / 4;
+                tool_name_tokens + args_tokens + 20 // tool call overhead
+            },
+            JunoAgentEvent::ToolResult { result, .. } => {
+                let result_tokens = serde_json::to_string(result)
+                    .unwrap_or_default()
+                    .len() / 4;
+                result_tokens + 15 // tool result overhead
+            },
+            _ => 5, // Minimal tokens for other events
+        }
+    }
+    
+    /// Estimate memory usage of a single event (rough approximation)
+    fn estimate_event_memory_usage(&self, event: &JunoAgentEvent) -> usize {
+        // Rough estimation: base overhead + content size
+        let base_overhead = 128; // bytes for struct overhead
+        
+        let content_size = match event {
+            JunoAgentEvent::UserMessage { content, .. } |
+            JunoAgentEvent::AssistantMessage { content, .. } |
+            JunoAgentEvent::AssistantStreamingMessage { content, .. } => {
+                content.len() * 4 // Rough estimate: 4 bytes per character for unicode
+            },
+            JunoAgentEvent::ToolCall { tool_name, args, .. } => {
+                tool_name.len() + serde_json::to_string(args).unwrap_or_default().len()
+            },
+            JunoAgentEvent::ToolResult { result, .. } => {
+                serde_json::to_string(result).unwrap_or_default().len()
+            },
+            JunoAgentEvent::SystemMessage { message, .. } => {
+                message.len()
+            },
+            _ => 64, // Default estimate for other event types
+        };
+        
+        base_overhead + content_size
     }
 }
 
@@ -235,6 +352,8 @@ pub struct EventBusStats {
     pub total_handlers: usize,
     pub event_type_counts: HashMap<String, usize>,
     pub handler_types: Vec<String>,
+    pub memory_usage: usize,
+    pub estimated_tokens: usize,
 }
 
 /// Utility for creating session IDs

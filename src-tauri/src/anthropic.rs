@@ -482,11 +482,11 @@ async fn execute_agent_internal(
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
-    let memory_manager_arc = state.get_memory_manager().await;
+    let mut memory_manager = state.get_memory_manager().await
+        .ok_or("EventMemoryManager not initialized")?;
 
     // Clean up orphaned tool calls before starting
     {
-        let mut memory_manager = memory_manager_arc.lock().await;
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
             warn!("Failed to process clean orphaned tool calls: {}", e);
         }
@@ -641,10 +641,7 @@ async fn execute_agent_internal(
 
             // Create single agent runner with direct tools (no delegation)
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
-                {
-                    let memory_guard = memory_manager_arc.lock().await;
-                    memory_guard.clone()
-                },
+                memory_manager.clone(),
                 single_agent_tool_provider,
                 brain,
                 agent::config::MAX_ITERATIONS,
@@ -790,10 +787,7 @@ async fn execute_agent_internal(
 
             // Create the orchestrator agent runner with delegation-only tools
             let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
-                {
-                    let memory_guard = memory_manager_arc.lock().await;
-                    memory_guard.clone()
-                },
+                memory_manager.clone(),
                 orchestrator_tool_provider,
                 orchestrator_brain,
                 agent::config::MAX_ITERATIONS,
@@ -1322,11 +1316,8 @@ async fn execute_specialized_agent_task(
     // FIXED: Get the orchestrator's memory manager instead of creating a new one
     // This preserves conversation context and fixes the "yes please" cohesion issue
     let state = app_handle.state::<AppState>();
-    let memory_manager_arc = state.get_memory_manager().await;
-    let specialist_memory = {
-        let memory_guard = memory_manager_arc.lock().await;
-        memory_guard.clone()
-    };
+    let specialist_memory = state.get_memory_manager().await
+        .ok_or("EventMemoryManager not initialized")?;
 
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
@@ -1509,8 +1500,8 @@ pub async fn get_tts_audio(
 pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<(), String> {
     info!("Clearing conversation history...");
 
-    let memory_manager_arc = state.get_memory_manager().await;
-    let mut memory_manager = memory_manager_arc.lock().await;
+    let mut memory_manager = state.get_memory_manager().await
+        .ok_or("EventMemoryManager not initialized")?;
 
     match memory_manager.clear_memory().await {
         Ok(()) => {

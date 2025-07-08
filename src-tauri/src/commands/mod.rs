@@ -35,6 +35,7 @@ pub mod keyboard;
 pub mod mcp;
 pub mod memory;
 pub mod mouse;
+pub mod session_management;
 pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
@@ -95,6 +96,7 @@ pub use self::ui_commands::*; // Re-export consolidated UI API commands
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;
+pub use self::session_management::*;
 pub use self::onboarding::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;

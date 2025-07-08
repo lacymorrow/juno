@@ -13,8 +13,8 @@ use std::sync::Arc;
 // Import sound commands for boot sound functionality
 use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
 use crate::constants::events;
-// Import event handlers for registration
-use crate::agent::{UserInputHandler, AgentOrchestrator};
+// Import event system manager for centralized event setup
+use crate::agent::EventSystemManager;
 
 /// Initialize all application state components and background tasks
 pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), String> {
@@ -35,12 +35,19 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     info!("✅ EventBus initialized successfully");
     
-    // Register event handlers
-    if let Err(e) = register_event_handlers(&app_state, app_handle).await {
-        error!("Failed to register event handlers: {}", e);
-        return Err(format!("Event handler registration failed: {}", e));
+    // TARS Phase 3: Initialize EventMemoryManager after EventBus is ready
+    if let Err(e) = app_state.init_memory_manager().await {
+        error!("Failed to initialize EventMemoryManager: {}", e);
+        return Err(format!("EventMemoryManager initialization failed: {}", e));
     }
-    info!("✅ Event handlers registered successfully");
+    info!("✅ EventMemoryManager initialized successfully");
+    
+    // Initialize complete event-driven system with EventSystemManager
+    if let Err(e) = initialize_event_driven_system(&app_state, app_handle).await {
+        error!("Failed to initialize event-driven system: {}", e);
+        return Err(format!("Event-driven system initialization failed: {}", e));
+    }
+    info!("✅ Event-driven system initialized successfully");
 
     // Initialize core state components in parallel
     let (
@@ -636,25 +643,23 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
     Ok(issues)
 }
 
-/// Register event handlers with the EventBus
-async fn register_event_handlers(app_state: &AppState, app_handle: &AppHandle) -> Result<(), String> {
-    info!("Registering event handlers with EventBus...");
+/// Initialize the complete event-driven system using EventSystemManager
+async fn initialize_event_driven_system(app_state: &AppState, app_handle: &AppHandle) -> Result<(), String> {
+    info!("Initializing complete event-driven system...");
     
-    // Get the EventBus
-    let event_bus = app_state.get_event_bus().await?;
+    // Create and initialize the event system manager
+    let event_system_manager = EventSystemManager::new(
+        app_handle.clone(),
+        Arc::new(app_state.clone())
+    ).await?;
     
-    // Register UserInputHandler
-    let user_input_handler = Arc::new(UserInputHandler::new());
-    event_bus.register_handler(user_input_handler).await;
+    // Initialize all event handlers
+    event_system_manager.initialize().await?;
     
-    // Register AgentOrchestrator (now fixed)
-    let agent_orchestrator = Arc::new(AgentOrchestrator::new(
-        Arc::new(app_state.clone()),
-        app_handle.clone()
-    ));
-    event_bus.register_handler(agent_orchestrator).await;
+    // Store the event system manager in app state for future access
+    // (This could be added to AppState if needed for runtime access)
     
-    info!("Event handlers registered successfully");
+    info!("Complete event-driven system initialized successfully");
     Ok(())
 }
 

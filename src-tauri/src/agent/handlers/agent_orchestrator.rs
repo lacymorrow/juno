@@ -6,7 +6,7 @@ use crate::agent::events::{EventHandler, JunoAgentEvent, now};
 use crate::agent::AgentState;
 use crate::agent::core::AgentError;
 use crate::agent::providers::factory::BrainFactory;
-use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
+use crate::agent::EventMemoryManager;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::implementations::agent_runner::DefaultAgentRunner;
 use crate::agent::traits::AgentRunnable;
@@ -170,7 +170,7 @@ impl AgentOrchestrator {
     
     
     /// Create agent components (brain, tool provider, memory manager)
-    async fn create_agent_components(&self) -> Result<(Box<dyn crate::agent::traits::AgentBrain>, LocalToolProvider, AdvancedMemoryManager), String> {
+    async fn create_agent_components(&self) -> Result<(Box<dyn crate::agent::traits::AgentBrain>, LocalToolProvider, EventMemoryManager), String> {
         // Create brain using the factory method
         let brain = BrainFactory::create_brain().await
             .map_err(|e| format!("Failed to create brain: {}", e))?;
@@ -205,11 +205,8 @@ impl AgentOrchestrator {
         }
         
         // Use the shared memory manager from AppState (important for context continuity and pruning)
-        let memory_manager_arc = self.app_state.get_memory_manager().await;
-        let memory_manager = {
-            let manager_guard = memory_manager_arc.lock().await;
-            manager_guard.clone()
-        };
+        let memory_manager = self.app_state.get_memory_manager().await
+            .ok_or("EventMemoryManager not initialized")?;
         
         info!("Successfully created agent components with tools registered");
         Ok((brain, tool_provider, memory_manager))

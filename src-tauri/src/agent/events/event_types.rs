@@ -51,6 +51,11 @@ pub enum JunoAgentEvent {
         timestamp: u64,
         success: bool,
     },
+    ToolCoordinationStart {
+        tool_name: String,
+        tool_call_id: String,
+        timestamp: u64,
+    },
     
     // Agent lifecycle events
     AgentRunStart {
@@ -189,6 +194,7 @@ impl JunoAgentEvent {
             JunoAgentEvent::ToolResult { timestamp: ts, .. } => *ts = timestamp,
             JunoAgentEvent::ToolExecutionStart { timestamp: ts, .. } => *ts = timestamp,
             JunoAgentEvent::ToolExecutionEnd { timestamp: ts, .. } => *ts = timestamp,
+            JunoAgentEvent::ToolCoordinationStart { timestamp: ts, .. } => *ts = timestamp,
             JunoAgentEvent::AgentRunStart { timestamp: ts, .. } => *ts = timestamp,
             JunoAgentEvent::AgentRunEnd { timestamp: ts, .. } => *ts = timestamp,
             JunoAgentEvent::AgentIterationStart { timestamp: ts, .. } => *ts = timestamp,
@@ -247,6 +253,7 @@ impl JunoAgentEvent {
             JunoAgentEvent::ToolResult { .. } => "tool_result",
             JunoAgentEvent::ToolExecutionStart { .. } => "tool_execution_start",
             JunoAgentEvent::ToolExecutionEnd { .. } => "tool_execution_end",
+            JunoAgentEvent::ToolCoordinationStart { .. } => "tool_coordination_start",
             JunoAgentEvent::AgentRunStart { .. } => "agent_run_start",
             JunoAgentEvent::AgentRunEnd { .. } => "agent_run_end",
             JunoAgentEvent::AgentIterationStart { .. } => "agent_iteration_start",
