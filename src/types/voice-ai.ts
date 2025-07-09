@@ -13,8 +13,8 @@ export type AssistantState =
 	| typeof UI.AGENT_STATUS_OFFLINE
 	| typeof UI.AGENT_STATUS_PROCESSING
 	| "speaking"
-	| "success"
 	| "input"
+	| "success"
 	| "response";
 
 export type ContentType = "text" | "code" | "component" | "image" | "video"
