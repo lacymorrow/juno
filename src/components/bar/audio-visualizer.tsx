@@ -9,7 +9,12 @@ export type AppState =
   | typeof UI.AGENT_STATUS_PROCESSING
   | typeof UI.AGENT_STATUS_RESPONDING
   | typeof UI.AGENT_STATUS_ERROR
-  | typeof UI.AGENT_STATUS_FINISHED;
+  | typeof UI.AGENT_STATUS_FINISHED
+  | typeof UI.AGENT_STATUS_DICTATING
+  | typeof UI.AGENT_STATUS_SPEAKING
+  | typeof UI.AGENT_STATUS_INPUT
+  | typeof UI.AGENT_STATUS_SUCCESS
+  | typeof UI.AGENT_STATUS_RESPONSE;
 
 export interface AudioVisualizerProps {
   /** Current application state */
@@ -277,6 +282,11 @@ export default function AudioVisualizer({
         [UI.AGENT_STATUS_RESPONDING]: { r: 34, g: 197, b: 94 },
         [UI.AGENT_STATUS_ERROR]: { r: 239, g: 68, b: 68 },
         [UI.AGENT_STATUS_FINISHED]: { r: 16, g: 185, b: 129 },
+        [UI.AGENT_STATUS_DICTATING]: { r: 255, g: 165, b: 0 },
+        [UI.AGENT_STATUS_SPEAKING]: { r: 34, g: 197, b: 94 },
+        [UI.AGENT_STATUS_INPUT]: { r: 100, g: 116, b: 139 },
+        [UI.AGENT_STATUS_SUCCESS]: { r: 16, g: 185, b: 129 },
+        [UI.AGENT_STATUS_RESPONSE]: { r: 34, g: 197, b: 94 },
       };
 
       const defaultColors = {
@@ -286,6 +296,11 @@ export default function AudioVisualizer({
         responding: { r: 34, g: 197, b: 94 },
         error: { r: 239, g: 68, b: 68 },
         finished: { r: 16, g: 185, b: 129 },
+        dictating: { r: 255, g: 165, b: 0 },
+        speaking: { r: 34, g: 197, b: 94 },
+        input: { r: 100, g: 116, b: 139 },
+        success: { r: 16, g: 185, b: 129 },
+        response: { r: 34, g: 197, b: 94 },
       };
 
       const color =
@@ -574,6 +589,11 @@ export default function AudioVisualizer({
         [UI.AGENT_STATUS_RESPONDING]: 600,
         [UI.AGENT_STATUS_ERROR]: 400,
         [UI.AGENT_STATUS_FINISHED]: 1000,
+        [UI.AGENT_STATUS_DICTATING]: 700,
+        [UI.AGENT_STATUS_SPEAKING]: 600,
+        [UI.AGENT_STATUS_INPUT]: 900,
+        [UI.AGENT_STATUS_SUCCESS]: 1000,
+        [UI.AGENT_STATUS_RESPONSE]: 600,
       };
 
       const defaultSpeeds = {
@@ -583,6 +603,11 @@ export default function AudioVisualizer({
         responding: 600,
         error: 400,
         finished: 1000,
+        dictating: 700,
+        speaking: 600,
+        input: 900,
+        success: 1000,
+        response: 600,
       };
 
       const fromSpeed =
