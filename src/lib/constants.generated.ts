@@ -989,7 +989,7 @@ export const FILE_EXTENSIONS = {
   AGENT_LOG_FILE: 'agent_activity.log',
   CONVERSATION_CACHE_FILE: 'conversation_cache.json',
   WORKSPACE_CONFIG_FILE: '.workspace_config.json',
-  APP_NAME: 'app_name',
+  APP_NAME_PARAM: 'app_name',
 } as const;
 
 export const PERMISSION_TYPES = {
