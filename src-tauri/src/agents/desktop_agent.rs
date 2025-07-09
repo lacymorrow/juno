@@ -178,10 +178,17 @@ impl DesktopAgent {
                     commands::core::capture_screenshot_command(self.app_handle.clone()).await;
 
                 match result {
-                    Ok(screenshot_data) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output: serde_json::json!({"success": true, "action": "screenshot", "data": screenshot_data}),
-                    }),
+                    Ok(screenshot_result) => {
+                        // The result is now a struct, which will be serialized into the output JSON
+                        Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output: serde_json::json!({
+                                "success": true,
+                                "action": "screenshot",
+                                "data": screenshot_result
+                            }),
+                        })
+                    }
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }

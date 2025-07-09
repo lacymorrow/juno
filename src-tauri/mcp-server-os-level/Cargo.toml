@@ -61,5 +61,5 @@ windows = { version = "0.52", features = [
 # name = "server"
 # path = "src/bin/main.rs"
 
-[features]
-cargo-clippy = []
+# [features]
+# cargo-clippy feature is no longer needed in modern Rust

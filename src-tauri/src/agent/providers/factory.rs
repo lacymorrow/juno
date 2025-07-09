@@ -803,6 +803,13 @@ impl BrainFactory {
         )
         .await;
 
+        // Register display information tools for screen resolution and display info (per-provider instance)
+        crate::agent::tools::display_info_tools::register_display_info_tools(
+            provider,
+            app_handle.clone(),
+        )
+        .await?;
+
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 

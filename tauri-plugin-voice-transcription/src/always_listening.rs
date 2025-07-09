@@ -1247,6 +1247,7 @@ impl AlwaysListeningController {
         }
     }
 
+    #[allow(dead_code)] // Method for future audio input status checking
     pub(crate) async fn get_audio_input_status<R: Runtime>(
         &self,
         _app_handle: &AppHandle<R>,

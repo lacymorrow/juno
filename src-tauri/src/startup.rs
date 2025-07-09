@@ -13,6 +13,10 @@ use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
+use crate::agent::providers::factory::BrainFactory;
+// Remove unused import: use crate::constants::timeouts;
+use crate::state::AppState;
+use crate::cli::headless::HeadlessRuntime;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -238,7 +242,7 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
 /// Handle headless CLI operations
 async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     use crate::cli::headless::HeadlessRuntime;
-    
+
 
     // Create minimal Tauri app for CLI operations if needed
     let app_handle = create_minimal_tauri_app().await?;
