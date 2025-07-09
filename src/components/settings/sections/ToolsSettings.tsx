@@ -19,6 +19,9 @@ import { SettingsSectionProps } from "../types";
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
   const [toolApprovalLoading, setToolApprovalLoading] = useState(false);
+  const [smoothMouseMovement, setSmoothMouseMovement] = useState(false);
+  const [smoothMouseMovementLoading, setSmoothMouseMovementLoading] =
+    useState(false);
 
   // Load tool approval setting on mount
   useEffect(() => {
@@ -33,13 +36,30 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     loadToolApprovalSetting();
   }, []);
 
+  // Load smooth mouse movement setting on mount
+  useEffect(() => {
+    const loadSmoothMouseMovementSetting = async () => {
+      try {
+        const enabled = await invoke<boolean>(
+          "get_smooth_mouse_movement_setting"
+        );
+        setSmoothMouseMovement(enabled);
+      } catch (error) {
+        console.error("Failed to load smooth mouse movement setting:", error);
+      }
+    };
+    loadSmoothMouseMovementSetting();
+  }, []);
+
   const handleToggleToolApproval = async (required: boolean) => {
     setToolApprovalLoading(true);
     try {
       await invoke("set_tool_approval_required", { required });
       setToolApprovalRequired(required);
       toast.success(
-        `Tool approval ${required ? "enabled" : "disabled"}${required ? " - You will be asked to approve each tool execution" : ""}`
+        `Tool approval ${required ? "enabled" : "disabled"}${
+          required ? " - You will be asked to approve each tool execution" : ""
+        }`
       );
     } catch (error) {
       console.error("Failed to toggle tool approval:", error);
@@ -49,7 +69,23 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-    const handleToggleCategory = async (
+  const handleToggleSmoothMouseMovement = async (enabled: boolean) => {
+    setSmoothMouseMovementLoading(true);
+    try {
+      await invoke("set_smooth_mouse_movement_setting", { enabled });
+      setSmoothMouseMovement(enabled);
+      toast.success(
+        `Smooth mouse movement ${enabled ? "enabled" : "disabled"}`
+      );
+    } catch (error) {
+      console.error("Failed to toggle smooth mouse movement:", error);
+      toast.error("Failed to toggle smooth mouse movement setting");
+    } finally {
+      setSmoothMouseMovementLoading(false);
+    }
+  };
+
+  const handleToggleCategory = async (
     categoryName: string,
     enabled: boolean
   ) => {
@@ -69,7 +105,10 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
     try {
       // Backend now uses enum format consistently, so categoryName is already correct
-      await invoke("set_tool_category_enabled", { category: categoryName, enabled });
+      await invoke("set_tool_category_enabled", {
+        category: categoryName,
+        enabled,
+      });
       // Invalidate cache for future loads but don't reload now
       settings.invalidateToolConfigCache();
       toast.success(
@@ -88,13 +127,15 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     const updatedConfigs = { ...settings.toolConfigurations };
     for (const categoryKey in updatedConfigs) {
       const category = updatedConfigs[categoryKey];
-      const toolIndex = category.tools.findIndex(tool => tool.name === toolName);
+      const toolIndex = category.tools.findIndex(
+        (tool) => tool.name === toolName
+      );
       if (toolIndex !== -1) {
         updatedConfigs[categoryKey] = {
           ...category,
           tools: category.tools.map((tool, index) =>
             index === toolIndex ? { ...tool, enabled } : tool
-          )
+          ),
         };
         break;
       }
@@ -142,7 +183,8 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
               Tool Approval
             </CardTitle>
             <CardDescription>
-              Control whether the agent requires your approval before executing tools
+              Control whether the agent requires your approval before executing
+              tools
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -167,13 +209,57 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                   <div className="text-sm text-amber-800">
                     <div className="font-medium">Approval Required Mode</div>
                     <div className="mt-1">
-                      The agent will pause before executing any tool and show you an approval dialog.
-                      This provides maximum control but may slow down agent operations.
+                      The agent will pause before executing any tool and show
+                      you an approval dialog. This provides maximum control but
+                      may slow down agent operations.
                     </div>
                   </div>
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Smooth Mouse Movement Setting */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="lucide lucide-mouse-pointer-2"
+              >
+                <path d="m4 4 7.07 17 2.51-7.39L17 11.07 4 4z" />
+                <path d="m13 13 6 6" />
+              </svg>
+              Smooth Mouse Movement
+            </CardTitle>
+            <CardDescription>
+              Enable or disable smooth mouse movement for computer actions.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <div className="font-medium">Enable Smooth Mouse Movement</div>
+                <div className="text-sm text-gray-500">
+                  When enabled, mouse movements will be animated for better
+                  visual feedback.
+                </div>
+              </div>
+              <Switch
+                checked={smoothMouseMovement}
+                disabled={smoothMouseMovementLoading}
+                onCheckedChange={handleToggleSmoothMouseMovement}
+              />
+            </div>
           </CardContent>
         </Card>
 

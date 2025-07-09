@@ -32,6 +32,20 @@ pub trait MemoryManager: Send + Sync {
         Ok(0) // Default no-op implementation returns 0 cleaned items
     }
 
+    /// Sets the current execution ID to distinguish between different agent executions.
+    /// This helps prevent cleaning up tool calls that belong to the current execution.
+    /// Default implementation does nothing (for backward compatibility).
+    async fn set_current_execution_id(&mut self, _execution_id: &str) -> Result<(), AgentError> {
+        Ok(()) // Default no-op implementation
+    }
+
+    /// Removes orphaned tool calls only from previous executions, not from the current one.
+    /// This allows safe cleanup without affecting tools currently in progress.
+    /// Default implementation falls back to the regular clean_orphaned_tool_calls method.
+    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+        self.clean_orphaned_tool_calls().await // Default implementation calls the regular method
+    }
+
     // Potential future additions:
     // async fn summarize_memory(&self) -> Result<String, AgentError>;
     // async fn prune_memory(&mut self, max_tokens: usize) -> Result<(), AgentError>;

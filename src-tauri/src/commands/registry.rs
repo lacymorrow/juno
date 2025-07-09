@@ -17,6 +17,7 @@ macro_rules! generate_invoke_handler {
             // === AI AGENT COMMANDS ===
             submit_query,
             submit_orchestrated_query,
+            computer,
 
             // === ANTHROPIC COMPUTER USE TOOLS (OFFICIAL API) ===
             // All mouse, keyboard, and screen interaction now handled by:
@@ -231,6 +232,7 @@ pub mod categories {
     pub const AGENT: &[&str] = &[
         "submit_query",
         "submit_orchestrated_query",
+        "computer",
         "get_orchestrator_status",
         "configure_orchestrator",
         "create_orchestrator_task",
