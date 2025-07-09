@@ -39,7 +39,7 @@ pub struct CommandResult {
     pub data: Option<String>,
     pub error: Option<String>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
-    pub screenshot_base64: Option<String>,
+    pub screenshot_data: Option<serde_json::Value>,
 }
 
 /// Cloud command processor
@@ -86,7 +86,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|data| ResponseData {
                     text: Some(data),
                     audio_base64: None,
-                    screenshot_base64: None,
+                    screenshot_data: None,
                     agent_state: Some("completed".to_string()),
                     progress: Some(1.0),
                     metadata: None,
@@ -99,7 +99,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|data| ResponseData {
                     text: Some(data),
                     audio_base64: None,
-                    screenshot_base64: None,
+                    screenshot_data: None,
                     agent_state: Some("completed".to_string()),
                     progress: Some(1.0),
                     metadata: None,
@@ -112,7 +112,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|command_result| ResponseData {
                     text: command_result.data,
                     audio_base64: None,
-                    screenshot_base64: command_result.screenshot_base64,
+                    screenshot_data: command_result.screenshot_data,
                     agent_state: Some("completed".to_string()),
                     progress: Some(1.0),
                     metadata: command_result.metadata,
@@ -125,7 +125,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|r| ResponseData {
                     text: r.data,
                     audio_base64: None,
-                    screenshot_base64: r.screenshot_base64,
+                    screenshot_data: r.screenshot_data,
                     agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
                     progress: Some(if r.success { 1.0 } else { 0.0 }),
                     metadata: r.metadata,
@@ -138,7 +138,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|r| ResponseData {
                     text: r.data,
                     audio_base64: None,
-                    screenshot_base64: r.screenshot_base64,
+                    screenshot_data: r.screenshot_data,
                     agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
                     progress: Some(if r.success { 1.0 } else { 0.0 }),
                     metadata: r.metadata,
@@ -151,7 +151,7 @@ impl CloudCommandProcessor {
                 let response_data = execution_result.map(|r| ResponseData {
                     text: r.data,
                     audio_base64: None,
-                    screenshot_base64: r.screenshot_base64,
+                    screenshot_data: r.screenshot_data,
                     agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
                     progress: Some(if r.success { 1.0 } else { 0.0 }),
                     metadata: r.metadata,
@@ -167,7 +167,7 @@ impl CloudCommandProcessor {
             data: response_data.clone().unwrap_or_else(|_| ResponseData {
                 text: None,
                 audio_base64: None,
-                screenshot_base64: None,
+                screenshot_data: None,
                 agent_state: Some("error".to_string()),
                 progress: None,
                 metadata: None,
@@ -197,7 +197,7 @@ impl CloudCommandProcessor {
                     data: Some(result),
                     error: None,
                     metadata: None,
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             CloudCommandType::VoiceQuery => {
@@ -207,7 +207,7 @@ impl CloudCommandProcessor {
                     data: Some(result),
                     error: None,
                     metadata: None,
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             CloudCommandType::SystemCommand => self.execute_system_command(command).await,
@@ -422,7 +422,7 @@ impl CloudCommandProcessor {
                         metadata.insert("coordinates".to_string(), serde_json::json!({"x": x, "y": y}));
                         metadata
                     }),
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             Err(e) => {
@@ -451,7 +451,7 @@ impl CloudCommandProcessor {
                         metadata.insert("length".to_string(), serde_json::json!(text.len()));
                         metadata
                     }),
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             Err(e) => {
@@ -479,7 +479,7 @@ impl CloudCommandProcessor {
                         metadata.insert("key".to_string(), serde_json::json!(key));
                         metadata
                     }),
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             Err(e) => {
@@ -519,7 +519,7 @@ impl CloudCommandProcessor {
                         metadata.insert("command_success".to_string(), serde_json::json!(command_success));
                         metadata
                     }),
-                    screenshot_base64: None,
+                    screenshot_data: None,
                 })
             },
             Err(e) => {
@@ -537,7 +537,7 @@ impl CloudCommandProcessor {
             data: Some(serde_json::to_string(&system_info).unwrap_or_default()),
             error: None,
             metadata: None,
-            screenshot_base64: None,
+            screenshot_data: None,
         })
     }
 
@@ -546,14 +546,16 @@ impl CloudCommandProcessor {
         info!("Capturing screenshot for cloud");
 
         // Use existing screenshot functionality
-        match crate::commands::capture_screenshot_command(self.app_handle.clone()).await {
-            Ok(screenshot_data) => {
+        match crate::commands::core::capture_screenshot_command(self.app_handle.clone()).await {
+            Ok(screenshot_result) => {
+                let screenshot_json = serde_json::to_value(&screenshot_result)
+                    .map_err(|e| CloudError::SerializationError(format!("Failed to serialize screenshot result: {}", e)))?;
                 Ok(CommandResult {
                     success: true,
                     data: None,
                     error: None,
                     metadata: None,
-                    screenshot_base64: Some(screenshot_data),
+                    screenshot_data: Some(screenshot_json),
                 })
             },
             Err(e) => {
@@ -576,7 +578,7 @@ impl CloudCommandProcessor {
                 data: Some("Configuration updated successfully".to_string()),
                 error: None,
                 metadata: None,
-                screenshot_base64: None,
+                screenshot_data: None,
             })
         } else {
             Err(CloudError::ValidationFailed("Missing configuration data".to_string()))

@@ -116,6 +116,7 @@ async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(dead_code)] // Used via Tauri frontend
 pub(crate) async fn window_relative_click(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -198,6 +199,7 @@ pub(crate) async fn window_relative_click(
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(dead_code)] // Used via Tauri frontend
 pub(crate) async fn focused_window_relative_click(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -403,7 +405,20 @@ pub(crate) async fn mouse_move(
     }
 
     // Check if smooth mouse movement is enabled
-    let use_smooth_movement = state.get_smooth_mouse_movement().unwrap_or(false);
+    let use_smooth_movement = {
+        // Try to get from centralized settings first
+        if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
+            if let Ok(tool_settings) = settings_manager.get_tool_settings().await {
+                tool_settings.smooth_mouse_movement
+            } else {
+                // Fallback to runtime state
+                state.get_smooth_mouse_movement().unwrap_or(false)
+            }
+        } else {
+            // Fallback to runtime state
+            state.get_smooth_mouse_movement().unwrap_or(false)
+        }
+    };
 
     if use_smooth_movement {
         log_debug_operation("mouse_move", &format!("Moving mouse smoothly to ({}, {})", x, y), &debug_config);
@@ -806,17 +821,43 @@ pub(crate) async fn get_cursor_position(
 
 #[tauri::command]
 pub(crate) async fn get_smooth_mouse_movement_setting(
+    app: AppHandle,
     state: State<'_, AppState>
 ) -> Result<bool, String> {
+    // Try to get from centralized settings first
+    if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
+        if let Ok(tool_settings) = settings_manager.get_tool_settings().await {
+            // Update runtime state to match centralized settings
+            let _ = state.set_smooth_mouse_movement(tool_settings.smooth_mouse_movement);
+            return Ok(tool_settings.smooth_mouse_movement);
+        }
+    }
+
+    // Fallback to runtime state
     state.get_smooth_mouse_movement()
 }
 
 #[tauri::command]
 pub(crate) async fn set_smooth_mouse_movement_setting(
+    app: AppHandle,
     state: State<'_, AppState>,
     enabled: bool
 ) -> Result<(), String> {
-    state.set_smooth_mouse_movement(enabled)
+    // Update runtime state first
+    state.set_smooth_mouse_movement(enabled)?;
+
+    // Update centralized settings
+    if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
+        if let Ok(mut tool_settings) = settings_manager.get_tool_settings().await {
+            tool_settings.smooth_mouse_movement = enabled;
+            if let Err(e) = settings_manager.set_tool_settings(&tool_settings).await {
+                tracing::warn!("Failed to persist smooth mouse movement setting: {}", e);
+                // Don't fail the operation if persistence fails
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // Window-relative click functions removed due to missing DesktopWrapper functionality

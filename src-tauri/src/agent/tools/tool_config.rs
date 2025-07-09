@@ -313,6 +313,7 @@ impl ToolConfigManager {
             tools,
             category_enabled,
             mcp_servers,
+            smooth_mouse_movement: false, // Default to false for new installations
         })
     }
 

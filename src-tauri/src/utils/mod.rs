@@ -381,6 +381,8 @@ pub struct SystemContext {
     pub selected_text: Option<String>,
     pub hardware_info: Option<HardwareInfo>,
     pub voice_audio_state: Option<VoiceAudioState>,
+    // NEW: Display information for agent context
+    pub display_info: Option<DisplayInfo>,
 }
 
 /// Information about the currently focused window
@@ -459,6 +461,131 @@ pub struct VoiceAudioState {
     pub error_message: Option<String>,
 }
 
+/// Display information for agent context
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DisplayInfo {
+    pub main_display: Option<MainDisplayInfo>,
+    pub all_displays: Vec<DisplayDetails>,
+    pub center_point: Option<(i32, i32)>,
+    pub standard_resolution: Option<(u32, u32)>,
+}
+
+/// Main display information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MainDisplayInfo {
+    pub bounds: DisplayBounds,
+    pub resolution: (u32, u32),
+    pub is_main: bool,
+}
+
+/// Display bounds information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DisplayBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Individual display details
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DisplayDetails {
+    pub id: u32,
+    pub bounds: DisplayBounds,
+    pub resolution: (u32, u32),
+    pub is_main: bool,
+}
+
+/// Safely get display information for context
+async fn get_display_info_safe() -> Option<DisplayInfo> {
+    #[cfg(target_os = "macos")]
+    {
+        use computer_use_ai_sdk::platforms::macos::display::{get_main_display, get_active_displays};
+        use crate::utils::coordinates::get_current_standard_resolution;
+
+        let main_display = match get_main_display() {
+            Ok(display) => {
+                let main_info = MainDisplayInfo {
+                    bounds: DisplayBounds {
+                        x: display.bounds.origin.x as i32,
+                        y: display.bounds.origin.y as i32,
+                        width: display.bounds.size.width as u32,
+                        height: display.bounds.size.height as u32,
+                    },
+                    resolution: (display.bounds.size.width as u32, display.bounds.size.height as u32),
+                    is_main: true,
+                };
+                Some(main_info)
+            }
+            Err(e) => {
+                log::debug!("Could not get main display info: {}", e);
+                None
+            }
+        };
+
+        let all_displays = match get_active_displays() {
+            Ok(displays) => {
+                displays
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, display)| DisplayDetails {
+                        id: i as u32,
+                        bounds: DisplayBounds {
+                            x: display.bounds.origin.x as i32,
+                            y: display.bounds.origin.y as i32,
+                            width: display.bounds.size.width as u32,
+                            height: display.bounds.size.height as u32,
+                        },
+                        resolution: (display.bounds.size.width as u32, display.bounds.size.height as u32),
+                        is_main: i == 0, // First display is typically the main one
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                log::debug!("Could not get active displays: {}", e);
+                vec![]
+            }
+        };
+
+        // Calculate center point based on main display or first display
+        let center_point = if let Some(ref main) = main_display {
+            Some((
+                main.bounds.x + (main.bounds.width as i32) / 2,
+                main.bounds.y + (main.bounds.height as i32) / 2,
+            ))
+        } else if !all_displays.is_empty() {
+            let first_display = &all_displays[0];
+            Some((
+                first_display.bounds.x + (first_display.bounds.width as i32) / 2,
+                first_display.bounds.y + (first_display.bounds.height as i32) / 2,
+            ))
+        } else {
+            None
+        };
+
+        // Get standard resolution for coordinate system compatibility
+        let standard_resolution = match get_current_standard_resolution() {
+            Ok((width, height)) => Some((width, height)),
+            Err(e) => {
+                log::debug!("Could not get standard resolution: {}", e);
+                None
+            }
+        };
+
+        Some(DisplayInfo {
+            main_display,
+            all_displays,
+            center_point,
+            standard_resolution,
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 /// Gather comprehensive system context for agent initialization
 pub async fn gather_system_context(
     app_state: Option<&crate::state::AppState>,
@@ -493,6 +620,9 @@ pub async fn gather_system_context(
     let hardware_info = get_hardware_info_safe().await;
     let voice_audio_state = get_voice_audio_state_safe(app_state).await;
 
+    // Get display information
+    let display_info = get_display_info_safe().await;
+
     Ok(SystemContext {
         current_time,
         current_timestamp,
@@ -509,6 +639,7 @@ pub async fn gather_system_context(
         selected_text,
         hardware_info,
         voice_audio_state,
+        display_info,
     })
 }
 
@@ -1533,18 +1664,35 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
     }
 
-    // FIXED: Provide standard resolution instead of actual display resolution
-    // This ensures agent coordinates match the screenshot coordinate space
-    if let Some((_width, _height)) = context.system_info.screen_resolution {
-        // Get the standard resolution that screenshots are scaled to
-        use crate::utils::coordinates::get_current_standard_resolution;
-        match get_current_standard_resolution() {
-            Ok((standard_width, standard_height)) => {
-                context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
-            }
-            Err(_) => {
-                // Fallback to a common standard resolution if we can't get the current one
-                context_parts.push("Screen resolution: 1366×768".to_string());
+    // Display information from the display_info field
+    if let Some(ref display_info) = context.display_info {
+        // Use standard resolution if available, otherwise use main display resolution
+        if let Some((width, height)) = display_info.standard_resolution {
+            context_parts.push(format!("Screen resolution: {}×{}", width, height));
+        } else if let Some(ref main_display) = display_info.main_display {
+            context_parts.push(format!("Screen resolution: {}×{}", main_display.resolution.0, main_display.resolution.1));
+        }
+
+        // Add center point information - this is key for the agent to know where to click
+        if let Some((center_x, center_y)) = display_info.center_point {
+            context_parts.push(format!("Screen center point: ({}, {})", center_x, center_y));
+        }
+
+        // Add display count for multi-monitor awareness
+        if display_info.all_displays.len() > 1 {
+            context_parts.push(format!("Multiple displays detected: {} displays", display_info.all_displays.len()));
+        }
+    } else {
+        // Fallback to the old method if display_info is not available
+        if let Some((_width, _height)) = context.system_info.screen_resolution {
+            // Get the standard resolution that screenshots are scaled to
+            use crate::utils::coordinates::get_current_standard_resolution;
+            match get_current_standard_resolution() {
+                Ok((standard_width, standard_height)) => {
+                    context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
+                }
+                Err(_) => {
+                }
             }
         }
     }
