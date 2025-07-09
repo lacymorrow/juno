@@ -28,7 +28,7 @@ use crate::utils::permission_validator::{validate_permission, RequiredPermission
 use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::{info, warn};
- // Add window for scroll command
+// Window commands accessed via state.app_handle // Add window for scroll command
 use std::sync::Arc;
 
 use tokio;
@@ -201,18 +201,23 @@ pub async fn register_desktop_tools(
                 return Err(e.to_string());
             }
 
-            let block_result: Result<String, String> = tokio::task::block_in_place(|| {
+            // The command now returns a ScreenshotResult struct
+            let block_result: Result<commands::core::ScreenshotResult, String> = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    crate::capture_screenshot_command(app_handle.clone()).await // Clone app_handle for the inner async block
+                    commands::core::capture_screenshot_command(app_handle.clone()).await // Clone app_handle for the inner async block
                 })
             });
 
-            // Handle error from capture_screenshot_command (and map its format if desired)
-            let base64_string: String =
+            // Handle error from capture_screenshot_command
+            let screenshot_result =
                 block_result.map_err(|e| format!("Error from screenshot command: {}", e))?;
 
-            Ok(Value::String(base64_string)) // Return as Value::String
+            // Convert the result struct to a serde_json::Value
+            let result_value = serde_json::to_value(screenshot_result)
+                .map_err(|e| format!("Failed to serialize screenshot result: {}", e))?;
+
+            Ok(result_value)
          }
     };
     provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;

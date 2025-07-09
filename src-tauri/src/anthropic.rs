@@ -188,13 +188,12 @@ pub(crate) struct AnthropicContentBlock {
 }
 
 // Keep this for payload structure, ensure Clone is derived
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
     pub audio_base64: Option<String>,
     pub agent_state: String,               // Send final state to frontend
-    pub screenshot_base64: Option<String>, // Optional screenshot data from the session
+    pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
 }
 
 // Note: BackendResponsePayload removed as we now use streaming events only
@@ -865,7 +864,7 @@ async fn execute_agent_internal(
                 spoken_text: None, // TTS content is now handled during streaming via XML tags
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
-                screenshot_base64: None, // Capture screenshot if needed
+                screenshot_data: None, // Capture screenshot if needed
             }
         }
         Err(e) => {
@@ -957,7 +956,7 @@ async fn execute_agent_internal(
                 spoken_text: None,  // Error messages use same content for speech
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
-                screenshot_base64: None,
+                screenshot_data: None,
             };
 
             // Store the original provider to restore later if needed

@@ -81,7 +81,7 @@ pub(crate) fn macos_role_to_generic_role(role: &str) -> Vec<String> {
     }
 }
 // Helper function to get PIDs of running applications using NSWorkspace
-#[allow(clippy::unexpected_cfg_condition)]
+// #[allow(clippy::unexpected_cfg_condition)] // Removed: deprecated cfg condition
 pub(crate) fn get_running_application_pids(
     use_background_apps: bool,
 ) -> Result<Vec<i32>, AutomationError> {

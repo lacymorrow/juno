@@ -396,13 +396,16 @@ pub async fn execute_computer_tool(
                 "computer (screenshot)"
             ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
-            let screenshot_path = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
+            let screenshot_result = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
                 app_handle.clone(),
             ).await.map_err(|e| format!("Screenshot failed: {}", e)));
 
-            Ok::<Value, String>(json!({
-                "base64_image": screenshot_path
-            }))
+            // The result is a struct with the screenshot data and dimensions.
+            // Serialize it to a JSON value to return to the agent.
+            match serde_json::to_value(screenshot_result) {
+                Ok(value) => Ok::<Value, String>(value),
+                Err(e) => Ok::<Value, String>(create_anthropic_error_response(format!("Failed to serialize screenshot data: {}", e)))
+            }
         }
         "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
         "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {

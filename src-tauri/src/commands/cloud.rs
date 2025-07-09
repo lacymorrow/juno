@@ -584,7 +584,7 @@ pub async fn send_test_cloud_command(
         data: crate::cloud::types::ResponseData {
             text: Some("Mock response - cloud connector not available".to_string()),
             audio_base64: None,
-            screenshot_base64: None,
+            screenshot_data: None,
             agent_state: None,
             progress: None,
             metadata: None,

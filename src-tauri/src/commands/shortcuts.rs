@@ -382,6 +382,7 @@ pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), 
 }
 
 /// Get current escape key registration status (for debugging)
+#[allow(dead_code)] // Internal helper function for escape key management
 fn get_escape_key_status_internal() -> (bool, u32) {
     use std::sync::atomic::Ordering;
     (
