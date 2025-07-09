@@ -7,16 +7,12 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::{Arc, Mutex, LazyLock};
-use tauri::{AppHandle, Builder, App, Manager, State};
+use tauri::{AppHandle, Manager};
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
-use crate::agent::providers::factory::BrainFactory;
-use crate::constants::timeouts;
-use crate::state::AppState;
-use crate::cli::headless::HeadlessRuntime;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {

@@ -655,7 +655,7 @@ if (element) {{
     }
 }
 
-/// Global Safari tools instance (thread-safe)
+// Global Safari tools instance (thread-safe)
 lazy_static::lazy_static! {
     static ref SAFARI_TOOLS: SafariTools = SafariTools::new();
 }

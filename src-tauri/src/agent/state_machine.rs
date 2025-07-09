@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use std::collections::HashMap;
 
 /// Represents the current state of an agent execution

@@ -6,7 +6,7 @@
 //! TARS Integration Phase 1.6-1.8: Event System Coordination
 
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::agent::events::EventBus;
 use crate::agent::handlers::{UserInputHandler, AgentOrchestrator};

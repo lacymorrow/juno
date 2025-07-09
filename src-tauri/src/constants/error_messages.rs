@@ -31,7 +31,7 @@ pub mod patterns {
 }
 
 // Standard error messages for user display
-pub mod user_messages {
+pub mod user_error_messages {
     // Permission error messages
     pub const ACCESSIBILITY_PERMISSION_REQUIRED: &str =
         "Accessibility permission is required for this operation";

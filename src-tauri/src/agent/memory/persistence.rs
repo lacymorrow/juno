@@ -7,15 +7,13 @@
 //! - Compression and deduplication for efficient storage
 //! - Thread-safe operations with atomic writes
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+use tracing::{debug, info, warn};
 
 use crate::agent::events::JunoAgentEvent;
 use crate::agent::core::AgentError;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use async_trait::async_trait;
-use tracing::{error, info, warn, debug};
+use tracing::{error, info, warn};
 
 use crate::agent::events::{EventHandler, JunoAgentEvent, now};
 use crate::agent::AgentState;

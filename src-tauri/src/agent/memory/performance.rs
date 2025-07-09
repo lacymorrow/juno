@@ -14,11 +14,10 @@ use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Semaphore, Mutex as TokioMutex};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::events::JunoAgentEvent;
-use crate::agent::core::{AgentError, Message};
+use crate::agent::core::AgentError;
 
 /// Configuration for performance optimizations
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1322,7 +1322,7 @@ async fn execute_specialized_agent_task(
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
 
-    /// ERROR: CLEARS TOOLS BEFORE THEY FINISH
+    // ERROR: CLEARS TOOLS BEFORE THEY FINISH
     // let mut cloned_memory = specialist_memory;
     // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
     //     warn!(
