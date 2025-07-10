@@ -27,7 +27,7 @@ import {
   useDynamicIslandSize,
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import tauriConfig from "#/tauri.conf.json";
+import tauriConfig from "../../../src-tauri/tauri.conf.json";
 
 // === STANDARDIZED UI API TYPES ===
 
