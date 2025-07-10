@@ -1,26 +1,19 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useCallback } from "react"
-import { invoke } from "@tauri-apps/api/core"
-import { listen } from "@tauri-apps/api/event"
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window"
-import {
-  Brain,
-  Mic,
-  Volume2,
-  AlertCircle,
-  Check,
-  Loader2,
-} from "lucide-react"
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { Brain, Mic, Volume2, AlertCircle, Check, Loader2 } from "lucide-react";
 
 import {
   DynamicIsland,
   DynamicIslandProvider,
   useDynamicIslandSize,
   type SizePresets,
-} from "@/components/ui/dynamic-island"
-import { EVENTS, UI } from "@/lib/constants.generated"
-import tauriConfig from "../../../src-tauri/tauri.conf.json"
+} from "@/components/ui/dynamic-island";
+import { EVENTS, UI } from "@/lib/constants.generated";
+import tauriConfig from "../../../src-tauri/tauri.conf.json";
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -162,7 +155,7 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
       <div className="flex items-center justify-center h-full w-full">
         <Loader2 className="animate-spin h-6 w-6 text-blue-400" />
       </div>
-    )
+    );
   }
 
   if (widget.error) {
@@ -173,26 +166,26 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
           <div className="text-gray-400 text-xs">{widget.error}</div>
         </div>
       </div>
-    )
+    );
   }
 
   const getWidgetIcon = () => {
     switch (widget.content.icon) {
       case "mic":
-        return <Mic className="w-4 h-4 text-blue-400" />
+        return <Mic className="w-4 h-4 text-blue-400" />;
       case "volume":
-        return <Volume2 className="w-4 h-4 text-green-400" />
+        return <Volume2 className="w-4 h-4 text-green-400" />;
       case "loader":
-        return <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+        return <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />;
       case "alert":
-        return <AlertCircle className="w-4 h-4 text-red-400" />
+        return <AlertCircle className="w-4 h-4 text-red-400" />;
       case "check":
-        return <Check className="w-4 h-4 text-green-400" />
+        return <Check className="w-4 h-4 text-green-400" />;
       case "brain":
       default:
-        return <Brain className="w-4 h-4 text-white" />
+        return <Brain className="w-4 h-4 text-white" />;
     }
-  }
+  };
 
   return (
     <div className="flex items-center justify-center h-full w-full px-4 py-2">
@@ -203,11 +196,11 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
         </span>
       </div>
     </div>
-  )
-}
+  );
+};
 
 const AIFloatingChatbot = () => {
-  const { state: blobState, setSize } = useDynamicIslandSize()
+  const { setSize } = useDynamicIslandSize();
 
   // === STATE MANAGEMENT ===
 
@@ -230,7 +223,9 @@ const AIFloatingChatbot = () => {
     agentState: null,
   });
 
-  const [currentWidgetData, setCurrentWidgetData] = useState<WidgetData>(MOCK_WIDGETS.idle)
+  const [currentWidgetData, setCurrentWidgetData] = useState<WidgetData>(
+    MOCK_WIDGETS.idle
+  );
 
   // === WINDOW CONFIGURATION ===
 
@@ -259,10 +254,7 @@ const AIFloatingChatbot = () => {
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
-            console.log(
-              "📨 DynamicBar: Received state update:",
-              event.payload
-            );
+            console.log("📨 DynamicBar: Received state update:", event.payload);
 
             // Validate the received data structure
             const payload = event.payload;
@@ -416,7 +408,7 @@ const AIFloatingChatbot = () => {
         const interaction = createInteraction(UI.INTERACTION_TYPES_ESCAPE);
         sendInteraction(interaction);
       }
-      
+
       // Handle Enter key for quick actions
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         const interaction = createInteraction(UI.INTERACTION_TYPES_ENTER);
@@ -435,19 +427,21 @@ const AIFloatingChatbot = () => {
   }, [barState.barState]);
 
   const renderCurrentWidget = () => {
-    return <WidgetRenderer widget={currentWidgetData} />
-  }
+    return <WidgetRenderer widget={currentWidgetData} />;
+  };
 
   return (
     <div className="h-full w-full relative">
       <div className="flex items-center justify-center h-full">
         <div onClick={handleIslandClick} className="cursor-pointer">
-          <DynamicIsland id="ai-chatbot-panel">{renderCurrentWidget()}</DynamicIsland>
+          <DynamicIsland id="ai-chatbot-panel">
+            {renderCurrentWidget()}
+          </DynamicIsland>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 export function DynamicIslandDemo() {
   return (
@@ -456,6 +450,5 @@ export function DynamicIslandDemo() {
         <AIFloatingChatbot />
       </div>
     </DynamicIslandProvider>
-  )
+  );
 }
-
