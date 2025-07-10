@@ -13,6 +13,7 @@ export default defineConfig(async (): Promise<UserConfig> => ({
 	plugins: [react(), tailwindcss()],
 	resolve: {
 		alias: {
+			"~": path.resolve(__dirname, "./"),
 			"@": path.resolve(__dirname, "./src"),
 		},
 	},
