@@ -1,11 +1,12 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
-  MicOff,
-  Zap,
   Volume2,
   AlertCircle,
   CheckCircle,
@@ -19,28 +20,155 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  Brain,
+  Loader2,
+  Check,
+  Type,
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
-import AudioVisualizer from "./audio-visualizer";
+import AudioVisualizer, { type AppState } from "./audio-visualizer";
+import { EVENTS, UI } from "@/lib/constants.generated";
 import type {
   VoiceAIBarProps,
-  AssistantState,
   ContentType,
   ResponseContent,
-} from "../types/voice-ai";
+} from "../../types/voice-ai";
+import tauriConfig from "../../../src-tauri/tauri.conf.json";
+
+// === STANDARDIZED UI API TYPES ===
+
+/**
+ * UI State enumeration - Uses generated constants from backend
+ * These values are emitted by the backend UIManager in BAR_STATE_UPDATE events
+ */
+type UIState =
+  | typeof UI.BAR_STATES_DEFAULT
+  | typeof UI.BAR_STATES_EXPANDING
+  | typeof UI.BAR_STATES_INPUT
+  | typeof UI.BAR_STATES_SHRINKING
+  | typeof UI.BAR_STATES_SUBMITTING
+  | typeof UI.BAR_STATES_LOADING
+  | typeof UI.BAR_STATES_FINISHING
+  | typeof UI.BAR_STATES_SUCCESS
+  | typeof UI.BAR_STATES_LISTENING
+  | typeof UI.BAR_STATES_ERROR
+  | typeof UI.BAR_STATES_TRANSCRIBING
+  | typeof UI.BAR_STATES_SPEAKING
+  | typeof UI.BAR_STATES_DICTATING
+  | typeof UI.BAR_STATES_DICTATION_READY
+  | typeof UI.BAR_STATES_ALWAYS_LISTENING
+  | typeof UI.BAR_STATES_AGENT_RESPONDING;
+
+/**
+ * Backend State Data Structure - Matches exactly what backend emits
+ * This structure is defined in ui_commands.rs emit_bar_state_update()
+ */
+interface BarStateData {
+  // Core state
+  barState: UIState;
+  inputValue: string;
+  lastSubmittedValue: string;
+  currentError: string | null;
+
+  // Voice and transcription
+  transcriptionText: string;
+  spokenText: string;
+  voiceMode: string;
+  audioLevel: number;
+
+  // Status flags
+  isAgentWorking: boolean;
+  isDictationMode: boolean;
+  isAlwaysListening: boolean;
+
+  // Agent state
+  agentState: string | null;
+}
+
+/**
+ * Standardized UI Interaction Event Structure
+ * This matches UIInteractionEvent in ui_commands.rs
+ */
+interface UIInteractionEvent {
+  element_id: string;
+  interaction_type: string;
+  data: Record<string, any> | null;
+  timestamp: number;
+}
+
+// === COMPONENT CONSTANTS ===
+
+const FLOATING_BAR_DIMENSIONS = {
+  DEFAULT_WIDTH: 120,
+  DEFAULT_HEIGHT: 40,
+  EXPANDED_WIDTH: 280,
+  EXPANDED_HEIGHT: 50,
+};
+
+/**
+ * Component name for backend interactions - MUST match backend element handling
+ */
+const COMPONENT_ID = "voice-ai-bar-dark";
+
+/**
+ * Maps UI state to AudioVisualizer AppState
+ */
+const mapUIStateToAppState = (uiState: UIState): AppState => {
+  switch (uiState) {
+    case UI.BAR_STATES_DEFAULT:
+    case UI.BAR_STATES_DICTATION_READY:
+      return UI.AGENT_STATUS_IDLE;
+    case UI.BAR_STATES_LISTENING:
+      return UI.AGENT_STATUS_LISTENING;
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_SUBMITTING:
+      return UI.AGENT_STATUS_PROCESSING;
+    case UI.BAR_STATES_SPEAKING:
+      return UI.AGENT_STATUS_SPEAKING;
+    case UI.BAR_STATES_DICTATING:
+      return UI.AGENT_STATUS_DICTATING;
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      return UI.AGENT_STATUS_RESPONDING;
+    case UI.BAR_STATES_ERROR:
+      return UI.AGENT_STATUS_ERROR;
+    case UI.BAR_STATES_SUCCESS:
+      return UI.AGENT_STATUS_SUCCESS;
+    case UI.BAR_STATES_INPUT:
+      return UI.AGENT_STATUS_INPUT;
+    default:
+      return UI.AGENT_STATUS_IDLE;
+  }
+};
 
 export function VoiceAIBar({
-  onStateChange,
-  initialState = "idle",
   className = "",
   sampleResponses: propSampleResponses,
 }: VoiceAIBarProps) {
-  const [assistantState, setAssistantState] =
-    useState<AssistantState>(initialState);
-  const [currentMessage, setCurrentMessage] = useState("");
+  // === STATE MANAGEMENT ===
+
+  /**
+   * Backend-driven state - Updated via BAR_STATE_UPDATE events
+   * This is the single source of truth for all UI state
+   */
+  const [barState, setBarState] = useState<BarStateData>({
+    barState: UI.BAR_STATES_DEFAULT,
+    inputValue: "",
+    lastSubmittedValue: "",
+    currentError: null,
+    transcriptionText: "",
+    spokenText: "",
+    isAgentWorking: false,
+    isDictationMode: false,
+    isAlwaysListening: false,
+    audioLevel: 0,
+    voiceMode: UI.VOICE_MODES_IDLE,
+    agentState: null,
+  });
+
+  // Legacy state for visual transitions
+  const [localInputValue, setLocalInputValue] = useState("");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showStateIcon, setShowStateIcon] = useState(false);
-  const [inputText, setInputText] = useState("");
   const [responseContent, setResponseContent] = useState<ResponseContent[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +190,106 @@ export function VoiceAIBar({
   >("collapsed");
   const [isCalculatingDimensions, setIsCalculatingDimensions] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // === WINDOW CONFIGURATION ===
+
+  const floatingBarConfig = tauriConfig.app.windows.find(
+    (w) => w.label === "floating-bar"
+  );
+
+  const defaultWidth =
+    floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
+  const defaultHeight =
+    floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
+  const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
+  const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
+
+  // === STANDARDIZED EVENT LISTENER ===
+
+  /**
+   * Primary backend integration: Listen to BAR_STATE_UPDATE events
+   * This is the core pattern for all UI components - event-driven state updates
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      try {
+        unlisten = await listen<BarStateData>(
+          EVENTS.BAR_STATE_UPDATE,
+          (event) => {
+            console.log(
+              "📨 VoiceAIBarDark: Received state update:",
+              event.payload
+            );
+
+            // Validate the received data structure
+            const payload = event.payload;
+            if (
+              payload &&
+              typeof payload === "object" &&
+              "barState" in payload
+            ) {
+              setBarState(payload);
+            } else {
+              console.error(
+                "❌ VoiceAIBarDark: Invalid state data received:",
+                payload
+              );
+            }
+          }
+        );
+
+        console.log("✅ VoiceAIBarDark: Event listener established");
+      } catch (error) {
+        console.error(
+          "❌ VoiceAIBarDark: Failed to setup event listener:",
+          error
+        );
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+        console.log("🔄 VoiceAIBarDark: Event listener cleaned up");
+      }
+    };
+  }, []);
+
+  // === WINDOW RESIZING LOGIC ===
+
+  /**
+   * Responsive window resizing based on UI state
+   */
+  useEffect(() => {
+    const resizeWindow = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const currentUiState = barState.barState;
+
+        // Define compact states that use small window size
+        const isCompact = [
+          UI.BAR_STATES_DEFAULT,
+          UI.BAR_STATES_DICTATION_READY,
+        ].includes(currentUiState as any);
+        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
+        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+
+        console.log(
+          `🔧 VoiceAIBarDark: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+        );
+
+        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+      } catch (error) {
+        console.error("❌ VoiceAIBarDark: Failed to resize window:", error);
+      }
+    };
+
+    resizeWindow();
+  }, [barState.barState]);
 
   // Default sample responses
   const defaultSampleResponses = {
@@ -125,47 +353,108 @@ const styles = \`
   // Use provided sample responses or fall back to defaults
   const sampleResponses = propSampleResponses || defaultSampleResponses;
 
-  // Messages for different states
-  const stateMessages = {
-    idle: "Ready",
-    listening: "Listening to your request...",
-    processing:
-      "Processing your request, please wait while I analyze your input...",
-    speaking:
-      "Here's what I found for you based on your request and current context...",
-    error:
-      "Sorry, I couldn't understand that request. Please try speaking more clearly.",
-    success:
-      "Task completed successfully! Is there anything else I can help you with today?",
-    input: "Type your request...",
-    response: "Here's what I found:",
+  // === STANDARDIZED INTERACTION HANDLERS ===
+
+  /**
+   * Creates a standardized UI interaction event
+   * This helper ensures all interactions follow the same pattern
+   */
+  const createInteraction = useCallback(
+    (
+      interactionType: string,
+      data?: Record<string, any>
+    ): UIInteractionEvent => ({
+      element_id: COMPONENT_ID,
+      interaction_type: interactionType,
+      data: data || null,
+      timestamp: Date.now(),
+    }),
+    []
+  );
+
+  /**
+   * Sends interaction to backend via ui_handle_interaction command
+   * This is the standardized way to trigger backend actions
+   */
+  const sendInteraction = useCallback(
+    async (interaction: UIInteractionEvent) => {
+      try {
+        console.log("🔧 VoiceAIBarDark: Sending interaction:", interaction);
+
+        await invoke("ui_handle_interaction", {
+          elementId: COMPONENT_ID,
+          interaction,
+        });
+
+        console.log("✅ VoiceAIBarDark: Interaction sent successfully");
+      } catch (error) {
+        console.error("❌ VoiceAIBarDark: Interaction failed:", error);
+      }
+    },
+    []
+  );
+
+  /**
+   * Sync local input state with backend state updates
+   */
+  useEffect(() => {
+    setLocalInputValue(barState.inputValue);
+  }, [barState.inputValue]);
+
+  // Messages for different states (mapped from UI states)
+  const getStateMessage = (uiState: UIState) => {
+    switch (uiState) {
+      case UI.BAR_STATES_DEFAULT:
+        return "Ready";
+      case UI.BAR_STATES_LISTENING:
+        return "Listening to your request...";
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
+        return "Processing your request, please wait while I analyze your input...";
+      case UI.BAR_STATES_SPEAKING:
+        return "Here's what I found for you based on your request and current context...";
+      case UI.BAR_STATES_ERROR:
+        return (
+          barState.currentError ||
+          "Sorry, I couldn't understand that request. Please try speaking more clearly."
+        );
+      case UI.BAR_STATES_SUCCESS:
+        return "Task completed successfully! Is there anything else I can help you with today?";
+      case UI.BAR_STATES_INPUT:
+        return "Type your request...";
+      case UI.BAR_STATES_AGENT_RESPONDING:
+        return "Here's what I found:";
+      case UI.BAR_STATES_TRANSCRIBING:
+        return "Converting speech...";
+      case UI.BAR_STATES_DICTATING:
+        return "Dictating text...";
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        return "Always listening...";
+      default:
+        return "Processing...";
+    }
   };
 
-  const changeState = (newState: AssistantState) => {
-    if (newState === assistantState) return;
+  // Current message derived from state
+  const currentMessage = getStateMessage(barState.barState);
 
-    // Start text fade out
+  // === UI STATE CALCULATIONS ===
+
+  const currentUiState = barState.barState;
+
+  // Handle state changes and marquee reset
+  useEffect(() => {
+    // Handle text transitions
     setTextTransitioning(true);
-
-    // After fade out completes, update message and fade in
     setTimeout(() => {
-      setCurrentMessage(stateMessages[newState]);
-      setAssistantState(newState);
-
-      // Reset marquee when state changes
-      setMarqueeKey((prev) => prev + 1);
-
-      // Notify parent component of state change
-      onStateChange?.(newState);
-
-      // End text transition (fade in)
-      setTimeout(() => {
-        setTextTransitioning(false);
-      }, 150);
+      setTextTransitioning(false);
     }, 150);
 
-    // Handle state-specific transitions (keep existing logic)
-    if (newState === "input") {
+    // Reset marquee when state changes
+    setMarqueeKey((prev) => prev + 1);
+
+    // Handle specific state transitions
+    if (currentUiState === UI.BAR_STATES_INPUT) {
       setTimeout(() => {
         setIsTransitioning(true);
         setTimeout(() => {
@@ -173,26 +462,21 @@ const styles = \`
           setIsTransitioning(false);
         }, 300);
       }, 300);
-    } else if (newState === "response") {
+    } else if (currentUiState === UI.BAR_STATES_AGENT_RESPONDING) {
       setTimeout(() => {
         setIsTransitioning(true);
         handleResponseState();
-        // Move this to the end of handleResponseState instead
         setTimeout(() => {
           setIsTransitioning(false);
-        }, 1200); // Total time for all response transitions
-      }, 300);
-    } else {
-      setTimeout(() => {
-        setIsTransitioning(true);
-        setTimeout(() => {
-          setIsTransitioning(false);
-        }, 200);
+        }, 1200);
       }, 300);
     }
 
-    // Show state icon for success/error states with smooth timing
-    if (newState === "success" || newState === "error") {
+    // Show state icon for success/error states
+    if (
+      currentUiState === UI.BAR_STATES_SUCCESS ||
+      currentUiState === UI.BAR_STATES_ERROR
+    ) {
       setTimeout(() => {
         setShowStateIcon(true);
         setTimeout(() => {
@@ -202,10 +486,9 @@ const styles = \`
     } else {
       setShowStateIcon(false);
     }
-  };
+  }, [currentUiState]);
 
   const handleResponseState = () => {
-    setCurrentMessage(stateMessages["response"]);
     setIsCalculatingDimensions(true);
     setResponsePhase("collapsed");
 
@@ -242,109 +525,66 @@ const styles = \`
 
           setTimeout(() => {
             setResponsePhase("showing-content");
-            // Remove this duplicate setIsTransitioning(false) call
 
             setTimeout(() => {
               setIsExpanded(false);
             }, 100);
-          }, 600); // Increased for smoother height transition
-        }, 500); // Increased for smoother width transition
-      }, 150); // Small delay to ensure smooth start
+          }, 600);
+        }, 500);
+      }, 150);
     }, 100);
   };
 
-  // External state change handler (for dev panel)
+  // Handle response state transitions and set sample content
   useEffect(() => {
-    if (initialState !== assistantState) {
-      if (initialState === "response") {
-        // Set sample response content when externally set to response state
-        setResponseContent([
-          sampleResponses.text,
-          sampleResponses.code,
-          sampleResponses.component,
-        ]);
+    if (currentUiState === UI.BAR_STATES_AGENT_RESPONDING) {
+      // Set sample response content when entering response state
+      setResponseContent([
+        sampleResponses.text,
+        sampleResponses.code,
+        sampleResponses.component,
+      ]);
+    }
+  }, [currentUiState]);
+
+  // === INTERACTION HANDLERS ===
+
+  const toggleListening = useCallback(async () => {
+    const interaction = createInteraction("toggle_listening");
+    await sendInteraction(interaction);
+  }, [createInteraction, sendInteraction]);
+
+  const handleInputSubmit = useCallback(
+    async (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+
+      const trimmedValue = localInputValue.trim();
+      if (trimmedValue) {
+        const interaction = createInteraction(UI.INTERACTION_TYPES_SUBMIT, {
+          value: trimmedValue,
+        });
+        await sendInteraction(interaction);
       }
-      changeState(initialState);
-    }
-  }, [initialState]);
+    },
+    [localInputValue, createInteraction, sendInteraction]
+  );
 
-  const toggleListening = () => {
-    if (assistantState === "idle") {
-      changeState("listening");
-    } else if (assistantState === "listening") {
-      changeState("processing");
+  const toggleInputMode = useCallback(async () => {
+    const interaction = createInteraction("toggle_input");
+    await sendInteraction(interaction);
+  }, [createInteraction, sendInteraction]);
 
-      // Smoother timing for voice flow
-      setTimeout(() => {
-        changeState("speaking");
+  const handleFocus = useCallback(async () => {
+    const interaction = createInteraction(UI.INTERACTION_TYPES_FOCUS);
+    await sendInteraction(interaction);
+  }, [createInteraction, sendInteraction]);
 
-        setTimeout(() => {
-          changeState("success");
+  const handleBlur = useCallback(async () => {
+    const interaction = createInteraction(UI.INTERACTION_TYPES_BLUR);
+    await sendInteraction(interaction);
+  }, [createInteraction, sendInteraction]);
 
-          setTimeout(() => {
-            changeState("idle");
-          }, 2000); // Longer success display
-        }, 2500); // Longer speaking duration
-      }, 1500); // Longer processing time
-    } else {
-      changeState("idle");
-      setIsExpanded(false);
-    }
-  };
-
-  const handleInputSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
-    if (inputText.trim()) {
-      const userInput = inputText.trim();
-      setInputText("");
-      changeState("processing");
-
-      setTimeout(() => {
-        let responseItems: ResponseContent[] = [];
-
-        if (
-          userInput.toLowerCase().includes("glass") ||
-          userInput.toLowerCase().includes("design")
-        ) {
-          responseItems = [
-            sampleResponses.text,
-            sampleResponses.code,
-            sampleResponses.component,
-          ];
-        } else if (
-          userInput.toLowerCase().includes("code") ||
-          userInput.toLowerCase().includes("css")
-        ) {
-          responseItems = [sampleResponses.code, sampleResponses.component];
-        } else if (
-          userInput.toLowerCase().includes("image") ||
-          userInput.toLowerCase().includes("example")
-        ) {
-          responseItems = [sampleResponses.image, sampleResponses.text];
-        } else {
-          responseItems = [sampleResponses.text];
-        }
-
-        setResponseContent(responseItems);
-        changeState("response");
-
-        setTimeout(() => {
-          setIsExpanded(true);
-        }, 200);
-      }, 800);
-    }
-  };
-
-  const toggleInputMode = () => {
-    if (assistantState === "input") {
-      changeState("idle");
-    } else {
-      changeState("input");
-    }
-  };
-
-  const toggleExpanded = () => {
+  const toggleExpanded = useCallback(() => {
     if (!isExpanded) {
       setHeightTransitionTarget("expanded");
       setTimeout(() => {
@@ -356,15 +596,14 @@ const styles = \`
         setHeightTransitionTarget("summary");
       }, 200);
     }
-  };
+  }, [isExpanded]);
 
-  const closeResponse = () => {
+  const closeResponse = useCallback(async () => {
     setIsExpanded(false);
     setResponsePhase("collapsed");
-    setTimeout(() => {
-      changeState("idle");
-    }, 300);
-  };
+    const interaction = createInteraction("close_response");
+    await sendInteraction(interaction);
+  }, [createInteraction, sendInteraction]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard
@@ -379,50 +618,67 @@ const styles = \`
 
   // Get icon based on current state
   const getStateIcon = () => {
-    switch (assistantState) {
-      case "listening":
+    switch (currentUiState) {
+      case UI.BAR_STATES_LISTENING:
         return (
           <Mic className="w-3 h-3 text-white transition-all duration-300" />
         );
-      case "processing":
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
         return (
-          <Zap className="w-3 h-3 text-white transition-all duration-300" />
+          <Loader2 className="w-3 h-3 text-white transition-all duration-300 animate-spin" />
         );
-      case "speaking":
+      case UI.BAR_STATES_SPEAKING:
         return (
           <Volume2 className="w-3 h-3 text-white transition-all duration-300" />
         );
-      case "error":
+      case UI.BAR_STATES_ERROR:
         return (
           <AlertCircle className="w-3 h-3 text-white transition-all duration-300" />
         );
-      case "success":
+      case UI.BAR_STATES_SUCCESS:
         return (
-          <CheckCircle className="w-3 h-3 text-white transition-all duration-300" />
+          <Check className="w-3 h-3 text-white transition-all duration-300" />
         );
-      case "input":
+      case UI.BAR_STATES_INPUT:
         return <X className="w-3 h-3 text-white transition-all duration-300" />;
-      case "response":
+      case UI.BAR_STATES_AGENT_RESPONDING:
         return isExpanded ? (
           <ChevronDown className="w-3 h-3 text-white transition-all duration-300" />
         ) : (
           <ChevronUp className="w-3 h-3 text-white transition-all duration-300" />
         );
+      case UI.BAR_STATES_TRANSCRIBING:
+        return (
+          <Mic className="w-3 h-3 text-white transition-all duration-300 animate-pulse" />
+        );
+      case UI.BAR_STATES_DICTATING:
+        return (
+          <Type className="w-3 h-3 text-white transition-all duration-300" />
+        );
+      case UI.BAR_STATES_DICTATION_READY:
+        return (
+          <Type className="w-3 h-3 text-orange-400 transition-all duration-300" />
+        );
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        return (
+          <Mic className="w-3 h-3 text-blue-400 transition-all duration-300 animate-pulse" />
+        );
       default:
         return (
-          <MicOff className="w-3 h-3 text-white/70 transition-all duration-300" />
+          <Brain className="w-3 h-3 text-white/70 transition-all duration-300" />
         );
     }
   };
 
   // Get the state feedback icon for waveform replacement
   const getStateFeedbackIcon = () => {
-    switch (assistantState) {
-      case "success":
+    switch (currentUiState) {
+      case UI.BAR_STATES_SUCCESS:
         return (
           <CheckCircle className="w-4 h-4 text-green-400 animate-bounce" />
         );
-      case "error":
+      case UI.BAR_STATES_ERROR:
         return <AlertCircle className="w-4 h-4 text-red-400 animate-pulse" />;
       default:
         return null;
@@ -448,13 +704,15 @@ const styles = \`
   // Get bar class based on current state
   const getBarClass = () => {
     let baseClass =
-      assistantState === "idle" ? "glass-bar-idle" : "glass-bar-active";
+      currentUiState === UI.BAR_STATES_DEFAULT
+        ? "glass-bar-idle"
+        : "glass-bar-active";
 
-    if (assistantState === "input") {
+    if (currentUiState === UI.BAR_STATES_INPUT) {
       baseClass = "glass-bar-input";
     }
 
-    if (assistantState === "response") {
+    if (currentUiState === UI.BAR_STATES_AGENT_RESPONDING) {
       switch (responsePhase) {
         case "expanding-width":
           baseClass = "glass-bar-response-width";
@@ -479,20 +737,21 @@ const styles = \`
     if (isTransitioning) baseClass += " transitioning";
 
     // Add state-specific classes
-    switch (assistantState) {
-      case "listening":
+    switch (currentUiState) {
+      case UI.BAR_STATES_LISTENING:
         return baseClass + " state-listening";
-      case "processing":
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
         return baseClass + " state-processing";
-      case "speaking":
+      case UI.BAR_STATES_SPEAKING:
         return baseClass + " state-speaking";
-      case "error":
+      case UI.BAR_STATES_ERROR:
         return baseClass + " state-error";
-      case "success":
+      case UI.BAR_STATES_SUCCESS:
         return baseClass + " state-success";
-      case "input":
+      case UI.BAR_STATES_INPUT:
         return baseClass + " state-input";
-      case "response":
+      case UI.BAR_STATES_AGENT_RESPONDING:
         return baseClass + " state-response";
       default:
         return baseClass;
@@ -579,13 +838,15 @@ const styles = \`
       {/* Floating Voice Control Bar */}
       <div className={getBarClass()}>
         {/* Text Input Field - Only visible in input state */}
-        {assistantState === "input" && (
+        {currentUiState === UI.BAR_STATES_INPUT && (
           <form onSubmit={handleInputSubmit} className="input-form">
             <input
               ref={inputRef}
               type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              value={localInputValue}
+              onChange={(e) => setLocalInputValue(e.target.value)}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
               placeholder="Type your request..."
               className="glass-input"
               autoFocus
@@ -593,7 +854,7 @@ const styles = \`
             <button
               type="submit"
               className="glass-send-btn"
-              disabled={!inputText.trim()}
+              disabled={!localInputValue.trim()}
             >
               <Send className="w-3 h-3 text-white" />
             </button>
@@ -601,32 +862,33 @@ const styles = \`
         )}
 
         {/* Hidden content for dimension calculation */}
-        {assistantState === "response" && isCalculatingDimensions && (
-          <div
-            ref={contentRef}
-            className="response-content-calculator"
-            style={{
-              position: "absolute",
-              visibility: "hidden",
-              pointerEvents: "none",
-              width: "350px",
-            }}
-          >
-            <div className="response-header">
-              <h3>AI Response</h3>
+        {currentUiState === UI.BAR_STATES_AGENT_RESPONDING &&
+          isCalculatingDimensions && (
+            <div
+              ref={contentRef}
+              className="response-content-calculator"
+              style={{
+                position: "absolute",
+                visibility: "hidden",
+                pointerEvents: "none",
+                width: "350px",
+              }}
+            >
+              <div className="response-header">
+                <h3>AI Response</h3>
+              </div>
+              <div className="response-content">
+                {responseContent.map((item, index) => (
+                  <div key={index} className="response-item">
+                    {renderContent(item)}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="response-content">
-              {responseContent.map((item, index) => (
-                <div key={index} className="response-item">
-                  {renderContent(item)}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
 
         {/* Response Content - Only visible in response state and after height transition */}
-        {assistantState === "response" &&
+        {currentUiState === UI.BAR_STATES_AGENT_RESPONDING &&
           responsePhase === "showing-content" &&
           !isCalculatingDimensions && (
             <div className="response-container">
@@ -690,11 +952,11 @@ const styles = \`
 
         {/* Audio Visualizer - Replaces the old waveform animation */}
         {/* Audio Visualizer + Status Text - Show both together */}
-        {assistantState !== "input" &&
-          assistantState !== "response" &&
-          assistantState !== "idle" &&
-          assistantState !== "error" &&
-          assistantState !== "success" && (
+        {currentUiState !== UI.BAR_STATES_INPUT &&
+          currentUiState !== UI.BAR_STATES_AGENT_RESPONDING &&
+          currentUiState !== UI.BAR_STATES_DEFAULT &&
+          currentUiState !== UI.BAR_STATES_ERROR &&
+          currentUiState !== UI.BAR_STATES_SUCCESS && (
             <div className="visualizer-status-container">
               {/* Audio Visualizer */}
               <div className="audio-visualizer-wrapper">
@@ -711,7 +973,7 @@ const styles = \`
                   }`}
                 >
                   <AudioVisualizer
-                    appState={assistantState}
+                    appState={mapUIStateToAppState(currentUiState)}
                     width={60}
                     height={20}
                     enableMicrophone={false}
@@ -735,7 +997,11 @@ const styles = \`
                     pauseOnHover={true}
                     delay={textTransitioning ? 0 : 1.2}
                     play={
-                      assistantState !== "idle" &&
+                      ![
+                        UI.BAR_STATES_DEFAULT,
+                        UI.BAR_STATES_ERROR,
+                        UI.BAR_STATES_SUCCESS,
+                      ].includes(currentUiState as any) &&
                       !isTransitioning &&
                       !textTransitioning
                     }
@@ -754,7 +1020,8 @@ const styles = \`
           )}
 
         {/* Error and Success States - Show icon with marquee text */}
-        {(assistantState === "error" || assistantState === "success") && (
+        {(currentUiState === UI.BAR_STATES_ERROR ||
+          currentUiState === UI.BAR_STATES_SUCCESS) && (
           <div className="visualizer-status-container">
             {/* State Icon */}
             <div className="audio-visualizer-wrapper">
@@ -775,7 +1042,9 @@ const styles = \`
                   pauseOnHover={true}
                   delay={textTransitioning ? 0 : 1.2}
                   play={
-                    assistantState !== "idle" &&
+                    [UI.BAR_STATES_ERROR, UI.BAR_STATES_SUCCESS].includes(
+                      currentUiState as any
+                    ) &&
                     !isTransitioning &&
                     !textTransitioning
                   }
@@ -818,7 +1087,7 @@ const styles = \`
         )}*/}
 
         {/* Control Buttons - Idle State with Hover */}
-        {assistantState === "idle" && (
+        {currentUiState === UI.BAR_STATES_DEFAULT && (
           <div
             className="idle-container"
             onMouseEnter={() => setIsIdleHovered(true)}
@@ -830,7 +1099,7 @@ const styles = \`
               }`}
             >
               <AudioVisualizer
-                appState="idle"
+                appState={mapUIStateToAppState(UI.BAR_STATES_DEFAULT)}
                 width={80}
                 height={20}
                 enableMicrophone={false}
@@ -865,21 +1134,25 @@ const styles = \`
           </div>
         )}
 
-        {assistantState !== "idle" &&
-          assistantState !== "input" &&
-          assistantState !== "response" && (
+        {currentUiState !== UI.BAR_STATES_DEFAULT &&
+          currentUiState !== UI.BAR_STATES_INPUT &&
+          currentUiState !== UI.BAR_STATES_AGENT_RESPONDING && (
             <div className="main-button-container">
               <button
                 onClick={toggleListening}
                 className="glass-mic-btn"
-                disabled={assistantState === "processing" || isTransitioning}
+                disabled={
+                  currentUiState === UI.BAR_STATES_LOADING ||
+                  currentUiState === UI.BAR_STATES_SUBMITTING ||
+                  isTransitioning
+                }
               >
                 <div className="icon-container">{getStateIcon()}</div>
               </button>
             </div>
           )}
 
-        {assistantState === "input" && (
+        {currentUiState === UI.BAR_STATES_INPUT && (
           <div className="main-button-container">
             <button
               onClick={toggleInputMode}
@@ -892,7 +1165,7 @@ const styles = \`
         )}
       </div>
 
-      <style jsx>
+      <style>
         {`
           .voice-ai-bar-container {
             position: relative;

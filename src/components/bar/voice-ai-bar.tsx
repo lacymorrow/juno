@@ -7,8 +7,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
-  MicOff,
-  Zap,
   Volume2,
   AlertCircle,
   CheckCircle,
@@ -22,7 +20,6 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Sparkles,
   Brain,
   Loader2,
   Check,
@@ -30,8 +27,7 @@ import {
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
 import AudioVisualizer from "./audio-visualizer";
-import { cn } from "@/lib/utils";
-import { VoiceStatusIndicator } from "../VoiceStatusIndicator";
+
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type {
   VoiceAIBarProps,
@@ -524,14 +520,6 @@ const styles = \`
   }, [barState.barState]);
 
   // === UI STATE CALCULATIONS ===
-
-  const currentUiState = barState.barState;
-  const isCompact = [
-    UI.BAR_STATES_DEFAULT,
-    UI.BAR_STATES_DICTATION_READY,
-  ].includes(currentUiState as any);
-  const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-  const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
   const toggleListening = useCallback(async () => {
     const interaction = createInteraction("toggle_listening");
