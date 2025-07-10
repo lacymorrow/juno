@@ -147,6 +147,7 @@ function App() {
   useBackendEvents({
     addSystemMessage: conversation.addSystemMessage,
     addAssistantMessage: conversation.addAssistantMessage,
+    addOrUpdateStreamingMessage: conversation.addOrUpdateStreamingMessage,
     playAudioFromBase64: audioPlayback.playAudioFromBase64,
     stopCurrentAudio: audioPlayback.stopCurrentAudio,
     setIsProcessing: appState.setIsProcessing,

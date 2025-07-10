@@ -84,6 +84,39 @@ export function useConversation() {
         setConversationWithPruning(prev => [...prev, assistantMessage]);
     }, [setConversationWithPruning]);
 
+    // Update or add a streaming assistant message
+    const addOrUpdateStreamingMessage = useCallback((messageId: string, content: string, isComplete: boolean = false) => {
+        setConversationWithPruning(prev => {
+            // Find existing streaming message with this ID
+            const existingIndex = prev.findIndex(msg => 
+                msg.role === "assistant" && 
+                msg.messageId === messageId
+            );
+            
+            if (existingIndex >= 0) {
+                // Update existing streaming message
+                const updatedMessages = [...prev];
+                updatedMessages[existingIndex] = {
+                    ...updatedMessages[existingIndex],
+                    content,
+                    isStreaming: !isComplete,
+                    messageId: messageId,
+                };
+                return updatedMessages;
+            } else {
+                // Add new streaming message
+                const streamingMessage: ChatMessage = {
+                    role: "assistant",
+                    content,
+                    timestamp: Date.now(),
+                    isStreaming: !isComplete,
+                    messageId: messageId,
+                };
+                return [...prev, streamingMessage];
+            }
+        });
+    }, [setConversationWithPruning]);
+
     // Copy response handler with enhanced feedback
     const handleCopyResponse = useCallback(
         async (content: string, messageIndex: number, onCopyingStateChange: (id: string | null) => void) => {
@@ -157,6 +190,7 @@ export function useConversation() {
         addSystemMessage,
         addUserMessage,
         addAssistantMessage,
+        addOrUpdateStreamingMessage,
 
         // Enhanced operations
         handleCopyResponse,

@@ -29,6 +29,7 @@ type BackendEventPayload = {
 interface UseBackendEventsProps {
   addSystemMessage: (message: string) => void;
   addAssistantMessage: (message: string) => void;
+  addOrUpdateStreamingMessage: (messageId: string, content: string, isComplete?: boolean) => void;
   playAudioFromBase64: (base64: string) => Promise<void>;
   stopCurrentAudio: () => Promise<void>;
   setIsProcessing: (processing: boolean) => void;
@@ -37,6 +38,7 @@ interface UseBackendEventsProps {
 export const useBackendEvents = ({
   addSystemMessage,
   addAssistantMessage,
+  addOrUpdateStreamingMessage,
   playAudioFromBase64,
   stopCurrentAudio,
   setIsProcessing,
@@ -81,16 +83,25 @@ export const useBackendEvents = ({
           }
           break;
 
-        // Streaming events - simplified for now
+        // Streaming events - real-time streaming implementation
         case "agent-stream-start":
           console.log("Stream started:", payload.message_id);
+          if (payload.message_id) {
+            // Initialize streaming message with empty content
+            streamingMessages.current.set(payload.message_id, "");
+            addOrUpdateStreamingMessage(payload.message_id, "", false);
+          }
           break;
 
-        case "agent-stream-text":
-          // Accumulate text chunks for final display
+        case "agent-text-stream":
+          // Real-time text streaming (fixed event name)
           if (payload.message_id && payload.chunk) {
             const existing = streamingMessages.current.get(payload.message_id) || "";
-            streamingMessages.current.set(payload.message_id, existing + payload.chunk);
+            const newText = existing + payload.chunk;
+            streamingMessages.current.set(payload.message_id, newText);
+            
+            // Update the streaming message in real-time
+            addOrUpdateStreamingMessage(payload.message_id, newText, false);
           }
           break;
 
@@ -98,7 +109,8 @@ export const useBackendEvents = ({
           if (payload.message_id) {
             const finalText = payload.complete_text || streamingMessages.current.get(payload.message_id) || "";
             if (finalText) {
-              addAssistantMessage(finalText);
+              // Mark streaming as complete with final text
+              addOrUpdateStreamingMessage(payload.message_id, finalText, true);
             }
             streamingMessages.current.delete(payload.message_id);
             setIsProcessing(false);
@@ -121,13 +133,33 @@ export const useBackendEvents = ({
           }
           break;
 
+        // Agent events (generic)
+        case "agent-event":
+          console.log("Agent event received:", payload);
+          // These might contain thinking, tool calls, etc.
+          if (payload.type === "thinking" && payload.payload?.content) {
+            // Could show thinking process to user
+            console.log("Agent thinking:", payload.payload.content);
+          }
+          break;
+
+        // Tool usage events
+        case "tool-usage":
+          console.log("Tool usage event:", payload);
+          // Could show tool execution feedback
+          if (payload.tool && payload.success !== undefined) {
+            const status = payload.success ? "✅" : "❌";
+            console.log(`Tool ${payload.tool}: ${status}`);
+          }
+          break;
+
         default:
           console.log(`[Event] Unhandled event type: ${eventType}`);
       }
     } catch (error) {
       console.error(`[Event] Error handling ${eventType}:`, error);
     }
-  }, [addSystemMessage, addAssistantMessage, playAudioFromBase64, stopCurrentAudio, setIsProcessing]);
+  }, [addSystemMessage, addAssistantMessage, addOrUpdateStreamingMessage, playAudioFromBase64, stopCurrentAudio, setIsProcessing]);
 
   // Single useEffect for all backend events - clean and simple
   useEffect(() => {
@@ -151,10 +183,12 @@ export const useBackendEvents = ({
         "tts-audio-ready",
         "tts-stop-requested",
         "agent-stream-start",
-        "agent-stream-text", 
+        "agent-text-stream", // Fixed event name to match backend
         "agent-stream-end",
         "agent-error",
         "agent-stop-all",
+        "agent-event", // Generic agent events
+        "tool-usage", // Tool execution events
         "user-message-submitted",
       ];
 
