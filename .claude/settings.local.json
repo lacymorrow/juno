@@ -19,7 +19,9 @@
       "Bash(ls:*)",
       "Bash(cargo test:*)",
       "Bash(timeout:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)"
     ],
     "deny": []
   }
