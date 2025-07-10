@@ -305,10 +305,10 @@ pub struct AppState {
     pub mcp_manager: Arc<TokioMutex<MCPManager>>,
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
-    
+
     // TARS Integration: Event-driven architecture (initialized later with AppHandle)
     pub event_processor: Arc<TokioMutex<Option<EventProcessor>>>,
-    
+
     // Event-driven refactor: Core event bus and state machine
     pub event_bus: Arc<TokioMutex<Option<Arc<EventBus>>>>,
     pub agent_state_machine: Arc<TokioMutex<AgentStateMachine>>,
@@ -354,10 +354,10 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
-            
+
             // TARS Integration: Initialize event processor as None (will be set when AppHandle available)
             event_processor: Arc::new(TokioMutex::new(None)),
-            
+
             // Event-driven refactor: Initialize event bus and state machine
             event_bus: Arc::new(TokioMutex::new(None)), // Will be initialized with AppHandle
             agent_state_machine: Arc::new(TokioMutex::new(AgentStateMachine::with_config(
@@ -380,25 +380,25 @@ impl AppState {
     /// This should be called after the Tauri app is fully initialized
     pub async fn init_event_processor(&self, app_handle: AppHandle) -> Result<(), String> {
         info!("Initializing TARS event processor with real app handle");
-        
+
         let config = EventProcessorConfig {
             max_events: 10000,
             emit_to_frontend: true,
             persist_events: false,
             max_emission_failures: 5,
         };
-        
+
         let new_processor = EventProcessor::new(app_handle, Some(config));
-        
+
         // Add logging subscriber to the new processor
         new_processor.subscribe(Box::new(LoggingSubscriber)).await;
-        
+
         // Set the real processor (replacing None)
         {
             let mut processor_guard = self.event_processor.lock().await;
             *processor_guard = Some(new_processor);
         }
-        
+
         info!("TARS event processor initialized successfully");
         Ok(())
     }
@@ -406,22 +406,22 @@ impl AppState {
     /// Initialize the EventBus for event-driven architecture
     pub async fn init_event_bus(&self, app_handle: AppHandle) -> Result<(), String> {
         info!("Initializing EventBus for event-driven architecture");
-        
+
         let config = EventBusConfig {
             max_stored_events: 5000,
             emit_to_frontend: true,
             max_recursion_depth: 8,
             debug_logging: cfg!(debug_assertions),
         };
-        
+
         let event_bus = Arc::new(EventBus::with_config(app_handle, config));
-        
+
         // Store the event bus
         {
             let mut bus_guard = self.event_bus.lock().await;
             *bus_guard = Some(event_bus);
         }
-        
+
         info!("EventBus initialized successfully");
         Ok(())
     }
@@ -429,13 +429,13 @@ impl AppState {
     /// Initialize EventMemoryManager after EventBus is ready
     pub async fn init_memory_manager(&self) -> Result<(), String> {
         info!("Initializing EventMemoryManager for TARS Phase 3");
-        
+
         // Get the event bus (it should be initialized by now)
         let event_bus = {
             let bus_guard = self.event_bus.lock().await;
             bus_guard.clone().ok_or("EventBus not initialized - call init_event_bus first")?
         };
-        
+
         // Create memory manager configuration optimized for the new architecture
         let config = EventMemoryConfig {
             max_events: 1000,           // Max events to keep
@@ -445,21 +445,21 @@ impl AppState {
             enable_persistence: true,   // Enable enhanced persistence (Phase 3.5)
             persistence_config: Some(crate::agent::memory::PersistenceConfig::default()),
         };
-        
+
         // Create the event memory manager
         let memory_manager = EventMemoryManager::with_config(event_bus, config).await
             .map_err(|e| format!("Failed to create EventMemoryManager: {}", e))?;
-        
+
         // Store the memory manager
         {
             let mut manager_guard = self.memory_manager.lock().await;
             *manager_guard = Some(memory_manager);
         }
-        
+
         info!("EventMemoryManager initialized successfully");
         Ok(())
     }
-    
+
     /// Get the EventBus
     pub async fn get_event_bus(&self) -> Result<Arc<EventBus>, String> {
         let bus_guard = self.event_bus.lock().await;
@@ -469,7 +469,7 @@ impl AppState {
             Err("EventBus not initialized".to_string())
         }
     }
-    
+
     /// Emit an event through the EventBus (preferred method for event-driven architecture)
     pub async fn emit_event(&self, event: JunoAgentEvent) -> Result<(), String> {
         let bus_guard = self.event_bus.lock().await;
@@ -492,12 +492,12 @@ impl AppState {
             Ok(())
         }
     }
-    
+
     /// Get the event processor (TARS Integration)
     pub async fn get_event_processor(&self) -> Arc<TokioMutex<Option<EventProcessor>>> {
         self.event_processor.clone()
     }
-    
+
     /// Subscribe to events (TARS Integration)
     pub async fn subscribe_to_events(&self, subscriber: Box<dyn crate::agent::events::EventSubscriber + Send + Sync>) {
         let processor_guard = self.event_processor.lock().await;
@@ -1032,6 +1032,25 @@ impl AppState {
     pub async fn get_memory_manager(&self) -> Option<EventMemoryManager> {
         let manager_guard = self.memory_manager.lock().await;
         manager_guard.clone()
+    }
+
+    // Method to get or create the timer manager
+    pub async fn get_timer_manager(&self) -> Arc<crate::agent::tools::timer_tools::TimerManager> {
+        use std::sync::Arc;
+        use crate::agent::tools::timer_tools::TimerManager;
+
+        // Check if we already have a timer manager
+        if let Some(manager) = self.get::<TimerManager>() {
+            return manager;
+        }
+
+        // Create new timer manager and store it
+        let timer_manager = Arc::new(TimerManager::new());
+        if let Err(e) = self.insert(timer_manager.clone()) {
+            tracing::error!("Failed to store timer manager: {}", e);
+        }
+
+        timer_manager
     }
 
     // Insert a component into the state

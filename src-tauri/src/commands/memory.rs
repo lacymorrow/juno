@@ -55,6 +55,39 @@ pub async fn clear_conversation_memory(state: State<'_, AppState>) -> Result<(),
     Ok(())
 }
 
+/// Clean orphaned tool calls - EventMemoryManager version
+#[tauri::command]
+pub async fn clean_orphaned_tool_calls(state: State<'_, AppState>) -> Result<String, String> {
+    let mut memory_manager = state.get_memory_manager().await
+        .ok_or("EventMemoryManager not initialized")?;
+
+    memory_manager.clean_orphaned_tool_calls().await
+        .map_err(|e| format!("Failed to clean orphaned tool calls: {}", e))?;
+
+    Ok("Orphaned tool calls cleaned successfully".to_string())
+}
+
+/// Get last N messages - EventMemoryManager version
+#[tauri::command]
+pub async fn get_last_messages(state: State<'_, AppState>, count: Option<usize>) -> Result<Vec<crate::agent::Message>, String> {
+    let memory_manager = state.get_memory_manager().await
+        .ok_or("EventMemoryManager not initialized")?;
+
+    let messages = memory_manager.get_messages().await
+        .map_err(|e| format!("Failed to get messages: {}", e))?;
+
+    let count = count.unwrap_or(10); // Default to last 10 messages
+    let last_messages = messages.into_iter()
+        .rev()
+        .take(count)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    Ok(last_messages)
+}
+
 /// Force memory prune - simplified for EventMemoryManager
 #[tauri::command]
 pub async fn force_memory_prune(state: State<'_, AppState>) -> Result<String, String> {
@@ -62,13 +95,13 @@ pub async fn force_memory_prune(state: State<'_, AppState>) -> Result<String, St
         .ok_or("EventMemoryManager not initialized")?;
 
     let before_metrics = memory_manager.get_metrics().await;
-    
+
     // Force prune using existing method
     memory_manager.prune_memory_if_needed().await
         .map_err(|e| format!("Failed to prune memory: {}", e))?;
 
     let after_metrics = memory_manager.get_metrics().await;
-    
+
     let messages_removed = before_metrics.total_messages.saturating_sub(after_metrics.total_messages);
     let tokens_saved = before_metrics.estimated_tokens.saturating_sub(after_metrics.estimated_tokens);
 
@@ -141,7 +174,7 @@ pub async fn emergency_memory_recovery(
         let new_metrics = memory_manager.get_metrics().await;
         Ok(format!(
             "Emergency recovery completed: Reduced from {} to {} tokens ({} messages cleared)",
-            metrics.estimated_tokens, new_metrics.estimated_tokens, 
+            metrics.estimated_tokens, new_metrics.estimated_tokens,
             metrics.total_messages - new_metrics.total_messages
         ))
     } else {

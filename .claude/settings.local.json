@@ -21,7 +21,8 @@
       "Bash(timeout:*)",
       "Bash(awk:*)",
       "Bash(git fetch:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(sed:*)"
     ],
     "deny": []
   }

@@ -10,8 +10,8 @@ use crate::constants::agent::tool_names;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use tracing::{info, error};
@@ -27,6 +27,7 @@ pub struct TimerTask {
 }
 
 /// Simple timer manager
+#[derive(Clone)]
 pub struct TimerManager {
     tasks: Arc<Mutex<HashMap<String, TimerTask>>>,
 }
