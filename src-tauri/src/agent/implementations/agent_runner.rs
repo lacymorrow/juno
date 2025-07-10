@@ -200,7 +200,7 @@ where
             tool_results_cache.push((tool_call.clone(), None));
         }
 
-        // Execute the tools as provided - no special logic
+        // Execute the tools as provided - simplified logic
         match self
             .execute_tool_batch(&tool_calls, cancel_rx, 0, &mut tool_results_cache)
             .await?
@@ -227,44 +227,20 @@ where
             Option<Result<crate::agent::core::ToolResult, AgentError>>,
         )],
     ) -> Result<(), AgentError> {
-        log::info!(
-            "Handling batch cancellation for {} tool calls",
-            tool_calls.len()
-        );
-
         let mut cancelled_count = 0;
         let mut mem = self.memory.lock().await;
 
-        // Check each tool call and add cancellation message if it wasn't executed
-        for (i, tool_call) in tool_calls.iter().enumerate() {
-            // Check if this tool was executed (has a result in cache)
-            let was_executed = if i < tool_results_cache.len() {
-                tool_results_cache[i].1.is_some()
-            } else {
-                false
-            };
-
-            if !was_executed {
-                // Add cancellation message to memory for this unexecuted tool
+        for (tool_call, result) in tool_results_cache {
+            if result.is_none() {
+                // Tool was not executed due to cancellation
                 mem.add_message(crate::agent::core::Message {
                     role: crate::agent::core::Role::Tool,
-                    content: "Tool execution was cancelled by user".to_string(),
+                    content: "Tool execution was cancelled".to_string(),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
                 })
                 .await?;
-
-                // Emit cancellation event to frontend
-                crate::agent::tool_logger::log_tool_call_result(
-                    &self.app_handle,
-                    &tool_call.name,
-                    serde_json::json!({"cancelled": true, "reason": "User cancelled execution"}),
-                    false,
-                    Some(format!("Tool {} was cancelled", tool_call.name)),
-                    None,
-                );
-
                 cancelled_count += 1;
             }
         }
@@ -276,7 +252,7 @@ where
         Ok(())
     }
 
-    /// Execute a batch of tools with optimized workflow
+    /// Simplified tool batch execution - trust the agent, execute the tools
     async fn execute_tool_batch(
         &mut self,
         batch: &[crate::agent::core::ToolCall],
@@ -289,120 +265,9 @@ where
     ) -> Result<bool, AgentError> {
         log::info!("Executing tool batch: {} tools", batch.len());
 
-        // Check if all tools in batch can be executed as MCP batch
-        if self.can_execute_as_mcp_batch(batch).await {
-            return self
-                .execute_mcp_tool_batch(batch, cancel_rx, start_index, tool_results_cache)
-                .await;
-        }
-
-        // Fall back to optimized sequential execution (faster than normal due to reduced approval overhead)
+        // Simplified: Just execute all tools sequentially with batch approval
         self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache)
             .await
-    }
-
-    /// Check if a batch can be executed via MCP batching
-    async fn can_execute_as_mcp_batch(&self, batch: &[crate::agent::core::ToolCall]) -> bool {
-        // Check if all tools in the batch are MCP tools
-        for tool_call in batch {
-            if !self.is_mcp_tool(&tool_call.name).await {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Check if a tool is an MCP tool
-    async fn is_mcp_tool(&self, tool_name: &str) -> bool {
-        // Use the canonical MCP tool detection pattern
-        tool_name.contains("mcp-server-") || tool_name.starts_with("mcp_")
-    }
-
-    /// Execute batch via MCP batching system
-    async fn execute_mcp_tool_batch(
-        &mut self,
-        batch: &[crate::agent::core::ToolCall],
-        cancel_rx: &crate::state::CancelReceiver,
-        start_index: usize,
-        tool_results_cache: &mut Vec<(
-            crate::agent::core::ToolCall,
-            Option<Result<crate::agent::core::ToolResult, AgentError>>,
-        )>,
-    ) -> Result<bool, AgentError> {
-        // Check cancellation
-        if *cancel_rx.borrow() {
-            log::info!("Cancellation detected at start of MCP batch execution");
-            return Ok(false);
-        }
-
-        // Batch approval check - ask once for the entire batch
-        if !self.check_batch_approval(batch, cancel_rx).await? {
-            return Ok(true);
-        }
-
-        log::info!("Executing MCP batch: {} tools", batch.len());
-
-        // Use the existing MCP batch execution
-        match self.tool_provider.execute_batch_tools(batch.to_vec()).await {
-            Ok(results) => {
-                // Process all results and add to memory
-                for (i, result) in results.into_iter().enumerate() {
-                    let tool_call = &batch[i];
-
-                    // FIXED: Emit tool result event to frontend for chat display
-                    // Extract screenshot if this is a screenshot tool
-                    let screenshot_base64 =
-                        if tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot" {
-                            // For screenshot tools, the result output should contain base64 data
-                            // Check multiple possible field names for screenshot data
-                            if let Some(screenshot_data) = result.output.get("base64_image") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_data) = result.output.get("base64") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_data) = result.output.get("data") {
-                                screenshot_data.as_str().map(|s| s.to_string())
-                            } else if let Some(screenshot_str) = result.output.as_str() {
-                                Some(screenshot_str.to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                    crate::agent::tool_logger::log_tool_call_result(
-                        &self.app_handle,
-                        &tool_call.name,
-                        result.output.clone(),
-                        true,
-                        Some(format!(
-                            "MCP batched tool {} executed successfully",
-                            tool_call.name
-                        )),
-                        screenshot_base64,
-                    );
-
-                    tool_results_cache[start_index + i].1 = Some(Ok(result.clone()));
-                    self.add_tool_result_to_memory(tool_call, Ok(result))
-                        .await?;
-                }
-                Ok(true)
-            }
-            Err(e) => {
-                log::error!(
-                    "MCP batch execution failed: {}. Falling back to sequential execution.",
-                    e
-                );
-
-                // FIXED: Don't add error results to cache/memory when falling back to sequential execution
-                // This prevents duplicate tool executions and conflicting results
-                // The sequential execution will handle the actual tool execution and results
-
-                // Fall back to sequential execution without polluting cache/memory
-                self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache)
-                    .await
-            }
-        }
     }
 
     /// Execute batch sequentially but with optimized approval process
@@ -1207,47 +1072,108 @@ where
                 self.transition_state(AgentState::Executing).await;
                 log::info!("Executing {} tool call(s)", tool_calls.len());
 
-                // Add assistant message indicating tool call(s) BEFORE starting execution
-                // This ensures the conversation is in a consistent state even if interrupted
+                // Add assistant message with tool calls to memory first (required for proper conversation order)
+                // We'll implement rollback if tool execution fails to prevent orphaned tool_use blocks
+                let assistant_message = Message {
+                    role: Role::Assistant,
+                    content: "".to_string(), // Content might be empty or indicate thought process
+                    tool_calls: Some(tool_calls.clone()),
+                    tool_call_id: None,
+                    name: None,
+                };
+
                 {
                     let mut mem = self.memory.lock().await;
-                    // Clone the calls for the message
-                    let message_tool_calls = tool_calls.clone();
-                    mem.add_message(Message {
-                        role: Role::Assistant,
-                        content: "".to_string(), // Content might be empty or indicate thought process
-                        tool_calls: Some(message_tool_calls),
-                        tool_call_id: None,
-                        name: None,
-                    })
-                    .await?;
+                    mem.add_message(assistant_message.clone()).await?;
                 }
 
-                // Execute tools with intelligent batching for performance optimization
-                // This replaces the sequential loop with batch-aware execution
-                if let Err(e) = self
+                                // Execute tools with intelligent batching for performance optimization
+                let execution_result = self
                     .execute_tools_with_batching(tool_calls.clone(), &cancel_rx)
-                    .await
-                {
-                    log::error!("Tool batch execution failed: {}", e);
-                    // The cancellation handling is already done in execute_tools_with_batching
-                    // for AgentError::Terminated, but we should handle other error types too
-                    match e {
-                        AgentError::Terminated => {
-                            // Cancellation was already handled in execute_tools_with_batching
-                            return Err(e);
+                    .await;
+
+                match execution_result {
+                    Ok(()) => {
+                        // Tools executed successfully - conversation is consistent
+                        log::info!("All tool batches executed successfully");
+                        Ok(AgentAction::Think) // Move to thinking after successful execution
+                    }
+                    Err(e) => {
+                        log::error!("Tool batch execution failed: {}", e);
+
+                        // CRITICAL FIX: Only remove assistant message if NO tools were executed
+                        // If some tools executed (partial success), keep the assistant message
+                        // as handle_batch_cancellation will have added proper tool results/cancellations
+                        {
+                            let mut mem = self.memory.lock().await;
+                            let messages = mem.get_messages().await?;
+
+                            // Count how many tool result messages were added since our assistant message
+                            let mut tool_result_count = 0;
+                            let mut found_our_assistant_message = false;
+                            let mut assistant_tool_call_ids = Vec::new();
+
+                            // First pass: Find our assistant message and collect its tool call IDs
+                            for msg in messages.iter().rev() {
+                                if matches!(msg.role, Role::Assistant) &&
+                                   msg.tool_calls.is_some() &&
+                                   msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                                    found_our_assistant_message = true;
+                                    // Collect all tool call IDs from this assistant message
+                                    if let Some(tool_calls) = &msg.tool_calls {
+                                        assistant_tool_call_ids = tool_calls.iter()
+                                            .map(|tc| tc.id.clone())
+                                            .collect();
+                                    }
+                                    break;
+                                }
+                            }
+
+                            // Second pass: Count tool results that match our assistant's tool call IDs
+                            if found_our_assistant_message {
+                                for msg in messages.iter().rev() {
+                                    if matches!(msg.role, Role::Tool) &&
+                                       msg.tool_call_id.is_some() &&
+                                       assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                                        tool_result_count += 1;
+                                    }
+                                }
+
+                                log::debug!(
+                                    "Found {} tool results out of {} expected for assistant message",
+                                    tool_result_count,
+                                    assistant_tool_call_ids.len()
+                                );
+                            }
+
+                            // Only remove assistant message if NO tool results were added (complete failure)
+                            if found_our_assistant_message && tool_result_count == 0 {
+                                let mut messages_vec = messages;
+                                // Remove the assistant message with tool calls
+                                if let Some(last_message) = messages_vec.last() {
+                                    if matches!(last_message.role, Role::Assistant) &&
+                                       last_message.tool_calls.is_some() &&
+                                       last_message.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                                        messages_vec.pop();
+
+                                        // Clear and rebuild memory without the orphaned message
+                                        mem.clear_memory().await?;
+                                        for msg in messages_vec {
+                                            mem.add_message(msg).await?;
+                                        }
+
+                                        log::info!("Removed orphaned assistant message with tool calls (no tools executed)");
+                                    }
+                                }
+                            } else if found_our_assistant_message && tool_result_count > 0 {
+                                log::info!("Keeping assistant message as {} tool(s) were executed before failure", tool_result_count);
+                            }
                         }
-                        _ => {
-                            // For other errors, we still need to ensure conversation consistency
-                            // but we don't call handle_batch_cancellation as this wasn't a user cancellation
-                            return Err(e);
-                        }
+
+                        // Return the original error
+                        return Err(e);
                     }
                 }
-
-                // If we reach here, all tools were executed successfully
-                log::info!("All tool batches executed successfully");
-                Ok(AgentAction::Think) // Move to thinking after successful execution
             }
             AgentAction::RespondToUser(response) => {
                 self.transition_state(AgentState::Responding).await;
@@ -1384,6 +1310,138 @@ mod tests {
         // Next step should equal max (stopping condition)
         let next_step = current_step + 1;
         assert_eq!(next_step, max_steps);
+    }
+
+    #[test]
+    fn test_tool_result_counting_logic() {
+        use crate::agent::core::{Message, Role, ToolCall};
+        use serde_json::json;
+
+        // Create a mock message history
+        let mut messages = Vec::new();
+
+        // Add some initial messages
+        messages.push(Message {
+            role: Role::User,
+            content: "Hello".to_string(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        messages.push(Message {
+            role: Role::Assistant,
+            content: "How can I help?".to_string(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+
+        // Add an assistant message with tool calls
+        let tool_calls = vec![
+            ToolCall {
+                id: "tool1".to_string(),
+                name: "test_tool".to_string(),
+                input: json!({"action": "test"}),
+            },
+            ToolCall {
+                id: "tool2".to_string(),
+                name: "test_tool2".to_string(),
+                input: json!({"action": "test2"}),
+            },
+        ];
+
+        messages.push(Message {
+            role: Role::Assistant,
+            content: "".to_string(),
+            tool_calls: Some(tool_calls.clone()),
+            tool_call_id: None,
+            name: None,
+        });
+
+        // Add tool results for the first tool only (partial execution)
+        messages.push(Message {
+            role: Role::Tool,
+            content: "Tool result".to_string(),
+            tool_calls: None,
+            tool_call_id: Some("tool1".to_string()),
+            name: Some("test_tool".to_string()),
+        });
+
+        // Now manually implement the counting logic from our fix
+        let mut tool_result_count = 0;
+        let mut found_our_assistant_message = false;
+        let mut assistant_tool_call_ids = Vec::new();
+
+        // First pass: Find assistant message and collect tool call IDs
+        for msg in messages.iter().rev() {
+            if matches!(msg.role, Role::Assistant) &&
+               msg.tool_calls.is_some() &&
+               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                found_our_assistant_message = true;
+                if let Some(tool_calls) = &msg.tool_calls {
+                    assistant_tool_call_ids = tool_calls.iter()
+                        .map(|tc| tc.id.clone())
+                        .collect();
+                }
+                break;
+            }
+        }
+
+        // Second pass: Count tool results that match our assistant's tool call IDs
+        if found_our_assistant_message {
+            for msg in messages.iter().rev() {
+                if matches!(msg.role, Role::Tool) &&
+                   msg.tool_call_id.is_some() &&
+                   assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                    tool_result_count += 1;
+                }
+            }
+        }
+
+        // Verify results
+        assert!(found_our_assistant_message, "Should have found the assistant message");
+        assert_eq!(assistant_tool_call_ids.len(), 2, "Should have found 2 tool call IDs");
+        assert_eq!(tool_result_count, 1, "Should have counted 1 tool result");
+
+        // Test case 2: No tool results
+        let mut messages2 = messages.clone();
+        messages2.pop(); // Remove the tool result
+
+        let mut tool_result_count2 = 0;
+        let mut found_our_assistant_message2 = false;
+        let mut assistant_tool_call_ids2 = Vec::new();
+
+        // First pass
+        for msg in messages2.iter().rev() {
+            if matches!(msg.role, Role::Assistant) &&
+               msg.tool_calls.is_some() &&
+               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                found_our_assistant_message2 = true;
+                if let Some(tool_calls) = &msg.tool_calls {
+                    assistant_tool_call_ids2 = tool_calls.iter()
+                        .map(|tc| tc.id.clone())
+                        .collect();
+                }
+                break;
+            }
+        }
+
+        // Second pass
+        if found_our_assistant_message2 {
+            for msg in messages2.iter().rev() {
+                if matches!(msg.role, Role::Tool) &&
+                   msg.tool_call_id.is_some() &&
+                   assistant_tool_call_ids2.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                    tool_result_count2 += 1;
+                }
+            }
+        }
+
+        // Verify results for case 2
+        assert!(found_our_assistant_message2, "Should have found the assistant message");
+        assert_eq!(assistant_tool_call_ids2.len(), 2, "Should have found 2 tool call IDs");
+        assert_eq!(tool_result_count2, 0, "Should have counted 0 tool results");
     }
 
     // MCP Batching Tests

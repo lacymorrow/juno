@@ -456,7 +456,7 @@ impl BrainFactory {
                 // This is tricky because we need to move out of Arc
                 // For now, create a new one with same type
                 let memory_impl =
-                    crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+                    crate::agent::implementations::memory_manager::AdvancedMemoryManager::new();
 
                 let runner = DefaultAgentRunner::with_boxed_brain(
                     memory_impl,
@@ -802,6 +802,13 @@ impl BrainFactory {
             app_handle.clone(),
         )
         .await;
+
+        // Register display information tools for screen resolution and display info (per-provider instance)
+        crate::agent::tools::display_info_tools::register_display_info_tools(
+            provider,
+            app_handle.clone(),
+        )
+        .await?;
 
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, &*state_manager).await;

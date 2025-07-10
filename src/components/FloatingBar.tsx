@@ -56,8 +56,8 @@ type UIState =
   | typeof UI.BAR_STATES_AGENT_RESPONDING;
 
 /**
- * Backend State Data Structure - Matches exactly what backend emits
- * This structure is defined in ui_commands.rs emit_bar_state_update()
+ * BarStateData interface - The state object emitted by the backend
+ * This is shared across all UI components and provides a comprehensive state model
  */
 interface BarStateData {
   // Core state
@@ -146,52 +146,58 @@ export function FloatingBar() {
   // === STANDARDIZED EVENT LISTENER ===
 
   /**
-   * Primary backend integration: Listen to BAR_STATE_UPDATE events
-   * This is the core pattern for all UI components - event-driven state updates
+   * Primary backend integration: Listen to both direct and forwarded events
+   * 1. Listen directly to BAR_STATE_UPDATE events from the backend
+   * 2. Listen to component-specific events from the multi-bar-registration system
    */
   useEffect(() => {
     let unlisten: (() => void) | null = null;
 
+    // Handler function for processing state updates
+    const handleStateUpdate = (payload: any) => {
+      console.log("📨 FloatingBar: Received state update:", payload);
+
+      // Validate the received data structure
+      if (payload && typeof payload === "object" && "barState" in payload) {
+        setBarState(payload);
+      } else {
+        console.error("❌ FloatingBar: Invalid state data received:", payload);
+      }
+    };
+
     const setupListener = async () => {
       try {
+        // Set up the standard backend event listener
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
-          (event) => {
-            console.log(
-              "📨 FloatingBar: Received state update:",
-              event.payload
-            );
-
-            // Validate the received data structure
-            const payload = event.payload;
-            if (
-              payload &&
-              typeof payload === "object" &&
-              "barState" in payload
-            ) {
-              setBarState(payload);
-            } else {
-              console.error(
-                "❌ FloatingBar: Invalid state data received:",
-                payload
-              );
-            }
-          }
+          (event) => handleStateUpdate(event.payload)
         );
 
-        console.log("✅ FloatingBar: Event listener established");
+        // Also listen for component-specific events from event forwarding
+        document.addEventListener(`${COMPONENT_ID}-state-update`, ((
+          e: CustomEvent
+        ) => handleStateUpdate(e.detail)) as EventListener);
+
+        console.log("✅ FloatingBar: Event listeners established");
       } catch (error) {
-        console.error("❌ FloatingBar: Failed to setup event listener:", error);
+        console.error(
+          "❌ FloatingBar: Failed to setup event listeners:",
+          error
+        );
       }
     };
 
     setupListener();
 
     return () => {
+      // Clean up both listeners
       if (unlisten) {
         unlisten();
-        console.log("🔄 FloatingBar: Event listener cleaned up");
       }
+      document.removeEventListener(`${COMPONENT_ID}-state-update`, ((
+        e: CustomEvent
+      ) => handleStateUpdate(e.detail)) as EventListener);
+      console.log("🔄 FloatingBar: Event listeners cleaned up");
     };
   }, []);
 

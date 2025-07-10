@@ -11,7 +11,6 @@ use tracing::{error, info, warn};
 use std::sync::Arc;
 
 // Import sound commands for boot sound functionality
-use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
 use crate::constants::events;
 // Import event system manager for centralized event setup
 use crate::agent::EventSystemManager;

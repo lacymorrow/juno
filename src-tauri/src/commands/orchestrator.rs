@@ -193,11 +193,8 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
     Ok(())
 }
 
-/// Initialize default MCP servers for common tools
-async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
-    tracing::info!("Redirecting to safe MCP server initialization...");
-    initialize_default_mcp_servers_safely(mcp_manager).await
-}
+// Removed unused function: initialize_default_mcp_servers
+// It was just redirecting to initialize_default_mcp_servers_safely
 
 /// Get the global orchestrator instance
 async fn get_orchestrator() -> Result<Arc<Mutex<Orchestrator>>, String> {

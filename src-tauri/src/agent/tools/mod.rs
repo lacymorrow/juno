@@ -14,6 +14,7 @@
 //! - `cursor_integration`: Integration with Cursor IDE for development workflows
 //! - `mcp_integration`: Model Context Protocol (MCP) server integration for extensibility
 //! - `self_awareness_tools`: Self-building and introspection capabilities (debug mode only)
+//! - `display_info_tools`: Screen resolution and display information without screenshots
 
 //! - `tool_mapping`: Tool mapping service for centralized tool categorization
 //! - `ui_token_selector`: UI-Guided Visual Token Selection for 33% computational cost reduction
@@ -33,6 +34,7 @@ pub mod event_executor; // TARS Phase 1.7: Event-driven tool executor
 pub mod collaborative_ai; // Advanced Collaborative AI System Design from ComfyBench research
 pub mod cursor_integration;
 pub mod desktop_tools;
+pub mod display_info_tools; // Screen resolution and display information tools
 pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research

@@ -888,84 +888,102 @@ pub async fn ui_handle_interaction(
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
 
-        match element_id.as_str() {
-            "floating-bar" => {
-                match interaction.interaction_type.as_str() {
-                    "click" => manager.handle_bar_click().await,
-                    "submit" => {
-                        if let Some(data) = &interaction.data {
-                            if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
-                                manager.handle_bar_submit(value.to_string()).await
-                            } else {
-                                Err("Submit interaction missing value".to_string())
-                            }
+        // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar)
+        if element_id == "floating-bar" || element_id == "app-bar" || element_id == "voice-ai-bar" || element_id == "dynamic-bar" {
+            match interaction.interaction_type.as_str() {
+                "click" => manager.handle_bar_click().await,
+                "submit" => {
+                    if let Some(data) = &interaction.data {
+                        if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
+                            manager.handle_bar_submit(value.to_string()).await
                         } else {
-                            Err("Submit interaction missing data".to_string())
+                            Err("Submit interaction missing value".to_string())
                         }
-                    },
-                    "input_change" => {
-                        if let Some(data) = &interaction.data {
-                            if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
-                                manager.handle_bar_input_change(value.to_string()).await
-                            } else {
-                                Err("Input change interaction missing value".to_string())
-                            }
+                    } else {
+                        Err("Submit interaction missing data".to_string())
+                    }
+                },
+                "input_change" => {
+                    if let Some(data) = &interaction.data {
+                        if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
+                            manager.handle_bar_input_change(value.to_string()).await
                         } else {
-                            Err("Input change interaction missing data".to_string())
+                            Err("Input change interaction missing value".to_string())
                         }
-                    },
-                    "focus" => {
-                        if let Some(data) = &interaction.data {
-                            if let Some(is_focused) = data.get("isFocused").and_then(|v| v.as_bool()) {
-                                manager.handle_bar_focus_change(is_focused).await
-                            } else {
-                                manager.handle_bar_focus_change(true).await
-                            }
+                    } else {
+                        Err("Input change interaction missing data".to_string())
+                    }
+                },
+                "focus" => {
+                    if let Some(data) = &interaction.data {
+                        if let Some(is_focused) = data.get("isFocused").and_then(|v| v.as_bool()) {
+                            manager.handle_bar_focus_change(is_focused).await
                         } else {
                             manager.handle_bar_focus_change(true).await
                         }
-                    },
-                    "blur" => manager.handle_bar_input_blur().await,
-                    _ => {
-                        warn!("Unknown interaction type for floating bar: {}", interaction.interaction_type);
-                        Ok(())
+                    } else {
+                        manager.handle_bar_focus_change(true).await
                     }
-                }
-            },
-            "floating-panel" => {
-                match interaction.interaction_type.as_str() {
-                    "set_click_through" => {
-                        if let Some(data) = &interaction.data {
-                            if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
-                                manager.set_panel_click_through(enabled).await
-                            } else {
-                                Err("Set click through interaction missing enabled value".to_string())
-                            }
-                        } else {
-                            Err("Set click through interaction missing data".to_string())
-                        }
-                    },
-                    "set_level" => {
-                        if let Some(data) = &interaction.data {
-                            if let Some(level) = data.get("level").and_then(|v| v.as_i64()) {
-                                manager.set_panel_level(level as i32).await
-                            } else {
-                                Err("Set level interaction missing level value".to_string())
-                            }
-                        } else {
-                            Err("Set level interaction missing data".to_string())
-                        }
-                    },
-                    _ => {
-                        warn!("Unknown interaction type for floating panel: {}", interaction.interaction_type);
+                },
+                "blur" => manager.handle_bar_input_blur().await,
+                "initialize" => {
+                    // Handle initialization specially - just acknowledge receipt
+                    debug!("Initialized bar component: {}", element_id);
+                    Ok(())
+                },
+                "escape" => {
+                    // Handle escape key - delegate to stop coordinator for proper cancellation
+                    debug!("Escape key pressed on bar component: {}", element_id);
+                    let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+                    coordinator.stop_all_operations(&manager.app_handle, "Escape key pressed via UI").await.map_err(|e| e.to_string()).map(|_| ())
+                },
+                "enter" => {
+                    // Handle enter key - submit current input if any
+                    debug!("Enter key pressed on bar component: {}", element_id);
+                    if manager.input_value.trim().is_empty() {
                         Ok(())
+                    } else {
+                        let input_value = manager.input_value.clone();
+                        manager.handle_bar_submit(input_value).await
                     }
+                },
+                _ => {
+                    warn!("Unknown interaction type for bar component: {}", interaction.interaction_type);
+                    Ok(())
                 }
-            },
-            _ => {
-                warn!("Interaction handling not implemented for element: {}", element_id);
-                Ok(())
             }
+        } else if element_id == "floating-panel" {
+            match interaction.interaction_type.as_str() {
+                "set_click_through" => {
+                    if let Some(data) = &interaction.data {
+                        if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
+                            manager.set_panel_click_through(enabled).await
+                        } else {
+                            Err("Set click through interaction missing enabled value".to_string())
+                        }
+                    } else {
+                        Err("Set click through interaction missing data".to_string())
+                    }
+                },
+                "set_level" => {
+                    if let Some(data) = &interaction.data {
+                        if let Some(level) = data.get("level").and_then(|v| v.as_i64()) {
+                            manager.set_panel_level(level as i32).await
+                        } else {
+                            Err("Set level interaction missing level value".to_string())
+                        }
+                    } else {
+                        Err("Set level interaction missing data".to_string())
+                    }
+                },
+                _ => {
+                    warn!("Unknown interaction type for floating panel: {}", interaction.interaction_type);
+                    Ok(())
+                }
+            }
+        } else {
+            warn!("Interaction handling not implemented for element: {}", element_id);
+            Ok(())
         }
     } else {
         Err("UI Manager not initialized".to_string())

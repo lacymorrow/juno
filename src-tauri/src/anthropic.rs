@@ -190,13 +190,12 @@ pub(crate) struct AnthropicContentBlock {
 }
 
 // Keep this for payload structure, ensure Clone is derived
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
     pub audio_base64: Option<String>,
     pub agent_state: String,               // Send final state to frontend
-    pub screenshot_base64: Option<String>, // Optional screenshot data from the session
+    pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
 }
 
 // Note: BackendResponsePayload removed as we now use streaming events only
@@ -487,8 +486,18 @@ async fn execute_agent_internal(
 
     // Clean up orphaned tool calls before starting
     {
-        if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
-            warn!("Failed to process clean orphaned tool calls: {}", e);
+        // Generate a current execution ID to distinguish between different agent executions
+        let current_execution_id = uuid::Uuid::new_v4().to_string();
+
+        // Mark current execution so new tools won't be considered orphaned
+        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
+            warn!("Failed to set current execution ID for orchestrator: {}", e);
+        }
+
+        // Use the safe clean method that only removes tool calls from previous executions
+        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
+            warn!("Failed to clean orphaned tool calls: {}", e);
+        }
         }
 
         // Also clean up orphaned tool results that have no corresponding tool calls
@@ -682,6 +691,19 @@ async fn execute_agent_internal(
                 app_handle.clone(),
             ).await;
 
+            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
+            if let Err(e) = BrainFactory::register_computer_use_tools(
+                &mut specialist_tool_provider,
+                app_handle.clone(),
+            )
+            .await
+            {
+                let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
+            info!("✅ Registered full Computer Use tools for specialist mode");
+
             // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
             let specialist_agent_tool_provider = {
                 let guard = shared_tool_provider.lock().await;
@@ -848,7 +870,7 @@ async fn execute_agent_internal(
     }
 
     // --- Process Agent Result ---
-    let mut final_response = match agent_result {
+    let final_response = match agent_result {
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
@@ -867,7 +889,7 @@ async fn execute_agent_internal(
                 spoken_text: None, // TTS content is now handled during streaming via XML tags
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
-                screenshot_base64: None, // Capture screenshot if needed
+                screenshot_data: None, // Capture screenshot if needed
             }
         }
         Err(e) => {
@@ -979,7 +1001,7 @@ async fn execute_agent_internal(
                 spoken_text: None,  // Error messages use same content for speech
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
-                screenshot_base64: None,
+                screenshot_data: None,
             };
 
             // Store the original provider to restore later if needed
@@ -1313,23 +1335,60 @@ async fn execute_specialized_agent_task(
 
     info!("Executing {} agent task: {}", agent_type, task);
 
-    // FIXED: Get the orchestrator's memory manager instead of creating a new one
-    // This preserves conversation context and fixes the "yes please" cohesion issue
-    let state = app_handle.state::<AppState>();
-    let specialist_memory = state.get_memory_manager().await
-        .ok_or("EventMemoryManager not initialized")?;
+    // FIXED: Create a completely independent memory manager for specialist agents
+    // This prevents ANY tool calls from being tracked in the orchestrator's memory space
+    // which would cause the "orphaned tool call" API error
+    let specialist_memory = {
+        use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
+        use crate::agent::core::{Message, Role};
 
-    // Clean up any orphaned tool calls that might exist from previous failed executions
-    // This provides additional safety against conversation state issues
+        // Create a completely fresh memory manager for specialist
+        let mut fresh_memory = AdvancedMemoryManager::new();
 
-    // ERROR: CLEARS TOOLS BEFORE THEY FINISH
-    // let mut cloned_memory = specialist_memory;
-    // if let Err(e) = cloned_memory.clean_orphaned_tool_calls().await {
-    //     warn!(
-    //         "Failed to clean orphaned tool calls for {} agent: {}",
-    //         agent_type, e
-    //     );
-    // }
+        // Extract only minimal context for the specialist
+        // This prevents sharing ANY tool calls between orchestrator and specialist
+        let query = if context.is_empty() {
+            task.to_string()
+        } else {
+            format!("{}\n\nAdditional context: {}", task, context)
+        };
+
+        // Initialize with just the task as user message
+        let user_message = Message {
+            role: Role::User,
+            content: query,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        };
+
+        if let Err(e) = fresh_memory.add_message(user_message).await {
+            warn!("Failed to add task to specialist memory: {}", e);
+        }
+
+        // Return the completely isolated memory manager
+        fresh_memory
+    };
+
+    // Clean up only genuinely orphaned tool calls from previous executions
+    // Generate a current execution ID to distinguish between current and previous sessions
+    let current_execution_id = uuid::Uuid::new_v4().to_string();
+    {
+        let mut memory_manager = specialist_memory.clone();
+
+        // Mark current execution so new tools won't be considered orphaned
+        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
+            warn!("Failed to set current execution ID for {} agent: {}", agent_type, e);
+        }
+
+        // Now safely clean only tools from previous executions
+        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
+            warn!(
+                "Failed to clean orphaned tool calls for {} agent: {}",
+                agent_type, e
+            );
+        }
+    }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
@@ -1338,7 +1397,7 @@ async fn execute_specialized_agent_task(
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };
 
-    // Create specialist agent runner with the shared memory (conversation context preserved)
+    // Create specialist agent runner with the isolated memory
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
         specialist_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
@@ -1347,15 +1406,8 @@ async fn execute_specialized_agent_task(
         app_handle,
     );
 
-    // Format the query for the specialist agent
-    let specialist_query = if context.is_empty() {
-        task.to_string()
-    } else {
-        format!("{}\n\nAdditional context: {}", task, context)
-    };
-
     // Execute the specialist agent with proper cancellation signal
-    match specialist_runner.run(specialist_query, cancel_rx).await {
+    match specialist_runner.run(task.to_string(), cancel_rx).await {
         Ok(result) => {
             info!("Specialist {} agent completed successfully", agent_type);
 
@@ -1369,50 +1421,23 @@ async fn execute_specialized_agent_task(
             // 3. The result is not just a simple success/failure indicator
             let user_communication_handled = is_jsx || is_substantial_user_communication(&result);
 
-            if is_jsx {
-                // If the result contains JSX, return it directly to preserve JSX rendering
-                info!(
-                    "Specialist {} agent returned JSX content, preserving for rendering",
-                    agent_type
-                );
-                // Log communication handling for debugging
-                info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
-                Ok(serde_json::json!({
-                    "success": true,
-                    "agent_type": agent_type,
-                    "result": result,
-                    "is_jsx": true,
-                    "user_communication_handled": true, // Signal that specialist handled user communication
-                    "message": format!("{} agent completed the task successfully with visual components", agent_type)
-                }))
-            } else {
-                // Standard non-JSX response - check if it contains meaningful user communication
-                if user_communication_handled {
-                    info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
-                } else {
-                    info!("Specialist {} agent completed background task - orchestrator should provide user feedback", agent_type);
-                }
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "agent_type": agent_type,
-                    "result": result,
-                    "is_jsx": false,
-                    "user_communication_handled": user_communication_handled,
-                    "message": format!("{} agent completed the task successfully", agent_type)
-                }))
-            }
+            // Format a rich result for the orchestrator
+            Ok(serde_json::json!({
+                "success": true,
+                "agent_type": agent_type,
+                "result": result,
+                "jsx_content": is_jsx,
+                "user_communication_handled": user_communication_handled,
+                "message": format!("{} agent completed task successfully", agent_type)
+            }))
         }
         Err(e) => {
-            // Enhanced error handling for different types of failures
-            let error_msg = match &e {
-                AgentError::Terminated => {
-                    format!("{} agent was cancelled or terminated", agent_type)
-                }
+            // Format user-friendly error message based on error type
+            let error_msg = match e {
                 AgentError::MaxStepsReached => {
-                    format!("{} agent reached maximum steps", agent_type)
+                    format!("{} agent ran out of iterations - task was too complex to complete in the allowed number of steps", agent_type)
                 }
-                AgentError::LlmError(msg) if msg.contains("Tool calls without results") => {
+                AgentError::Timeout(_) => {
                     format!("{} agent failed due to timeout - some tool operations did not complete within the time limit", agent_type)
                 }
                 AgentError::LlmError(msg) if msg.contains("timed out") => {

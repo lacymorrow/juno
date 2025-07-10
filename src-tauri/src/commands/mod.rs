@@ -88,7 +88,9 @@ pub use self::dictation_state_manager::{
 // Note: Specific exports from element, keyboard, text_editor, window modules
 // are not publicly re-exported as they don't have pub visibility
 // Exports from main branch - new features
-pub use self::enhanced_visual_reasoning_commands::*;
+pub use self::enhanced_visual_reasoning_commands::{
+    VisualReasoningState, VisualAnalysisRequest, SceneTypeInfo, TestResult, initialize_visual_reasoning_state
+};
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
 // Floating bar functionality fully migrated to ui_commands.rs - no longer needed
@@ -108,7 +110,6 @@ pub use self::shortcuts::*;
 pub use self::sound::*;
 pub use self::stop_operations::*;
 pub use self::tool_choice::*;
-pub use self::tools::*;
 pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
 
 // Explicitly re-export tool functions to ensure they're available
@@ -116,6 +117,9 @@ pub use self::tools::{
     get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
     is_tool_enabled, reset_tool_configuration, set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
     test_tool_config, test_tool_config_command,
+    // Tool approval commands
+    approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_pending_tool_approvals,
+    get_tool_approval_required, set_tool_approval_required,
 };
 
 // Shared helper function for sending notifications from dev tools

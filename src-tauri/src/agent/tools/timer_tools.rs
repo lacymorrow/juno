@@ -82,7 +82,327 @@ impl TimerManager {
     }
 }
 
-/// Register simple timer tools
+// Tool implementations
+mod timer_tools_impl {
+    use super::*;
+    use crate::agent::core::ToolDefinition;
+
+    /// Creates the tool definition for the `set_timer` tool.
+    ///
+    /// Used by: Tool registration system, agent tool discovery
+    /// Creates schema for simple time-based delay timers.
+    ///
+    /// # Returns
+    /// `ToolDefinition` for setting simple delay timers with context
+    pub fn set_timer_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "set_timer".to_string(),
+            description: "Sets a timer that will restart the agent after a specified delay. Useful for long-running tasks like games where the agent needs to wait for external events or take breaks. The agent will be restarted with the saved context when the timer expires.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "delay_seconds": {
+                        "type": "number",
+                        "description": "Number of seconds to wait before restarting the agent",
+                        "minimum": 1
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Context data to restore when the timer expires (game state, conversation history, etc.)",
+                        "additionalProperties": true
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description of what this timer is for"
+                    }
+                },
+                "required": ["delay_seconds", "context", "description"]
+            }),
+            api_type: None,
+            beta_flag: None,
+        }
+    }
+
+    /// Executes the `set_timer` tool operation.
+    ///
+    /// Creates a simple delay timer that will emit a timer-expired event
+    /// to restart the agent with saved context after the delay.
+    ///
+    /// Used by: Game automation, long-running processes, scheduled tasks
+    ///
+    /// # Arguments
+    /// * `input` - JSON with delay_seconds, context, and description
+    /// * `app_handle` - Tauri app handle for event emission
+    ///
+    /// # Returns
+    /// Success response with timer details or error message
+    pub async fn set_timer_exec(
+        input: Value,
+        app_handle: AppHandle,
+    ) -> Result<Value, String> {
+        let delay_seconds = input["delay_seconds"]
+            .as_f64()
+            .ok_or_else(|| "Missing or invalid 'delay_seconds' parameter".to_string())? as u64;
+
+        let context = input["context"]
+            .as_object()
+            .ok_or_else(|| "Missing or invalid 'context' parameter".to_string())?
+            .clone();
+
+        let description = input["description"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'description' parameter".to_string())?
+            .to_string();
+
+        let timer_id = Uuid::new_v4().to_string();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("System time error: {}", e))?
+            .as_secs();
+        let trigger_time = now + delay_seconds;
+
+        let timer_task = TimerTask {
+            id: timer_id.clone(),
+            trigger_time,
+            context: Value::Object(context),
+            description,
+            created_at: now,
+        };
+
+        // Get or create timer manager from app state
+        let state = app_handle.state::<AppState>();
+        let timer_manager = state.get_timer_manager().await;
+
+        timer_manager.add_timer(timer_task.clone()).await;
+
+        // Start the timer task
+        let app_handle_clone = app_handle.clone();
+        let timer_manager_clone = timer_manager.clone();
+        let timer_id_clone = timer_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
+
+            // Check if timer is still active (might have been cancelled)
+            if timer_manager_clone.cancel_timer(&timer_id_clone).await {
+                info!("Timer {} expired, triggering agent restart with context", timer_id_clone);
+
+                // Emit event to frontend to restart agent with context
+                if let Err(e) = app_handle_clone.emit("timer-expired", &timer_task) {
+                    error!("Failed to emit timer-expired event: {}", e);
+                }
+            }
+        });
+
+        Ok(json!({
+            "success": true,
+            "timer_id": timer_id,
+            "trigger_time": trigger_time,
+            "message": format!("Timer set for {} seconds from now", delay_seconds)
+        }))
+    }
+
+    /// Creates the tool definition for the `cancel_timer` tool.
+    ///
+    /// Used by: Tool registration system for timer cancellation capabilities
+    /// Allows agents to cancel previously set timers when conditions change.
+    ///
+    /// # Returns
+    /// `ToolDefinition` for cancelling active timers by ID
+    pub fn cancel_timer_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "cancel_timer".to_string(),
+            description: "Cancels a previously set timer by its ID. Useful if conditions change and the agent no longer needs to restart.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "timer_id": {
+                        "type": "string",
+                        "description": "The ID of the timer to cancel"
+                    }
+                },
+                "required": ["timer_id"]
+            }),
+            api_type: None,
+            beta_flag: None,
+        }
+    }
+
+    /// Executes the `cancel_timer` tool operation.
+    ///
+    /// Cancels an active timer by removing it from the manager and stopping
+    /// any associated monitoring tasks.
+    ///
+    /// Used by: Cleanup processes, condition changes, manual timer cancellation
+    ///
+    /// # Arguments
+    /// * `input` - JSON with timer_id to cancel
+    /// * `app_handle` - Tauri app handle for state access
+    ///
+    /// # Returns
+    /// Success/failure response with cancellation details
+    pub async fn cancel_timer_exec(
+        input: Value,
+        app_handle: AppHandle,
+    ) -> Result<Value, String> {
+        let timer_id = input["timer_id"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'timer_id' parameter".to_string())?;
+
+        let state = app_handle.state::<AppState>();
+        let timer_manager = state.get_timer_manager().await;
+
+        let cancelled = timer_manager.cancel_timer(timer_id).await;
+
+        Ok(json!({
+            "success": cancelled,
+            "message": if cancelled {
+                format!("Timer {} cancelled", timer_id)
+            } else {
+                format!("Timer {} not found or already expired", timer_id)
+            }
+        }))
+    }
+
+    /// Creates the tool definition for the `list_timers` tool.
+    ///
+    /// Used by: Tool registration system for timer status inspection
+    /// Enables agents to view all currently active timers and their details.
+    ///
+    /// # Returns
+    /// `ToolDefinition` for listing all active timers
+    pub fn list_timers_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "list_timers".to_string(),
+            description: "Lists all active timers that are currently scheduled. Useful for checking what timers are running.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            api_type: None,
+            beta_flag: None,
+        }
+    }
+
+    /// Executes the `list_timers` tool operation.
+    ///
+    /// Returns a comprehensive list of all active timers with their configurations,
+    /// remaining time, and current status.
+    ///
+    /// Used by: Status reporting, debugging, timer management interfaces
+    ///
+    /// # Arguments
+    /// * `_input` - Unused (no parameters required)
+    /// * `app_handle` - Tauri app handle for state access
+    ///
+    /// # Returns
+    /// JSON array of all active timers with details and time remaining
+    pub async fn list_timers_exec(
+        _input: Value,
+        app_handle: AppHandle,
+    ) -> Result<Value, String> {
+        let state = app_handle.state::<AppState>();
+        let timer_manager = state.get_timer_manager().await;
+
+        let active_timers = timer_manager.list_timers().await;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("System time error: {}", e))?
+            .as_secs();
+
+        let timer_info: Vec<Value> = active_timers
+            .iter()
+            .map(|timer| {
+                let time_remaining = if timer.trigger_time > now {
+                    timer.trigger_time - now
+                } else {
+                    0
+                };
+
+                json!({
+                    "id": timer.id,
+                    "description": timer.description,
+                    "trigger_time": timer.trigger_time,
+                    "time_remaining_seconds": time_remaining,
+                    "created_at": timer.created_at
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "success": true,
+            "active_timers": timer_info,
+            "count": active_timers.len()
+        }))
+    }
+
+    /// Creates the tool definition for the `check_expired_timers` tool.
+    ///
+    /// Used by: Tool registration system for expired timer checking
+    /// Critical for agent startup to detect if previous timers have expired
+    /// and need context restoration.
+    ///
+    /// # Returns
+    /// `ToolDefinition` for checking and retrieving expired timer contexts
+    pub fn check_expired_timers_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "check_expired_timers".to_string(),
+            description: "Checks for any expired timers and returns their contexts. This is useful during agent startup to see if the agent should resume a previous task.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            api_type: None,
+            beta_flag: None,
+        }
+    }
+
+    /// Executes the `check_expired_timers` tool operation.
+    ///
+    /// Scans for expired timers and returns their contexts for agent resumption.
+    /// Automatically removes expired timers from the active collection.
+    ///
+    /// Used by: Agent startup, context restoration, expired timer cleanup
+    ///
+    /// # Arguments
+    /// * `_input` - Unused (no parameters required)
+    /// * `app_handle` - Tauri app handle for state access
+    ///
+    /// # Returns
+    /// JSON with expired timer details and contexts for restoration
+    pub async fn check_expired_timers_exec(
+        _input: Value,
+        app_handle: AppHandle,
+    ) -> Result<Value, String> {
+        let state = app_handle.state::<AppState>();
+        let timer_manager = state.get_timer_manager().await;
+
+        timer_manager.check_expired(&app_handle).await;
+
+        Ok(json!({
+            "success": true,
+            "message": "Checked for expired timers"
+        }))
+    }
+}
+
+/// Registers all timer tools with the provider for agent task scheduling and resumption.
+///
+/// This is the main registration function that makes all timer capabilities available
+/// to agents. Includes simple timers, monitoring timers, and timer management tools.
+///
+/// Used by: Agent initialization in `anthropic.rs`, tool provider setup
+///
+/// # Arguments
+/// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `app_handle` - Tauri app handle for state access and event emission
+///
+/// # Tools Registered
+/// - `set_timer`: Simple delay timers with context restoration
+/// - `cancel_timer`: Timer cancellation by ID
+/// - `list_timers`: List all active timers with status
+/// - `check_expired_timers`: Check for expired timers needing context restoration
 pub async fn register_timer_tools(
     tool_provider: &mut LocalToolProvider,
     _app_state: &AppState,

@@ -56,6 +56,10 @@ export default function CommandOverlay() {
       (event) => {
         const { id, command, success, error, duration } = event.payload;
         const commandId = id;
+        const newStatus: "completed" | "failed" = success
+          ? "completed"
+          : "failed";
+
         setCommands((prev) => {
           // Try to find and update the matching command by id
           let updated = false;
@@ -64,7 +68,7 @@ export default function CommandOverlay() {
               updated = true;
               return {
                 ...cmd,
-                status: success ? "completed" : "failed",
+                status: newStatus,
                 duration: duration || 0,
                 error: error || undefined,
               };
@@ -73,17 +77,15 @@ export default function CommandOverlay() {
           });
           // If not found, add as new (fallback for out-of-order events)
           if (!updated) {
-            return [
-              ...prev,
-              {
-                id: commandId || Date.now(),
-                command: command || "Unknown command",
-                timestamp: Date.now(),
-                status: success ? "completed" : "failed",
-                duration: duration || 0,
-                error: error || undefined,
-              },
-            ];
+            const newCommand: CommandInfo = {
+              id: commandId || Date.now(),
+              command: command || "Unknown command",
+              timestamp: Date.now(),
+              status: newStatus,
+              duration: duration || 0,
+              error: error || undefined,
+            };
+            return [...prev, newCommand];
           }
           return updatedCommands;
         });
