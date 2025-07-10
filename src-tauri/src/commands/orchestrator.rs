@@ -43,13 +43,9 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
         }
     });
 
-    // Store globally
-    ORCHESTRATOR
-        .set(Arc::new(Mutex::new(orchestrator)))
-        .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
-    MCP_MANAGER
-        .set(mcp_manager)
-        .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
+    // Store globally using thread-safe get_or_init to prevent race conditions
+    let orchestrator_arc = ORCHESTRATOR.get_or_init(|| Arc::new(Mutex::new(orchestrator)));
+    let mcp_manager_arc = MCP_MANAGER.get_or_init(|| mcp_manager);
 
     tracing::info!("Enhanced multi-agent orchestrator system initialized successfully");
     tracing::info!("MCP server initialization continues in background");

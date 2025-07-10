@@ -749,11 +749,11 @@ pub async fn initialize_ui_manager(app_handle: AppHandle) -> Result<(), String> 
     let manager = UIManager::new(app_handle.clone()).await?;
     let manager_arc = Arc::new(TokioMutex::new(manager));
 
-    // Store globally
-    UI_MANAGER.set(manager_arc.clone()).map_err(|_| "Failed to set UI manager")?;
+    // Store globally using thread-safe get_or_init to prevent race conditions
+    let stored_manager = UI_MANAGER.get_or_init(|| manager_arc.clone());
 
     // Set up event listeners
-    setup_ui_event_listeners(app_handle, manager_arc).await;
+    setup_ui_event_listeners(app_handle, stored_manager.clone()).await;
 
     info!("UI Manager initialized successfully");
     Ok(())

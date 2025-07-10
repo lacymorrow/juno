@@ -15,7 +15,7 @@ impl SharedWhisperManager {
     pub fn initialize(model_path: &str) -> Result<Arc<WhisperContext>> {
         info!("[SharedWhisper] 🚀 Initializing shared Whisper context with model: {}", model_path);
 
-        // Check if already initialized
+        // Check if already initialized first
         if let Some(existing_context) = SHARED_WHISPER_CONTEXT.get() {
             info!("[SharedWhisper] ✅ Shared context already exists, returning existing instance (no duplicate loading)");
             return Ok(existing_context.clone());
@@ -45,19 +45,12 @@ impl SharedWhisperManager {
         let arc_context = Arc::new(whisper_context);
         info!("[SharedWhisper] ✅ WhisperContext created successfully");
 
-        // Try to set the global context
-        match SHARED_WHISPER_CONTEXT.set(arc_context.clone()) {
-            Ok(_) => {
-                info!("[SharedWhisper] ✅ Shared Whisper context initialized successfully - available for reuse");
-                info!("[SharedWhisper] 💡 Both VoiceController and AlwaysListeningController can now use this shared instance");
-                Ok(arc_context)
-            }
-            Err(_) => {
-                // This shouldn't happen since we checked above, but handle gracefully
-                warn!("[SharedWhisper] ⚠️  Race condition detected during initialization, returning existing instance");
-                Ok(Self::get()?)
-            }
-        }
+        // Use get_or_init for thread-safe initialization (stable feature)
+        let stored_context = SHARED_WHISPER_CONTEXT.get_or_init(|| arc_context.clone());
+        info!("[SharedWhisper] ✅ Shared Whisper context initialized successfully - available for reuse");
+        info!("[SharedWhisper] 💡 Both VoiceController and AlwaysListeningController can now use this shared instance");
+        
+        Ok(stored_context.clone())
     }
 
     /// Get the shared Whisper context (must be initialized first)
