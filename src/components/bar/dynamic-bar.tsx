@@ -320,40 +320,96 @@ const AIFloatingChatbot = () => {
     setSize(newWidget.size);
   }, [barState.barState, setSize]);
 
-  // === WINDOW RESIZING LOGIC ===
+  // === DYNAMIC WINDOW RESIZING LOGIC ===
 
   /**
-   * Responsive window resizing based on UI state
+   * Smart window sizing based on state and content
+   */
+  const getWindowDimensions = (uiState: UIState, widget: WidgetData) => {
+    // Base dimensions from config
+    const base = { width: defaultWidth, height: defaultHeight };
+
+    // State-specific sizing with multiple tiers
+    switch (uiState) {
+      case UI.BAR_STATES_DEFAULT:
+      case UI.BAR_STATES_DICTATION_READY:
+        return { width: 80, height: 30 }; // Extra compact for default state
+
+      case UI.BAR_STATES_LISTENING:
+      case UI.BAR_STATES_TRANSCRIBING:
+        return { width: 160, height: 40 }; // Medium for voice states
+
+      case UI.BAR_STATES_SPEAKING:
+        // Size based on content length
+        const textLength = barState.spokenText?.length || 0;
+        const dynamicWidth = Math.min(320, Math.max(180, 180 + textLength * 2));
+        return { width: dynamicWidth, height: 45 };
+
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
+        return { width: 200, height: 50 }; // Medium for processing states
+
+      case UI.BAR_STATES_INPUT:
+      case UI.BAR_STATES_EXPANDING:
+        // Large for input state
+        return { width: 400, height: 60 };
+
+      case UI.BAR_STATES_ERROR:
+        // Size based on error message length
+        const errorLength = barState.currentError?.length || 0;
+        const errorWidth = Math.min(
+          350,
+          Math.max(200, 200 + errorLength * 1.5)
+        );
+        return { width: errorWidth, height: 55 };
+
+      case UI.BAR_STATES_SUCCESS:
+        return { width: 180, height: 45 }; // Compact for success
+
+      case UI.BAR_STATES_AGENT_RESPONDING:
+        // Dynamic size based on agent state
+        return { width: 280, height: 65 }; // Larger for agent work
+
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        // Large persistent state
+        return { width: 250, height: 80 };
+
+      default:
+        return base;
+    }
+  };
+
+  /**
+   * Enhanced window resizing with smooth transitions and content awareness
    */
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = getCurrentWindow();
-        const currentUiState = barState.barState;
-
-        // Define compact states that use small window size (match FloatingBar behavior)
-        const isCompact = [
-          UI.BAR_STATES_DEFAULT,
-          UI.BAR_STATES_LISTENING,
-          UI.BAR_STATES_DICTATION_READY,
-          UI.BAR_STATES_SPEAKING,
-          UI.BAR_STATES_TRANSCRIBING,
-        ].includes(currentUiState as any);
-        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
-
-        console.log(
-          `🔧 DynamicBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+        const dimensions = getWindowDimensions(
+          barState.barState,
+          currentWidgetData
         );
 
-        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+        console.log(
+          `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${barState.barState}`
+        );
+
+        await appWindow.setSize(
+          new LogicalSize(dimensions.width, dimensions.height)
+        );
       } catch (error) {
         console.error("❌ DynamicBar: Failed to resize window:", error);
       }
     };
 
     resizeWindow();
-  }, [barState.barState]);
+  }, [
+    barState.barState,
+    currentWidgetData,
+    barState.spokenText,
+    barState.currentError,
+  ]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
