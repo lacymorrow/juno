@@ -932,9 +932,10 @@ pub async fn ui_handle_interaction(
                     Ok(())
                 },
                 "escape" => {
-                    // Handle escape key - cancel any active operations
+                    // Handle escape key - delegate to stop coordinator for proper cancellation
                     debug!("Escape key pressed on bar component: {}", element_id);
-                    manager.handle_bar_escape().await
+                    let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+                    coordinator.stop_all_operations(&manager.app_handle, "Escape key pressed via UI").await.map_err(|e| e.to_string()).map(|_| ())
                 },
                 "enter" => {
                     // Handle enter key - submit current input if any
@@ -942,7 +943,8 @@ pub async fn ui_handle_interaction(
                     if manager.input_value.trim().is_empty() {
                         Ok(())
                     } else {
-                        manager.handle_bar_submit(manager.input_value.clone()).await
+                        let input_value = manager.input_value.clone();
+                        manager.handle_bar_submit(input_value).await
                     }
                 },
                 _ => {

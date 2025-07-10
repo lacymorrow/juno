@@ -345,6 +345,8 @@ export const UI = {
   INTERACTION_TYPES_HOVER: 'hover',
   INTERACTION_TYPES_INPUT: 'input',
   INTERACTION_TYPES_SUBMIT: 'submit',
+  INTERACTION_TYPES_ESCAPE: 'escape',
+  INTERACTION_TYPES_ENTER: 'enter',
   TEXT_DISPLAY_MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH: 30,
   TEXT_DISPLAY_MAX_UI_PREVIEW_TEXT_LENGTH: 50,
   MOBILE_BREAKPOINT: 768,
@@ -993,7 +995,7 @@ export const FILE_EXTENSIONS = {
   AGENT_LOG_FILE: 'agent_activity.log',
   CONVERSATION_CACHE_FILE: 'conversation_cache.json',
   WORKSPACE_CONFIG_FILE: '.workspace_config.json',
-  APP_NAME: 'app_name',
+  APP_NAME_PARAM: 'app_name',
 } as const;
 
 export const PERMISSION_TYPES = {

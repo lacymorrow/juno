@@ -69,6 +69,8 @@ pub mod interaction_types {
     pub const HOVER: &str = "hover";
     pub const INPUT: &str = "input";
     pub const SUBMIT: &str = "submit";
+    pub const ESCAPE: &str = "escape";
+    pub const ENTER: &str = "enter";
 }
 
 // UI layout constants (moved from frontend constants.ts)
