@@ -1333,274 +1333,6 @@ impl AdvancedMemoryManager {
 // Add MemoryManager trait implementation for AdvancedMemoryManager
 #[async_trait]
 impl MemoryManager for AdvancedMemoryManager {
-<<<<<<< HEAD
-||||||| parent of ed8ec6f5 (auto commit)
-    async fn add_message(&mut self, mut message: Message) -> Result<(), AgentError> {
-        let start_time = Instant::now();
-
-        // Process screenshots BEFORE adding to memory (critical for token optimization)
-        self.process_message_screenshots(&mut message).await?;
-
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Track tool calls and results
-        match message.role {
-            Role::Assistant => {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Add tool call IDs to pending list
-                    for tool_call in tool_calls {
-                        pending.insert(tool_call.id.clone());
-                        log::debug!("Tracking pending tool call: {}", tool_call.id);
-                    }
-                }
-            }
-            Role::Tool => {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    // Remove from pending list when result is added
-                    if pending.remove(tool_call_id) {
-                        log::debug!("Resolved pending tool call: {}", tool_call_id);
-                    } else {
-                        log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        messages.push(message.clone());
-
-        // Release locks before async operations
-        drop(messages);
-        drop(pending);
-
-        log::debug!("Memory: Added message. Role={:?}", message.role);
-
-                // RE-ENABLED: Auto-pruning and metrics with safer implementation
-        self.prune_memory_if_needed().await?;
-
-        // RE-ENABLED: Metrics update with safer timing (non-critical path)
-        if let Err(e) = self.update_metrics(start_time).await {
-            log::warn!("Failed to update metrics after adding message: {}", e);
-            // Continue execution - metrics failure shouldn't block message addition
-        }
-
-        Ok(())
-    }
-
-    async fn get_messages(&self) -> Result<Vec<Message>, AgentError> {
-        let start_time = Instant::now();
-        let messages = self.messages.read().await;
-        let pending = self.pending_tool_calls.read().await;
-
-        log::debug!("Memory: Retrieved {} messages, {} pending tool calls",
-                    messages.len(), pending.len());
-
-        let result = messages.clone();
-        drop(messages);
-        drop(pending);
-
-        // RE-ENABLED: Metrics update with error handling
-        if let Err(e) = self.update_metrics(start_time).await {
-            log::warn!("Failed to update metrics after getting messages: {}", e);
-            // Continue execution - metrics failure shouldn't block message retrieval
-        }
-
-        Ok(result)
-    }
-
-    async fn get_last_n_messages(&self, n: usize) -> Result<Vec<Message>, AgentError> {
-        let start_time = Instant::now();
-        let messages = self.messages.read().await;
-        let start_index = messages.len().saturating_sub(n);
-        let result = messages[start_index..].to_vec();
-        drop(messages);
-
-        // RE-ENABLED: Metrics update with error handling
-        if let Err(e) = self.update_metrics(start_time).await {
-            log::warn!("Failed to update metrics after getting last N messages: {}", e);
-            // Continue execution - metrics failure shouldn't block message retrieval
-        }
-
-        Ok(result)
-    }
-
-    async fn clear_memory(&mut self) -> Result<(), AgentError> {
-        let start_time = Instant::now();
-
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-        let mut summaries = self.summaries.write().await;
-        let mut cache = self.summary_cache.write().await;
-
-        messages.clear();
-        pending.clear();
-        summaries.clear();
-        cache.clear();
-
-        log::info!("Memory: Cleared all messages, pending tool calls, summaries, and cache");
-
-        // RE-ENABLED: Enhanced metrics reset with operation tracking
-        {
-            let mut metrics = self.metrics.write().await;
-            // Preserve cumulative counters but reset operational metrics
-            let preserved_pruning_events = metrics.pruning_events;
-            let preserved_summarization_events = metrics.summarization_events;
-            let preserved_orphaned_cleaned = metrics.orphaned_tool_calls_cleaned;
-
-            *metrics = MemoryMetrics::default();
-
-            // Restore cumulative counters
-            metrics.pruning_events = preserved_pruning_events;
-            metrics.summarization_events = preserved_summarization_events;
-            metrics.orphaned_tool_calls_cleaned = preserved_orphaned_cleaned;
-
-            log::info!("Memory metrics reset: preserved {} pruning events, {} summarization events, {} orphaned calls cleaned",
-                       preserved_pruning_events, preserved_summarization_events, preserved_orphaned_cleaned);
-        }
-
-        Ok(())
-    }
-
-    async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        // Call the actual implementation method
-        AdvancedMemoryManager::clean_orphaned_tool_calls(self).await
-    }
-
-    async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        // Call the actual implementation method
-        AdvancedMemoryManager::clean_orphaned_tool_results(self).await
-    }
-}
-
-/// A simple in-memory implementation of the MemoryManager trait (existing implementation)
-/// Kept for backward compatibility
-#[derive(Debug, Clone)]
-pub struct SimpleMemoryManager {
-    messages: Arc<RwLock<Vec<Message>>>,
-    pending_tool_calls: Arc<RwLock<HashSet<String>>>, // Track tool call IDs that haven't been resolved yet
-}
-
-impl SimpleMemoryManager {
-    pub fn new() -> Self {
-        SimpleMemoryManager {
-            messages: Arc::new(RwLock::new(Vec::new())),
-            pending_tool_calls: Arc::new(RwLock::new(HashSet::new())),
-        }
-    }
-
-    /// Remove orphaned tool calls that don't have corresponding tool results
-    /// This method should be called when starting a new agent execution to clean up
-    /// any incomplete tool calls from previous cancelled executions
-    pub async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Find all tool call IDs that have results
-        let mut resolved_tool_calls = HashSet::new();
-        for message in messages.iter() {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    resolved_tool_calls.insert(tool_call_id.clone());
-                }
-            }
-        }
-
-        // Remove any Assistant messages with tool calls that don't have corresponding results
-        let mut orphaned_tool_call_ids = HashSet::new();
-        messages.retain(|message| {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
-                    if !all_resolved {
-                        // Mark these tool calls as orphaned
-                        for tc in tool_calls {
-                            if !resolved_tool_calls.contains(&tc.id) {
-                                orphaned_tool_call_ids.insert(tc.id.clone());
-                            }
-                        }
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        // Clean up pending tool calls
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id));
-
-        if !orphaned_tool_call_ids.is_empty() {
-            log::info!("Cleaned up {} orphaned tool calls: {:?}",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids);
-        }
-
-        Ok(())
-    }
-
-    /// Clear all pending tool calls (useful when starting a fresh conversation)
-    pub async fn clear_pending_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut pending = self.pending_tool_calls.write().await;
-        pending.clear();
-        log::info!("Cleared all pending tool calls");
-        Ok(())
-    }
-
-    /// Get a list of currently pending tool call IDs
-    pub async fn get_pending_tool_calls(&self) -> Result<Vec<String>, AgentError> {
-        let pending = self.pending_tool_calls.read().await;
-        Ok(pending.iter().cloned().collect())
-    }
-
-    /// Clean up orphaned tool results that don't have corresponding tool calls
-    /// This method removes tool result messages that have no matching tool_use blocks
-    pub async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        let mut messages = self.messages.write().await;
-
-        // Find all tool call IDs that exist in assistant messages
-        let mut valid_tool_call_ids = std::collections::HashSet::new();
-        for message in messages.iter() {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    for tool_call in tool_calls {
-                        valid_tool_call_ids.insert(tool_call.id.clone());
-                    }
-                }
-            }
-        }
-
-        // Count orphaned tool results before removal
-        let mut orphaned_count = 0;
-        let mut orphaned_ids = Vec::new();
-
-        // Remove tool result messages that don't have corresponding tool calls
-        messages.retain(|message| {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    if !valid_tool_call_ids.contains(tool_call_id) {
-                        orphaned_count += 1;
-                        orphaned_ids.push(tool_call_id.clone());
-                        log::warn!("Removing orphaned tool result with ID: {}", tool_call_id);
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        if orphaned_count > 0 {
-            log::info!("Cleaned up {} orphaned tool results: {:?}", orphaned_count, orphaned_ids);
-        }
-
-        Ok(orphaned_count)
-    }
-}
-
-#[async_trait]
-impl MemoryManager for SimpleMemoryManager {
-=======
     async fn add_message(&mut self, mut message: Message) -> Result<(), AgentError> {
         let start_time = Instant::now();
 
@@ -1874,57 +1606,37 @@ impl SimpleMemoryManager {
 
 #[async_trait]
 impl MemoryManager for SimpleMemoryManager {
->>>>>>> ed8ec6f5 (auto commit)
     async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
-        // Record operation start time for metrics
-        let operation_start = Instant::now();
+        let mut messages = self.messages.write().await;
+        let mut pending = self.pending_tool_calls.write().await;
 
-        // Clone the message to avoid ownership issues
-        let mut message_clone = message.clone();
-
-        // Process screenshots in the message content if necessary
-        if Self::is_screenshot_content(&message_clone.content) {
-            if let Err(e) = self.process_message_screenshots(&mut message_clone).await {
-                log::warn!("Failed to process screenshots in message: {}", e);
+        // Track tool calls and results
+        match message.role {
+            Role::Assistant => {
+                if let Some(tool_calls) = &message.tool_calls {
+                    // Add tool call IDs to pending list
+                    for tool_call in tool_calls {
+                        pending.insert(tool_call.id.clone());
+                        log::debug!("Tracking pending tool call: {}", tool_call.id);
+                    }
+                }
             }
+            Role::Tool => {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    // Remove from pending list when result is added
+                    if pending.remove(tool_call_id) {
+                        log::debug!("Resolved pending tool call: {}", tool_call_id);
+                    } else {
+                        log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
+                    }
+                }
+            }
+            _ => {}
         }
 
-        // Track tool calls if present
-        if let Some(tool_calls) = &message_clone.tool_calls {
-            let mut pending = self.pending_tool_calls.write().await;
-            for tool_call in tool_calls {
-                pending.insert(tool_call.id.clone());
-            }
-        }
+        messages.push(message);
 
-        // Remove from pending if this is a tool result
-        if message_clone.role == Role::Tool {
-            if let Some(tool_call_id) = &message_clone.tool_call_id {
-                let mut pending = self.pending_tool_calls.write().await;
-                pending.remove(tool_call_id);
-            }
-        }
-
-        // Add message to memory
-        {
-            let mut messages = self.messages.write().await;
-            messages.push(message_clone);
-
-            // Update metrics
-            if let Ok(mut metrics) = self.metrics.try_write() {
-                metrics.total_messages = messages.len();
-            }
-        }
-
-        // Prune memory if needed
-        if self.config.read().await.auto_prune {
-            if let Err(e) = self.prune_memory_if_needed().await {
-                log::warn!("Failed to auto-prune memory: {}", e);
-            }
-        }
-
-        // Update operation metrics
-        let _ = self.update_metrics(operation_start).await;
+        log::debug!("Memory: Added message");
 
         Ok(())
     }
@@ -1942,42 +1654,34 @@ impl MemoryManager for SimpleMemoryManager {
     }
 
     async fn clear_memory(&mut self) -> Result<(), AgentError> {
-        // Clear all messages
-        {
-            let mut messages = self.messages.write().await;
-            messages.clear();
-        }
+        let mut messages = self.messages.write().await;
+        let mut pending = self.pending_tool_calls.write().await;
 
-        // Clear pending tool calls
-        {
-            let mut pending = self.pending_tool_calls.write().await;
-            pending.clear();
-        }
-
-        // Reset metrics (but keep counters for pruning events, etc.)
-        {
-            if let Ok(mut metrics) = self.metrics.try_write() {
-                metrics.total_messages = 0;
-                metrics.estimated_tokens = 0;
-                // Keep other metrics for historical tracking
-            }
-        }
+        messages.clear();
+        pending.clear();
 
         log::info!("Memory cleared");
         Ok(())
     }
 
-    // These methods are already implemented as public methods on AdvancedMemoryManager
-    // and simply forward to those existing implementations
-
     async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
         // Delegate to the existing implementation
-        self.clean_orphaned_tool_calls().await
+        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
     }
 
     async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
         // Delegate to the existing implementation
-        self.clean_orphaned_tool_results().await
+        SimpleMemoryManager::clean_orphaned_tool_results(self).await
+    }
+
+    async fn set_current_execution_id(&mut self, _execution_id: &str) -> Result<(), AgentError> {
+        // SimpleMemoryManager doesn't track execution IDs, so this is a no-op
+        Ok(())
+    }
+
+    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+        // For simple memory manager, just clean all orphaned tool calls
+        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
     }
 }
 
