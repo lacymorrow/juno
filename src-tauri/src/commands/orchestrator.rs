@@ -835,37 +835,9 @@ pub async fn execute_workflow_template(
     ))
 }
 
-/// Initialize the orchestrator on app startup
-pub async fn initialize_orchestrator_system() -> Result<(), String> {
-    // Updated to use the non-deprecated function with app handle
-    // Note: This function now requires an app handle to be passed in properly
-    let factory = AgentFactory::new();
-
-    // Initialize default agents (will skip desktop agent without app_handle)
-    factory
-        .initialize_default_agents()
-        .await
-        .map_err(|e| format!("Failed to initialize agents: {}", e))?;
-
-    // Create orchestrator
-    let orchestrator = factory.create_orchestrator();
-
-    // Initialize MCP manager
-    let mcp_manager = Arc::new(MCPManager::new());
-
-    // Store globally
-    ORCHESTRATOR
-        .set(Arc::new(Mutex::new(orchestrator)))
-        .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
-    MCP_MANAGER
-        .set(mcp_manager)
-        .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
-
-    tracing::info!(
-        "Enhanced multi-agent orchestrator system initialized successfully (minimal mode)"
-    );
-    Ok(())
-}
+// Note: initialize_orchestrator_system() was removed to prevent duplicate initialization
+// All orchestrator initialization should go through init_orchestrator_with_app_handle()
+// which is called by initialize_orchestrator_state() in state_management.rs
 
 /// NEW: Execute tasks with intelligent parallel processing
 #[tauri::command]

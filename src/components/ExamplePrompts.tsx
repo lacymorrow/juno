@@ -231,7 +231,10 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
             key={index}
             variant="outline"
             className="h-auto p-2 justify-start text-left hover:bg-accent"
-            onClick={() => onPromptSelect(example.prompt)}
+            onClick={() => {
+              console.log("Example prompt clicked:", example.prompt);
+              onPromptSelect(example.prompt);
+            }}
           >
             <div className="flex items-center gap-2 w-full">
               <div

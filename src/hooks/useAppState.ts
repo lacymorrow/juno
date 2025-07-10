@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { AppView } from "@/components/AppHeader";
 import type { ModalType, FeedbackData, UpdateInfo } from "@/components/ModalSystem";
 
@@ -90,6 +91,22 @@ export function useAppState() {
 
     const resetSavingState = useCallback(() => {
         setTimeout(() => setSavingMessageId(null), 1000);
+    }, []);
+
+    // Initialize server status on mount
+    useEffect(() => {
+        const checkServerStatus = async () => {
+            try {
+                // Check if the backend server is available
+                await invoke("check_server_status");
+                setServerStatus("connected");
+            } catch (error) {
+                console.warn("Failed to connect to server:", error);
+                setServerStatus("error");
+            }
+        };
+
+        checkServerStatus();
     }, []);
 
     return {

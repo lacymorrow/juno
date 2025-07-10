@@ -56,13 +56,6 @@ function App() {
       const trimmedQuery = conversation.query.trim();
       console.log("🚀 Submitting query:", trimmedQuery);
 
-      // IMMEDIATE FEEDBACK: Notify floating bar immediately
-      try {
-        await invoke("notify_query_submitted", { query: trimmedQuery });
-      } catch (error) {
-        console.warn("Failed to notify floating bar of query submission:", error);
-      }
-
       appState.setIsProcessing(true);
       conversation.addUserMessage(trimmedQuery);
       conversation.setQuery("");
@@ -205,7 +198,14 @@ function App() {
   // Example prompt selection handler - automatically submits the prompt
   const handleExamplePromptSelect = useCallback(
     async (prompt: string) => {
-      if (!appState.canSubmit || !prompt.trim()) return;
+      console.log("🎯 handleExamplePromptSelect called with:", prompt);
+      console.log("🎯 appState.canSubmit:", appState.canSubmit);
+      console.log("🎯 appState.serverStatus:", appState.serverStatus);
+      
+      if (!appState.canSubmit || !prompt.trim()) {
+        console.log("🚫 Early return - canSubmit:", appState.canSubmit, "prompt:", prompt.trim());
+        return;
+      }
 
       const trimmedPrompt = prompt.trim();
       console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
@@ -216,13 +216,6 @@ function App() {
 
       // Auto-submit after a brief delay to show the query in the input
       setTimeout(async () => {
-        // IMMEDIATE FEEDBACK: Notify floating bar immediately
-        try {
-          await invoke("notify_query_submitted", { query: trimmedPrompt });
-        } catch (error) {
-          console.warn("Failed to notify floating bar of query submission:", error);
-        }
-
         appState.setIsProcessing(true);
         conversation.addUserMessage(trimmedPrompt);
         conversation.setQuery("");
