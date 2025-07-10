@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
   Sparkles,
@@ -23,56 +26,83 @@ import {
   type SizePresets,
   useDynamicIslandSize,
 } from "@/components/ui/dynamic-island";
+import { EVENTS, UI } from "@/lib/constants.generated";
+import tauriConfig from "#/tauri.conf.json";
 
-// === MOCK CONSTANTS (Replace with actual imports) ===
-const UI = {
-  BAR_STATES_DEFAULT: "default",
-  BAR_STATES_EXPANDING: "expanding",
-  BAR_STATES_INPUT: "input",
-  BAR_STATES_SHRINKING: "shrinking",
-  BAR_STATES_SUBMITTING: "submitting",
-  BAR_STATES_LOADING: "loading",
-  BAR_STATES_FINISHING: "finishing",
-  BAR_STATES_SUCCESS: "success",
-  BAR_STATES_LISTENING: "listening",
-  BAR_STATES_ERROR: "error",
-  BAR_STATES_TRANSCRIBING: "transcribing",
-  BAR_STATES_SPEAKING: "speaking",
-  BAR_STATES_DICTATING: "dictating",
-  BAR_STATES_DICTATION_READY: "dictation_ready",
-  BAR_STATES_ALWAYS_LISTENING: "always_listening",
-  BAR_STATES_AGENT_RESPONDING: "agent_responding",
-  VOICE_MODES_IDLE: "idle",
-  INTERACTION_TYPES_CLICK: "click",
-  INTERACTION_TYPES_SUBMIT: "submit",
-  INTERACTION_TYPES_FOCUS: "focus",
-  INTERACTION_TYPES_BLUR: "blur",
-} as const;
+// === STANDARDIZED UI API TYPES ===
 
-// === TYPES ===
-type UIState = (typeof UI)[keyof typeof UI];
+/**
+ * UI State enumeration - Uses generated constants from backend
+ * These values are emitted by the backend UIManager in BAR_STATE_UPDATE events
+ */
+type UIState =
+  | typeof UI.BAR_STATES_DEFAULT
+  | typeof UI.BAR_STATES_EXPANDING
+  | typeof UI.BAR_STATES_INPUT
+  | typeof UI.BAR_STATES_SHRINKING
+  | typeof UI.BAR_STATES_SUBMITTING
+  | typeof UI.BAR_STATES_LOADING
+  | typeof UI.BAR_STATES_FINISHING
+  | typeof UI.BAR_STATES_SUCCESS
+  | typeof UI.BAR_STATES_LISTENING
+  | typeof UI.BAR_STATES_ERROR
+  | typeof UI.BAR_STATES_TRANSCRIBING
+  | typeof UI.BAR_STATES_SPEAKING
+  | typeof UI.BAR_STATES_DICTATING
+  | typeof UI.BAR_STATES_DICTATION_READY
+  | typeof UI.BAR_STATES_ALWAYS_LISTENING
+  | typeof UI.BAR_STATES_AGENT_RESPONDING;
 
+/**
+ * Backend State Data Structure - Matches exactly what backend emits
+ * This structure is defined in ui_commands.rs emit_bar_state_update()
+ */
 interface BarStateData {
+  // Core state
   barState: UIState;
   inputValue: string;
   lastSubmittedValue: string;
   currentError: string | null;
+
+  // Voice and transcription
   transcriptionText: string;
   spokenText: string;
   voiceMode: string;
   audioLevel: number;
+
+  // Status flags
   isAgentWorking: boolean;
   isDictationMode: boolean;
   isAlwaysListening: boolean;
+
+  // Agent state
   agentState: string | null;
 }
 
+/**
+ * Standardized UI Interaction Event Structure
+ * This matches UIInteractionEvent in ui_commands.rs
+ */
 interface UIInteractionEvent {
   element_id: string;
   interaction_type: string;
   data: Record<string, any> | null;
   timestamp: number;
 }
+
+// === COMPONENT CONSTANTS ===
+
+const FLOATING_BAR_DIMENSIONS = {
+  DEFAULT_WIDTH: 60,
+  DEFAULT_HEIGHT: 20,
+  EXPANDED_WIDTH: 280,
+  EXPANDED_HEIGHT: 50,
+};
+
+/**
+ * Component name for backend interactions - MUST match backend element handling
+ */
+const COMPONENT_ID = "floating-bar-dynamic";
 
 // === STATE TO SIZE MAPPING ===
 const getIslandSizeForState = (state: UIState): SizePresets => {
@@ -128,13 +158,13 @@ const AudioLevelIndicator = ({
   audioLevel: number;
   currentUiState: UIState;
 }) => {
-  if (
-    ![
-      UI.BAR_STATES_LISTENING,
-      UI.BAR_STATES_TRANSCRIBING,
-      UI.BAR_STATES_ALWAYS_LISTENING,
-    ].includes(currentUiState)
-  ) {
+  const validStates = [
+    UI.BAR_STATES_LISTENING,
+    UI.BAR_STATES_TRANSCRIBING,
+    UI.BAR_STATES_ALWAYS_LISTENING,
+  ];
+
+  if (!validStates.includes(currentUiState as any)) {
     return null;
   }
 
@@ -160,6 +190,11 @@ const FloatingBarContent = () => {
   const { setSize } = useDynamicIslandSize();
 
   // === STATE MANAGEMENT ===
+
+  /**
+   * Backend-driven state - Updated via BAR_STATE_UPDATE events
+   * This is the single source of truth for all UI state
+   */
   const [barState, setBarState] = useState<BarStateData>({
     barState: UI.BAR_STATES_DEFAULT,
     inputValue: "",
@@ -177,26 +212,69 @@ const FloatingBarContent = () => {
 
   const [localInputValue, setLocalInputValue] = useState("");
 
-  // === MOCK BACKEND INTEGRATION ===
-  // In real implementation, replace with actual Tauri event listeners
-  useEffect(() => {
-    // Mock state changes for demo
-    const mockStateSequence = [
-      { state: UI.BAR_STATES_DEFAULT, delay: 1000 },
-      { state: UI.BAR_STATES_EXPANDING, delay: 2000 },
-      { state: UI.BAR_STATES_INPUT, delay: 3000 },
-      { state: UI.BAR_STATES_LISTENING, delay: 5000 },
-      { state: UI.BAR_STATES_TRANSCRIBING, delay: 6000 },
-      { state: UI.BAR_STATES_LOADING, delay: 7000 },
-      { state: UI.BAR_STATES_SUCCESS, delay: 8000 },
-      { state: UI.BAR_STATES_DEFAULT, delay: 9000 },
-    ];
+  // === WINDOW CONFIGURATION ===
 
-    mockStateSequence.forEach(({ state, delay }) => {
-      setTimeout(() => {
-        setBarState((prev) => ({ ...prev, barState: state }));
-      }, delay);
-    });
+  const floatingBarConfig = tauriConfig.app.windows.find(
+    (w) => w.label === "floating-bar"
+  );
+
+  const defaultWidth =
+    floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
+  const defaultHeight =
+    floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
+  const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
+  const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
+
+  // === STANDARDIZED EVENT LISTENER ===
+
+  /**
+   * Primary backend integration: Listen to BAR_STATE_UPDATE events
+   * This is the core pattern for all UI components - event-driven state updates
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      try {
+        unlisten = await listen<BarStateData>(
+          EVENTS.BAR_STATE_UPDATE,
+          (event) => {
+            console.log(
+              "📨 FloatingBar: Received state update:",
+              event.payload
+            );
+
+            // Validate the received data structure
+            const payload = event.payload;
+            if (
+              payload &&
+              typeof payload === "object" &&
+              "barState" in payload
+            ) {
+              setBarState(payload);
+            } else {
+              console.error(
+                "❌ FloatingBar: Invalid state data received:",
+                payload
+              );
+            }
+          }
+        );
+
+        console.log("✅ FloatingBar: Event listener established");
+      } catch (error) {
+        console.error("❌ FloatingBar: Failed to setup event listener:", error);
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+        console.log("🔄 FloatingBar: Event listener cleaned up");
+      }
+    };
   }, []);
 
   // === SYNC DYNAMIC ISLAND SIZE WITH STATE ===
@@ -205,34 +283,86 @@ const FloatingBarContent = () => {
     setSize(newSize);
   }, [barState.barState, setSize]);
 
-  // === INTERACTION HANDLERS ===
+  // === WINDOW RESIZING LOGIC ===
+
+  /**
+   * Responsive window resizing based on UI state
+   */
+  useEffect(() => {
+    const resizeWindow = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const currentUiState = barState.barState;
+
+        // Define compact states that use small window size
+        const isCompact = [
+          UI.BAR_STATES_DEFAULT,
+          UI.BAR_STATES_LISTENING,
+          UI.BAR_STATES_DICTATION_READY,
+          UI.BAR_STATES_SPEAKING,
+          UI.BAR_STATES_TRANSCRIBING,
+        ].includes(currentUiState as any);
+        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
+        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+
+        console.log(
+          `🔧 FloatingBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+        );
+
+        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+      } catch (error) {
+        console.error("❌ FloatingBar: Failed to resize window:", error);
+      }
+    };
+
+    resizeWindow();
+  }, [barState.barState]);
+
+  // === STANDARDIZED INTERACTION HANDLERS ===
+
+  /**
+   * Creates a standardized UI interaction event
+   * This helper ensures all interactions follow the same pattern
+   */
   const createInteraction = (
     interactionType: string,
     data?: Record<string, any>
   ): UIInteractionEvent => ({
-    element_id: "floating-bar",
+    element_id: COMPONENT_ID,
     interaction_type: interactionType,
     data: data || null,
     timestamp: Date.now(),
   });
 
+  /**
+   * Sends interaction to backend via ui_handle_interaction command
+   * This is the standardized way to trigger backend actions
+   */
   const sendInteraction = async (interaction: UIInteractionEvent) => {
     try {
       console.log("🔧 FloatingBar: Sending interaction:", interaction);
-      // In real implementation: await invoke("ui_handle_interaction", { elementId: "floating-bar", interaction });
+
+      await invoke("ui_handle_interaction", {
+        elementId: COMPONENT_ID,
+        interaction,
+      });
+
+      console.log("✅ FloatingBar: Interaction sent successfully");
     } catch (error) {
       console.error("❌ FloatingBar: Interaction failed:", error);
     }
   };
 
+  /**
+   * Sync local input state with backend state updates
+   */
+  useEffect(() => {
+    setLocalInputValue(barState.inputValue);
+  }, [barState.inputValue]);
+
   const handleClick = useCallback(async () => {
     const interaction = createInteraction(UI.INTERACTION_TYPES_CLICK);
     await sendInteraction(interaction);
-    // Mock: trigger expansion
-    setBarState((prev) => ({ ...prev, barState: UI.BAR_STATES_EXPANDING }));
-    setTimeout(() => {
-      setBarState((prev) => ({ ...prev, barState: UI.BAR_STATES_INPUT }));
-    }, 300);
   }, []);
 
   const handleSubmit = useCallback(
@@ -245,10 +375,6 @@ const FloatingBarContent = () => {
           value: trimmedValue,
         });
         await sendInteraction(interaction);
-        setBarState((prev) => ({
-          ...prev,
-          barState: UI.BAR_STATES_SUBMITTING,
-        }));
       }
     },
     [localInputValue]
@@ -256,6 +382,16 @@ const FloatingBarContent = () => {
 
   const handleInputChange = useCallback((value: string) => {
     setLocalInputValue(value);
+  }, []);
+
+  const handleFocus = useCallback(async () => {
+    const interaction = createInteraction(UI.INTERACTION_TYPES_FOCUS);
+    await sendInteraction(interaction);
+  }, []);
+
+  const handleBlur = useCallback(async () => {
+    const interaction = createInteraction(UI.INTERACTION_TYPES_BLUR);
+    await sendInteraction(interaction);
   }, []);
 
   // === VISUAL HELPERS ===
@@ -315,36 +451,37 @@ const FloatingBarContent = () => {
 
   // === RENDER LOGIC ===
   const currentUiState = barState.barState;
-  const isCompact = [
-    UI.BAR_STATES_DEFAULT,
-    UI.BAR_STATES_DICTATION_READY,
-  ].includes(currentUiState);
+  const compactStates = [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY];
+  const isCompact = compactStates.includes(currentUiState as any);
 
   return (
     <>
       {/* Compact States - Default and Dictation Ready */}
       {isCompact && (
-        <DynamicContainer
-          className="flex items-center justify-center h-full w-full cursor-pointer"
-          onClick={handleClick}
-        >
-          <DynamicDiv className="flex items-center gap-2">
+        <DynamicContainer className="flex items-center justify-center h-full w-full">
+          <div
+            className="flex items-center gap-2 cursor-pointer"
+            onClick={handleClick}
+          >
             {getMainIcon()}
             {barState.voiceMode !== UI.VOICE_MODES_IDLE && (
               <VoiceStatusIndicator variant="compact" className="ml-1" />
             )}
-          </DynamicDiv>
+          </div>
         </DynamicContainer>
       )}
 
       {/* Active States with Audio Feedback */}
-      {[
-        UI.BAR_STATES_LISTENING,
-        UI.BAR_STATES_TRANSCRIBING,
-        UI.BAR_STATES_SPEAKING,
-        UI.BAR_STATES_DICTATING,
-        UI.BAR_STATES_AGENT_RESPONDING,
-      ].includes(currentUiState) && (
+      {(() => {
+        const activeStates = [
+          UI.BAR_STATES_LISTENING,
+          UI.BAR_STATES_TRANSCRIBING,
+          UI.BAR_STATES_SPEAKING,
+          UI.BAR_STATES_DICTATING,
+          UI.BAR_STATES_AGENT_RESPONDING,
+        ];
+        return activeStates.includes(currentUiState as any);
+      })() && (
         <DynamicContainer className="flex items-center justify-between w-full h-full px-4">
           <DynamicDiv className="flex items-center gap-3">
             {getMainIcon()}
@@ -379,6 +516,8 @@ const FloatingBarContent = () => {
                 type="text"
                 value={localInputValue}
                 onChange={(e) => handleInputChange(e.target.value)}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
                 placeholder="Ask me anything..."
                 className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
                 disabled={currentUiState !== UI.BAR_STATES_INPUT}
@@ -397,14 +536,17 @@ const FloatingBarContent = () => {
       )}
 
       {/* Status States - Loading, Error, Success */}
-      {[
-        UI.BAR_STATES_SUBMITTING,
-        UI.BAR_STATES_LOADING,
-        UI.BAR_STATES_ERROR,
-        UI.BAR_STATES_SUCCESS,
-        UI.BAR_STATES_SHRINKING,
-        UI.BAR_STATES_FINISHING,
-      ].includes(currentUiState) && (
+      {(() => {
+        const statusStates = [
+          UI.BAR_STATES_SUBMITTING,
+          UI.BAR_STATES_LOADING,
+          UI.BAR_STATES_ERROR,
+          UI.BAR_STATES_SUCCESS,
+          UI.BAR_STATES_SHRINKING,
+          UI.BAR_STATES_FINISHING,
+        ];
+        return statusStates.includes(currentUiState as any);
+      })() && (
         <DynamicContainer className="flex items-center justify-center w-full h-full">
           <DynamicDiv className="flex items-center gap-3">
             {getMainIcon()}
@@ -416,7 +558,7 @@ const FloatingBarContent = () => {
       )}
 
       {/* Complex States - Medium/Large layouts */}
-      {[UI.BAR_STATES_ALWAYS_LISTENING].includes(currentUiState) && (
+      {currentUiState === UI.BAR_STATES_ALWAYS_LISTENING && (
         <DynamicContainer className="flex flex-col justify-center items-center w-full h-full p-4 text-center">
           <DynamicDiv className="flex items-center gap-3 mb-2">
             {getMainIcon()}
