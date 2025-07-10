@@ -145,13 +145,9 @@ function App() {
   useBackendEvents({
     addSystemMessage: conversation.addSystemMessage,
     addAssistantMessage: conversation.addAssistantMessage,
-    setConversationWithPruning: conversation.setConversationWithPruning,
     playAudioFromBase64: audioPlayback.playAudioFromBase64,
     stopCurrentAudio: audioPlayback.stopCurrentAudio,
     setIsProcessing: appState.setIsProcessing,
-    setServerStatus: appState.setServerStatus,
-    setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    throttledAutoScroll: scrolling.throttledAutoScroll,
   });
 
   // Menu events integration

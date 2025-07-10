@@ -9,7 +9,7 @@
 //! - Edge case handling for concurrent execution scenarios
 //! - Resource management and security validation
 
-use crate::agent::tools::timer_tools::{TimerTask, TimerType};
+use crate::agent::tools::timer_tools::TimerTask;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -388,15 +388,8 @@ impl TimerEventHandler {
         match agent_state {
             AgentSystemState::Idle => Ok(TimerHandlingStrategy::ExecuteImmediately),
             AgentSystemState::ProcessingQuery => {
-                // Determine priority based on timer type
-                match timer_data.timer_type {
-                    TimerType::Simple => Ok(TimerHandlingStrategy::QueueForLater),
-                    TimerType::ScreenMonitor { .. } => Ok(TimerHandlingStrategy::InterruptCurrent),
-                    TimerType::FileMonitor { .. } => Ok(TimerHandlingStrategy::QueueWithPriority),
-                    TimerType::ApplicationMonitor { .. } => {
-                        Ok(TimerHandlingStrategy::EvaluateContext)
-                    }
-                }
+                // Simple timers always queue for later (trust the agent)
+                Ok(TimerHandlingStrategy::QueueForLater)
             }
             AgentSystemState::WaitingForUserInput => Ok(TimerHandlingStrategy::ExecuteImmediately),
             AgentSystemState::ErrorState => Ok(TimerHandlingStrategy::QueueForLater),

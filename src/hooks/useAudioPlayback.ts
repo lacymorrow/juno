@@ -17,7 +17,7 @@ export function useAudioPlayback() {
     }, []);
 
     // Helper function to play audio from base64 data
-    const playAudioFromBase64 = useCallback((base64Audio: string) => {
+    const playAudioFromBase64 = useCallback(async (base64Audio: string) => {
         // Stop any currently playing audio
         if (currentAudio) {
             currentAudio.pause();
@@ -61,7 +61,7 @@ export function useAudioPlayback() {
     }, [currentAudio, base64ToBlob]);
 
     // Stop current audio playback
-    const stopCurrentAudio = useCallback(() => {
+    const stopCurrentAudio = useCallback(async () => {
         if (currentAudio) {
             console.log("Stopping current audio element");
             currentAudio.pause();
