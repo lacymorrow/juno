@@ -1,3 +1,32 @@
+//! # Anthropic Agent Orchestrator
+//! 
+//! Purpose: Central orchestration module for all AI agent interactions in the application.
+//! This is the main entry point for executing agent queries and managing their lifecycle.
+//! 
+//! ## Key Components
+//! - `AgentExecutionQueue` - Prevents concurrent agent execution and manages query queueing
+//! - `execute_agent` - Public API for agent execution with automatic queueing
+//! - `execute_agent_internal` - Core implementation of agent execution logic
+//! - Tool management and registration for various agent capabilities
+//! 
+//! ## Architecture Overview
+//! 1. Queries enter through `execute_agent` command handler
+//! 2. Queue system ensures atomic execution (one agent at a time)
+//! 3. Agents are created using BrainFactory with appropriate configurations
+//! 4. Event-driven communication with frontend via TARS event system
+//! 5. Comprehensive error handling and cancellation support
+//! 
+//! ## Related Files
+//! - `agent/implementations/event_driven_runner.rs` - Executes agent logic
+//! - `agent/events/optimized_event_bus.rs` - Handles event distribution
+//! - `agent/providers/factory.rs` - Creates brain instances
+//! - `commands/mod.rs` - Registers this as a Tauri command
+//! 
+//! ## Critical Notes
+//! - Only one agent can execute at a time to prevent race conditions
+//! - All agent state is managed through AppState for thread safety
+//! - Cancellation is cooperative - agents check cancellation status periodically
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
@@ -28,7 +57,21 @@ use crate::utils::{format_system_context_for_agent, gather_system_context};
 // TARS Integration: Import event types
 use crate::agent::events::JunoAgentEvent;
 
-/// Agent execution queue system to prevent concurrent execution
+/// Agent execution queue system to prevent concurrent execution.
+/// 
+/// # Purpose
+/// Ensures only one agent executes at a time to prevent:
+/// - Race conditions in browser/desktop automation
+/// - Memory corruption from concurrent model access
+/// - UI state inconsistencies
+/// 
+/// # Design Decisions
+/// - Uses semaphore with capacity 1 for strict single execution
+/// - Automatically cancels previous execution when new query arrives
+/// - Maintains FIFO queue but clears old queries on new submissions
+/// 
+/// # Thread Safety
+/// All fields use Arc<Mutex<T>> for safe concurrent access across async boundaries.
 #[derive(Debug)]
 struct AgentExecutionQueue {
     /// Semaphore to ensure only one agent executes at a time
@@ -56,7 +99,24 @@ impl AgentExecutionQueue {
         }
     }
 
-    /// Queue a new query for execution, cancelling any existing execution
+    /// Queue a new query for execution, cancelling any existing execution.
+    /// 
+    /// # Behavior
+    /// 1. Cancels any currently executing agent (cooperative cancellation)
+    /// 2. Clears all pending queries (only latest query matters)
+    /// 3. Adds new query to queue for immediate execution
+    /// 
+    /// # Arguments
+    /// * `query` - The user's query or command to execute
+    /// * `app_handle` - Tauri app handle for event emission
+    /// * `state` - Application state containing cancellation token
+    /// 
+    /// # Returns
+    /// Unique query ID (UUID) for tracking this execution
+    /// 
+    /// # Why Clear Queue?
+    /// Users expect immediate response to their latest query. Executing
+    /// old queries after new ones would be confusing and wasteful.
     async fn queue_query(
         &self,
         query: String,
@@ -103,7 +163,22 @@ impl AgentExecutionQueue {
         }
     }
 
-    /// Execute the next queued query atomically
+    /// Execute the next queued query atomically.
+    /// 
+    /// # Execution Flow
+    /// 1. Try to acquire execution semaphore (non-blocking)
+    /// 2. Pop next query from queue if available
+    /// 3. Set current execution ID for tracking
+    /// 4. Execute agent logic via execute_agent_internal
+    /// 5. Clean up execution state and release semaphore
+    /// 
+    /// # Error Handling
+    /// - Execution errors are logged but don't crash the queue
+    /// - UI cleanup is handled within execute_agent_internal
+    /// - Semaphore is always released even on error
+    /// 
+    /// # Returns
+    /// Some(query) if execution completed, None if queue empty or busy
     async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
         // Try to acquire execution semaphore (non-blocking check)
         if let Ok(permit) = self.execution_semaphore.try_acquire() {
@@ -225,7 +300,24 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-/// Optimized JSX content detection using pattern matching
+/// Optimized JSX content detection using pattern matching.
+/// 
+/// # Purpose
+/// Determines if content contains JSX/React components that should
+/// be rendered visually rather than spoken by TTS.
+/// 
+/// # Performance
+/// - Early exits for short content
+/// - Quick syntax checks before pattern matching
+/// - Static array of indicators for efficient iteration
+/// 
+/// # Detection Criteria
+/// - Contains angle brackets (< >)
+/// - Includes React component names or JSX attributes
+/// 
+/// # Used By
+/// - TTS system to skip visual-only content
+/// - Response formatting to identify demo components
 fn is_jsx_content(content: &str) -> bool {
     // Early exit for content that's too short to be JSX
     if content.len() < 3 {
@@ -247,8 +339,30 @@ fn is_jsx_content(content: &str) -> bool {
     JSX_INDICATORS.iter().any(|&pattern| content.contains(pattern))
 }
 
-/// Optimized determination of substantial user communication
-/// Uses efficient pattern matching and configurable thresholds
+/// Optimized determination of substantial user communication.
+/// 
+/// # Purpose
+/// Distinguishes between simple status messages and meaningful
+/// explanations that should be spoken/emphasized to the user.
+/// 
+/// # Classification Logic
+/// Substantial if ANY of:
+/// - Word count > MIN_SUBSTANTIAL_CONTENT_WORDS (10)
+/// - Multiple sentences (2+ sentence endings)
+/// - Single long sentence > MIN_DETAILED_CONTENT_LENGTH (120 chars)
+/// - Contains explanation keywords or formatted content
+/// 
+/// # Performance Optimizations
+/// - Early exit for empty/short content
+/// - Checks ordered by computational cost (word count first)
+/// - Static pattern arrays to avoid allocations
+/// 
+/// # Why This Matters
+/// - Simple messages: Quick TTS, minimal UI space
+/// - Substantial content: Full TTS, detailed display
+/// 
+/// # Related Constants
+/// See `constants::text::limits` for threshold configuration
 fn is_substantial_user_communication(content: &str) -> bool {
     let trimmed = content.trim();
 
@@ -323,7 +437,7 @@ pub async fn submit_query(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("Received query for pure event-driven processing: {}", query);
+    info!("Received query for event-driven processing: {}", query);
 
     // --- Validate query text ---
     let trimmed_query = query.trim();
@@ -332,40 +446,30 @@ pub async fn submit_query(
         return Ok(());
     }
 
-    // Pure TARS event-driven architecture: Emit user message event
+    // Event-driven logging: Emit user message event for observability
     let user_message_event = JunoAgentEvent::UserMessage {
         content: trimmed_query.to_string(),
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-        session_id: None, // Will be generated by handler if needed
+        session_id: Some(crate::agent::events::generate_session_id()),
     };
-
-    // Emit event to trigger pure event-driven processing
-    state.emit_event(user_message_event).await
-        .map_err(|e| {
-            error!("Failed to emit user message event: {}", e);
-            format!("Event system error: {}", e)
-        })?;
-
-    info!("Successfully emitted user message event for processing");
-    Ok(())
-}
-
-/// Legacy fallback execution (DEPRECATED - Remove after full TARS conversion)
-#[deprecated(note = "Use pure event-driven architecture instead")]
-async fn execute_agent_fallback(
-    query: String,
-    state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    error!("DEPRECATED: Fallback execution should not be used in pure TARS architecture");
-
+    
+    // Emit event for logging/observability (non-blocking)
+    if let Err(e) = state.emit_event(user_message_event).await {
+        warn!("Failed to emit user message event for logging: {}", e);
+        // Don't fail the entire request for logging issues
+    }
+    
+    // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
+    // The event-driven refactor was incomplete and caused tool calls to not execute
+    info!("Executing agent directly for query: {}", trimmed_query);
+    
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
-    let _query_id = queue.queue_query(query, app_handle.clone(), state.clone()).await;
-
+    let _query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await;
+    
     // Execute the next queued query (will be the one we just queued)
     queue.execute_next_query(state.clone()).await;
-
+    
     Ok(())
 }
 
@@ -517,17 +621,17 @@ async fn execute_agent_internal(
     // --- Setup Tool Provider Based on Agent Mode ---
     let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
-
+    
     // TEMPORARY DEBUG FIX: Force single agent mode for computer use tasks
     // This ensures direct tool access instead of delegation
-    let contains_computer_keywords = trimmed_query.to_lowercase().contains("click")
-        || trimmed_query.to_lowercase().contains("drag")
+    let contains_computer_keywords = trimmed_query.to_lowercase().contains("click") 
+        || trimmed_query.to_lowercase().contains("drag") 
         || trimmed_query.to_lowercase().contains("mouse")
         || trimmed_query.to_lowercase().contains("screenshot")
         || trimmed_query.to_lowercase().contains("computer")
         || trimmed_query.to_lowercase().contains("spiral")
         || trimmed_query.to_lowercase().contains("draw");
-
+        
     let effective_agent_mode = if contains_computer_keywords {
         warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
         AgentMode::Single

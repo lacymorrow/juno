@@ -1,7 +1,35 @@
-//! Event-Driven Agent Runner
+//! # Event-Driven Agent Runner
 //! 
-//! This is a pure event-driven implementation of the agent execution system
-//! that replaces direct method calls with event emissions and subscriptions.
+//! Purpose: Pure event-driven implementation of agent execution that decouples
+//! agent logic from UI updates through asynchronous event streaming.
+//! 
+//! ## Architecture Overview
+//! This module implements the TARS (Tagged Agent Response System) event-driven
+//! architecture, replacing direct method calls with event emissions/subscriptions.
+//! 
+//! ## Key Components
+//! - `EventDrivenAgentRunner` - Main runner that orchestrates execution via events
+//! - State machine integration for tracking agent lifecycle
+//! - Event handler for emitting typed events to frontend
+//! - Brain abstraction for AI provider independence
+//! 
+//! ## Event Flow
+//! 1. User input → AgentRunStart event
+//! 2. Brain processing → StreamChunk events (content)
+//! 3. Tool execution → ToolCall/ToolResult events
+//! 4. Completion → AgentRunComplete event
+//! 
+//! ## Related Files
+//! - `agent/events/mod.rs` - Event type definitions
+//! - `agent/events/optimized_event_bus.rs` - Event distribution
+//! - `agent/state_machine.rs` - State transition logic
+//! - `anthropic.rs` - Creates and manages runner instances
+//! 
+//! ## Design Decisions
+//! - Events are fire-and-forget (no blocking on delivery)
+//! - All state changes emit corresponding events
+//! - Tool execution is asynchronous and non-blocking
+//! - Memory management is thread-safe via Arc<Mutex<T>>
 //! 
 //! TARS Integration Phase 1.6: Event-Driven Agent Runner
 
@@ -17,7 +45,21 @@ use crate::agent::traits::{AgentBrain, MemoryManager};
 use crate::agent::providers::factory::BrainFactory;
 use crate::agent::EventMemoryManager;
 
-/// Event-driven agent runner that orchestrates agent execution purely through events
+/// Event-driven agent runner that orchestrates agent execution purely through events.
+/// 
+/// # Purpose
+/// Implements the core agent execution loop using event-driven architecture.
+/// All communication with UI happens through typed events, ensuring loose coupling.
+/// 
+/// # Thread Safety
+/// - Brain is immutable after creation (Arc for sharing)
+/// - Memory manager uses Mutex for concurrent access
+/// - State machine has internal synchronization
+/// 
+/// # Lifecycle
+/// 1. Created by execute_agent_internal in anthropic.rs
+/// 2. Runs until completion or max_iterations reached
+/// 3. Cleaned up automatically via Drop trait
 pub struct EventDrivenAgentRunner {
     /// AI brain for generating responses
     brain: Arc<dyn AgentBrain + Send + Sync>,
@@ -32,7 +74,26 @@ pub struct EventDrivenAgentRunner {
 }
 
 impl EventDrivenAgentRunner {
-    /// Create a new event-driven agent runner
+    /// Create a new event-driven agent runner.
+    /// 
+    /// # Purpose
+    /// Factory method that assembles all components needed for agent execution.
+    /// Uses BrainFactory to create appropriate AI provider based on settings.
+    /// 
+    /// # Arguments
+    /// * `memory_manager` - Pre-configured memory manager with conversation history
+    /// * `app_handle` - Tauri app handle for state access and event emission
+    /// * `max_iterations` - Safety limit to prevent infinite loops (typically 15)
+    /// 
+    /// # Returns
+    /// * `Ok(Self)` - Configured runner ready for execution
+    /// * `Err(String)` - Error if brain creation fails
+    /// 
+    /// # Brain Selection
+    /// BrainFactory chooses provider based on:
+    /// - User settings (preferred model)
+    /// - API key availability
+    /// - Fallback order: Anthropic → OpenAI → OpenRouter
     pub async fn new(
         memory_manager: EventMemoryManager,
         app_handle: tauri::AppHandle,
@@ -54,7 +115,27 @@ impl EventDrivenAgentRunner {
         })
     }
     
-    /// Start a new agent execution session
+    /// Start a new agent execution session.
+    /// 
+    /// # Purpose
+    /// Entry point for agent execution. Sets up initial state, adds user
+    /// message to memory, and triggers first brain response generation.
+    /// 
+    /// # Arguments
+    /// * `content` - User's query or command
+    /// * `session_id` - Unique identifier for this execution session
+    /// 
+    /// # Returns
+    /// * `Ok(Vec<JunoAgentEvent>)` - Initial events from brain response
+    /// * `Err(String)` - Error if state transition or brain fails
+    /// 
+    /// # Event Emissions
+    /// - State transition events via state machine
+    /// - Brain response events via generate_brain_response
+    /// 
+    /// # Error Handling
+    /// - Transitions to error state on failure
+    /// - Ensures UI receives error event for cleanup
     async fn start_agent_run(&self, content: &str, session_id: &str) -> Result<Vec<JunoAgentEvent>, String> {
         info!("Starting event-driven agent run for session: {}", session_id);
         

@@ -1,3 +1,39 @@
+/**
+ * # PermissionsManager Component
+ * 
+ * Purpose: Centralized macOS permissions management UI that guides users through
+ * granting necessary system permissions for the application to function properly.
+ * 
+ * ## Key Features
+ * - Visual status display for all required permissions
+ * - Step-by-step guidance with macOS-specific instructions
+ * - Multiple display variants for different contexts
+ * - Auto-completion when all permissions granted
+ * - Native permission checking (no password prompts)
+ * 
+ * ## Required Permissions
+ * 1. **Accessibility** - For UI automation and click/type operations
+ * 2. **Screen Recording** - For screenshots and visual analysis
+ * 3. **Microphone** - For voice input features
+ * 4. **Input Monitoring** - For global keyboard shortcuts
+ * 
+ * ## Display Variants
+ * - `splash` - Full-screen onboarding experience
+ * - `settings` - Compact view for settings page
+ * - `compact` - Minimal inline display
+ * 
+ * ## Architecture Notes
+ * - Uses Tauri's invoke API for native permission checks
+ * - Listens for permission change events from backend
+ * - Implements retry logic for transient failures
+ * - Provides user-friendly error messages
+ * 
+ * ## Related Files
+ * - `src-tauri/src/commands/permissions.rs` - Backend permission logic
+ * - `src/hooks/usePermissions.ts` - React hook wrapper
+ * - `src/components/Setup.tsx` - Uses this in onboarding flow
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -27,6 +63,15 @@ import {
 } from "./ui/card";
 import { Separator } from "./ui/separator";
 
+/**
+ * Individual permission status information.
+ * 
+ * @property permissionType - Unique identifier for the permission
+ * @property granted - Whether permission is currently granted
+ * @property required - Whether this permission is mandatory
+ * @property description - User-friendly explanation of why needed
+ * @property instructions - Step-by-step grant instructions
+ */
 interface PermissionStatus {
   permissionType: string;
   granted: boolean;
@@ -44,6 +89,18 @@ interface PermissionsState {
   appName: string;
 }
 
+/**
+ * Props for the PermissionsManager component.
+ * 
+ * @property variant - Visual style preset for different contexts
+ * @property showHeader - Whether to display the header section
+ * @property showSkipOption - Allow users to skip permissions setup
+ * @property autoRedirectEnabled - Auto-open System Preferences
+ * @property className - Additional CSS classes
+ * @property onComplete - Called when all permissions granted
+ * @property onSkip - Called when user chooses to skip
+ * @property onRefresh - Called after permission check
+ */
 interface PermissionsManagerProps {
   // Display options
   variant?: "splash" | "settings" | "compact";
@@ -75,7 +132,21 @@ export function PermissionsManager({
   >(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Check permissions status with optional auto-redirect
+  /**
+   * Check current permission status from the system.
+   * 
+   * ## Implementation Details
+   * - Uses native APIs to avoid password prompts
+   * - Automatically triggers completion callback if all granted
+   * - Provides visual feedback during check (loading state)
+   * - Handles errors gracefully with user-friendly messages
+   * 
+   * ## Auto-completion Logic
+   * When all permissions are granted, waits 1 second before
+   * calling onComplete to allow users to see the success state.
+   * 
+   * @param _useAutoRedirect - Deprecated parameter (kept for compatibility)
+   */
   const checkPermissions = useCallback(
     async (_useAutoRedirect = false) => {
       try {

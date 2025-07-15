@@ -1,5 +1,36 @@
-// Computer Use API commands - Official Anthropic Computer Use implementation
-// This provides a unified interface for all mouse, keyboard, and screen operations
+//! # Computer Use API Commands
+//! 
+//! Purpose: Official implementation of Anthropic's Computer Use API specification
+//! providing a unified interface for all mouse, keyboard, and screen operations.
+//! 
+//! ## Architecture Overview
+//! This module implements the complete Computer Use API as a single Tauri command
+//! that dispatches to specific handlers based on the action type. All operations
+//! follow the official Anthropic specification for compatibility.
+//! 
+//! ## Supported Actions
+//! - **Screen**: screenshot, cursor_position
+//! - **Mouse**: click, right_click, middle_click, double_click, triple_click, move, drag
+//! - **Keyboard**: type, key, hold_key
+//! - **Scroll**: scroll (vertical/horizontal)
+//! - **Utility**: wait
+//! 
+//! ## Coordinate System
+//! - Uses absolute screen coordinates (not window-relative)
+//! - Automatically scales for high-DPI displays
+//! - Validates bounds before execution
+//! 
+//! ## Related Files
+//! - `utils/coordinates.rs` - Coordinate scaling and validation
+//! - `commands/core.rs` - Screenshot implementation
+//! - `commands/clicks.rs` - Mouse click implementations
+//! - `commands/keyboard.rs` - Keyboard input handling
+//! 
+//! ## Design Decisions
+//! - Single entry point for all computer operations (reduces API surface)
+//! - Coordinate validation prevents out-of-bounds errors
+//! - All operations return consistent ComputerResult structure
+//! - Screenshots included in response for visual feedback
 
 use crate::state::AppState;
 use crate::utils::coordinates;
@@ -8,7 +39,20 @@ use tauri::{AppHandle, State};
 use tracing::{error, info};
 use crate::commands::core::ScreenshotResult as CoreScreenshotResult;
 
-/// Computer action input structure matching the official Anthropic Computer Use API
+/// Computer action input structure matching the official Anthropic Computer Use API.
+/// 
+/// # Field Usage by Action Type
+/// - `screenshot`: No additional fields required
+/// - `click/move`: Requires `coordinate` [x, y]
+/// - `drag`: Requires `coordinate` for end position (starts at cursor)
+/// - `scroll`: Requires `scroll_count` and optionally `scroll_direction`
+/// - `type`: Requires `text` to type
+/// - `key`: Requires `text` with key combination (e.g., "cmd+c")
+/// - `wait`: Optionally uses `duration` (default 1000ms)
+/// 
+/// # Coordinate Format
+/// Coordinates are absolute screen positions as [x, y] floats.
+/// The system automatically handles DPI scaling.
 #[derive(Debug, Deserialize)]
 pub struct ComputerInput {
     pub action: String,
@@ -35,7 +79,33 @@ pub struct ComputerResult {
     pub coordinate: Option<Vec<f64>>,
 }
 
-/// Main computer command - implements the official Anthropic Computer Use API
+/// Main computer command - implements the official Anthropic Computer Use API.
+/// 
+/// # Purpose
+/// Single entry point for all computer automation operations. Dispatches
+/// to appropriate handlers based on action type and ensures consistent
+/// error handling and response format.
+/// 
+/// # Arguments
+/// * `input` - Action specification with type and parameters
+/// * `app_handle` - Tauri app handle for system operations
+/// * `state` - Application state for coordinate scaling
+/// 
+/// # Returns
+/// * `Ok(ComputerResult)` - Always returns Ok with success/error in result
+/// * `Err(String)` - Only for catastrophic failures
+/// 
+/// # Error Handling
+/// Errors are captured in ComputerResult.error field rather than
+/// propagated as Err to ensure consistent API responses.
+/// 
+/// # Example Usage
+/// ```json
+/// {
+///   "action": "click",
+///   "coordinate": [500, 300]
+/// }
+/// ```
 #[tauri::command]
 pub async fn computer(
     input: ComputerInput,
@@ -87,7 +157,10 @@ pub async fn computer(
     }
 }
 
-// --- Action Handlers ---
+// ===== ACTION HANDLERS =====
+// Each handler implements a specific computer action following
+// the Anthropic Computer Use specification. Handlers are responsible
+// for parameter validation and delegating to appropriate subsystems.
 
 async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, String> {
     let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone())

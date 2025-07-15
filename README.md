@@ -80,27 +80,40 @@ npm test              # Frontend tests only
 
 ## 📚 Documentation
 
+### 🤖 **For LLM Agents**
+
+**[LLM_GUIDE.md](LLM_GUIDE.md)** - START HERE if you're an LLM working with this codebase
+
 ### 📋 **Complete Documentation Index**
 
 **[docs/rules/INDEX.md](docs/rules/INDEX.md)** - Comprehensive navigation for all documentation
 
 ### 🎯 **Core Documentation**
 
+- **[LLM_GUIDE.md](LLM_GUIDE.md)** - LLM-optimized navigation and task guide
 - **[docs/rules/CONSOLIDATED_DOCUMENTATION.md](docs/rules/CONSOLIDATED_DOCUMENTATION.md)** - Complete project overview and consolidated information
 - **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Complete development guide and patterns
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and component architecture
 - **[API.md](API.md)** - Runtime API reference and integration guide
 
-### 📁 **Organized by Category**
+### 📁 **Documentation Structure**
 
-- **[docs/rules/implementation/](docs/rules/implementation/)** - Feature implementations and milestones
-- **[docs/rules/security/](docs/rules/security/)** - Security framework and permissions
-- **[docs/rules/testing/](docs/rules/testing/)** - Testing strategies and validation
-- **[docs/rules/voice/](docs/rules/voice/)** - Voice system implementation
-- **[docs/rules/cloud/](docs/rules/cloud/)** - Cloud connector and remote control
-- **[docs/rules/tools/](docs/rules/tools/)** - Tool system implementations
-- **[docs/rules/ui/](docs/rules/ui/)** - User interface and frontend
+#### Core Documentation
+- **[CHANGELOG.md](CHANGELOG.md)** - All fixes and changes in chronological order
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guide and setup
+- **[API.md](API.md)** - API reference documentation
+- **[LLM_GUIDE.md](LLM_GUIDE.md)** - Guide for LLMs working with the codebase
+
+#### Feature Documentation
+- **[docs/rules/](docs/rules/)** - Comprehensive feature guides and best practices
+- **[docs/COMPUTER_USE.md](docs/COMPUTER_USE.md)** - Complete Computer Use implementation details
+- **[docs/llm/](docs/llm/)** - LLM-optimized documentation and navigation
+
+#### Implementation History
+- **[docs/implementation/](docs/implementation/)** - Historical implementation details, fixes, and analysis
+- **[docs/archive/](docs/archive/)** - Archived documentation for reference
 
 ### 🎨 **Floating Panel System**
 
