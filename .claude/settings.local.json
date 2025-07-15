@@ -24,7 +24,10 @@
       "Bash(git merge:*)",
       "Bash(sed:*)",
       "Bash(npm run generate-constants:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm test)"
     ],
     "deny": []
   }

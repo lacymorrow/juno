@@ -112,7 +112,19 @@ export const useBackendEvents = ({
               addOrUpdateStreamingMessage(payload.message_id, finalText, true);
             }
             streamingMessages.current.delete(payload.message_id);
-            setIsProcessing(false);
+            
+            // Only set isProcessing to false if agent has actually finished
+            // Check the agent_state field to determine if processing is complete
+            const agentState = payload.agent_state;
+            console.log(`[Event] agent-stream-end with state: ${agentState}`);
+            
+            // Handle all completion states (including "Offline" for network errors)
+            if (agentState === "Finished" || agentState === "Failed" || agentState === "Cancelled" || agentState === "Offline") {
+              console.log(`[Event] Setting isProcessing to false due to agent state: ${agentState}`);
+              setIsProcessing(false);
+            } else {
+              console.log(`[Event] Keeping isProcessing true - unexpected agent state: ${agentState}`);
+            }
           }
           break;
 
