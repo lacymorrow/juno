@@ -22,7 +22,9 @@
       "Bash(awk:*)",
       "Bash(git fetch:*)",
       "Bash(git merge:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(npm run generate-constants:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }

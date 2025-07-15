@@ -74,7 +74,7 @@ impl TimerManager {
             tasks.remove(&id);
 
             // Emit timer expired event
-            if let Err(e) = app_handle.emit("timer-expired", &task) {
+            if let Err(e) = app_handle.emit(crate::constants::events::timer::EXPIRED, &task) {
                 error!("Failed to emit timer expired event: {}", e);
             }
 
@@ -188,7 +188,7 @@ mod timer_tools_impl {
                 info!("Timer {} expired, triggering agent restart with context", timer_id_clone);
 
                 // Emit event to frontend to restart agent with context
-                if let Err(e) = app_handle_clone.emit("timer-expired", &timer_task) {
+                if let Err(e) = app_handle_clone.emit(crate::constants::events::timer::EXPIRED, &timer_task) {
                     error!("Failed to emit timer-expired event: {}", e);
                 }
             }

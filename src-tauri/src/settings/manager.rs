@@ -10,9 +10,9 @@ use tauri_plugin_store::StoreExt;
 use crate::constants::settings::{
     SETTINGS_STORE_FILE,
     store_keys,
-    events,
     validation,
 };
+use crate::constants::events;
 use crate::settings::{
     AppSettings,
     KeyboardShortcuts,
@@ -221,7 +221,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize keyboard shortcuts: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::KEYBOARD_SHORTCUTS_CHANGED, shortcuts)
+        self.app_handle.emit(events::settings::KEYBOARD_SHORTCUTS_CHANGED, shortcuts)
             .map_err(|e| format!("Failed to emit keyboard shortcuts changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -234,7 +234,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize floating bar settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::FLOATING_BAR_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::FLOATING_BAR_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit floating bar settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -247,7 +247,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize agent settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::AGENT_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::AGENT_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit agent settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -260,7 +260,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize provider settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::PROVIDER_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::PROVIDER_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit provider settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -279,7 +279,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize cloud settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::CLOUD_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::CLOUD_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit cloud settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -298,7 +298,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize audio settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::AUDIO_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::AUDIO_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit audio settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -311,7 +311,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize tool settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::TOOL_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::TOOL_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit tool settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -324,7 +324,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize prompt settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::PROMPT_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::PROMPT_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit prompt settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -363,7 +363,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize CLI settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::CLI_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::CLI_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit CLI settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -387,7 +387,7 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?);
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        self.app_handle.emit(events::VOICE_TRANSCRIPTION_SETTINGS_CHANGED, settings)
+        self.app_handle.emit(events::settings::VOICE_TRANSCRIPTION_SETTINGS_CHANGED, settings)
             .map_err(|e| format!("Failed to emit voice transcription settings changed event: {}", e))?;
         self.emit_settings_changed().await;
         Ok(())
@@ -485,7 +485,7 @@ impl SettingsManager {
     /// Emit general settings changed event for full reactivity
     async fn emit_settings_changed(&self) {
         if let Ok(settings) = self.get_all_settings().await {
-            if let Err(e) = self.app_handle.emit(events::SETTINGS_CHANGED, &settings) {
+            if let Err(e) = self.app_handle.emit(events::settings::SETTINGS_CHANGED, &settings) {
                 eprintln!("Failed to emit settings changed event: {}", e);
             }
         }

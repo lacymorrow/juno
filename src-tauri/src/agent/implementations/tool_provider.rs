@@ -493,7 +493,7 @@ impl LocalToolProvider {
             debug!("Auto-added tool configuration for: '{}' in category: {:?}", tool_name, category);
         }
     } else {
-        warn!("Cannot auto-configure tool '{}' - no app handle available during registration", tool_name);
+        debug!("Tool '{}' will be auto-configured when app handle becomes available", tool_name);
     }
 
         // Wrap the executor with additional error handling for display-related operations
@@ -1524,7 +1524,7 @@ impl ToolProvider for LocalToolProvider {
         // TARS Integration: Emit tool call and execution start events
         if let Some(ref app_handle) = self.app_handle {
             let state = app_handle.state::<AppState>();
-            
+
             // Emit tool call event
             let tool_call_event = JunoAgentEvent::ToolCall {
                 tool_name: tool_call.name.clone(),
@@ -1537,15 +1537,8 @@ impl ToolProvider for LocalToolProvider {
                 warn!("Failed to emit tool call event: {}", e);
             }
 
-            // Emit tool execution start event
-            let execution_start_event = JunoAgentEvent::ToolExecutionStart {
-                tool_name: tool_call.name.clone(),
-                tool_call_id: tool_call.id.clone(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            };
-            if let Err(e) = state.emit_agent_event(execution_start_event).await {
-                warn!("Failed to emit tool execution start event: {}", e);
-            }
+            // Note: ToolExecutionStart events removed as they were redundant
+            // The ToolCall event above contains all necessary information for execution
         }
 
         // Emit command execution start event if app handle is available
@@ -1614,7 +1607,7 @@ impl ToolProvider for LocalToolProvider {
         // TARS Integration: Emit tool result and execution end events
         if let Some(ref app_handle) = self.app_handle {
             let state = app_handle.state::<AppState>();
-            
+
             // Emit tool result event
             let tool_result_event = JunoAgentEvent::ToolResult {
                 tool_call_id: tool_call_id.clone(),

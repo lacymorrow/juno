@@ -662,7 +662,7 @@ impl AdvancedMemoryManager {
         let start_time = Instant::now();
 
         // Clean orphaned tool calls
-        let _orphaned_cleaned = self.clean_orphaned_tool_calls().await?;
+        let _orphaned_cleaned = self.cleanup_orphaned_tools().await?;
 
         // Force pruning if over limits
         let _pruned = self.prune_memory_if_needed().await?;
@@ -812,13 +812,13 @@ impl AdvancedMemoryManager {
         Ok(())
     }
 
-    /// Remove orphaned tool calls that don't have corresponding tool results
-    /// This method should be called when starting a new agent execution to clean up
-    /// any incomplete tool calls from previous cancelled executions
-    pub async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
+    /// Unified orphaned tool cleanup - consolidates multiple cleanup functions
+    /// This replaces the over-engineered multiple cleanup functions with a single, trust-based approach
+    pub async fn cleanup_orphaned_tools(&mut self) -> Result<usize, AgentError> {
         let start_time = Instant::now();
         let mut messages = self.messages.write().await;
         let mut pending = self.pending_tool_calls.write().await;
+        let mut cleanup_count = 0;
 
         // Find all tool call IDs that have results
         let mut resolved_tool_calls = HashSet::new();
@@ -829,187 +829,9 @@ impl AdvancedMemoryManager {
                 }
             }
         }
-
-        // Remove any Assistant messages with tool calls that don't have corresponding results
-        let mut orphaned_tool_call_ids = HashSet::new();
-        messages.retain(|message| {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
-                    if !all_resolved {
-                        // Mark these tool calls as orphaned
-                        for tc in tool_calls {
-                            if !resolved_tool_calls.contains(&tc.id) {
-                                orphaned_tool_call_ids.insert(tc.id.clone());
-                            }
-                        }
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        // Clean up pending tool calls
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id));
-
-        // Enhanced metrics update with comprehensive tracking
-        if !orphaned_tool_call_ids.is_empty() {
-            // Update metrics safely with enhanced tracking
-            if let Ok(mut metrics) = self.metrics.try_write() {
-                metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
-
-                // Calculate memory efficiency ratio after cleanup
-                // Use the existing messages variable instead of acquiring a new lock
-                let useful_messages = messages.iter()
-                    .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-                    .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
-                    useful_messages as f64 / messages.len() as f64
-                } else {
-                    1.0
-                };
-
-                // Update operation timing
-                let operation_time = start_time.elapsed().as_millis() as f64;
-                metrics.average_response_time_ms =
-                    (metrics.average_response_time_ms + operation_time) / 2.0;
-            } else {
-                log::warn!("Could not acquire metrics lock for orphaned tool calls update");
-            }
-
-            log::info!("Cleaned up {} orphaned tool calls: {:?} (operation took {}ms)",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids, start_time.elapsed().as_millis());
-        }
-        Ok(())
-    }
-
-    /// Cleans only orphaned tool calls from previous executions, not from the current one
-    pub async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
-        let start_time = Instant::now();
-        let current_execution_id_option = {
-            let guard = self.current_execution_id.read().await;
-            guard.clone()
-        };
-
-        // If no current execution ID is set, fall back to regular cleaning
-        if current_execution_id_option.is_none() {
-            log::warn!("No current execution ID set, falling back to regular orphaned tool call cleanup");
-            return self.clean_orphaned_tool_calls().await;
-        }
-
-        let current_execution_id = current_execution_id_option.unwrap();
-        log::info!("Cleaning orphaned tool calls from previous executions (current execution: {})",
-                  current_execution_id);
-
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Find all tool call IDs that have results
-        let mut resolved_tool_calls = HashSet::new();
-        for message in messages.iter() {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    resolved_tool_calls.insert(tool_call_id.clone());
-                }
-            }
-        }
-
-        // Remove any Assistant messages with tool calls that don't have corresponding results
-        // BUT only if they're not part of the current execution (determined by toolcall_id prefix)
-        let mut orphaned_tool_call_ids = HashSet::new();
-        messages.retain(|message| {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
-
-                    if !all_resolved {
-                        // Check if any unresolved tool call belongs to the current execution
-                        let has_current_execution_tools = tool_calls.iter()
-                            .filter(|tc| !resolved_tool_calls.contains(&tc.id))
-                            .any(|tc| tc.id.contains(&current_execution_id));
-
-                        if has_current_execution_tools {
-                            // Keep messages from current execution even if they have unresolved tools
-                            log::debug!("Keeping unresolved tool calls from current execution: {}", current_execution_id);
-                            return true;
-                        }
-
-                        // Mark these tool calls as orphaned (from previous executions)
-                        for tc in tool_calls {
-                            if !resolved_tool_calls.contains(&tc.id) {
-                                orphaned_tool_call_ids.insert(tc.id.clone());
-                            }
-                        }
-
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls from previous execution: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        // Clean up pending tool calls (only from previous executions)
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id) || id.contains(&current_execution_id));
-
-        if !orphaned_tool_call_ids.is_empty() {
-            // Update metrics safely with enhanced tracking
-            if let Ok(mut metrics) = self.metrics.try_write() {
-                metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
-
-                // Calculate memory efficiency ratio after cleanup
-                let useful_messages = messages.iter()
-                    .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-                    .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
-                    useful_messages as f64 / messages.len() as f64
-                } else {
-                    1.0
-                };
-
-                // Update operation timing
-                let operation_time = start_time.elapsed().as_millis() as f64;
-                metrics.average_response_time_ms =
-                    (metrics.average_response_time_ms + operation_time) / 2.0;
-            } else {
-                log::warn!("Could not acquire metrics lock for orphaned tool calls update");
-            }
-
-            log::info!("Cleaned up {} orphaned tool calls from previous executions: {:?} (operation took {}ms)",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids, start_time.elapsed().as_millis());
-        }
-
-        Ok(())
-    }
-
-    /// Clear all pending tool calls (useful when starting a fresh conversation)
-    pub async fn clear_pending_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut pending = self.pending_tool_calls.write().await;
-        pending.clear();
-        log::info!("Cleared all pending tool calls");
-        Ok(())
-    }
-
-    /// Get a list of currently pending tool call IDs
-    pub async fn get_pending_tool_calls(&self) -> Result<Vec<String>, AgentError> {
-        let pending = self.pending_tool_calls.read().await;
-        Ok(pending.iter().cloned().collect())
-    }
-
-    /// Clean up orphaned tool results that don't have corresponding tool calls
-    /// This method removes tool result messages that have no matching tool_use blocks
-    pub async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        let start_time = Instant::now();
-        let mut messages = self.messages.write().await;
 
         // Find all tool call IDs that exist in assistant messages
-        let mut valid_tool_call_ids = std::collections::HashSet::new();
+        let mut valid_tool_call_ids = HashSet::new();
         for message in messages.iter() {
             if message.role == Role::Assistant {
                 if let Some(tool_calls) = &message.tool_calls {
@@ -1020,52 +842,61 @@ impl AdvancedMemoryManager {
             }
         }
 
-        // Count orphaned tool results before removal
-        let mut orphaned_count = 0;
-        let mut orphaned_ids = Vec::new();
+        // Clean up orphaned tool calls AND tool results in one pass
+        let mut orphaned_call_ids = HashSet::new();
+        let mut orphaned_result_ids = Vec::new();
 
-        // Remove tool result messages that don't have corresponding tool calls
         messages.retain(|message| {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    if !valid_tool_call_ids.contains(tool_call_id) {
-                        orphaned_count += 1;
-                        orphaned_ids.push(tool_call_id.clone());
-                        log::warn!("Removing orphaned tool result with ID: {}", tool_call_id);
-                        return false; // Remove this message
+            match message.role {
+                Role::Assistant => {
+                    if let Some(tool_calls) = &message.tool_calls {
+                        // Check if all tool calls in this message have results
+                        let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
+                        if !all_resolved {
+                            // Mark these tool calls as orphaned
+                            for tc in tool_calls {
+                                if !resolved_tool_calls.contains(&tc.id) {
+                                    orphaned_call_ids.insert(tc.id.clone());
+                                }
+                            }
+                            cleanup_count += 1;
+                            log::debug!("Removing orphaned Assistant message with unresolved tool calls");
+                            return false; // Remove this message
+                        }
                     }
                 }
+                Role::Tool => {
+                    if let Some(tool_call_id) = &message.tool_call_id {
+                        if !valid_tool_call_ids.contains(tool_call_id) {
+                            orphaned_result_ids.push(tool_call_id.clone());
+                            cleanup_count += 1;
+                            log::debug!("Removing orphaned tool result with ID: {}", tool_call_id);
+                            return false; // Remove this message
+                        }
+                    }
+                }
+                _ => {}
             }
             true // Keep the message
         });
 
-        if orphaned_count > 0 {
-            // Enhanced metrics update with comprehensive tracking
+        // Clean up pending tool calls
+        pending.retain(|id| !orphaned_call_ids.contains(id));
+
+        if cleanup_count > 0 {
+            // Update metrics
             if let Ok(mut metrics) = self.metrics.try_write() {
-                metrics.orphaned_tool_calls_cleaned += orphaned_count;
-
-                // Calculate memory efficiency ratio after cleanup
-                let useful_messages = messages.iter()
-                    .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
-                    .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
-                    useful_messages as f64 / messages.len() as f64
-                } else {
-                    1.0
-                };
-
-                // Update operation timing
+                metrics.orphaned_tool_calls_cleaned += cleanup_count;
                 let operation_time = start_time.elapsed().as_millis() as f64;
                 metrics.average_response_time_ms =
                     (metrics.average_response_time_ms + operation_time) / 2.0;
-            } else {
-                log::warn!("Could not acquire metrics lock for orphaned tool results update");
             }
 
-            log::info!("Cleaned up {} orphaned tool results: {:?} (operation took {}ms)",
-                       orphaned_count, orphaned_ids, start_time.elapsed().as_millis());
+            log::info!("Unified cleanup: removed {} orphaned tool calls and {} orphaned tool results ({}ms)",
+                       orphaned_call_ids.len(), orphaned_result_ids.len(), start_time.elapsed().as_millis());
         }
-        Ok(orphaned_count)
+
+        Ok(cleanup_count)
     }
 
     /// Detect if content contains a screenshot/base64 image
@@ -1461,13 +1292,14 @@ impl MemoryManager for AdvancedMemoryManager {
     }
 
     async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        // Call the actual implementation method
-        AdvancedMemoryManager::clean_orphaned_tool_calls(self).await
+        // Call the unified cleanup and discard count for trait compatibility
+        let _count = self.cleanup_orphaned_tools().await?;
+        Ok(())
     }
 
     async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        // Call the actual implementation method
-        AdvancedMemoryManager::clean_orphaned_tool_results(self).await
+        // Call the unified cleanup and return count
+        self.cleanup_orphaned_tools().await
     }
 
     async fn set_current_execution_id(&mut self, execution_id: &str) -> Result<(), AgentError> {
@@ -1475,7 +1307,9 @@ impl MemoryManager for AdvancedMemoryManager {
     }
 
     async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
-        AdvancedMemoryManager::clean_orphaned_tool_calls_from_previous_executions(self).await
+        // Call the unified cleanup and discard count for trait compatibility
+        let _count = self.cleanup_orphaned_tools().await?;
+        Ok(())
     }
 }
 
@@ -1495,12 +1329,11 @@ impl SimpleMemoryManager {
         }
     }
 
-    /// Remove orphaned tool calls that don't have corresponding tool results
-    /// This method should be called when starting a new agent execution to clean up
-    /// any incomplete tool calls from previous cancelled executions
-    pub async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
+    /// Unified orphaned tool cleanup - simplified version for SimpleMemoryManager
+    pub async fn cleanup_orphaned_tools(&mut self) -> Result<usize, AgentError> {
         let mut messages = self.messages.write().await;
         let mut pending = self.pending_tool_calls.write().await;
+        let mut cleanup_count = 0;
 
         // Find all tool call IDs that have results
         let mut resolved_tool_calls = HashSet::new();
@@ -1512,61 +1345,8 @@ impl SimpleMemoryManager {
             }
         }
 
-        // Remove any Assistant messages with tool calls that don't have corresponding results
-        let mut orphaned_tool_call_ids = HashSet::new();
-        messages.retain(|message| {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
-                    if !all_resolved {
-                        // Mark these tool calls as orphaned
-                        for tc in tool_calls {
-                            if !resolved_tool_calls.contains(&tc.id) {
-                                orphaned_tool_call_ids.insert(tc.id.clone());
-                            }
-                        }
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        // Clean up pending tool calls
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id));
-
-        if !orphaned_tool_call_ids.is_empty() {
-            log::info!("Cleaned up {} orphaned tool calls: {:?}",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids);
-        }
-
-        Ok(())
-    }
-
-    /// Clear all pending tool calls (useful when starting a fresh conversation)
-    pub async fn clear_pending_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut pending = self.pending_tool_calls.write().await;
-        pending.clear();
-        log::info!("Cleared all pending tool calls");
-        Ok(())
-    }
-
-    /// Get a list of currently pending tool call IDs
-    pub async fn get_pending_tool_calls(&self) -> Result<Vec<String>, AgentError> {
-        let pending = self.pending_tool_calls.read().await;
-        Ok(pending.iter().cloned().collect())
-    }
-
-    /// Clean up orphaned tool results that don't have corresponding tool calls
-    /// This method removes tool result messages that have no matching tool_use blocks
-    pub async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        let mut messages = self.messages.write().await;
-
         // Find all tool call IDs that exist in assistant messages
-        let mut valid_tool_call_ids = std::collections::HashSet::new();
+        let mut valid_tool_call_ids = HashSet::new();
         for message in messages.iter() {
             if message.role == Role::Assistant {
                 if let Some(tool_calls) = &message.tool_calls {
@@ -1577,30 +1357,53 @@ impl SimpleMemoryManager {
             }
         }
 
-        // Count orphaned tool results before removal
-        let mut orphaned_count = 0;
-        let mut orphaned_ids = Vec::new();
+        // Clean up orphaned tool calls AND tool results in one pass
+        let mut orphaned_call_ids = HashSet::new();
+        let mut orphaned_result_ids = Vec::new();
 
-        // Remove tool result messages that don't have corresponding tool calls
         messages.retain(|message| {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    if !valid_tool_call_ids.contains(tool_call_id) {
-                        orphaned_count += 1;
-                        orphaned_ids.push(tool_call_id.clone());
-                        log::warn!("Removing orphaned tool result with ID: {}", tool_call_id);
-                        return false; // Remove this message
+            match message.role {
+                Role::Assistant => {
+                    if let Some(tool_calls) = &message.tool_calls {
+                        // Check if all tool calls in this message have results
+                        let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
+                        if !all_resolved {
+                            // Mark these tool calls as orphaned
+                            for tc in tool_calls {
+                                if !resolved_tool_calls.contains(&tc.id) {
+                                    orphaned_call_ids.insert(tc.id.clone());
+                                }
+                            }
+                            cleanup_count += 1;
+                            log::debug!("Removing orphaned Assistant message with unresolved tool calls");
+                            return false; // Remove this message
+                        }
                     }
                 }
+                Role::Tool => {
+                    if let Some(tool_call_id) = &message.tool_call_id {
+                        if !valid_tool_call_ids.contains(tool_call_id) {
+                            orphaned_result_ids.push(tool_call_id.clone());
+                            cleanup_count += 1;
+                            log::debug!("Removing orphaned tool result with ID: {}", tool_call_id);
+                            return false; // Remove this message
+                        }
+                    }
+                }
+                _ => {}
             }
             true // Keep the message
         });
 
-        if orphaned_count > 0 {
-            log::info!("Cleaned up {} orphaned tool results: {:?}", orphaned_count, orphaned_ids);
+        // Clean up pending tool calls
+        pending.retain(|id| !orphaned_call_ids.contains(id));
+
+        if cleanup_count > 0 {
+            log::info!("Simple cleanup: removed {} orphaned tool calls and {} orphaned tool results",
+                       orphaned_call_ids.len(), orphaned_result_ids.len());
         }
 
-        Ok(orphaned_count)
+        Ok(cleanup_count)
     }
 }
 
@@ -1665,13 +1468,14 @@ impl MemoryManager for SimpleMemoryManager {
     }
 
     async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        // Delegate to the existing implementation
-        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
+        // Call the unified cleanup and discard count for trait compatibility
+        let _count = self.cleanup_orphaned_tools().await?;
+        Ok(())
     }
 
     async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        // Delegate to the existing implementation
-        SimpleMemoryManager::clean_orphaned_tool_results(self).await
+        // Call the unified cleanup and return count
+        self.cleanup_orphaned_tools().await
     }
 
     async fn set_current_execution_id(&mut self, _execution_id: &str) -> Result<(), AgentError> {
@@ -1680,8 +1484,9 @@ impl MemoryManager for SimpleMemoryManager {
     }
 
     async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
-        // For simple memory manager, just clean all orphaned tool calls
-        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
+        // For simple memory manager, call unified cleanup and discard count for trait compatibility
+        let _count = self.cleanup_orphaned_tools().await?;
+        Ok(())
     }
 }
 
@@ -1784,5 +1589,24 @@ impl MemoryManager for DelegatedMemoryManager {
         // For tool results, we don't need to do anything locally
         // This is handled by the individual messages which are never orphaned in our setup
         Ok(0)
+    }
+
+    async fn set_current_execution_id(&mut self, execution_id: &str) -> Result<(), AgentError> {
+        // Delegate to parent memory manager
+        let mut parent = self.parent.lock().await;
+        parent.set_current_execution_id(execution_id).await
+    }
+
+    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+        // This only cleans the local tool calls - NOT the parent's
+        let mut pending = self.local_pending_tool_calls.write().await;
+        let orphan_count = pending.len();
+
+        if orphan_count > 0 {
+            log::info!("DelegatedMemory: Cleaning {} orphaned tool calls from local tracking", orphan_count);
+            pending.clear();
+        }
+
+        Ok(())
     }
 }

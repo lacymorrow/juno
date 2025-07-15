@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO } from "@/lib/constants.generated";
+import { AUDIO, EVENTS } from "@/lib/constants.generated";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
 	ProviderInfo,
@@ -210,7 +210,7 @@ export function useSettings() {
 					temperature?: number;
 					system_prompt?: string;
 				}[];
-			}>("provider_settings_changed", (event) => {
+			}>(EVENTS.SETTINGS_PROVIDER_SETTINGS_CHANGED, (event) => {
 				console.log("useSettings: Received provider settings update:", event.payload);
 				const fullProviderSettings = event.payload;
 

@@ -221,25 +221,7 @@ impl EventDrivenToolExecutor {
 impl EventHandler for EventDrivenToolExecutor {
     async fn handle_event(&self, event: &JunoAgentEvent) -> Result<Vec<JunoAgentEvent>, String> {
         match event {
-            JunoAgentEvent::ToolExecutionStart { tool_name, tool_call_id, .. } => {
-                info!("Event-driven tool executor handling execution start for: {} (ID: {})", tool_name, tool_call_id);
-                
-                // We need to find the corresponding ToolCall event to get the arguments
-                // For now, we'll emit an error requesting the full tool call info
-                warn!("ToolExecutionStart event received but missing tool arguments - this indicates incomplete event flow");
-                
-                Ok(vec![JunoAgentEvent::ErrorOccurred {
-                    error_type: "incomplete_tool_execution_event".to_string(),
-                    message: format!("ToolExecutionStart for '{}' missing arguments - need full ToolCall event", tool_name),
-                    recoverable: true,
-                    timestamp: now(),
-                    context: Some(serde_json::json!({
-                        "tool_name": tool_name,
-                        "tool_call_id": tool_call_id,
-                        "suggestion": "Use ToolCall event directly instead of ToolExecutionStart"
-                    })),
-                }])
-            }
+            // ToolExecutionStart events removed - we now handle ToolCall events directly
             
             JunoAgentEvent::ToolCall { tool_name, args, id, session_id, .. } => {
                 info!("Event-driven tool executor handling direct tool call: {} (ID: {})", tool_name, id);

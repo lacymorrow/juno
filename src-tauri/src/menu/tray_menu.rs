@@ -415,7 +415,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for floating bar state changes to detect processing states
-    let _ = app_handle.listen("floating-bar-state-changed", {
+    let _ = app_handle.listen(crate::constants::events::ui::BAR_STATE_CHANGED, {
         move |event| {
             tauri::async_runtime::spawn(async move {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {

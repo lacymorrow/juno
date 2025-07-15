@@ -98,16 +98,10 @@ impl ToolCoordinator {
             timestamp: now(),
         };
         
-        // Emit tool execution start event for the EventDrivenToolExecutor
-        let execution_start = JunoAgentEvent::ToolExecutionStart {
-            tool_name: tool_name.to_string(),
-            tool_call_id: tool_call_id.to_string(),
-            timestamp: now(),
-        };
-        
-        // The key change in Phase 1.7: We emit events instead of directly executing
-        // The EventDrivenToolExecutor will handle the actual execution
-        Ok(vec![coordination_start, execution_start])
+        // Note: ToolExecutionStart events removed as they were redundant
+        // The ToolCall events contain all necessary information for execution
+        // The EventDrivenToolExecutor handles ToolCall events directly
+        Ok(vec![coordination_start])
     }
     
     /// Check if a tool is available in any registered provider

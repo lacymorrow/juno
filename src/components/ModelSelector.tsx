@@ -11,6 +11,7 @@ import { Brain, Cpu } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { EVENTS } from "@/lib/constants.generated";
 
 interface ModelSelectorProps {
   variant?: "compact" | "full";
@@ -45,7 +46,7 @@ export function ModelSelector({
     let unlisten: (() => void) | undefined;
 
     const setupProviderListener = async () => {
-      unlisten = await listen("provider_settings_changed", (_event) => {
+      unlisten = await listen(EVENTS.SETTINGS_PROVIDER_SETTINGS_CHANGED, (_event) => {
         console.log("ModelSelector: Received provider settings update");
         // Models list might have changed, reload models for current provider
         if (settings.activeProvider) {

@@ -84,6 +84,11 @@ pub mod ui {
     pub const UI_CURSOR_HIGHLIGHT_START: &str = "ui-cursor-highlight-start";
     pub const UI_CURSOR_HIGHLIGHT_MOVE: &str = "ui-cursor-highlight-move";
     pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
+    
+    // UI element management events
+    pub const ELEMENT_CREATED: &str = "ui-element-created";
+    pub const ELEMENT_UPDATED: &str = "ui-element-updated";
+    pub const ELEMENT_DELETED: &str = "ui-element-deleted";
 }
 
 /// Menu and navigation events
@@ -104,13 +109,7 @@ pub mod menu {
     pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
     pub const ABOUT_REQUESTED: &str = "about-requested";
 
-    // Edit menu events
-    pub const EDIT_UNDO: &str = "menu-edit-undo";
-    pub const EDIT_REDO: &str = "menu-edit-redo";
-    pub const EDIT_CUT: &str = "menu-edit-cut";
-    pub const EDIT_COPY: &str = "menu-edit-copy";
-    pub const EDIT_PASTE: &str = "menu-edit-paste";
-    pub const EDIT_SELECT_ALL: &str = "menu-edit-select-all";
+    // Edit menu events removed - handled natively by Tauri's PredefinedMenuItem
 }
 
 /// Text-to-speech events
@@ -161,6 +160,8 @@ pub mod cloud {
     pub const CONNECTOR_STATE: &str = "cloud-connector-state";
     pub const CONNECTION_STATE: &str = "cloud-connection-state";
     pub const COMMAND_RECEIVED: &str = "cloud-command-received";
+    pub const MESSAGE_RECEIVED: &str = "cloud-message-received";
+    pub const CONNECTOR_ERROR: &str = "cloud-connector-error";
 }
 
 /// System and application events
@@ -180,6 +181,21 @@ pub mod onboarding {
 /// Notification events
 pub mod notifications {
     pub const TOAST: &str = "toast-notification";
+}
+
+/// Settings change events
+pub mod settings {
+    pub const SETTINGS_CHANGED: &str = "settings_changed";
+    pub const KEYBOARD_SHORTCUTS_CHANGED: &str = "keyboard_shortcuts_changed";
+    pub const AGENT_SETTINGS_CHANGED: &str = "agent_settings_changed";
+    pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
+    pub const CLOUD_SETTINGS_CHANGED: &str = "cloud_settings_changed";
+    pub const AUDIO_SETTINGS_CHANGED: &str = "audio_settings_changed";
+    pub const TOOL_SETTINGS_CHANGED: &str = "tool_settings_changed";
+    pub const FLOATING_BAR_SETTINGS_CHANGED: &str = "floating_bar_settings_changed";
+    pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
+    pub const CLI_SETTINGS_CHANGED: &str = "cli_settings_changed";
+    pub const VOICE_TRANSCRIPTION_SETTINGS_CHANGED: &str = "voice_transcription_settings_changed";
 }
 
 /// Bar and UI state events

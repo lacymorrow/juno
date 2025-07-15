@@ -348,7 +348,7 @@ impl UIManager {
             "query": query
         });
 
-        if let Err(e) = self.app_handle.emit("app-dictation-finished", query_payload) {
+        if let Err(e) = self.app_handle.emit(crate::constants::events::dictation::FINISHED, query_payload) {
             error!("Failed to emit query submission: {}", e);
             return Err(format!("Failed to submit query: {}", e));
         }
@@ -659,7 +659,7 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit("ui-element-created", &state_update) {
+        if let Err(e) = self.app_handle.emit(crate::constants::events::ui::ELEMENT_CREATED, &state_update) {
             error!("Failed to emit element created event: {}", e);
         }
 
@@ -679,7 +679,7 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit("ui-element-updated", &state_update) {
+        if let Err(e) = self.app_handle.emit(crate::constants::events::ui::ELEMENT_UPDATED, &state_update) {
             error!("Failed to emit element updated event: {}", e);
         }
 
@@ -690,7 +690,7 @@ impl UIManager {
         debug!("UI Manager: Deleting element: {}", element_id);
         self.elements.remove(&element_id);
 
-        if let Err(e) = self.app_handle.emit("ui-element-deleted", &element_id) {
+        if let Err(e) = self.app_handle.emit(crate::constants::events::ui::ELEMENT_DELETED, &element_id) {
             error!("Failed to emit element deleted event: {}", e);
         }
 
@@ -770,7 +770,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Complete transition events
     let manager_clone = manager.clone();
-    app_handle.listen("floating-bar-complete-transition", move |event| {
+    app_handle.listen(crate::constants::events::bar::COMPLETE_TRANSITION, move |event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
@@ -789,7 +789,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Clear error events
     let manager_clone = manager.clone();
-    app_handle.listen("floating-bar-clear-error", move |event| {
+    app_handle.listen(crate::constants::events::bar::CLEAR_ERROR, move |event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;

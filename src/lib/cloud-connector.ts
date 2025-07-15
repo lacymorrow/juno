@@ -124,19 +124,19 @@ export class ProductionCloudConnector {
 		});
 
 		// Listen for cloud messages (handled by the Rust backend)
-		await listen('cloud-message-received', (event) => {
+		await listen(EVENTS.CLOUD_MESSAGE_RECEIVED, (event) => {
 			const message = event.payload as CloudMessage;
 			console.log('[CloudConnector] Received cloud message:', message);
 			this.messageListeners.forEach(listener => listener(message));
 		});
 
 		// Listen for connection errors
-		await listen('cloud-connector-error', (event) => {
+		await listen(EVENTS.CLOUD_CONNECTOR_ERROR, (event) => {
 			console.error('[CloudConnector] Connection error:', event.payload);
 		});
 
 		// Listen for cloud commands from the native WebSocket connection
-		await listen('cloud-command-received', (event) => {
+		await listen(EVENTS.CLOUD_COMMAND_RECEIVED, (event) => {
 			const command = event.payload;
 			console.log('[CloudConnector] Received cloud command:', command);
 			// Cloud commands are handled by the Rust backend

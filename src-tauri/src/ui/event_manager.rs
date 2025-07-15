@@ -167,10 +167,7 @@ impl EventDrivenUIManager {
                 }
             }
             
-            JunoAgentEvent::ToolExecutionStart { tool_name, tool_call_id, .. } => {
-                debug!("UI Manager: Tool execution start: {} (ID: {})", tool_name, tool_call_id);
-                self.emit_to_frontend("agent-event", event).await?;
-            }
+            // ToolExecutionStart events removed - no longer emitted by the system
             
             JunoAgentEvent::ToolExecutionEnd { tool_name, tool_call_id, success, .. } => {
                 debug!("UI Manager: Tool execution end: {} (ID: {}, success: {})", tool_name, tool_call_id, success);
@@ -430,7 +427,6 @@ impl EventHandler for EventDrivenUIManager {
             // Tool execution events
             JunoAgentEvent::ToolCall { .. } |
             JunoAgentEvent::ToolResult { .. } |
-            JunoAgentEvent::ToolExecutionStart { .. } |
             JunoAgentEvent::ToolExecutionEnd { .. } |
             JunoAgentEvent::ToolCoordinationStart { .. } => {
                 self.handle_tool_ui_events(event).await

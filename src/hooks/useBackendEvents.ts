@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
-import type { ChatMessage } from "@/components/ChatMessage";
 
 // Simplified type definitions
 type BackendEventPayload = {
