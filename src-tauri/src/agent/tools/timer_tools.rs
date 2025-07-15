@@ -406,11 +406,10 @@ mod timer_tools_impl {
 /// - `check_expired_timers`: Check for expired timers needing context restoration
 pub async fn register_timer_tools(
     tool_provider: &mut LocalToolProvider,
-    _app_state: &AppState,
+    app_state: &AppState,
 ) {
-    let timer_manager = Arc::new(TimerManager::new());
-
-    // Note: Timer manager stored locally - AppState integration can be added later if needed
+    // Get timer manager from AppState for global accessibility
+    let timer_manager = app_state.get_timer_manager().await;
 
     // set_timer tool
     let set_timer_def = ToolDefinition {
@@ -440,8 +439,10 @@ pub async fn register_timer_tools(
 
     let set_timer_executor = {
         let timer_manager = timer_manager.clone();
+        let app_state_weak = Arc::downgrade(&Arc::new(app_state.clone()));
         move |input: Value| {
             let timer_manager = timer_manager.clone();
+            let app_state_weak = app_state_weak.clone();
             async move {
                 let delay_seconds = input["delay_seconds"].as_f64()
                     .ok_or("Missing delay_seconds")?;
@@ -464,7 +465,30 @@ pub async fn register_timer_tools(
                     created_at: current_time,
                 };
 
-                timer_manager.add_timer(task).await;
+                timer_manager.add_timer(task.clone()).await;
+
+                // Spawn background task to wait for timer expiration
+                let timer_manager_clone = timer_manager.clone();
+                let timer_id_clone = timer_id.clone();
+                let timer_task_clone = task.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(delay_seconds as u64)).await;
+
+                    // Check if timer is still active (might have been cancelled)
+                    if timer_manager_clone.cancel_timer(&timer_id_clone).await {
+                        info!("Timer {} expired, emitting timer-expired event", timer_id_clone);
+
+                        // Try to get app handle from AppState to emit event
+                        if let Some(app_state) = app_state_weak.upgrade() {
+                            // Emit through event bus if available
+                            if let Ok(event_bus) = app_state.get_event_bus().await {
+                                if let Err(e) = event_bus.emit_to_frontend(crate::constants::events::timer::EXPIRED, &timer_task_clone).await {
+                                    error!("Failed to emit timer-expired event: {}", e);
+                                }
+                            }
+                        }
+                    }
+                });
 
                 Ok(json!({
                     "success": true,
@@ -549,7 +573,68 @@ pub async fn register_timer_tools(
 
     tool_provider.register_async_tool(list_timers_def, list_timers_executor).await;
 
-    // Note: Timer background task can be added later when AppState integration is complete
+    // check_expired_timers tool
+    let check_expired_timers_def = ToolDefinition {
+        name: "check_expired_timers".to_string(),
+        description: "Check for expired timers and trigger their events".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+        api_type: None,
+        beta_flag: None,
+    };
 
-    info!("Registered 3 simple timer tools");
+    let check_expired_timers_executor = {
+        let timer_manager = timer_manager.clone();
+        let app_state_weak = Arc::downgrade(&Arc::new(app_state.clone()));
+        move |_input: Value| {
+            let timer_manager = timer_manager.clone();
+            let app_state_weak = app_state_weak.clone();
+            async move {
+                if let Some(app_state) = app_state_weak.upgrade() {
+                    // Get app handle through event bus
+                    if let Ok(event_bus) = app_state.get_event_bus().await {
+                        // Manually check for expired timers
+                        let current_time = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+
+                        let timers = timer_manager.list_timers().await;
+                        let mut expired_count = 0;
+
+                        for timer in timers {
+                            if timer.trigger_time <= current_time {
+                                if timer_manager.cancel_timer(&timer.id).await {
+                                    // Emit timer expired event
+                                    if let Err(e) = event_bus.emit_to_frontend(crate::constants::events::timer::EXPIRED, &timer).await {
+                                        error!("Failed to emit timer-expired event: {}", e);
+                                    } else {
+                                        info!("Timer expired: {} - {}", timer.id, timer.description);
+                                        expired_count += 1;
+                                    }
+                                }
+                            }
+                        }
+
+                        Ok(json!({
+                            "success": true,
+                            "expired_count": expired_count,
+                            "message": format!("Checked timers, {} expired", expired_count)
+                        }))
+                    } else {
+                        Err("EventBus not available")
+                    }
+                } else {
+                    Err("AppState no longer available")
+                }
+            }
+        }
+    };
+
+    tool_provider.register_async_tool(check_expired_timers_def, check_expired_timers_executor).await;
+
+    info!("Registered 4 timer tools including check_expired_timers");
 }
