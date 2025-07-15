@@ -625,10 +625,10 @@ pub async fn register_timer_tools(
                             "message": format!("Checked timers, {} expired", expired_count)
                         }))
                     } else {
-                        Err("EventBus not available")
+                        Err("EventBus not available".to_string())
                     }
                 } else {
-                    Err("AppState no longer available")
+                    Err("AppState no longer available".to_string())
                 }
             }
         }
