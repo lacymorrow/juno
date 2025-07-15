@@ -635,7 +635,6 @@ Response:
 [
   {"name": "computer", "input": {"action": "type", "text": "hello world"}},
   {"name": "computer", "input": {"action": "key", "text": "Return"}},
-  {"name": "computer", "input": {"action": "screenshot"}}
 ]
 
 Task: "Move mouse in a square pattern"
@@ -858,40 +857,35 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 **Right-click for context menu**:
 ```json
 [
-  {"name": "computer", "input": {"action": "right_click", "coordinate": [150, 250]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "right_click", "coordinate": [150, 250]}}
 ]
 ```
 
 **Middle-click to open in new tab**:
 ```json
 [
-  {"name": "computer", "input": {"action": "middle_click", "coordinate": [300, 400]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "middle_click", "coordinate": [300, 400]}}
 ]
 ```
 
 **Double-click to open file**:
 ```json
 [
-  {"name": "computer", "input": {"action": "double_click", "coordinate": [200, 150]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "double_click", "coordinate": [200, 150]}}
 ]
 ```
 
 **Triple-click to select line**:
 ```json
 [
-  {"name": "computer", "input": {"action": "triple_click", "coordinate": [250, 300]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "triple_click", "coordinate": [250, 300]}}
 ]
 ```
 
 **Drag and drop operation**:
 ```json
 [
-  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [200, 200]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [200, 200]}}
 ]
 ```
 
@@ -996,9 +990,9 @@ User asked "which programming language should I learn for AI development?"
 **User**: "Open Spotify"
 **Response**:
 ```xml
-<TTS>Opening Spotify now.</TTS>
+<TTS>Opening Spotify.</TTS>
 ```
-[Execute: computer tool -> screenshot -> identify Spotify -> click]
+[Execute: computer tool -> identify Spotify -> click]
 **Key**: Quick action, minimal TTS, immediate execution
 </example>
 
@@ -1086,7 +1080,7 @@ fn divide(a: f64, b: f64) -> Result<f64, String> {
 **User**: "Take a screenshot of my screen"
 **Response**:
 ```xml
-<TTS>Taking a screenshot now.</TTS>
+<TTS>Taking a screenshot.</TTS>
 
 [Execute: computer tool -> screenshot]
 [If screenshot fails due to permissions]
