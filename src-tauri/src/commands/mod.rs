@@ -71,7 +71,7 @@ pub use self::safari_tools::{
 };
 
 // Autostart commands
-pub use self::autostart::{get_autostart_enabled, set_autostart_enabled};
+pub use self::autostart::{is_autostart_enabled, enable_autostart, disable_autostart, toggle_autostart};
 
 // Computer commands
 pub use self::computer::computer;
@@ -81,33 +81,32 @@ pub use self::computer::computer;
 
 // Dictation commands
 pub use self::dictation::{
-    dictate_text, get_dictation_enabled, set_dictation_enabled,
-    start_dictation, stop_dictation
+    get_dictation_clipboard_enabled, set_dictation_clipboard_enabled
 };
 
 // Always listening commands
 pub use self::always_listening::{
-    get_always_listening_status, set_always_listening_status, toggle_always_listening_mode,
+    get_always_listening_status, start_always_listening_mode, stop_always_listening_mode, toggle_always_listening_mode,
     get_always_listening_sensitivity, set_always_listening_sensitivity,
     get_always_listening_wake_words, set_always_listening_wake_words
 };
 
 // Cloud commands
 pub use self::cloud::{
-    connect_to_cloud, disconnect_from_cloud, get_cloud_status,
+    enable_cloud, disable_cloud, get_cloud_status,
     send_test_cloud_command, execute_remote_command
 };
 
 // Cloud test commands
-pub use self::cloud_test::{test_cloud_connection, run_cloud_diagnostics};
+pub use self::cloud_test::{test_cloud_backend_connection, get_cloud_config_status};
 
 // Collaborative AI commands
 pub use self::collaborative_ai_commands::{
-    get_collaborative_ai_status, configure_collaborative_ai
+    get_collaborative_ai_statistics, get_collaborative_ai_capabilities
 };
 
 // Debug tools
-pub use self::debug_tools::{get_debug_info, test_debug_tools};
+pub use self::debug_tools::{debug_tool_configuration, debug_registered_tools, debug_reset_tool_config};
 
 // Dictation state manager
 pub use self::dictation_state_manager::{
@@ -116,21 +115,24 @@ pub use self::dictation_state_manager::{
 };
 // Enhanced visual reasoning commands
 pub use self::enhanced_visual_reasoning_commands::{
-    analyze_screenshot_for_elements, get_visual_reasoning_config,
-    update_visual_reasoning_config, VisualReasoningState, VisualAnalysisRequest, 
+    analyze_gui_scene_with_visual_reasoning, get_visual_reasoning_capabilities,
+    get_visual_reasoning_statistics, VisualReasoningState, VisualAnalysisRequest, 
     SceneTypeInfo, TestResult, initialize_visual_reasoning_state
 };
 
 // Error recovery commands
 pub use self::error_recovery::{
-    get_error_recovery_status, clear_error_recovery_history
+    get_recovery_statistics, get_recovery_config, reset_recovery_state
 };
 
 // Filesystem commands
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
 
 // UI commands (consolidated UI API)
-pub use self::ui_commands::{ui_handle_interaction, get_ui_state, set_ui_state};
+pub use self::ui_commands::{
+    ui_handle_interaction, ui_get_element_state, ui_create_element, ui_update_element,
+    ui_delete_element, ui_get_bar_config, ui_set_bar_config
+};
 
 // MCP commands
 pub use self::mcp::{
@@ -156,7 +158,7 @@ pub use self::memory::{
 // Note: get_cursor_position removed as it is unused
 
 // Onboarding commands
-pub use self::onboarding::{get_onboarding_status, complete_onboarding, skip_onboarding};
+pub use self::onboarding::{check_onboarding_status, complete_onboarding, skip_onboarding, reset_onboarding, restart_onboarding};
 
 // Orchestrator commands
 pub use self::orchestrator::{
@@ -167,16 +169,16 @@ pub use self::orchestrator::{
 
 // Permissions commands
 pub use self::permissions::{
-    check_accessibility_permission, check_screen_recording_permission,
-    request_accessibility_permission, request_screen_recording_permission,
-    get_permission_status
+    check_permissions_status_native, get_permissions_state,
+    request_accessibility_permission_native, request_microphone_permission_native,
+    request_screen_recording_permission_native, request_input_monitoring_permission_native
 };
 
 // Settings commands
 pub use self::settings::{
-    get_settings, set_setting, reset_settings, export_settings, import_settings,
-    get_providers, set_provider, get_provider_models, set_provider_model,
-    test_provider_connection
+    get_all_settings, save_all_settings, reset_centralized_settings, export_settings, import_settings,
+    get_centralized_provider_settings, set_centralized_provider_settings,
+    get_floating_bar_settings, set_floating_bar_settings
 };
 
 // Shell commands
@@ -184,17 +186,17 @@ pub use self::shell::{bash_command};
 
 // Shortcuts commands
 pub use self::shortcuts::{
-    get_shortcuts, set_shortcut, reset_shortcuts, validate_shortcut
+    get_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts, reset_keyboard_shortcuts, validate_keyboard_shortcut
 };
 
 // Sound commands
 pub use self::sound::{
-    play_sound, stop_sound, get_sound_settings, set_sound_settings
+    play_sound_by_type, play_notification_sound, get_sound_enabled, set_sound_enabled
 };
 
 // Stop operations commands
 pub use self::stop_operations::{
-    stop_all_operations, stop_agent, stop_dictation_operations, stop_tts
+    stop_all_operations
 };
 
 // Tool choice commands
@@ -215,7 +217,7 @@ pub use self::tools::{
 
 // UI token selection commands
 pub use self::ui_token_selection::{
-    get_ui_token_selection_config, update_ui_token_selection_config
+    get_ui_token_config, update_ui_token_config, set_ui_token_config
 };
 
 // Shared helper function for sending notifications from dev tools

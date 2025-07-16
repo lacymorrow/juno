@@ -267,9 +267,10 @@ use crate::commands::{
 
 // Import keyboard shortcuts commands explicitly
 use crate::commands::{
-    get_escape_key_status, get_keyboard_shortcuts, get_shortcut_best_practices,
-    get_shortcut_suggestions, reset_keyboard_shortcuts, set_keyboard_shortcut,
-    set_keyboard_shortcuts, validate_keyboard_shortcut,
+    get_keyboard_shortcuts, set_keyboard_shortcut,
+    set_keyboard_shortcuts, reset_keyboard_shortcuts, validate_keyboard_shortcut,
+    check_onboarding_status, complete_onboarding, skip_onboarding, reset_onboarding, restart_onboarding,
+    get_onboarding_info, test_global_shortcuts_working,
 };
 
 // Import MCP commands explicitly
@@ -684,9 +685,6 @@ pub fn run() {
             set_keyboard_shortcuts,
             reset_keyboard_shortcuts,
             validate_keyboard_shortcut,
-            get_shortcut_suggestions,
-            get_shortcut_best_practices,
-            get_escape_key_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
             commands::escape_key_coordinator::test_escape_key_flow,
             // Stop Coordinator Commands
@@ -771,13 +769,13 @@ pub fn run() {
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
             // Onboarding Commands
-            commands::check_onboarding_status,
-            commands::complete_onboarding,
-            commands::skip_onboarding,
-            commands::reset_onboarding,
-            commands::restart_onboarding,
-            commands::get_onboarding_info,
-            commands::test_global_shortcuts_working,
+            check_onboarding_status,
+            complete_onboarding,
+            skip_onboarding,
+            reset_onboarding,
+            restart_onboarding,
+            get_onboarding_info,
+            test_global_shortcuts_working,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,

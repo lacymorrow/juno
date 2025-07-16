@@ -26,7 +26,8 @@ use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 // TARS Integration: Import event types
-use crate::agent::events::JunoAgentEvent;
+// TODO: Re-enable when events module is implemented
+// use crate::agent::events::JunoAgentEvent;
 
 /// Agent execution queue system to prevent concurrent execution
 #[derive(Debug)]
@@ -333,6 +334,8 @@ pub async fn submit_query(
     }
 
     // Event-driven logging: Emit user message event for observability
+    // TODO: Re-enable when events module is implemented
+    /*
     let user_message_event = JunoAgentEvent::UserMessage {
         content: trimmed_query.to_string(),
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -344,6 +347,7 @@ pub async fn submit_query(
         warn!("Failed to emit user message event for logging: {}", e);
         // Don't fail the entire request for logging issues
     }
+    */
     
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
     // The event-driven refactor was incomplete and caused tool calls to not execute
@@ -425,6 +429,8 @@ async fn execute_agent_internal(
     );
 
     // TARS Integration: Emit agent run start event
+    // TODO: Re-enable when events module is implemented
+    /*
     let agent_run_start_event = JunoAgentEvent::AgentRunStart {
         session_id: execution_id.clone(),
         agent_type: "orchestrator".to_string(),
@@ -435,6 +441,7 @@ async fn execute_agent_internal(
     if let Err(e) = state.emit_agent_event(agent_run_start_event).await {
         warn!("Failed to emit agent run start event: {}", e);
     }
+    */
 
     // --- FIXED: Notify Floating Bar Manager that Agent Started ---
     // This ensures the floating bar shows agent activity regardless of trigger source
@@ -842,6 +849,8 @@ async fn execute_agent_internal(
     );
 
     // TARS Integration: Emit agent run end event
+    // TODO: Re-enable when events module is implemented
+    /*
     let agent_run_end_event = JunoAgentEvent::AgentRunEnd {
         session_id: execution_id.clone(),
         status: match &agent_result {
@@ -857,6 +866,7 @@ async fn execute_agent_internal(
     if let Err(e) = state.emit_agent_event(agent_run_end_event).await {
         warn!("Failed to emit agent run end event: {}", e);
     }
+    */
 
     // Unregister escape key as agent execution is complete
     if let Err(e) =
@@ -871,6 +881,8 @@ async fn execute_agent_internal(
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
             // TARS Integration: Emit assistant message event for successful completion
+            // TODO: Re-enable when events module is implemented
+            /*
             let assistant_message_event = JunoAgentEvent::AssistantMessage {
                 content: message.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -879,6 +891,7 @@ async fn execute_agent_internal(
             if let Err(e) = state.emit_agent_event(assistant_message_event).await {
                 warn!("Failed to emit assistant message event: {}", e);
             }
+            */
 
             SubmitQueryResult {
                 text: message.clone(),
@@ -892,6 +905,8 @@ async fn execute_agent_internal(
             error!("Agent run failed: {}", e);
 
             // TARS Integration: Emit error event
+            // TODO: Re-enable when events module is implemented
+            /*
             let error_event = JunoAgentEvent::ErrorOccurred {
                 error_type: match &e {
                     AgentError::Terminated => "user_cancelled".to_string(),
@@ -910,6 +925,7 @@ async fn execute_agent_internal(
             if let Err(e) = state.emit_agent_event(error_event).await {
                 warn!("Failed to emit error event: {}", e);
             }
+            */
 
             // Check if this is a network-related error
             let error_message = e.to_string();
