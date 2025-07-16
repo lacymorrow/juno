@@ -21,7 +21,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/settings" element={<ModularSettingsWindow />} />
-          <Route path="/app-bar" element={<AppBar />} />
           <Route path="/floating-bar" element={<FloatingBar />} />
           <Route path="/voice-bar" element={<VoiceAIBar />} />
           <Route path="/dynamic-bar" element={<DynamicIslandDemo />} />

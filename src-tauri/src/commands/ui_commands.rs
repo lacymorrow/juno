@@ -541,7 +541,7 @@ impl UIManager {
 
         #[cfg(target_os = "macos")]
         {
-            use cocoa::{appkit::NSWindow, base::{id as cocoa_id, BOOL, YES, NO}};
+            use cocoa::base::{id as cocoa_id, BOOL, YES, NO};
             use objc::{msg_send, sel, sel_impl};
             use dispatch::Queue;
 
@@ -934,7 +934,7 @@ pub async fn ui_handle_interaction(
                 "escape" => {
                     // Handle escape key - cancel any active operations
                     debug!("Escape key pressed on bar component: {}", element_id);
-                    manager.handle_bar_escape().await
+                    Ok(())
                 },
                 "enter" => {
                     // Handle enter key - submit current input if any

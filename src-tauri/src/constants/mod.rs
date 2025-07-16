@@ -27,30 +27,48 @@ pub mod text;
 pub mod timeouts;
 pub mod ui;
 
-// Re-export everything from agent for convenience
-pub use agent::*;
+// Re-export commonly used constants explicitly to avoid ambiguous glob re-exports
+// This eliminates the compilation warnings about ambiguous re-exports
 
-// Re-export commonly used constants from modules that exist
-pub use api::*;
-pub use app::*;
-pub use audio::*;
-pub use browser::*;
-pub use cli::*;
-pub use commands::*;
-pub use error_messages::*;
-pub use errors::*;
-pub use events::*;
-pub use files::*;
-pub use memory::*;
-pub use menus::*;
-pub use mouse::*;
-pub use performance::*;
-pub use permissions::*;
-pub use ports::*;
-pub use settings::*;
-pub use text::*;
-pub use timeouts::*;
-pub use ui::*;
+// From app module
+pub use app::{APP_NAME, BUNDLE_IDENTIFIER, PRODUCT_NAME, CONFIG_DIR_NAME, SCREENSHOT_PREFIX};
+
+// From audio module
+pub use audio::{WHISPER_SAMPLE_RATE, DEFAULT_SENSITIVITY, DEFAULT_WAKE_WORDS};
+
+// From platform module (macOS-specific)
+pub use platform::macos::{key_codes, modifiers, system, system_prefs};
+
+// From files module
+pub use files::{CONFIG_FILE_NAME, SETTINGS_FILE_NAME, PROMPTS_FILE_NAME};
+
+// From timeouts module
+pub use timeouts::{DEFAULT_TIMEOUT_MS, QUICK_TIMEOUT_MS, SLOW_TIMEOUT_MS};
+
+// From memory module
+pub use memory::{MAX_MEMORY_ENTRIES as MEMORY_MAX_ENTRIES, MAX_CONTEXT_TOKENS};
+
+// From mouse module
+pub use mouse::{DEFAULT_CLICK_DELAY_MS, DEFAULT_SCROLL_AMOUNT};
+
+// From permissions module
+pub use permissions::{REQUIRED_PERMISSIONS, PERMISSION_DESCRIPTIONS};
+
+// From ui module
+pub use ui::{FLOATING_BAR_HEIGHT, FLOATING_BAR_WIDTH, SETTINGS_WINDOW_WIDTH, SETTINGS_WINDOW_HEIGHT};
+
+// Re-export module namespaces for structured access
+pub use events::agent as agent_events;
+pub use events::dictation as dictation_events;
+pub use events::always_listening as always_listening_events;
+pub use events::ui as ui_events;
+pub use events::menu as menu_events;
+pub use events::tts as tts_events;
+pub use events::cloud as cloud_events;
+pub use events::system as system_events;
+pub use events::timer as timer_events;
+pub use events::bar as bar_events;
+pub use events::tools as tools_events;
 
 // Global constants that don't fit in specific modules
 pub const MAX_MEMORY_ENTRIES: usize = 1000;
@@ -62,12 +80,8 @@ pub const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
 // File system constants
 pub const MAX_FILE_SIZE_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 
-// System constants from platform
-pub use platform::*;
-
 // App messages that can be re-exported for convenience
 pub mod messages {
-    // Note: Currently no messages module in files, but keeping structure for future use
     pub const GENERIC_SUCCESS: &str = "Operation completed successfully";
     pub const GENERIC_ERROR: &str = "An error occurred during the operation";
 }

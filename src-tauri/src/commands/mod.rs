@@ -5,7 +5,6 @@ use crate::utils::{format_system_context_for_agent, gather_system_context};
 use tauri::{Emitter, State};
 use crate::constants::events;
 
-
 // Declare the submodules
 pub mod accessibility;
 pub mod registry;
@@ -42,7 +41,6 @@ pub mod orchestrator;
 pub mod permissions;
 pub mod providers;
 // pub mod self_improvement; // TODO: Fix module not found
-
 pub mod settings;
 pub mod shell;
 pub mod shortcuts;
@@ -58,62 +56,162 @@ pub mod ui_commands; // Consolidated UI API for all floating elements
 pub mod ui_token_selection;
 pub mod window; // Debug commands for tool configuration diagnostics
 
-// Re-export commands for easy access in lib.rs
+// Re-export commands with explicit imports to avoid ambiguous glob re-exports
+// Accessibility commands
 pub use self::accessibility::{
     accessibility_scan, accessibility_click, test_accessibility_permissions,
     get_accessibility_tool_definitions, execute_accessibility_tool
 };
+
+// Safari tools
 pub use self::safari_tools::{
     safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool
 };
-pub use self::autostart::*;
-pub use self::computer::*;
-pub use self::core::*;
-// Removed unused dev import: pub use self::dev::*;
-pub use self::dictation::*;
-// Removed deprecated dictation_reset exports
-pub use self::always_listening::*;
-pub use self::cloud::*;
-pub use self::cloud_test::*;
-pub use self::collaborative_ai_commands::*;
-pub use self::debug_tools::*; // Re-export debug tool commands
+
+// Autostart commands
+pub use self::autostart::{get_autostart_enabled, set_autostart_enabled};
+
+// Computer commands
+pub use self::computer::{computer_action, compute_click_coordinate};
+
+// Core commands
+// Note: list_apps and check_server_status removed as they are unused
+
+// Dictation commands
+pub use self::dictation::{
+    dictate_text, get_dictation_enabled, set_dictation_enabled,
+    start_dictation, stop_dictation
+};
+
+// Always listening commands
+pub use self::always_listening::{
+    get_always_listening_status, set_always_listening_status, toggle_always_listening_mode,
+    get_always_listening_sensitivity, set_always_listening_sensitivity,
+    get_always_listening_wake_words, set_always_listening_wake_words
+};
+
+// Cloud commands
+pub use self::cloud::{
+    connect_to_cloud, disconnect_from_cloud, get_cloud_status,
+    send_test_cloud_command, execute_remote_command
+};
+
+// Cloud test commands
+pub use self::cloud_test::{test_cloud_connection, run_cloud_diagnostics};
+
+// Collaborative AI commands
+pub use self::collaborative_ai_commands::{
+    get_collaborative_ai_status, configure_collaborative_ai
+};
+
+// Debug tools
+pub use self::debug_tools::{get_debug_info, test_debug_tools};
+
+// Dictation state manager
 pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
 };
-// Exports from dev2 branch - preserving existing functionality
-// Note: Specific exports from element, keyboard, text_editor, window modules
-// are not publicly re-exported as they don't have pub visibility
-// Exports from main branch - new features
-pub use self::enhanced_visual_reasoning_commands::*;
-pub use self::error_recovery::*;
+
+// Enhanced visual reasoning commands
+pub use self::enhanced_visual_reasoning_commands::{
+    analyze_screenshot_for_elements, get_visual_reasoning_config,
+    update_visual_reasoning_config
+};
+
+// Error recovery commands
+pub use self::error_recovery::{
+    get_error_recovery_status, clear_error_recovery_history
+};
+
+// Filesystem commands
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
-// Floating bar functionality fully migrated to ui_commands.rs - no longer needed
-pub use self::ui_commands::*; // Re-export consolidated UI API commands
-pub use self::mcp::*;
-pub use self::memory::*;
-pub use self::mouse::*;
-pub use self::onboarding::*;
-pub use self::orchestrator::*;
-pub use self::permissions::*;
-// pub use self::self_improvement::*; // TODO: Fix module not found
 
-pub use self::settings::*;
-pub use self::shell::*;
-pub use self::shortcuts::*;
-pub use self::sound::*;
-pub use self::stop_operations::*;
-pub use self::tool_choice::*;
-pub use self::tools::*;
-pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
+// UI commands (consolidated UI API)
+pub use self::ui_commands::{ui_handle_interaction, get_ui_state, set_ui_state};
 
-// Explicitly re-export tool functions to ensure they're available
+// MCP commands
+pub use self::mcp::{
+    get_mcp_tools, add_mcp_server, remove_mcp_server, start_mcp_server, stop_mcp_server,
+    get_mcp_servers, get_mcp_server_statuses, update_mcp_server, set_mcp_server_enabled,
+    toggle_mcp_server, toggle_mcp_tool, test_mcp_server_connection, initialize_mcp_servers,
+    get_mcp_diagnostics, restart_mcp_server_with_diagnostics, troubleshoot_mcp_issues,
+    apply_mcp_quick_fixes
+};
+
+// Memory commands
+pub use self::memory::{
+    get_memory_status, clear_conversation_memory, clean_orphaned_tool_calls,
+    clean_orphaned_tool_results, get_conversation_messages, get_last_n_messages,
+    get_visual_summaries, update_visual_config, get_visual_config,
+    compress_all_screenshots, configure_screenshot_compression, get_memory_compression_stats,
+    emergency_memory_recovery, get_conversation_summaries, optimize_memory,
+    get_memory_config, update_memory_config, get_advanced_memory_metrics,
+    force_memory_prune, get_tiered_memory_context
+};
+
+// Mouse commands
+// Note: get_cursor_position removed as it is unused
+
+// Onboarding commands
+pub use self::onboarding::{get_onboarding_status, complete_onboarding, skip_onboarding};
+
+// Orchestrator commands
+pub use self::orchestrator::{
+    get_orchestrator_status, configure_orchestrator, create_orchestrator_task,
+    get_task_history, get_active_tasks, get_agent_capabilities, cancel_task,
+    get_workflow_templates, execute_workflow_template, execute_mcp_task
+};
+
+// Permissions commands
+pub use self::permissions::{
+    check_accessibility_permission, check_screen_recording_permission,
+    request_accessibility_permission, request_screen_recording_permission,
+    get_permission_status
+};
+
+// Settings commands
+pub use self::settings::{
+    get_settings, set_setting, reset_settings, export_settings, import_settings,
+    get_providers, set_provider, get_provider_models, set_provider_model,
+    test_provider_connection
+};
+
+// Shell commands
+pub use self::shell::{bash_command};
+
+// Shortcuts commands
+pub use self::shortcuts::{
+    get_shortcuts, set_shortcut, reset_shortcuts, validate_shortcut
+};
+
+// Sound commands
+pub use self::sound::{
+    play_sound, stop_sound, get_sound_settings, set_sound_settings
+};
+
+// Stop operations commands
+pub use self::stop_operations::{
+    stop_all_operations, stop_agent, stop_dictation_operations, stop_tts
+};
+
+// Tool choice commands
+pub use self::tool_choice::{
+    get_tool_choice_config, set_tool_choice_config, reset_tool_choice_config
+};
+
+// Tools commands
 pub use self::tools::{
-    get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
-    is_tool_enabled, reset_tool_configuration, set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
-    test_tool_config, test_tool_config_command,
+    get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary,
+    get_tool_configurations, is_tool_enabled, reset_tool_configuration,
+    set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization
+};
+
+// UI token selection commands
+pub use self::ui_token_selection::{
+    get_ui_token_selection_config, update_ui_token_selection_config
 };
 
 // Shared helper function for sending notifications from dev tools

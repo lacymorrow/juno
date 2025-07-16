@@ -81,7 +81,6 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 
                     // Enable mouse events for floating bar only when it needs them
                     // This fixes the issue where floating bar interferes with main window clicks
-                    #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
                     info!("macOS Setup: Floating bar mouse events configured.");
 
@@ -133,16 +132,13 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
 
                     // PRODUCTION READY: Start with click-through enabled (default state)
                     // Panel should be non-interactive by default, only interactive when hovered/expanded
-                    #[allow(unexpected_cfgs)]
                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
 
                     // PRODUCTION READY: Proper window role for accessibility
-                    #[allow(unexpected_cfgs)]
                     let accessibility_role_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "AXFloatingWindow".as_ptr()];
                     let _: () = msg_send![ns_window, setAccessibilityRole: accessibility_role_string];
 
                     // PRODUCTION READY: Set proper window description for accessibility
-                    #[allow(unexpected_cfgs)]
                     let accessibility_label_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "Juno AI Assistant Panel".as_ptr()];
                     let _: () = msg_send![ns_window, setAccessibilityLabel: accessibility_label_string];
 
@@ -173,11 +169,9 @@ fn setup_main_window(app_handle: &AppHandle) {
                 let ns_window = ns_window_ptr as cocoa_id;
                 unsafe {
                     // Ensure main window can receive mouse events
-                    #[allow(unexpected_cfgs)]
                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
 
                     // Make sure the window accepts first responder status
-                    #[allow(unexpected_cfgs)]
                     let _: BOOL = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
 
                     info!("macOS Setup: Main window mouse events enabled.");
@@ -377,19 +371,16 @@ pub mod mouse_tracking {
             // Declare class only if it doesn't exist yet
             if delegate_class.is_none() {
                 info!("Declaring {} class...", delegate_class_name);
-                #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
                 let mut decl = ClassDecl::new(&delegate_class_name, superclass).unwrap();
 
                 // Add mouseEntered: method
-                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
                 decl.add_method(
                     sel!(mouseEntered:),
                     mouse_entered as extern "C" fn(&Object, Sel, cocoa_id),
                 );
 
                 // Add mouseExited: method
-                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
                 decl.add_method(
                     sel!(mouseExited:),
                     mouse_exited as extern "C" fn(&Object, Sel, cocoa_id),
@@ -399,7 +390,6 @@ pub mod mouse_tracking {
                 info!("{} class registered.", delegate_class_name);
             }
 
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
             info!("{} instance created: {:?}", delegate_class_name, delegate);
 
@@ -419,13 +409,10 @@ pub mod mouse_tracking {
             // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
             let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
 
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let bounds: NSRect = msg_send![view, bounds];
             info!("Got view bounds for tracking area.");
 
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send and class! macros
             let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let tracking_area_ptr: cocoa_id = msg_send![
                 tracking_area,
                 initWithRect: bounds
@@ -435,9 +422,7 @@ pub mod mouse_tracking {
             ];
             info!("NSTrackingArea created: {:?}", tracking_area_ptr);
 
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![tracking_area_ptr, release]; // Release after adding (view retains it)
             // Note: Do not release the delegate here, it's leaked via Box::leak
 
