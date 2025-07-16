@@ -5,6 +5,7 @@
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::core::ToolDefinition;
+use crate::agent::events::event_types::JunoAgentEvent;
 use crate::state::AppState;
 use crate::constants::agent::tool_names;
 use serde_json::{json, Value};
@@ -482,7 +483,13 @@ pub async fn register_timer_tools(
                         if let Some(app_state) = app_state_weak.upgrade() {
                             // Emit through event bus if available
                             if let Ok(event_bus) = app_state.get_event_bus().await {
-                                if let Err(e) = event_bus.emit_to_frontend(crate::constants::events::timer::EXPIRED, &timer_task_clone).await {
+                                let timer_event = JunoAgentEvent::SystemMessage {
+                                level: "info".to_string(),
+                                message: format!("Timer expired: {}", timer_task_clone.description),
+                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                category: Some("timer".to_string()),
+                            };
+                            if let Err(e) = event_bus.emit(timer_event).await {
                                     error!("Failed to emit timer-expired event: {}", e);
                                 }
                             }
@@ -609,7 +616,13 @@ pub async fn register_timer_tools(
                             if timer.trigger_time <= current_time {
                                 if timer_manager.cancel_timer(&timer.id).await {
                                     // Emit timer expired event
-                                    if let Err(e) = event_bus.emit_to_frontend(crate::constants::events::timer::EXPIRED, &timer).await {
+                                    let timer_event = JunoAgentEvent::SystemMessage {
+                                        level: "info".to_string(),
+                                        message: format!("Timer expired: {}", timer.description),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        category: Some("timer".to_string()),
+                                    };
+                                    if let Err(e) = event_bus.emit(timer_event).await {
                                         error!("Failed to emit timer-expired event: {}", e);
                                     } else {
                                         info!("Timer expired: {} - {}", timer.id, timer.description);
