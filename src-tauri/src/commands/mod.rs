@@ -74,7 +74,7 @@ pub use self::safari_tools::{
 pub use self::autostart::{get_autostart_enabled, set_autostart_enabled};
 
 // Computer commands
-pub use self::computer::{computer_action, compute_click_coordinate};
+pub use self::computer::computer;
 
 // Core commands
 // Note: list_apps and check_server_status removed as they are unused
@@ -114,11 +114,11 @@ pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
 };
-
 // Enhanced visual reasoning commands
 pub use self::enhanced_visual_reasoning_commands::{
     analyze_screenshot_for_elements, get_visual_reasoning_config,
-    update_visual_reasoning_config
+    update_visual_reasoning_config, VisualReasoningState, VisualAnalysisRequest, 
+    SceneTypeInfo, TestResult, initialize_visual_reasoning_state
 };
 
 // Error recovery commands
@@ -206,7 +206,11 @@ pub use self::tool_choice::{
 pub use self::tools::{
     get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary,
     get_tool_configurations, is_tool_enabled, reset_tool_configuration,
-    set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization
+    set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
+    test_tool_config, test_tool_config_command,
+    // Tool approval commands
+    approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_pending_tool_approvals,
+    get_tool_approval_required, set_tool_approval_required,
 };
 
 // UI token selection commands

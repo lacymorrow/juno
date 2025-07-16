@@ -37,4 +37,13 @@ pub mod urls {
     pub const INPUT_MONITORING_PANEL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
 }
 
+// Top-level exports for compatibility
+pub const REQUIRED_PERMISSIONS: &[&str] = &[
+    types::ACCESSIBILITY,
+    types::SCREEN_RECORDING,
+    types::MICROPHONE,
+];
+
+pub use descriptions as PERMISSION_DESCRIPTIONS;
+
 

@@ -15,6 +15,11 @@ pub const VERY_LONG_DELAY_MS: u64 = 1000;
 pub const EXTENDED_DELAY_MS: u64 = 2000;
 pub const MAX_DELAY_MS: u64 = 3000;
 
+// Common timeout aliases
+pub const DEFAULT_TIMEOUT_MS: u64 = 5000;
+pub const QUICK_TIMEOUT_MS: u64 = 2000;
+pub const SLOW_TIMEOUT_MS: u64 = 10000;
+
 // Frontend UI timeouts (moved from frontend constants.ts)
 pub const SOUND_DEBOUNCE_MS: u64 = 300;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30000;

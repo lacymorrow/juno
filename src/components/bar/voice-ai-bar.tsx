@@ -7,8 +7,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
-  MicOff,
-  Zap,
   Volume2,
   AlertCircle,
   CheckCircle,
@@ -22,7 +20,6 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Sparkles,
   Brain,
   Loader2,
   Check,
@@ -30,8 +27,7 @@ import {
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
 import AudioVisualizer from "./audio-visualizer";
-import { cn } from "@/lib/utils";
-import { VoiceStatusIndicator } from "../VoiceStatusIndicator";
+
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type {
   VoiceAIBarProps,
@@ -189,10 +185,7 @@ export function VoiceAIBar({
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
-            console.log(
-              "📨 VoiceAIBar: Received state update:",
-              event.payload
-            );
+            console.log("📨 VoiceAIBar: Received state update:", event.payload);
 
             // Validate the received data structure
             const payload = event.payload;
@@ -393,7 +386,10 @@ const styles = \`
       case UI.BAR_STATES_SPEAKING:
         return "Here's what I found for you based on your request and current context...";
       case UI.BAR_STATES_ERROR:
-        return barState.currentError || "Sorry, I couldn't understand that request. Please try speaking more clearly.";
+        return (
+          barState.currentError ||
+          "Sorry, I couldn't understand that request. Please try speaking more clearly."
+        );
       case UI.BAR_STATES_SUCCESS:
         return "Task completed successfully! Is there anything else I can help you with today?";
       case UI.BAR_STATES_INPUT:
@@ -524,14 +520,6 @@ const styles = \`
   }, [barState.barState]);
 
   // === UI STATE CALCULATIONS ===
-
-  const currentUiState = barState.barState;
-  const isCompact = [
-    UI.BAR_STATES_DEFAULT,
-    UI.BAR_STATES_DICTATION_READY,
-  ].includes(currentUiState as any);
-  const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-  const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
   const toggleListening = useCallback(async () => {
     const interaction = createInteraction("toggle_listening");
@@ -674,7 +662,9 @@ const styles = \`
   const getBarClass = () => {
     const currentUiState = barState.barState;
     let baseClass =
-      currentUiState === UI.BAR_STATES_DEFAULT ? "glass-bar-idle" : "glass-bar-active";
+      currentUiState === UI.BAR_STATES_DEFAULT
+        ? "glass-bar-idle"
+        : "glass-bar-active";
 
     if (currentUiState === UI.BAR_STATES_INPUT) {
       baseClass = "glass-bar-input";
@@ -828,29 +818,30 @@ const styles = \`
         )}
 
         {/* Hidden content for dimension calculation */}
-        {barState.barState === UI.BAR_STATES_AGENT_RESPONDING && isCalculatingDimensions && (
-          <div
-            ref={contentRef}
-            className="response-content-calculator"
-            style={{
-              position: "absolute",
-              visibility: "hidden",
-              pointerEvents: "none",
-              width: "350px",
-            }}
-          >
-            <div className="response-header">
-              <h3>AI Response</h3>
+        {barState.barState === UI.BAR_STATES_AGENT_RESPONDING &&
+          isCalculatingDimensions && (
+            <div
+              ref={contentRef}
+              className="response-content-calculator"
+              style={{
+                position: "absolute",
+                visibility: "hidden",
+                pointerEvents: "none",
+                width: "350px",
+              }}
+            >
+              <div className="response-header">
+                <h3>AI Response</h3>
+              </div>
+              <div className="response-content">
+                {responseContent.map((item, index) => (
+                  <div key={index} className="response-item">
+                    {renderContent(item)}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="response-content">
-              {responseContent.map((item, index) => (
-                <div key={index} className="response-item">
-                  {renderContent(item)}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
 
         {/* Response Content - Only visible in response state and after height transition */}
         {barState.barState === UI.BAR_STATES_AGENT_RESPONDING &&
@@ -917,50 +908,59 @@ const styles = \`
 
         {/* Audio Visualizer - Replaces the old waveform animation */}
         {/* Audio Visualizer + Status Text - Show both together */}
-        {![UI.BAR_STATES_INPUT, UI.BAR_STATES_AGENT_RESPONDING, UI.BAR_STATES_DEFAULT, UI.BAR_STATES_ERROR, UI.BAR_STATES_SUCCESS].includes(barState.barState as any) && (
-            <div className="visualizer-status-container">
-              {/* Audio Visualizer */}
-              <div className="audio-visualizer-wrapper">
-                <div
-                  className="audio-visualizer-content visible"
-                >
-                  <AudioVisualizer
-                    appState={barState.barState === UI.BAR_STATES_LISTENING ? "listening" : "processing"}
-                    width={60}
-                    height={20}
-                    enableMicrophone={false}
-                    intensity={0.8}
-                    showTransitionProgress={false}
-                    animationStyle="organic"
-                    className="audio-visualizer"
-                  />
-                </div>
-              </div>
-
-              {/* Status Text */}
-              <div className="status-text-wrapper">
-                <div className="status-content">
-                  <Marquee
-                    key={marqueeKey}
-                    speed={30}
-                    gradient={true}
-                    gradientColor="rgba(255, 255, 255, 0)"
-                    gradientWidth={8}
-                    pauseOnHover={true}
-                    delay={1.5}
-                    play={barState.barState !== UI.BAR_STATES_DEFAULT}
-                  >
-                    <span className="marquee-text text-white/80 text-xs whitespace-nowrap pr-12">
-                      {currentMessage || "Processing..."}
-                    </span>
-                  </Marquee>
-                </div>
+        {![
+          UI.BAR_STATES_INPUT,
+          UI.BAR_STATES_AGENT_RESPONDING,
+          UI.BAR_STATES_DEFAULT,
+          UI.BAR_STATES_ERROR,
+          UI.BAR_STATES_SUCCESS,
+        ].includes(barState.barState as any) && (
+          <div className="visualizer-status-container">
+            {/* Audio Visualizer */}
+            <div className="audio-visualizer-wrapper">
+              <div className="audio-visualizer-content visible">
+                <AudioVisualizer
+                  appState={
+                    barState.barState === UI.BAR_STATES_LISTENING
+                      ? "listening"
+                      : "processing"
+                  }
+                  width={60}
+                  height={20}
+                  enableMicrophone={false}
+                  intensity={0.8}
+                  showTransitionProgress={false}
+                  animationStyle="organic"
+                  className="audio-visualizer"
+                />
               </div>
             </div>
-          )}
+
+            {/* Status Text */}
+            <div className="status-text-wrapper">
+              <div className="status-content">
+                <Marquee
+                  key={marqueeKey}
+                  speed={30}
+                  gradient={true}
+                  gradientColor="rgba(255, 255, 255, 0)"
+                  gradientWidth={8}
+                  pauseOnHover={true}
+                  delay={1.5}
+                  play={barState.barState !== UI.BAR_STATES_DEFAULT}
+                >
+                  <span className="marquee-text text-white/80 text-xs whitespace-nowrap pr-12">
+                    {currentMessage || "Processing..."}
+                  </span>
+                </Marquee>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Error and Success States - Show icon with text */}
-        {(barState.barState === UI.BAR_STATES_ERROR || barState.barState === UI.BAR_STATES_SUCCESS) && (
+        {(barState.barState === UI.BAR_STATES_ERROR ||
+          barState.barState === UI.BAR_STATES_SUCCESS) && (
           <div className="state-message-container">
             <div className="state-icon-wrapper">{getStateFeedbackIcon()}</div>
             <div className="state-text-wrapper">
@@ -1001,10 +1001,13 @@ const styles = \`
             className="idle-container"
             onMouseEnter={() => setIsIdleHovered(true)}
             onMouseLeave={() => setIsIdleHovered(false)}
-            onClick={[
-              UI.BAR_STATES_DEFAULT,
-              UI.BAR_STATES_DICTATION_READY,
-            ].includes(barState.barState as any) ? handleClick : undefined}
+            onClick={
+              [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+                barState.barState as any
+              )
+                ? handleClick
+                : undefined
+            }
           >
             <div
               className={`idle-waveform ${
@@ -1045,21 +1048,25 @@ const styles = \`
           </div>
         )}
 
-        {![UI.BAR_STATES_DEFAULT, UI.BAR_STATES_INPUT, UI.BAR_STATES_AGENT_RESPONDING].includes(barState.barState as any) && (
-            <button
-              onClick={toggleListening}
-              className="glass-mic-btn"
-              disabled={[UI.BAR_STATES_LOADING, UI.BAR_STATES_SUBMITTING].includes(barState.barState as any)}
-            >
-              <div className="icon-container">{getStateIcon()}</div>
-            </button>
-          )}
+        {![
+          UI.BAR_STATES_DEFAULT,
+          UI.BAR_STATES_INPUT,
+          UI.BAR_STATES_AGENT_RESPONDING,
+        ].includes(barState.barState as any) && (
+          <button
+            onClick={toggleListening}
+            className="glass-mic-btn"
+            disabled={[
+              UI.BAR_STATES_LOADING,
+              UI.BAR_STATES_SUBMITTING,
+            ].includes(barState.barState as any)}
+          >
+            <div className="icon-container">{getStateIcon()}</div>
+          </button>
+        )}
 
         {barState.barState === UI.BAR_STATES_INPUT && (
-          <button
-            onClick={toggleInputMode}
-            className="glass-mic-btn close-btn"
-          >
+          <button onClick={toggleInputMode} className="glass-mic-btn close-btn">
             <div className="icon-container">{getStateIcon()}</div>
           </button>
         )}

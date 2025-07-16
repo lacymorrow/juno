@@ -69,7 +69,7 @@ pub enum ResponseStatus {
 pub struct ResponseData {
     pub text: Option<String>,
     pub audio_base64: Option<String>,
-    pub screenshot_base64: Option<String>,
+    pub screenshot_data: Option<serde_json::Value>,
     pub agent_state: Option<String>,
     pub progress: Option<f32>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,

@@ -313,6 +313,7 @@ impl ToolConfigManager {
             tools,
             category_enabled,
             mcp_servers,
+            smooth_mouse_movement: false, // Default to false for new installations
         })
     }
 
@@ -349,7 +350,8 @@ impl ToolConfigManager {
     /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
         if let Some(tool_config) = self.tools.get(tool_name) {
-            if tool_config.required {
+
+			if tool_config.required {
                 tracing::debug!("Tool '{}' is required and always enabled", tool_name);
                 return true; // Required tools are always enabled
             }
@@ -550,11 +552,35 @@ impl ToolConfigManager {
             (tool_names::BROWSER_GET_CONTENT, "Extract page content"),
         ];
 
+        // Safari tools (specialized Safari automation - disabled by default)
+        let safari_tools = vec![
+            (tool_names::SAFARI_EXTRACT_DOM, "Extract DOM from current Safari tab using JavaScript injection"),
+            (tool_names::SAFARI_CLICK_ELEMENT, "Click DOM elements in Safari by ID using JavaScript injection"),
+            (tool_names::SAFARI_TYPE_TEXT, "Type text in Safari forms using JavaScript injection"),
+            (tool_names::SAFARI_GET_URL, "Get current Safari tab URL"),
+            (tool_names::SAFARI_NAVIGATE, "Navigate Safari to specified URL"),
+            (tool_names::SAFARI_LIST_CLICKABLE_ELEMENTS, "List clickable elements in Safari"),
+            (tool_names::SAFARI_EXECUTE_JAVASCRIPT, "Execute custom JavaScript in Safari"),
+            (tool_names::SAFARI_CLEAR_CACHE, "Clear Safari browser cache"),
+        ];
+
+        // Add standard browser tools (enabled by default)
         for (name, description) in browser_tools {
             let config = ToolConfig::new(
                 name.to_string(),
                 ToolCategory::Browser,
                 true,
+            ).with_description(description.to_string());
+
+            tools.insert(name.to_string(), config);
+        }
+
+        // Add Safari tools (disabled by default since they're specialized)
+        for (name, description) in safari_tools {
+            let config = ToolConfig::new(
+                name.to_string(),
+                ToolCategory::Browser,
+                false, // Disabled by default - users can enable if needed
             ).with_description(description.to_string());
 
             tools.insert(name.to_string(), config);

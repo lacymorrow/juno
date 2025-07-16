@@ -198,6 +198,9 @@ pub mod response_fields {
 pub const AGENT_LOG_FILE: &str = "agent_activity.log";
 pub const CONVERSATION_CACHE_FILE: &str = "conversation_cache.json";
 pub const WORKSPACE_CONFIG_FILE: &str = ".workspace_config.json";
+pub const CONFIG_FILE_NAME: &str = "config.json";
+pub const SETTINGS_FILE_NAME: &str = "settings.json";
+pub const PROMPTS_FILE_NAME: &str = "prompts.json";
 
 // --- Tool Parameter Constants ---
-pub const APP_NAME: &str = "app_name";
+pub const APP_NAME_PARAM: &str = "app_name";

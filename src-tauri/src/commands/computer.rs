@@ -6,6 +6,7 @@ use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
+use crate::commands::core::ScreenshotResult as CoreScreenshotResult;
 
 /// Computer action input structure matching the official Anthropic Computer Use API
 #[derive(Debug, Deserialize)]
@@ -28,7 +29,8 @@ pub struct ComputerResult {
     pub success: bool,
     pub action: String,
     pub message: Option<String>,
-    pub base64_image: Option<String>,
+    #[serde(flatten)]
+    pub screenshot: Option<CoreScreenshotResult>,
     pub error: Option<String>,
     pub coordinate: Option<Vec<f64>>,
 }
@@ -77,7 +79,7 @@ pub async fn computer(
                 success: false,
                 action: input.action.clone(),
                 message: None,
-                base64_image: None,
+                screenshot: None,
                 error: Some(e),
                 coordinate: None,
             })
@@ -88,7 +90,7 @@ pub async fn computer(
 // --- Action Handlers ---
 
 async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, String> {
-    let screenshot_base64 = crate::commands::core::capture_screenshot_command(app_handle.clone())
+    let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone())
         .await
         .map_err(|e| format!("Screenshot failed: {}", e))?;
 
@@ -96,7 +98,7 @@ async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, Str
         success: true,
         action: "screenshot".to_string(),
         message: Some("Screenshot captured successfully".to_string()),
-        base64_image: Some(screenshot_base64),
+        screenshot: Some(screenshot_result),
         error: None,
         coordinate: None,
     })
@@ -125,7 +127,7 @@ async fn handle_click(
         success: true,
         action: "click".to_string(),
         message: Some(format!("Clicked at ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -154,7 +156,7 @@ async fn handle_right_click(
         success: true,
         action: "right_click".to_string(),
         message: Some(format!("Right clicked at ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -183,7 +185,7 @@ async fn handle_middle_click(
         success: true,
         action: "middle_click".to_string(),
         message: Some(format!("Middle clicked at ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -212,7 +214,7 @@ async fn handle_double_click(
         success: true,
         action: "double_click".to_string(),
         message: Some(format!("Double clicked at ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -241,7 +243,7 @@ async fn handle_triple_click(
         success: true,
         action: "triple_click".to_string(),
         message: Some(format!("Triple clicked at ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -287,7 +289,7 @@ async fn handle_drag(
         success: true,
         action: "left_click_drag".to_string(),
         message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -316,7 +318,7 @@ async fn handle_move(
         success: true,
         action: "move".to_string(),
         message: Some(format!("Moved mouse to ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -358,7 +360,7 @@ async fn handle_scroll(
         success: true,
         action: "scroll".to_string(),
         message: Some(format!("Scrolled {} {} times at ({}, {})", direction, scroll_count, x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -380,7 +382,7 @@ async fn handle_type(
         success: true,
         action: "type".to_string(),
         message: Some(format!("Typed text: {}", text)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -402,7 +404,7 @@ async fn handle_key(
         success: true,
         action: "key".to_string(),
         message: Some(format!("Pressed key: {}", key)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -426,7 +428,7 @@ async fn handle_hold_key(
         success: true,
         action: "hold_key".to_string(),
         message: Some(format!("Held key {} for {}ms", key, duration)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -441,7 +443,7 @@ async fn handle_wait(input: &ComputerInput) -> Result<ComputerResult, String> {
         success: true,
         action: "wait".to_string(),
         message: Some(format!("Waited for {}ms", duration)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: None,
     })
@@ -459,7 +461,7 @@ async fn handle_cursor_position(
         success: true,
         action: "cursor_position".to_string(),
         message: Some(format!("Cursor position: ({}, {})", x, y)),
-        base64_image: None,
+        screenshot: None,
         error: None,
         coordinate: Some(vec![x, y]),
     })

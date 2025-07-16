@@ -335,12 +335,18 @@ export const UI = {
   AGENT_STATUS_CANCELLED: 'cancelled',
   AGENT_STATUS_OFFLINE: 'offline',
   AGENT_STATUS_PROCESSING: 'processing',
+  AGENT_STATUS_SPEAKING: 'speaking',
+  AGENT_STATUS_INPUT: 'input',
+  AGENT_STATUS_SUCCESS: 'success',
+  AGENT_STATUS_RESPONSE: 'response',
   INTERACTION_TYPES_CLICK: 'click',
   INTERACTION_TYPES_FOCUS: 'focus',
   INTERACTION_TYPES_BLUR: 'blur',
   INTERACTION_TYPES_HOVER: 'hover',
   INTERACTION_TYPES_INPUT: 'input',
   INTERACTION_TYPES_SUBMIT: 'submit',
+  INTERACTION_TYPES_ESCAPE: 'escape',
+  INTERACTION_TYPES_ENTER: 'enter',
   TEXT_DISPLAY_MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH: 30,
   TEXT_DISPLAY_MAX_UI_PREVIEW_TEXT_LENGTH: 50,
   MOBILE_BREAKPOINT: 768,
@@ -989,7 +995,7 @@ export const FILE_EXTENSIONS = {
   AGENT_LOG_FILE: 'agent_activity.log',
   CONVERSATION_CACHE_FILE: 'conversation_cache.json',
   WORKSPACE_CONFIG_FILE: '.workspace_config.json',
-  APP_NAME: 'app_name',
+  APP_NAME_PARAM: 'app_name',
 } as const;
 
 export const PERMISSION_TYPES = {

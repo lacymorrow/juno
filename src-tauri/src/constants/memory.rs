@@ -10,6 +10,12 @@ pub mod limits {
 
     /// Default maximum estimated tokens before pruning
     pub const DEFAULT_MAX_TOKENS: usize = 100000;
+    
+    /// Maximum memory entries (re-export for compatibility)
+    pub const MAX_MEMORY_ENTRIES: usize = 1000;
+    
+    /// Maximum context tokens (re-export for compatibility)
+    pub const MAX_CONTEXT_TOKENS: usize = 100000;
 
     /// Minimum number of messages to keep during pruning
     pub const DEFAULT_MIN_MESSAGES_TO_KEEP: usize = 3;

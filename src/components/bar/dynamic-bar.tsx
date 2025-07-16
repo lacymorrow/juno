@@ -1,26 +1,19 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useCallback } from "react"
-import { invoke } from "@tauri-apps/api/core"
-import { listen } from "@tauri-apps/api/event"
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window"
-import {
-  Brain,
-  Mic,
-  Volume2,
-  AlertCircle,
-  Check,
-  Loader2,
-} from "lucide-react"
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { Brain, Mic, Volume2, AlertCircle, Check, Loader2 } from "lucide-react";
 
 import {
   DynamicIsland,
   DynamicIslandProvider,
   useDynamicIslandSize,
   type SizePresets,
-} from "@/components/ui/dynamic-island"
-import { EVENTS, UI } from "@/lib/constants.generated"
-import tauriConfig from "../../../src-tauri/tauri.conf.json"
+} from "@/components/ui/dynamic-island";
+import { EVENTS, UI } from "@/lib/constants.generated";
+import tauriConfig from "../../../src-tauri/tauri.conf.json";
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -162,7 +155,7 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
       <div className="flex items-center justify-center h-full w-full">
         <Loader2 className="animate-spin h-6 w-6 text-blue-400" />
       </div>
-    )
+    );
   }
 
   if (widget.error) {
@@ -173,26 +166,26 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
           <div className="text-gray-400 text-xs">{widget.error}</div>
         </div>
       </div>
-    )
+    );
   }
 
   const getWidgetIcon = () => {
     switch (widget.content.icon) {
       case "mic":
-        return <Mic className="w-4 h-4 text-blue-400" />
+        return <Mic className="w-4 h-4 text-blue-400" />;
       case "volume":
-        return <Volume2 className="w-4 h-4 text-green-400" />
+        return <Volume2 className="w-4 h-4 text-green-400" />;
       case "loader":
-        return <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+        return <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />;
       case "alert":
-        return <AlertCircle className="w-4 h-4 text-red-400" />
+        return <AlertCircle className="w-4 h-4 text-red-400" />;
       case "check":
-        return <Check className="w-4 h-4 text-green-400" />
+        return <Check className="w-4 h-4 text-green-400" />;
       case "brain":
       default:
-        return <Brain className="w-4 h-4 text-white" />
+        return <Brain className="w-4 h-4 text-white" />;
     }
-  }
+  };
 
   return (
     <div className="flex items-center justify-center h-full w-full px-4 py-2">
@@ -203,11 +196,11 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
         </span>
       </div>
     </div>
-  )
-}
+  );
+};
 
 const AIFloatingChatbot = () => {
-  const { state: blobState, setSize } = useDynamicIslandSize()
+  const { setSize } = useDynamicIslandSize();
 
   // === STATE MANAGEMENT ===
 
@@ -230,7 +223,9 @@ const AIFloatingChatbot = () => {
     agentState: null,
   });
 
-  const [currentWidgetData, setCurrentWidgetData] = useState<WidgetData>(MOCK_WIDGETS.idle)
+  const [currentWidgetData, setCurrentWidgetData] = useState<WidgetData>(
+    MOCK_WIDGETS.idle
+  );
 
   // === WINDOW CONFIGURATION ===
 
@@ -259,10 +254,7 @@ const AIFloatingChatbot = () => {
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
-            console.log(
-              "📨 DynamicBar: Received state update:",
-              event.payload
-            );
+            console.log("📨 DynamicBar: Received state update:", event.payload);
 
             // Validate the received data structure
             const payload = event.payload;
@@ -328,40 +320,96 @@ const AIFloatingChatbot = () => {
     setSize(newWidget.size);
   }, [barState.barState, setSize]);
 
-  // === WINDOW RESIZING LOGIC ===
+  // === DYNAMIC WINDOW RESIZING LOGIC ===
 
   /**
-   * Responsive window resizing based on UI state
+   * Smart window sizing based on state and content
+   */
+  const getWindowDimensions = (uiState: UIState, widget: WidgetData) => {
+    // Base dimensions from config
+    const base = { width: defaultWidth, height: defaultHeight };
+
+    // State-specific sizing with multiple tiers
+    switch (uiState) {
+      case UI.BAR_STATES_DEFAULT:
+      case UI.BAR_STATES_DICTATION_READY:
+        return { width: 80, height: 30 }; // Extra compact for default state
+
+      case UI.BAR_STATES_LISTENING:
+      case UI.BAR_STATES_TRANSCRIBING:
+        return { width: 160, height: 40 }; // Medium for voice states
+
+      case UI.BAR_STATES_SPEAKING:
+        // Size based on content length
+        const textLength = barState.spokenText?.length || 0;
+        const dynamicWidth = Math.min(320, Math.max(180, 180 + textLength * 2));
+        return { width: dynamicWidth, height: 45 };
+
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
+        return { width: 200, height: 50 }; // Medium for processing states
+
+      case UI.BAR_STATES_INPUT:
+      case UI.BAR_STATES_EXPANDING:
+        // Large for input state
+        return { width: 400, height: 60 };
+
+      case UI.BAR_STATES_ERROR:
+        // Size based on error message length
+        const errorLength = barState.currentError?.length || 0;
+        const errorWidth = Math.min(
+          350,
+          Math.max(200, 200 + errorLength * 1.5)
+        );
+        return { width: errorWidth, height: 55 };
+
+      case UI.BAR_STATES_SUCCESS:
+        return { width: 180, height: 45 }; // Compact for success
+
+      case UI.BAR_STATES_AGENT_RESPONDING:
+        // Dynamic size based on agent state
+        return { width: 280, height: 65 }; // Larger for agent work
+
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        // Large persistent state
+        return { width: 250, height: 80 };
+
+      default:
+        return base;
+    }
+  };
+
+  /**
+   * Enhanced window resizing with smooth transitions and content awareness
    */
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = getCurrentWindow();
-        const currentUiState = barState.barState;
-
-        // Define compact states that use small window size (match FloatingBar behavior)
-        const isCompact = [
-          UI.BAR_STATES_DEFAULT,
-          UI.BAR_STATES_LISTENING,
-          UI.BAR_STATES_DICTATION_READY,
-          UI.BAR_STATES_SPEAKING,
-          UI.BAR_STATES_TRANSCRIBING,
-        ].includes(currentUiState as any);
-        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
-
-        console.log(
-          `🔧 DynamicBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+        const dimensions = getWindowDimensions(
+          barState.barState,
+          currentWidgetData
         );
 
-        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+        console.log(
+          `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${barState.barState}`
+        );
+
+        await appWindow.setSize(
+          new LogicalSize(dimensions.width, dimensions.height)
+        );
       } catch (error) {
         console.error("❌ DynamicBar: Failed to resize window:", error);
       }
     };
 
     resizeWindow();
-  }, [barState.barState]);
+  }, [
+    barState.barState,
+    currentWidgetData,
+    barState.spokenText,
+    barState.currentError,
+  ]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
@@ -416,7 +464,7 @@ const AIFloatingChatbot = () => {
         const interaction = createInteraction(UI.INTERACTION_TYPES_ESCAPE);
         sendInteraction(interaction);
       }
-      
+
       // Handle Enter key for quick actions
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         const interaction = createInteraction(UI.INTERACTION_TYPES_ENTER);
@@ -435,19 +483,21 @@ const AIFloatingChatbot = () => {
   }, [barState.barState]);
 
   const renderCurrentWidget = () => {
-    return <WidgetRenderer widget={currentWidgetData} />
-  }
+    return <WidgetRenderer widget={currentWidgetData} />;
+  };
 
   return (
     <div className="h-full w-full relative">
       <div className="flex items-center justify-center h-full">
         <div onClick={handleIslandClick} className="cursor-pointer">
-          <DynamicIsland id="ai-chatbot-panel">{renderCurrentWidget()}</DynamicIsland>
+          <DynamicIsland id="ai-chatbot-panel">
+            {renderCurrentWidget()}
+          </DynamicIsland>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 export function DynamicIslandDemo() {
   return (
@@ -456,6 +506,5 @@ export function DynamicIslandDemo() {
         <AIFloatingChatbot />
       </div>
     </DynamicIslandProvider>
-  )
+  );
 }
-

@@ -3,6 +3,10 @@
 //! Constants for mouse operations, UI interactions, and visual feedback
 //! to eliminate magic numbers throughout the mouse and UI system.
 
+// Top-level exports for compatibility
+pub const DEFAULT_CLICK_DELAY_MS: u64 = 100;
+pub const DEFAULT_SCROLL_AMOUNT: i32 = 5;
+
 /// Mouse movement and animation constants
 pub mod movement {
     /// Frames per second for smooth mouse movement

@@ -357,7 +357,7 @@ mod timer_tools_impl {
                 manager
             });
 
-        timer_manager.add_timer(timer_task.clone()).await;
+        let _ = timer_manager.add_timer(timer_task.clone()).await;
 
         // Start the timer task
         let app_handle_clone = app_handle.clone();
@@ -509,7 +509,7 @@ mod timer_tools_impl {
                 manager
             });
 
-        timer_manager.add_timer(timer_task.clone()).await;
+        let _ = timer_manager.add_timer(timer_task.clone()).await;
 
         // Take initial screenshot for comparison
         let initial_screenshot = macos_utils::capture_and_encode_screenshot()

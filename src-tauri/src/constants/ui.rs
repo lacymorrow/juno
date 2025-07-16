@@ -2,6 +2,12 @@
 //!
 //! User interface related constants including window labels and breakpoints.
 
+// Window dimensions
+pub const FLOATING_BAR_HEIGHT: f64 = 80.0;
+pub const FLOATING_BAR_WIDTH: f64 = 600.0;
+pub const SETTINGS_WINDOW_WIDTH: f64 = 1200.0;
+pub const SETTINGS_WINDOW_HEIGHT: f64 = 800.0;
+
 pub mod window_labels {
     pub const MAIN: &str = "main";
     pub const FLOATING_BAR: &str = "floating-bar";
@@ -54,6 +60,10 @@ pub mod agent_status {
     pub const CANCELLED: &str = "cancelled";
     pub const OFFLINE: &str = "offline";
     pub const PROCESSING: &str = "processing";
+    pub const SPEAKING: &str = "speaking";
+    pub const INPUT: &str = "input";
+    pub const SUCCESS: &str = "success";
+    pub const RESPONSE: &str = "response";
 }
 
 /// UI interaction types
@@ -65,6 +75,8 @@ pub mod interaction_types {
     pub const HOVER: &str = "hover";
     pub const INPUT: &str = "input";
     pub const SUBMIT: &str = "submit";
+    pub const ESCAPE: &str = "escape";
+    pub const ENTER: &str = "enter";
 }
 
 // UI layout constants (moved from frontend constants.ts)

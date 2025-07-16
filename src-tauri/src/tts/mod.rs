@@ -24,6 +24,7 @@ struct AudioPlaybackHandle {
     error_notify: Arc<tokio::sync::Notify>,
     playback_error: Arc<Mutex<Option<String>>>,
     start_time: std::time::Instant,
+    #[allow(dead_code)] // May be used for future playback status checking
     playback_started: Arc<AtomicBool>,
     // Keep the spawn handle alive to prevent task cancellation
     _task_handle: tokio::task::JoinHandle<()>,
@@ -315,6 +316,7 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
 }
 
 /// Legacy wrapper for compatibility - now properly waits for completion with error propagation
+#[allow(dead_code)] // Direct audio playback function - kept for future use
 async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
     let handle = play_base64_audio_with_tracking(base64_audio).await?;
     handle.wait_for_completion().await?;
