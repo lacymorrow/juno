@@ -280,7 +280,7 @@ pub async fn get_cloud_device_info(
         "device_id": config.device_id,
         "device_name": config.device_name,
         "platform": std::env::consts::OS,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_string()),
         "capabilities": [
             "text_processing",
             "voice_transcription",

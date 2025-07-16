@@ -52,7 +52,7 @@ impl DeviceAuth {
             device_name: self.config.device_name.clone(),
             api_key,
             platform: self.get_platform(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_string()),
             capabilities,
             user_id: None, // Will be set by cloud platform
         })
