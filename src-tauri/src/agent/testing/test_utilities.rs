@@ -136,11 +136,17 @@ pub struct TestUtilities;
 
 impl TestUtilities {
     /// Create a test memory manager with given configuration
-    /// Note: This is a simplified version for testing that skips event bus setup
-    pub async fn create_test_memory_manager(_config: EventMemoryConfig) -> Result<EventMemoryManager, String> {
-        // For now, return an error indicating that proper test setup is needed
-        // In a real test environment, you'd create a proper test EventBus
-        Err("Test memory manager creation requires proper test environment setup".to_string())
+    pub async fn create_test_memory_manager(config: EventMemoryConfig) -> Result<EventMemoryManager, String> {
+        // For testing purposes, we'll create a mock or minimal setup
+        // In a real test environment, you'd want to set up proper infrastructure
+        // For now, let's simulate the memory manager without the event bus dependency
+        use crate::agent::memory::EventMemoryManager;
+        
+        // Create a minimal memory manager for testing
+        // This bypasses the event bus requirement for unit testing
+        EventMemoryManager::new_for_testing(config)
+            .await
+            .map_err(|e| format!("Failed to create test memory manager: {}", e))
     }
 
     /// Generate test messages for various scenarios

@@ -225,9 +225,11 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check for transcription timeout (safety mechanism)
         if state.check_transcription_timeout() {
             warn!("[DictationMonitor] Transcription timeout detected - forcing stop");
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_STOP, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::STOP, serde_json::json!({
+                "stopType": events::dictation::stop_types::FORCE
+            })) {
                 error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-force-stop: {}",
+                    "[DictationMonitor] Failed to emit dictation-stop: {}",
                     e
                 );
             }
@@ -244,9 +246,11 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check if we need to force cleanup due to stuck state
         if state.should_force_cleanup() {
             warn!("[DictationMonitor] Force cleanup triggered");
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_CLEANUP, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::STOP, serde_json::json!({
+                "stopType": events::dictation::stop_types::ERROR
+            })) {
                 error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-force-cleanup: {}",
+                    "[DictationMonitor] Failed to emit dictation-stop: {}",
                     e
                 );
             }
@@ -310,7 +314,9 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
         info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
 
         // Emit event to stop dictation normally
-        if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
+        if let Err(e) = app_handle.emit(events::dictation::STOP, serde_json::json!({
+            "stopType": events::dictation::stop_types::NORMAL
+        })) {
             error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
         }
     } else if transcription_started {
@@ -320,9 +326,11 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
         );
 
         // Emit event to cancel transcription - no passthrough needed since we use Option+Space now
-        if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_CANCEL, ()) {
+        if let Err(e) = app_handle.emit(events::dictation::STOP, serde_json::json!({
+            "stopType": events::dictation::stop_types::NORMAL
+        })) {
             error!(
-                "[DictationMonitor] Failed to emit dictation-transcription-cancel: {}",
+                "[DictationMonitor] Failed to emit dictation-stop: {}",
                 e
             );
         }

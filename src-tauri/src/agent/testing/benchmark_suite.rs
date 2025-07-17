@@ -5,14 +5,17 @@
 //! Comprehensive benchmarking system for evaluating the performance
 //! optimizations implemented in the event-driven memory system.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
+use std::{
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex as TokioMutex;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities, MemoryMonitor};
+use crate::agent::traits::MemoryManager;
 use crate::agent::memory::performance::{PerformanceMetrics, PerformanceConfig, ObjectPool, SmartCache};
 use crate::agent::events::{OptimizedEventBus, OptimizedEventBusConfig, JunoAgentEvent};
 

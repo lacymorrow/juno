@@ -11,18 +11,24 @@ pub mod agent {
     pub const STATE_CHANGED: &str = "agent-state-changed";
     pub const TOOL_CALL: &str = "agent-tool-call";
     pub const THOUGHT_PROCESS: &str = "agent-thought-process";
-    pub const STOPPING: &str = "agent-stopping";
     pub const STATUS_UPDATE: &str = "agent-status-update";
+
+    // Consolidated stop event with type parameter
+    pub const STOP: &str = "agent-stop";
 
     // Agent state events
     pub const ACTIVE: &str = "agent-active";
     pub const ERROR: &str = "agent-error";
     pub const TRANSCRIPTION_START: &str = "agent-transcription-start";
     pub const TRANSCRIPTION_STOP: &str = "agent-transcription-stop";
-    pub const CANCEL: &str = "agent-cancel";
     pub const COMMITTED: &str = "agent-committed";
-    pub const FORCE_STOP: &str = "agent-force-stop";
-    pub const FORCE_CLEANUP: &str = "agent-force-cleanup";
+
+    // Stop types for the consolidated agent-stop event
+    pub mod stop_types {
+        pub const NORMAL: &str = "normal";
+        pub const FORCE: &str = "force";
+        pub const ERROR: &str = "error";
+    }
 }
 
 /// Streaming events
@@ -39,17 +45,22 @@ pub mod dictation {
     pub const PARTIAL_RESULT: &str = "app-dictation-partial-result";
     pub const ERROR: &str = "app-dictation-error";
     pub const STATE_CHANGED: &str = "dictation-state-changed";
+    pub const TRANSCRIPTION_CANCEL: &str = "dictation-transcription-cancel";
+
+    // Consolidated stop event with type parameter
+    pub const STOP: &str = "dictation-stop";
 
     // Dictation state events
     pub const ACTIVE: &str = "dictation-active";
-    pub const CANCELLED: &str = "dictation-cancelled";
     pub const TRANSCRIPTION_START: &str = "dictation-transcription-start";
-    pub const TRANSCRIPTION_STOP: &str = "dictation-transcription-stop";
     pub const COMMITTED: &str = "dictation-committed";
-    pub const STOP: &str = "dictation-stop";
-    pub const TRANSCRIPTION_CANCEL: &str = "dictation-cancel";
-    pub const TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
-    pub const TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
+
+    // Stop types for the consolidated dictation-stop event
+    pub mod stop_types {
+        pub const NORMAL: &str = "normal";
+        pub const FORCE: &str = "force";
+        pub const ERROR: &str = "error";
+    }
 }
 
 /// Voice transcription events (from plugin)

@@ -112,6 +112,16 @@ impl EventMemoryManager {
         })
     }
 
+    /// Create a minimal memory manager for testing purposes
+    /// This method creates a memory manager without requiring an event bus or app handle
+    pub async fn new_for_testing(config: EventMemoryConfig) -> Result<Self, AgentError> {
+        // Create a minimal mock event bus or use a test-specific implementation
+        // For now, we'll return an error indicating this needs proper implementation
+        Err(AgentError::MemoryError(
+            "Test memory manager not implemented yet. Use proper test setup with event bus.".to_string()
+        ))
+    }
+
     /// Set session ID for message-to-event conversion and persistence
     pub async fn set_session_id(&self, session_id: String) {
         // Update the session ID on the existing converter

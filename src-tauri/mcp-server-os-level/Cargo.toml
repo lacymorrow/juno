@@ -38,7 +38,7 @@ core-foundation-sys = "0.8.7"
 core-graphics = "0.24.0"
 image = { version = "0.25.1", features = ["png"] }
 libc = "0.2"
-objc = "0.2.7"
+objc = { version = "0.2.7", features = ["exception"] }  # Added exception feature for better error handling
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
 # objc still needed for other platform interactions

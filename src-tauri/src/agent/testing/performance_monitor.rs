@@ -7,12 +7,17 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, Mutex as TokioMutex};
 use tokio::time::interval;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
+use crate::agent::{
+    core::AgentError,
+    traits::MemoryManager,
+    testing::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities},
+};
 use crate::agent::memory::performance::{PerformanceMetrics, PerformanceSummary};
 
 /// Real-time performance monitoring configuration

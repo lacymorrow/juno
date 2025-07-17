@@ -5,9 +5,7 @@
 
 use std::time::{Duration, Instant};
 use async_trait::async_trait;
-
 use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities};
-use crate::agent::memory::EventMemoryManager;
 use crate::agent::traits::MemoryManager;
 
 /// Integration test for basic memory operations

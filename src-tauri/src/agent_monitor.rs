@@ -218,8 +218,10 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         );
 
         // If released before threshold, cancel the agent
-        if let Err(e) = app_handle.emit(events::agent::CANCEL, ()) {
-            error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
+        if let Err(e) = app_handle.emit(events::agent::STOP, serde_json::json!({
+            "stopType": events::agent::stop_types::NORMAL
+        })) {
+            error!("[AgentMonitor] Failed to emit agent-stop: {}", e);
         }
     } else {
         debug!(
@@ -270,15 +272,19 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
 
             // Check for timeouts
             if state.check_agent_timeout() {
-                if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
+                if let Err(e) = app_handle.emit(events::agent::STOP, serde_json::json!({
+                    "stopType": events::agent::stop_types::FORCE
+                })) {
+                    error!("[AgentMonitor] Failed to emit agent-stop: {}", e);
                 }
             }
 
             // Check for stuck state cleanup
             if state.should_force_cleanup() {
-                if let Err(e) = app_handle.emit(events::agent::FORCE_CLEANUP, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-force-cleanup: {}", e);
+                if let Err(e) = app_handle.emit(events::agent::STOP, serde_json::json!({
+                    "stopType": events::agent::stop_types::ERROR
+                })) {
+                    error!("[AgentMonitor] Failed to emit agent-stop: {}", e);
                 }
             }
         }

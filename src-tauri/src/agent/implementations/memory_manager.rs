@@ -985,7 +985,7 @@ impl AdvancedMemoryManager {
 
     /// Compress a screenshot to text summary with enhanced analysis
     async fn compress_screenshot_to_text(&self, base64_content: &str) -> Result<VisualContextSummary, AgentError> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         let original_tokens = base64_content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
 
         // RE-ENABLED: Enhanced screenshot analysis
@@ -1165,7 +1165,7 @@ impl AdvancedMemoryManager {
 #[async_trait]
 impl MemoryManager for AdvancedMemoryManager {
     async fn add_message(&mut self, mut message: Message) -> Result<(), AgentError> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
 
         // Process screenshots BEFORE adding to memory (critical for token optimization)
         self.process_message_screenshots(&mut message).await?;
@@ -1209,7 +1209,7 @@ impl MemoryManager for AdvancedMemoryManager {
         self.prune_memory_if_needed().await?;
 
         // RE-ENABLED: Metrics update with safer timing (non-critical path)
-        if let Err(e) = self.update_metrics(start_time).await {
+        if let Err(e) = self.update_metrics(_start_time).await {
             log::warn!("Failed to update metrics after adding message: {}", e);
             // Continue execution - metrics failure shouldn't block message addition
         }

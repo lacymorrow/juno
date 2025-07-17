@@ -4,9 +4,7 @@
 
 use std::time::{Duration, Instant};
 use async_trait::async_trait;
-
-use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities, MemoryMonitor};
-use crate::agent::memory::EventMemoryManager;
+use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities};
 use crate::agent::traits::MemoryManager;
 
 /// High-throughput message processing test

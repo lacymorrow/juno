@@ -163,29 +163,28 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
 /// Setup force stop and cleanup event listeners for voice transcription
 fn setup_force_stop_listeners(app_handle: &AppHandle) {
-    // Listen for force stop events (timeout/stuck transcription)
-    let app_handle_for_force_stop = app_handle.clone();
-    app_handle.listen("dictation-transcription-force-stop", move |_event| {
-        warn!(
-            "[Event] Received dictation-transcription-force-stop event - force stopping dictation"
-        );
+    // Listen for consolidated dictation stop events with stopType parameter
+    let app_handle_for_dictation_stop = app_handle.clone();
+    app_handle.listen("dictation-stop", move |event| {
+        // Parse stopType from payload
+        let stop_type = if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+            payload.get("stopType").and_then(|t| t.as_str()).unwrap_or("normal").to_string()
+        } else {
+            "normal".to_string()
+        };
 
-        let app_handle_clone = app_handle_for_force_stop.clone();
+        warn!("[Event] Received dictation-stop event with type: {} - handling dictation stop", stop_type);
+
+        let app_handle_clone = app_handle_for_dictation_stop.clone();
         safe_spawn_async_task(move || async move {
-            handle_voice_controller_force_stop(&app_handle_clone).await;
-        });
-    });
-
-    // Listen for force cleanup events (stuck state recovery)
-    let app_handle_for_force_cleanup = app_handle.clone();
-    app_handle.listen("dictation-transcription-force-cleanup", move |_event| {
-        warn!(
-            "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
-        );
-
-        let app_handle_clone = app_handle_for_force_cleanup.clone();
-        safe_spawn_async_task(move || async move {
-            handle_dictation_state_cleanup(&app_handle_clone).await;
+            match stop_type.as_str() {
+                "force" => handle_voice_controller_force_stop(&app_handle_clone).await,
+                "error" => handle_dictation_state_cleanup(&app_handle_clone).await,
+                _ => {
+                    // Handle normal stop - just log for now
+                    info!("[Event] Normal dictation stop - no special handling needed");
+                }
+            }
         });
     });
 }
@@ -470,8 +469,7 @@ fn setup_agent_mode_integration(app_handle: &AppHandle) {
     // Setup agent control event listeners
     setup_agent_control_listeners(app_handle);
 
-    // Setup comprehensive agent stop event listener
-    setup_agent_stop_all_listener(app_handle);
+    // Agent stop events are now handled in setup_agent_control_listeners with stopType
 }
 
 /// Setup agent transcription event listeners for hold mode
@@ -499,55 +497,31 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
     });
 }
 
-/// Setup agent control event listeners for stop, cancel, and force stop
+/// Setup agent control event listeners for stop with different types
 fn setup_agent_control_listeners(app_handle: &AppHandle) {
-    // Listen for agent stop events (hold mode - normal completion)
+    // Listen for consolidated agent stop events with stopType parameter
     let app_handle_for_agent_stop = app_handle.clone();
-    app_handle.listen("agent-stop", move |_event| {
-        info!("[Event] Received agent-stop event - stopping agent mode via hold");
+    app_handle.listen("agent-stop", move |event| {
+        // Parse stopType from payload
+        let stop_type = if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+            payload.get("stopType").and_then(|t| t.as_str()).unwrap_or("normal").to_string()
+        } else {
+            "normal".to_string()
+        };
+
+        info!("[Event] Received agent-stop event with type: {} - handling agent stop", stop_type);
 
         let app_handle_clone = app_handle_for_agent_stop.clone();
         safe_spawn_async_task(move || async move {
-            handle_agent_stop(&app_handle_clone).await;
-        });
-    });
-
-    // Listen for agent cancel events (hold mode - cancelled before threshold)
-    let app_handle_for_agent_cancel = app_handle.clone();
-    app_handle.listen("agent-cancel", move |_event| {
-        info!("[Event] Received agent-cancel event - cancelling agent mode via hold");
-
-        let app_handle_clone = app_handle_for_agent_cancel.clone();
-        safe_spawn_async_task(move || async move {
-            handle_agent_cancel(&app_handle_clone).await;
-        });
-    });
-
-    // Listen for agent force-stop events (hold mode - timeout or stuck)
-    let app_handle_for_agent_force_stop = app_handle.clone();
-    app_handle.listen("agent-force-stop", move |_event| {
-        info!("[Event] Received agent-force-stop event - force stopping agent mode");
-
-        let app_handle_clone = app_handle_for_agent_force_stop.clone();
-        safe_spawn_async_task(move || async move {
-            handle_agent_force_stop(&app_handle_clone).await;
+            match stop_type.as_str() {
+                "force" => handle_agent_force_stop(&app_handle_clone).await,
+                "error" => handle_agent_error_stop(&app_handle_clone).await,
+                _ => handle_agent_stop(&app_handle_clone).await,
+            }
         });
     });
 }
 
-/// Setup comprehensive agent stop event listener for emergency situations
-fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
-    // Listen for comprehensive agent-stop-all events (from stop button or emergency situations)
-    let app_handle_for_agent_stop_all = app_handle.clone();
-    app_handle.listen("agent-stop-all", move |_event| {
-        info!("[Event] Received agent-stop-all event - performing comprehensive agent shutdown");
-
-        let app_handle_clone = app_handle_for_agent_stop_all.clone();
-        safe_spawn_async_task(move || async move {
-            handle_agent_stop_all(&app_handle_clone).await;
-        });
-    });
-}
 
 /// Handle agent transcription start
 async fn handle_agent_transcription_start(app_handle: &AppHandle) {
@@ -732,66 +706,28 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
     }
 }
 
-/// Handle agent cancel (cancelled before threshold)
-async fn handle_agent_cancel(app_handle: &AppHandle) {
-    // Cancel agent mode using voice transcription
-    match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                app_handle.clone(),
-                controller_state,
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!("[Agent Mode] Cancelled agent transcription successfully");
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        false,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-                    }
-                }
-                Err(e) => {
-                    error!("[Agent Mode] Failed to cancel agent transcription: {}", e);
-
-                    // Force reset agent input monitor state on failure
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        false,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change after cancel failure: {}", e);
-                    }
-                }
-            }
-        }
-        None => {
-            warn!(
-                "[Agent Mode] Voice controller not available - cannot cancel agent transcription"
-            );
-
-            // Reset agent input monitor state
-            crate::agent_monitor::force_reset_agent_input_state().await;
-
-            // Use synchronize_component_state to update UI manager AND emit event
-            if let Err(e) = utils::synchronize_component_state(
-                app_handle,
-                "agent",
-                false,
-                Some(constants::events::agent::ACTIVE),
-            ).await {
-                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-            }
-        }
+/// Handle agent error stop
+async fn handle_agent_error_stop(app_handle: &AppHandle) {
+    error!("[Agent Mode] Error stop requested");
+    
+    // Force stop any ongoing operations
+    if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+            app_handle.clone(),
+            controller_state,
+        ).await;
+    }
+    
+    // Reset agent state
+    crate::agent_monitor::force_reset_agent_input_state().await;
+    
+    if let Err(e) = utils::synchronize_component_state(
+        app_handle,
+        "agent",
+        false,
+        Some(constants::events::agent::ACTIVE),
+    ).await {
+        error!("[Agent Mode] Failed to synchronize agent state: {}", e);
     }
 }
 
@@ -828,18 +764,6 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     info!("[Agent Mode] Force stopped agent mode successfully");
 }
 
-/// Handle comprehensive agent stop all (emergency situations)
-async fn handle_agent_stop_all(app_handle: &AppHandle) {
-    // Use state management module for emergency cleanup
-    if let Err(e) = crate::state_management::handle_emergency_state_cleanup(app_handle).await {
-        error!("[Agent Stop All] Emergency cleanup failed: {}", e);
-    }
-
-    // Force stop voice transcription using centralized error handling
-    crate::error_handling::utils::handle_voice_error(app_handle, "Emergency stop requested").await;
-
-    info!("[Agent Stop All] Comprehensive agent shutdown completed");
-}
 
 /// Setup development mode integration (debug builds only)
 #[cfg(debug_assertions)]

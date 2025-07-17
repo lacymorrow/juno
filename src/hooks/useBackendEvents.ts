@@ -4,8 +4,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
 
-// Simplified type definitions
+// Simple type for event payloads - keep it minimal
 type BackendEventPayload = {
+  // Common fields
+  stopType?: 'normal' | 'force' | 'error';
+  message_id?: string;
+  chunk?: string;
+  complete_text?: string;
+  agent_state?: string;
+  error_message?: string;
+  content?: string;
+  tool_name?: string;
+  success?: boolean;
+  audio_base64?: string;
+  
+  // Backend response
   query?: string;
   response?: {
     text: string;
@@ -14,14 +27,7 @@ type BackendEventPayload = {
     agent_state: string;
     screenshot_base64?: string;
   };
-  audio_base64?: string;
-  chunk?: string;
-  message_id?: string;
-  agent_state?: string;
-  complete_text?: string;
-  error_message?: string;
-  content?: string;
-  tool_name?: string;
+  
   [key: string]: any;
 };
 
@@ -43,6 +49,7 @@ export const useBackendEvents = ({
   setIsProcessing,
 }: UseBackendEventsProps) => {
   const hasCheckedServer = useRef(false);
+  // Simple map for streaming messages - React is single-threaded
   const streamingMessages = useRef<Map<string, string>>(new Map());
 
   // Consolidated event handler
@@ -66,13 +73,17 @@ export const useBackendEvents = ({
           setIsProcessing(false);
           break;
 
-        case "agent-stopping":
-        case "tts-stop-requested":
-        case "agent-stop-all":
-          console.log("Stopping operations...");
+        case "agent-stop":
+          console.log("Agent stop event:", payload.stopType);
           await stopCurrentAudio();
           await stopTTS((msg) => console.log(`[TTS] ${msg}`));
           setIsProcessing(false);
+          break;
+
+        case "tts-stop-requested":
+          console.log("Stopping TTS...");
+          await stopCurrentAudio();
+          await stopTTS((msg) => console.log(`[TTS] ${msg}`));
           break;
 
         // Audio events
@@ -86,20 +97,16 @@ export const useBackendEvents = ({
         case "agent-stream-start":
           console.log("Stream started:", payload.message_id);
           if (payload.message_id) {
-            // Initialize streaming message with empty content
             streamingMessages.current.set(payload.message_id, "");
             addOrUpdateStreamingMessage(payload.message_id, "", false);
           }
           break;
 
         case "agent-text-stream":
-          // Real-time text streaming (fixed event name)
           if (payload.message_id && payload.chunk) {
             const existing = streamingMessages.current.get(payload.message_id) || "";
             const newText = existing + payload.chunk;
             streamingMessages.current.set(payload.message_id, newText);
-            
-            // Update the streaming message in real-time
             addOrUpdateStreamingMessage(payload.message_id, newText, false);
           }
           break;
@@ -108,13 +115,10 @@ export const useBackendEvents = ({
           if (payload.message_id) {
             const finalText = payload.complete_text || streamingMessages.current.get(payload.message_id) || "";
             if (finalText) {
-              // Mark streaming as complete with final text
               addOrUpdateStreamingMessage(payload.message_id, finalText, true);
             }
             streamingMessages.current.delete(payload.message_id);
             
-            // Only set isProcessing to false if agent has actually finished
-            // Check the agent_state field to determine if processing is complete
             const agentState = payload.agent_state;
             console.log(`[Event] agent-stream-end with state: ${agentState}`);
             
@@ -158,9 +162,9 @@ export const useBackendEvents = ({
         case "tool-usage":
           console.log("Tool usage event:", payload);
           // Could show tool execution feedback
-          if (payload.tool && payload.success !== undefined) {
+          if (payload.tool_name && payload.success !== undefined) {
             const status = payload.success ? "✅" : "❌";
-            console.log(`Tool ${payload.tool}: ${status}`);
+            console.log(`Tool ${payload.tool_name}: ${status}`);
           }
           break;
 
@@ -190,14 +194,13 @@ export const useBackendEvents = ({
       // Event types we want to listen to
       const eventTypes = [
         "backend-response",
-        "agent-stopping", 
+        "agent-stop", // Consolidated stop event
         "tts-audio-ready",
         "tts-stop-requested",
         "agent-stream-start",
         "agent-text-stream", // Fixed event name to match backend
         "agent-stream-end",
         "agent-error",
-        "agent-stop-all",
         "agent-event", // Generic agent events
         "tool-usage", // Tool execution events
         "user-message-submitted",
