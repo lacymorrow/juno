@@ -158,7 +158,7 @@ pub use self::memory::{
 // Note: get_cursor_position removed as it is unused
 
 // Onboarding commands
-pub use self::onboarding::{check_onboarding_status, complete_onboarding, skip_onboarding, reset_onboarding, restart_onboarding};
+pub use self::onboarding::{check_onboarding_status, complete_onboarding, skip_onboarding, reset_onboarding, restart_onboarding, get_onboarding_info, test_global_shortcuts_working};
 
 // Orchestrator commands
 pub use self::orchestrator::{
