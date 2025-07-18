@@ -12,7 +12,7 @@ import "./styles/globals.css";
 import { AppBar } from "./components/AppBar";
 import { FloatingBar } from "./components/FloatingBar";
 import { VoiceAIBar } from "./components/bar/voice-ai-bar";
-import { DynamicIslandDemo } from "./components/bar/dynamic-bar";
+import { DynamicBar } from "./components/bar/dynamic-bar";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -24,7 +24,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/app-bar" element={<AppBar />} />
           <Route path="/floating-bar" element={<FloatingBar />} />
           <Route path="/voice-bar" element={<VoiceAIBar />} />
-          <Route path="/dynamic-bar" element={<DynamicIslandDemo />} />
+          <Route path="/dynamic-bar" element={<DynamicBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
           <Route

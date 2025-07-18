@@ -13,6 +13,7 @@ pub mod agent {
     pub const THOUGHT_PROCESS: &str = "agent-thought-process";
     pub const STOPPING: &str = "agent-stopping";
     pub const STATUS_UPDATE: &str = "agent-status-update";
+    pub const STOP_ALL: &str = "agent-stop-all";
 
     // Agent state events
     pub const ACTIVE: &str = "agent-active";
@@ -84,6 +85,11 @@ pub mod ui {
     pub const UI_CURSOR_HIGHLIGHT_START: &str = "ui-cursor-highlight-start";
     pub const UI_CURSOR_HIGHLIGHT_MOVE: &str = "ui-cursor-highlight-move";
     pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
+    
+    // Element management events
+    pub const ELEMENT_CREATED: &str = "ui-element-created";
+    pub const ELEMENT_UPDATED: &str = "ui-element-updated";
+    pub const ELEMENT_DELETED: &str = "ui-element-deleted";
 }
 
 /// Menu and navigation events
@@ -103,6 +109,30 @@ pub mod menu {
     pub const ZOOM_WINDOW_REQUESTED: &str = "zoom-window-requested";
     pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
     pub const ABOUT_REQUESTED: &str = "about-requested";
+    
+    // View menu events
+    pub const VIEW_CHAT: &str = "menu-view-chat";
+    pub const VIEW_DEVTOOLS: &str = "menu-view-devtools";
+    pub const VIEW_PERMISSIONS: &str = "menu-view-permissions";
+    
+    // Chat menu events
+    pub const CLEAR_CHAT: &str = "menu-clear-chat";
+    
+    // Modal events
+    pub const SHOW_HELP: &str = "menu-show-help";
+    pub const SHOW_FEEDBACK: &str = "menu-show-feedback";
+    pub const EXPORT_CHAT: &str = "menu-export-chat";
+    pub const IMPORT_CHAT: &str = "menu-import-chat";
+    pub const OPEN_SETTINGS: &str = "menu-open-settings";
+    
+    // Reload events
+    pub const RELOAD_APP: &str = "menu-reload-app";
+    pub const FORCE_RELOAD: &str = "menu-force-reload";
+    
+    // Zoom events
+    pub const ZOOM_IN: &str = "menu-zoom-in";
+    pub const ZOOM_OUT: &str = "menu-zoom-out";
+    pub const RESET_ZOOM: &str = "menu-reset-zoom";
 
     // Edit menu events
     pub const EDIT_UNDO: &str = "menu-edit-undo";
@@ -169,6 +199,18 @@ pub mod system {
     pub const MCP_STATE_UPDATED: &str = "mcp_state_updated";
     pub const MOUSE_ENTERED_WINDOW: &str = "mouse-entered-window";
     pub const MOUSE_LEFT_WINDOW: &str = "mouse-left-window";
+    pub const BACKEND_RESPONSE: &str = "backend-response";
+    pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
+    
+    // Application lifecycle events
+    pub const APP_READY: &str = "app-ready";
+    pub const APP_FOCUS: &str = "app-focus";
+    pub const APP_BLUR: &str = "app-blur";
+    
+    // Window events
+    pub const WINDOW_MINIMIZE: &str = "window-minimize";
+    pub const WINDOW_MAXIMIZE: &str = "window-maximize";
+    pub const WINDOW_CLOSE: &str = "window-close";
 }
 
 /// Onboarding events

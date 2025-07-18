@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
   CheckCircle,
   ChevronRight,
@@ -254,7 +255,7 @@ function KeyboardShortcut({
     // Listen for backend shortcut detection events
     const setupBackendListener = async () => {
       try {
-        const unlisten = await listen("shortcut-agent-mode", (event: any) => {
+        const unlisten = await listen(EVENTS.SHORTCUTS_AGENT_MODE, (event: any) => {
           if (event.payload?.state === "pressed") {
             // Backend detected the shortcut, trigger visual feedback and completion
             setIsComplete(true);
@@ -560,7 +561,7 @@ export default function OnboardingFlow({
     try {
       setPermissionsError(null);
       const result = await invoke<PermissionsState>(
-        "check_permissions_status_native"
+        COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
       );
       setPermissionsState(result);
       setActualPermissionsGranted(result.allGranted);
@@ -582,16 +583,16 @@ export default function OnboardingFlow({
       let commandName = "";
       switch (permissionType) {
         case "accessibility":
-          commandName = "request_accessibility_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION;
           break;
         case "screen_recording":
-          commandName = "request_screen_recording_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION;
           break;
         case "microphone":
-          commandName = "request_microphone_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION;
           break;
         case "input_monitoring":
-          commandName = "request_input_monitoring_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION;
           break;
         default:
           throw new Error(`Unknown permission type: ${permissionType}`);

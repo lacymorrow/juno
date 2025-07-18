@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { EVENTS } from "@/lib/constants.generated";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 interface MenuEventsProps {
 	// Navigation
@@ -36,21 +37,21 @@ export function useMenuEvents({
 		const setupMenuListeners = async () => {
 			// View management
 			unlistenCallbacks.push(
-				await listen("menu-view-chat", () => {
+				await listen(EVENTS.MENU_VIEW_CHAT, () => {
 					console.log("📱 Menu: Switching to chat view");
 					setCurrentView("chat");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-view-devtools", () => {
+				await listen(EVENTS.MENU_VIEW_DEVTOOLS, () => {
 					console.log("🛠️ Menu: Switching to devtools view");
 					setCurrentView("devtools");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-view-permissions", () => {
+				await listen(EVENTS.MENU_VIEW_PERMISSIONS, () => {
 					console.log("🔒 Menu: Switching to permissions view");
 					setCurrentView("permissions");
 				})
@@ -58,14 +59,14 @@ export function useMenuEvents({
 
 			// Modal management
 			unlistenCallbacks.push(
-				await listen("menu-show-help", () => {
+				await listen(EVENTS.MENU_SHOW_HELP, () => {
 					console.log("❓ Menu: Opening help modal");
 					setActiveModal("help");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-show-feedback", () => {
+				await listen(EVENTS.MENU_SHOW_FEEDBACK, () => {
 					console.log("📝 Menu: Opening feedback modal");
 					setFeedbackData({
 						type: "general",
@@ -79,14 +80,14 @@ export function useMenuEvents({
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-export-chat", () => {
+				await listen(EVENTS.MENU_EXPORT_CHAT, () => {
 					console.log("📤 Menu: Opening export modal");
 					setActiveModal("export");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-import-chat", () => {
+				await listen(EVENTS.MENU_IMPORT_CHAT, () => {
 					console.log("📥 Menu: Opening import modal");
 					setActiveModal("import");
 				})
@@ -94,7 +95,7 @@ export function useMenuEvents({
 
 			// Chat management
 			unlistenCallbacks.push(
-				await listen("menu-new-chat", () => {
+				await listen(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
 					console.log("🆕 Menu: Starting new chat");
 					startNewChat();
 					addSystemMessage("🆕 New chat started");
@@ -102,7 +103,7 @@ export function useMenuEvents({
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-clear-chat", () => {
+				await listen(EVENTS.MENU_CLEAR_CHAT, () => {
 					console.log("🗑️ Menu: Clearing chat (using new chat)");
 					startNewChat();
 					addSystemMessage("🗑️ Chat history cleared");
@@ -111,7 +112,7 @@ export function useMenuEvents({
 
 			// Update management
 			unlistenCallbacks.push(
-				await listen("menu-check-updates", () => {
+				await listen(EVENTS.MENU_UPDATE_CHECK_REQUESTED, () => {
 					console.log("🔄 Menu: Checking for updates");
 					handleUpdateCheck();
 				})
@@ -119,45 +120,45 @@ export function useMenuEvents({
 
 			// Application events
 			unlistenCallbacks.push(
-				await listen("app-ready", () => {
+				await listen(EVENTS.SYSTEM_APP_READY, () => {
 					console.log("🚀 App ready event received");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("app-focus", () => {
+				await listen(EVENTS.SYSTEM_APP_FOCUS, () => {
 					console.log("👀 App focus event received");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("app-blur", () => {
+				await listen(EVENTS.SYSTEM_APP_BLUR, () => {
 					console.log("😴 App blur event received");
 				})
 			);
 
 			// Window management
 			unlistenCallbacks.push(
-				await listen("window-minimize", () => {
+				await listen(EVENTS.SYSTEM_WINDOW_MINIMIZE, () => {
 					console.log("⬇️ Window minimize requested");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("window-maximize", () => {
+				await listen(EVENTS.SYSTEM_WINDOW_MAXIMIZE, () => {
 					console.log("⬆️ Window maximize requested");
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("window-close", () => {
+				await listen(EVENTS.SYSTEM_WINDOW_CLOSE, () => {
 					console.log("❌ Window close requested");
 				})
 			);
 
 			// Settings and configuration
 			unlistenCallbacks.push(
-				await listen("menu-open-settings", () => {
+				await listen(EVENTS.MENU_OPEN_SETTINGS, () => {
 					console.log("⚙️ Menu: Opening settings");
 					// Note: Settings opens in a separate window via backend
 				})
@@ -180,14 +181,14 @@ export function useMenuEvents({
 
 			// Performance and debugging
 			unlistenCallbacks.push(
-				await listen("menu-reload-app", () => {
+				await listen(EVENTS.MENU_RELOAD_APP, () => {
 					console.log("🔄 Menu: Reloading application");
 					window.location.reload();
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-force-reload", () => {
+				await listen(EVENTS.MENU_FORCE_RELOAD, () => {
 					console.log("🔄 Menu: Force reloading application");
 					window.location.reload();
 				})
@@ -195,21 +196,21 @@ export function useMenuEvents({
 
 			// Accessibility and user assistance
 			unlistenCallbacks.push(
-				await listen("menu-zoom-in", () => {
+				await listen(EVENTS.MENU_ZOOM_IN, () => {
 					console.log("🔍 Menu: Zoom in requested");
 					// Zoom functionality could be implemented here
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-zoom-out", () => {
+				await listen(EVENTS.MENU_ZOOM_OUT, () => {
 					console.log("🔍 Menu: Zoom out requested");
 					// Zoom functionality could be implemented here
 				})
 			);
 
 			unlistenCallbacks.push(
-				await listen("menu-reset-zoom", () => {
+				await listen(EVENTS.MENU_RESET_ZOOM, () => {
 					console.log("🔍 Menu: Reset zoom requested");
 					// Reset zoom functionality could be implemented here
 				})
@@ -228,11 +229,7 @@ export function useMenuEvents({
 		// Cleanup function
 		return () => {
 			unlistenCallbacks.forEach((unlisten) => {
-				try {
-					unlisten();
-				} catch (error) {
-					console.error("❌ Error cleaning up menu listener:", error);
-				}
+				safeCleanupEventListener(unlisten);
 			});
 			console.log("🧹 Menu event listeners cleaned up");
 		};

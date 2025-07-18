@@ -410,7 +410,7 @@ const DynamicContainer = ({ className, children }: DynamicContainerProps) => {
     y: size === previousSize ? 0 : 5,
   }
 
-  const animateState = {
+  const animateState: any = {
     opacity: 1,
     scale: 1,
     y: 0,
@@ -426,7 +426,17 @@ const DynamicContainer = ({ className, children }: DynamicContainerProps) => {
     <motion.div
       initial={initialState}
       animate={animateState}
-      exit={{ opacity: 0, filter: "blur(10px)", scale: 0.95, y: 20 }}
+      exit={{ 
+        opacity: 0, 
+        scale: 0.95, 
+        y: 20,
+        transition: {
+          type: "spring" as const,
+          stiffness,
+          damping,
+          duration: 0.3
+        }
+      }}
       style={{ willChange }}
       className={className}
     >
