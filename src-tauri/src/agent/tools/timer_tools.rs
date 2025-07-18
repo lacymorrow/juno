@@ -15,6 +15,7 @@
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
+use crate::constants::{events, agent, error_messages};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -274,7 +275,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for setting simple delay timers with context
     pub fn set_timer_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "set_timer".to_string(),
+            name: agent::tool_names::SET_TIMER.to_string(),
             description: "Sets a timer that will restart the agent after a specified delay. Useful for long-running tasks like games where the agent needs to wait for external events or take breaks. The agent will be restarted with the saved context when the timer expires.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -320,22 +321,22 @@ mod timer_tools_impl {
     ) -> Result<Value, String> {
         let delay_seconds = input["delay_seconds"]
             .as_f64()
-            .ok_or_else(|| "Missing or invalid 'delay_seconds' parameter".to_string())? as u64;
+            .ok_or_else(|| error_messages::tool_errors::MISSING_DELAY_SECONDS_PARAMETER.to_string())? as u64;
 
         let context = input["context"]
             .as_object()
-            .ok_or_else(|| "Missing or invalid 'context' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_CONTEXT_PARAMETER.to_string())?
             .clone();
 
         let description = input["description"]
             .as_str()
-            .ok_or_else(|| "Missing or invalid 'description' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_DESCRIPTION_PARAMETER.to_string())?
             .to_string();
 
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("System time error: {}", e))?
+            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
             .as_secs();
         let trigger_time = now + delay_seconds;
 
@@ -368,11 +369,11 @@ mod timer_tools_impl {
 
             // Check if timer is still active (might have been cancelled)
             if let Some(expired_timer) = timer_manager_clone.remove_timer(&timer_id_clone).await {
-                info!("Timer {} expired, triggering agent restart with context", timer_id_clone);
+                info!("{}", error_messages::format_strings::TIMER_EXPIRED_TRIGGERING_RESTART.replace("{}", &timer_id_clone));
 
                 // Emit event to frontend to restart agent with context
-                if let Err(e) = app_handle_clone.emit("timer-expired", &expired_timer) {
-                    error!("Failed to emit timer-expired event: {}", e);
+                if let Err(e) = app_handle_clone.emit(events::timer::EXPIRED, &expired_timer) {
+                    error!("{}", error_messages::format_strings::FAILED_TO_EMIT_TIMER_EXPIRED_EVENT.replace("{}", &e.to_string()));
                 }
             }
         });
@@ -394,7 +395,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for screen change monitoring with region and threshold options
     pub fn set_screen_monitor_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "set_screen_monitor".to_string(),
+            name: agent::tool_names::SET_SCREEN_MONITOR.to_string(),
             description: "Sets up screen monitoring that will restart the agent when significant changes are detected in a specified screen region. Useful for monitoring game states, chat applications, or waiting for UI changes. The agent will be restarted when the screen content changes beyond the threshold.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -462,12 +463,12 @@ mod timer_tools_impl {
     ) -> Result<Value, String> {
         let context = input["context"]
             .as_object()
-            .ok_or_else(|| "Missing or invalid 'context' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_CONTEXT_PARAMETER.to_string())?
             .clone();
 
         let description = input["description"]
             .as_str()
-            .ok_or_else(|| "Missing or invalid 'description' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_DESCRIPTION_PARAMETER.to_string())?
             .to_string();
 
         let region = input["region"].as_object().map(|r| ScreenRegion {
@@ -484,7 +485,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("System time error: {}", e))?
+            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -557,8 +558,8 @@ mod timer_tools_impl {
 
                             if let Some(expired_timer) = timer_manager_clone.remove_timer(&timer_id_clone).await {
                                 // Emit event to frontend to restart agent with context
-                                if let Err(e) = app_handle_clone.emit("timer-expired", &expired_timer) {
-                                    error!("Failed to emit timer-expired event: {}", e);
+                                if let Err(e) = app_handle_clone.emit(events::timer::EXPIRED, &expired_timer) {
+                                    error!("{}", error_messages::format_strings::FAILED_TO_EMIT_TIMER_EXPIRED_EVENT.replace("{}", &e.to_string()));
                                 }
                             }
                             break;
@@ -600,7 +601,7 @@ mod timer_tools_impl {
         _input: Value,
         _app_handle: AppHandle,
     ) -> Result<Value, String> {
-        Err("Screen monitoring is only supported on macOS currently".to_string())
+        Err(error_messages::tool_errors::SCREEN_MONITORING_MACOS_ONLY.to_string())
     }
 
     /// Creates the tool definition for the `set_file_monitor` tool.
@@ -612,7 +613,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for file system event monitoring
     pub fn set_file_monitor_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "set_file_monitor".to_string(),
+            name: agent::tool_names::SET_FILE_MONITOR.to_string(),
             description: "Sets up file system monitoring that will restart the agent when specified file events occur. Useful for monitoring downloads, log files, or waiting for file creation/modification. The agent will be restarted when the monitored file event occurs.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -684,17 +685,17 @@ mod timer_tools_impl {
             "modified" => FileMonitorType::Modified,
             "deleted" => FileMonitorType::Deleted,
             "size_changed" => FileMonitorType::SizeChanged,
-            _ => return Err("Invalid monitor_type. Must be one of: created, modified, deleted, size_changed".to_string()),
+            _ => return Err(error_messages::tool_errors::INVALID_MONITOR_TYPE.to_string()),
         };
 
         let context = input["context"]
             .as_object()
-            .ok_or_else(|| "Missing or invalid 'context' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_CONTEXT_PARAMETER.to_string())?
             .clone();
 
         let description = input["description"]
             .as_str()
-            .ok_or_else(|| "Missing or invalid 'description' parameter".to_string())?
+            .ok_or_else(|| error_messages::tool_errors::MISSING_DESCRIPTION_PARAMETER.to_string())?
             .to_string();
 
         let check_interval_seconds = input["check_interval_seconds"].as_u64().unwrap_or(5);
@@ -703,7 +704,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("System time error: {}", e))?
+            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -807,8 +808,8 @@ mod timer_tools_impl {
 
                     if let Some(expired_timer) = timer_manager_clone.remove_timer(&timer_id_clone).await {
                         // Emit event to frontend to restart agent with context
-                        if let Err(e) = app_handle_clone.emit("timer-expired", &expired_timer) {
-                            error!("Failed to emit timer-expired event: {}", e);
+                        if let Err(e) = app_handle_clone.emit(events::timer::EXPIRED, &expired_timer) {
+                            error!("{}", error_messages::format_strings::FAILED_TO_EMIT_TIMER_EXPIRED_EVENT.replace("{}", &e.to_string()));
                         }
                     }
                     break;
@@ -840,7 +841,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for cancelling active timers by ID
     pub fn cancel_timer_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "cancel_timer".to_string(),
+            name: agent::tool_names::CANCEL_TIMER.to_string(),
             description: "Cancels a previously set timer by its ID. Useful if conditions change and the agent no longer needs to restart.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -880,7 +881,7 @@ mod timer_tools_impl {
 
         let state = app_handle.state::<AppState>();
         let timer_manager = state.get::<TimerManager>()
-            .ok_or_else(|| "Timer manager not initialized".to_string())?;
+            .ok_or_else(|| error_messages::tool_errors::TIMER_MANAGER_NOT_INITIALIZED.to_string())?;
 
         if let Some(cancelled_timer) = timer_manager.remove_timer(timer_id).await {
             Ok(json!({
@@ -910,7 +911,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for listing all active timers
     pub fn list_timers_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "list_timers".to_string(),
+            name: agent::tool_names::LIST_TIMERS.to_string(),
             description: "Lists all active timers that are currently scheduled. Useful for checking what timers are running.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -941,12 +942,12 @@ mod timer_tools_impl {
     ) -> Result<Value, String> {
         let state = app_handle.state::<AppState>();
         let timer_manager = state.get::<TimerManager>()
-            .ok_or_else(|| "Timer manager not initialized".to_string())?;
+            .ok_or_else(|| error_messages::tool_errors::TIMER_MANAGER_NOT_INITIALIZED.to_string())?;
 
         let active_timers = timer_manager.list_active_timers().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("System time error: {}", e))?
+            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
             .as_secs();
 
         let timer_info: Vec<Value> = active_timers
@@ -988,7 +989,7 @@ mod timer_tools_impl {
     /// `ToolDefinition` for checking and retrieving expired timer contexts
     pub fn check_expired_timers_definition() -> ToolDefinition {
         ToolDefinition {
-            name: "check_expired_timers".to_string(),
+            name: agent::tool_names::CHECK_EXPIRED_TIMERS.to_string(),
             description: "Checks for any expired timers and returns their contexts. This is useful during agent startup to see if the agent should resume a previous task.".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -1019,7 +1020,7 @@ mod timer_tools_impl {
     ) -> Result<Value, String> {
         let state = app_handle.state::<AppState>();
         let timer_manager = state.get::<TimerManager>()
-            .ok_or_else(|| "Timer manager not initialized".to_string())?;
+            .ok_or_else(|| error_messages::tool_errors::TIMER_MANAGER_NOT_INITIALIZED.to_string())?;
 
         let expired_timers = timer_manager.get_expired_timers().await;
 
@@ -1047,9 +1048,9 @@ mod timer_tools_impl {
             "expired_timers": expired_info,
             "count": expired_timers.len(),
             "message": if expired_timers.is_empty() {
-                "No expired timers found"
+                error_messages::tool_errors::NO_EXPIRED_TIMERS_FOUND
             } else {
-                "Found expired timers with context to resume"
+                error_messages::tool_errors::FOUND_EXPIRED_TIMERS_WITH_CONTEXT
             }
         }))
     }

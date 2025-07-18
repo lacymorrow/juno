@@ -27,6 +27,8 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
+import { useShortcutEvents } from "@/hooks/useShortcutEvents";
+import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
 
 function App() {
   // Initialize custom hooks
@@ -166,6 +168,53 @@ function App() {
     startNewChat: conversation.startNewChat,
     addSystemMessage: conversation.addSystemMessage,
     handleUpdateCheck,
+  });
+
+  // Shortcut events integration
+  useShortcutEvents({
+    onAgentModeShortcut: useCallback((payload: any) => {
+      console.log("Agent mode shortcut event received:", payload);
+      if (payload.state === "pressed" && !payload.test_mode) {
+        appState.setIsAgentModeActive(true);
+        toast.info("Agent mode activated");
+      } else if (payload.state === "released") {
+        appState.setIsAgentModeActive(false);
+      }
+    }, [appState]),
+    onDictationInputShortcut: useCallback((payload: any) => {
+      console.log("Dictation input shortcut event received:", payload);
+      if (payload.state === "pressed" && !payload.test_mode) {
+        appState.setIsDictationActive(true);
+        toast.info("Dictation mode activated");
+      } else if (payload.state === "released") {
+        appState.setIsDictationActive(false);
+      }
+    }, [appState]),
+  });
+
+  // Dictation state events integration
+  useDictationStateEvents({
+    onStateChanged: useCallback((event: any) => {
+      console.log("Dictation state changed:", event);
+      appState.setDictationState(event.new_state);
+      
+      // Update UI based on dictation state changes
+      if (event.new_state === "active") {
+        appState.setIsDictationActive(true);
+      } else if (event.new_state === "idle") {
+        appState.setIsDictationActive(false);
+      }
+    }, [appState]),
+    onForceReset: useCallback((reason: any) => {
+      console.log("Dictation force reset:", reason);
+      appState.setDictationState("idle");
+      appState.setIsDictationActive(false);
+      toast.error(`Dictation reset: ${reason}`);
+    }, [appState]),
+    onInputChanged: useCallback((state: any) => {
+      console.log("Dictation input state changed:", state);
+      // Update input state tracking - could be used for visual feedback
+    }, []),
   });
 
   // Load app metadata on startup

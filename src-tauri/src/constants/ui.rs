@@ -10,6 +10,15 @@ pub mod window_labels {
     pub const SETTINGS: &str = "settings";
 }
 
+/// UI element IDs used for element targeting and interactions
+pub mod element_ids {
+    pub const FLOATING_BAR: &str = "floating-bar";
+    pub const APP_BAR: &str = "app-bar";
+    pub const VOICE_AI_BAR: &str = "voice-ai-bar";
+    pub const DYNAMIC_BAR: &str = "dynamic-bar";
+    pub const FLOATING_PANEL: &str = "floating-panel";
+}
+
 /// UI state constants for bar state management
 /// These values are used by the backend BarState enum and must match frontend expectations
 pub mod bar_states {
@@ -37,6 +46,8 @@ pub mod voice_modes {
     pub const IDLE: &str = "idle";
     pub const AGENT: &str = "agent";
     pub const DICTATION: &str = "dictation";
+    pub const SPEAKING: &str = "speaking";
+    pub const ALWAYS_LISTENING: &str = "always_listening";
 }
 
 /// Agent status constants
@@ -49,10 +60,10 @@ pub mod agent_status {
     pub const RESPONDING: &str = "responding";
     pub const ERROR: &str = "error";
     pub const WORKING: &str = "working";
-    pub const FINISHED: &str = "finished";
-    pub const FAILED: &str = "failed";
-    pub const CANCELLED: &str = "cancelled";
-    pub const OFFLINE: &str = "offline";
+    pub const FINISHED: &str = "Finished";
+    pub const FAILED: &str = "Failed";
+    pub const CANCELLED: &str = "Cancelled";
+    pub const OFFLINE: &str = "Offline";
     pub const PROCESSING: &str = "processing";
     pub const SPEAKING: &str = "speaking";
     pub const INPUT: &str = "input";
@@ -71,6 +82,10 @@ pub mod interaction_types {
     pub const SUBMIT: &str = "submit";
     pub const ESCAPE: &str = "escape";
     pub const ENTER: &str = "enter";
+    pub const INPUT_CHANGE: &str = "input_change";
+    pub const INITIALIZE: &str = "initialize";
+    pub const SET_CLICK_THROUGH: &str = "set_click_through";
+    pub const SET_LEVEL: &str = "set_level";
 }
 
 // UI layout constants (moved from frontend constants.ts)

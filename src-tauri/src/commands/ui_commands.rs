@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Listener};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
@@ -138,6 +138,10 @@ pub struct UIManager {
     pub agent_state: Option<String>,
     pub current_transition_id: Option<String>,
     pub bar_config: FloatingBarConfig,
+    
+    // Deduplication fields
+    pub last_submission_time: Option<Instant>,
+    pub last_submission_query: Option<String>,
 }
 
 impl UIManager {
@@ -157,10 +161,12 @@ impl UIManager {
             is_dictation_mode: false,
             is_always_listening: false,
             audio_level: 0.0,
-            voice_mode: "idle".to_string(),
+            voice_mode: ui::voice_modes::IDLE.to_string(),
             agent_state: None,
             current_transition_id: None,
             bar_config,
+            last_submission_time: None,
+            last_submission_query: None,
         })
     }
 
@@ -334,21 +340,34 @@ impl UIManager {
             return Ok(());
         }
 
+        // Check for duplicate submission within 1 second
+        let now = Instant::now();
+        if let (Some(last_time), Some(last_query)) = (&self.last_submission_time, &self.last_submission_query) {
+            if last_query == &query && now.duration_since(*last_time).as_millis() < 1000 {
+                warn!("Duplicate submission detected within 1 second, ignoring: '{}'", query);
+                return Ok(());
+            }
+        }
+
+        // Update deduplication tracking
+        self.last_submission_time = Some(now);
+        self.last_submission_query = Some(query.clone());
+
         // Set immediate submitting state for UI feedback
         self.last_submitted_value = query.clone();
         self.current_error = None;
         self.agent_state = None;
         self.is_agent_working = true;
-        self.voice_mode = "agent".to_string();
+        self.voice_mode = ui::voice_modes::AGENT.to_string();
 
         self.set_bar_state(BarState::Submitting).await;
 
-                // Emit query through the clean app-dictation-finished event path
+        // Emit query through the clean app-dictation-finished event path
         let query_payload = serde_json::json!({
             "query": query
         });
 
-        if let Err(e) = self.app_handle.emit("app-dictation-finished", query_payload) {
+        if let Err(e) = self.app_handle.emit(events::dictation::FINISHED, query_payload) {
             error!("Failed to emit query submission: {}", e);
             return Err(format!("Failed to submit query: {}", e));
         }
@@ -364,7 +383,7 @@ impl UIManager {
         self.agent_state = Some(agent_state.clone());
 
         match agent_state.as_str() {
-            "Finished" => {
+            ui::agent_status::FINISHED => {
                 self.set_bar_state(BarState::Finishing).await;
 
                 let app_handle = self.app_handle.clone();
@@ -374,11 +393,11 @@ impl UIManager {
                     let _ = app_handle.emit(events::bar::COMPLETE_TRANSITION, transition_id_clone);
                 });
             }
-            "Failed" | "Cancelled" | "Offline" => {
+            ui::agent_status::FAILED | ui::agent_status::CANCELLED | ui::agent_status::OFFLINE => {
                 self.current_error = Some(
-                    if agent_state == "Cancelled" {
+                    if agent_state == ui::agent_status::CANCELLED {
                         "Agent execution was cancelled".to_string()
-                    } else if agent_state == "Offline" {
+                    } else if agent_state == ui::agent_status::OFFLINE {
                         "Connection unavailable".to_string()
                     } else {
                         format!("Agent failed: {}", response_text.unwrap_or_default())
@@ -409,10 +428,10 @@ impl UIManager {
         self.is_dictation_mode = is_active;
 
         if is_active {
-            self.voice_mode = "dictation".to_string();
+            self.voice_mode = ui::voice_modes::DICTATION.to_string();
             self.set_bar_state(BarState::Dictating).await;
         } else {
-            self.voice_mode = "idle".to_string();
+            self.voice_mode = ui::voice_modes::IDLE.to_string();
             if !self.is_agent_working {
                 self.set_bar_state(BarState::Default).await;
             }
@@ -426,10 +445,10 @@ impl UIManager {
         self.is_always_listening = is_active;
 
         if is_active {
-            self.voice_mode = "always_listening".to_string();
+            self.voice_mode = ui::voice_modes::ALWAYS_LISTENING.to_string();
             self.set_bar_state(BarState::AlwaysListening).await;
         } else {
-            self.voice_mode = "idle".to_string();
+            self.voice_mode = ui::voice_modes::IDLE.to_string();
             if !self.is_agent_working && !self.is_dictation_mode {
                 self.set_bar_state(BarState::Default).await;
             }
@@ -441,7 +460,7 @@ impl UIManager {
     pub async fn handle_agent_started(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling agent started");
         self.is_agent_working = true;
-        self.voice_mode = "agent".to_string();
+        self.voice_mode = ui::voice_modes::AGENT.to_string();
         self.set_bar_state(BarState::Loading).await;
         Ok(())
     }
@@ -449,7 +468,7 @@ impl UIManager {
     pub async fn handle_agent_stopped(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling agent stopped");
         self.is_agent_working = false;
-        self.voice_mode = "idle".to_string();
+        self.voice_mode = ui::voice_modes::IDLE.to_string();
         if matches!(self.bar_state, BarState::Submitting | BarState::Loading | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
             self.set_bar_state(BarState::Default).await;
         }
@@ -459,7 +478,7 @@ impl UIManager {
     pub async fn handle_agent_cancelled(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling agent cancelled");
         self.is_agent_working = false;
-        self.voice_mode = "idle".to_string();
+        self.voice_mode = ui::voice_modes::IDLE.to_string();
         self.is_dictation_mode = false;
         self.transcription_text.clear();
         self.input_value.clear();
@@ -474,7 +493,7 @@ impl UIManager {
     pub async fn handle_tts_started(&mut self, text: String) -> Result<(), String> {
         debug!("UI Manager: Handling TTS started with text: '{}'", text);
         self.spoken_text = text;
-        self.voice_mode = "speaking".to_string();
+        self.voice_mode = ui::voice_modes::SPEAKING.to_string();
         self.set_bar_state(BarState::Speaking).await;
         Ok(())
     }
@@ -483,7 +502,7 @@ impl UIManager {
         debug!("UI Manager: Handling TTS finished");
         self.spoken_text.clear();
         if !self.is_agent_working && !self.is_dictation_mode && !self.is_always_listening {
-            self.voice_mode = "idle".to_string();
+            self.voice_mode = ui::voice_modes::IDLE.to_string();
             self.set_bar_state(BarState::Default).await;
         }
         Ok(())
@@ -494,7 +513,7 @@ impl UIManager {
     pub async fn handle_dictation_started(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling dictation started");
         self.transcription_text.clear();
-        self.voice_mode = "dictation".to_string();
+        self.voice_mode = ui::voice_modes::DICTATION.to_string();
         self.set_bar_state(BarState::Listening).await;
         Ok(())
     }
@@ -659,7 +678,7 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit("ui-element-created", &state_update) {
+        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_CREATED, &state_update) {
             error!("Failed to emit element created event: {}", e);
         }
 
@@ -679,7 +698,7 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit("ui-element-updated", &state_update) {
+        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_UPDATED, &state_update) {
             error!("Failed to emit element updated event: {}", e);
         }
 
@@ -690,7 +709,7 @@ impl UIManager {
         debug!("UI Manager: Deleting element: {}", element_id);
         self.elements.remove(&element_id);
 
-        if let Err(e) = self.app_handle.emit("ui-element-deleted", &element_id) {
+        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_DELETED, &element_id) {
             error!("Failed to emit element deleted event: {}", e);
         }
 
@@ -701,7 +720,7 @@ impl UIManager {
         let mut state = HashMap::new();
 
         // Special handling for floating-bar
-        if element_id == "floating-bar" {
+        if element_id == ui::element_ids::FLOATING_BAR {
             state.insert("barState".to_string(), serde_json::Value::String(self.bar_state.as_str().to_string()));
             state.insert("inputValue".to_string(), serde_json::Value::String(self.input_value.clone()));
             state.insert("lastSubmittedValue".to_string(), serde_json::Value::String(self.last_submitted_value.clone()));
@@ -745,6 +764,12 @@ static UI_MANAGER: OnceLock<Arc<TokioMutex<UIManager>>> = OnceLock::new();
 
 pub async fn initialize_ui_manager(app_handle: AppHandle) -> Result<(), String> {
     debug!("Initializing UI Manager");
+
+    // Check if already initialized
+    if UI_MANAGER.get().is_some() {
+        warn!("UI Manager already initialized, skipping duplicate initialization");
+        return Ok(());
+    }
 
     let manager = UIManager::new(app_handle.clone()).await?;
     let manager_arc = Arc::new(TokioMutex::new(manager));
@@ -889,10 +914,10 @@ pub async fn ui_handle_interaction(
         let mut manager = manager.lock().await;
 
         // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar)
-        if element_id == "floating-bar" || element_id == "app-bar" || element_id == "voice-ai-bar" || element_id == "dynamic-bar" {
+        if element_id == ui::element_ids::FLOATING_BAR || element_id == ui::element_ids::APP_BAR || element_id == ui::element_ids::VOICE_AI_BAR || element_id == ui::element_ids::DYNAMIC_BAR {
             match interaction.interaction_type.as_str() {
-                "click" => manager.handle_bar_click().await,
-                "submit" => {
+                ui::interaction_types::CLICK => manager.handle_bar_click().await,
+                ui::interaction_types::SUBMIT => {
                     if let Some(data) = &interaction.data {
                         if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
                             manager.handle_bar_submit(value.to_string()).await
@@ -903,7 +928,7 @@ pub async fn ui_handle_interaction(
                         Err("Submit interaction missing data".to_string())
                     }
                 },
-                "input_change" => {
+                ui::interaction_types::INPUT_CHANGE => {
                     if let Some(data) = &interaction.data {
                         if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
                             manager.handle_bar_input_change(value.to_string()).await
@@ -914,7 +939,7 @@ pub async fn ui_handle_interaction(
                         Err("Input change interaction missing data".to_string())
                     }
                 },
-                "focus" => {
+                ui::interaction_types::FOCUS => {
                     if let Some(data) = &interaction.data {
                         if let Some(is_focused) = data.get("isFocused").and_then(|v| v.as_bool()) {
                             manager.handle_bar_focus_change(is_focused).await
@@ -925,19 +950,19 @@ pub async fn ui_handle_interaction(
                         manager.handle_bar_focus_change(true).await
                     }
                 },
-                "blur" => manager.handle_bar_input_blur().await,
-                "initialize" => {
+                ui::interaction_types::BLUR => manager.handle_bar_input_blur().await,
+                ui::interaction_types::INITIALIZE => {
                     // Handle initialization specially - just acknowledge receipt
                     debug!("Initialized bar component: {}", element_id);
                     Ok(())
                 },
-                "escape" => {
+                ui::interaction_types::ESCAPE => {
                     // Handle escape key - delegate to stop coordinator for proper cancellation
                     debug!("Escape key pressed on bar component: {}", element_id);
                     let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
                     coordinator.stop_all_operations(&manager.app_handle, "Escape key pressed via UI").await.map_err(|e| e.to_string()).map(|_| ())
                 },
-                "enter" => {
+                ui::interaction_types::ENTER => {
                     // Handle enter key - submit current input if any
                     debug!("Enter key pressed on bar component: {}", element_id);
                     if manager.input_value.trim().is_empty() {
@@ -952,9 +977,9 @@ pub async fn ui_handle_interaction(
                     Ok(())
                 }
             }
-        } else if element_id == "floating-panel" {
+        } else if element_id == ui::element_ids::FLOATING_PANEL {
             match interaction.interaction_type.as_str() {
-                "set_click_through" => {
+                ui::interaction_types::SET_CLICK_THROUGH => {
                     if let Some(data) = &interaction.data {
                         if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
                             manager.set_panel_click_through(enabled).await
@@ -965,7 +990,7 @@ pub async fn ui_handle_interaction(
                         Err("Set click through interaction missing data".to_string())
                     }
                 },
-                "set_level" => {
+                ui::interaction_types::SET_LEVEL => {
                     if let Some(data) = &interaction.data {
                         if let Some(level) = data.get("level").and_then(|v| v.as_i64()) {
                             manager.set_panel_level(level as i32).await

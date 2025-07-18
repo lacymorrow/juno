@@ -98,7 +98,7 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     };
 
     if let Err(e) = app.emit(
-        "shortcut-agent-mode",
+        events::shortcuts::AGENT_MODE,
         serde_json::json!({
             "state": shortcut_state,
             "shortcut": "agent_mode_toggle"
@@ -181,9 +181,9 @@ fn handle_agent_tap_mode(app: &AppHandle) {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit agent mode start event
-            if let Err(e) = app_handle.emit("app-dictation-started", ()) {
+            if let Err(e) = app_handle.emit(events::dictation::STARTED, ()) {
                 error!(
-                    "[Agent Mode] Failed to emit app-dictation-started event: {}",
+                    "[Agent Mode] Failed to emit dictation started event: {}",
                     e
                 );
             }
@@ -222,7 +222,7 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     };
 
     if let Err(e) = app.emit(
-        "shortcut-dictation-input",
+        events::shortcuts::DICTATION_INPUT,
         serde_json::json!({
             "state": shortcut_state,
             "shortcut": "dictation_input"
@@ -340,8 +340,8 @@ pub async fn trigger_shortcut_test_event(
     state: String,
 ) -> Result<(), String> {
     let event_name = match shortcut_name.as_str() {
-        "agent_mode_toggle" => "shortcut-agent-mode",
-        "dictation_input" => "shortcut-dictation-input",
+        "agent_mode_toggle" => events::shortcuts::AGENT_MODE,
+        "dictation_input" => events::shortcuts::DICTATION_INPUT,
         _ => return Err("Unknown shortcut name".to_string()),
     };
 

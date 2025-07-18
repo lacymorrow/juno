@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select";
 import { useSettings } from "@/hooks/useSettings";
 import { Brain, Cpu } from "lucide-react";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -31,6 +32,8 @@ export function ModelSelector({
   const settings = useSettings();
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Load models when active provider changes or on initial load
   useEffect(() => {
@@ -45,7 +48,7 @@ export function ModelSelector({
     let unlisten: (() => void) | undefined;
 
     const setupProviderListener = async () => {
-      unlisten = await listen("provider_settings_changed", (_event) => {
+      unlisten = await listen(EVENTS.SYSTEM_PROVIDER_SETTINGS_CHANGED, (_event) => {
         console.log("ModelSelector: Received provider settings update");
         // Models list might have changed, reload models for current provider
         if (settings.activeProvider) {
@@ -58,13 +61,16 @@ export function ModelSelector({
     return () => unlisten?.();
   }, [settings.activeProvider]);
 
-  const loadModelsForProvider = async (providerId: string) => {
+  const loadModelsForProvider = async (providerId: string, isRetry = false) => {
     setLoadingModels(true);
+    setLoadError(null);
+    
     try {
-      const models = await invoke<ModelInfo[]>("get_provider_models", {
+      const models = await invoke<ModelInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDER_MODELS, {
         providerId,
       });
       setAvailableModels(models);
+      setRetryCount(0);
 
       console.log(
         `ModelSelector: Loaded ${models.length} models for provider: ${providerId}`
@@ -75,6 +81,11 @@ export function ModelSelector({
     } catch (error) {
       console.error("Failed to load models for provider:", error);
       setAvailableModels([]);
+      setLoadError(error instanceof Error ? error.message : "Failed to load models");
+      
+      if (isRetry) {
+        setRetryCount(prev => prev + 1);
+      }
     } finally {
       setLoadingModels(false);
     }
@@ -93,7 +104,7 @@ export function ModelSelector({
     );
   }
 
-  // If no models are available, show an error state
+  // If no models are available, show an error state with retry option
   if (availableModels.length === 0) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
@@ -103,7 +114,24 @@ export function ModelSelector({
             <span className="text-xs text-muted-foreground">Model:</span>
           </div>
         )}
-        <span className="text-xs text-red-500">No models available</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-red-500">
+            {loadError || "No models available"}
+          </span>
+          {retryCount < 3 && (
+            <button
+              onClick={() => {
+                if (settings.activeProvider) {
+                  loadModelsForProvider(settings.activeProvider, true);
+                }
+              }}
+              className="text-xs text-blue-500 hover:text-blue-600 underline"
+              disabled={loadingModels}
+            >
+              Retry
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -127,7 +155,7 @@ export function ModelSelector({
         onValueChange={async (value) => {
           // Validate model is available for current provider before setting
           try {
-            const isValid = await invoke<boolean>("validate_provider_model", {
+            const isValid = await invoke<boolean>(COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL, {
               providerId: settings.activeProvider,
               modelId: value,
             });
@@ -142,7 +170,7 @@ export function ModelSelector({
 
               // Save to backend - this will trigger provider_settings_changed event
               try {
-                await invoke("update_provider_model", {
+                await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
                   providerId: settings.activeProvider,
                   model: value,
                 });

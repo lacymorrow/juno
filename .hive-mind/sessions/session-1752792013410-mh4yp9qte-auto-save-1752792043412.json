@@ -1,0 +1,81 @@
+{
+  "sessionId": "session-1752792013410-mh4yp9qte",
+  "checkpointId": "checkpoint-1752792043412-1s1xs81il",
+  "checkpointName": "auto-save-1752792043412",
+  "timestamp": "2025-07-17T22:40:43.415Z",
+  "data": {
+    "timestamp": "2025-07-17T22:40:43.412Z",
+    "changeCount": 5,
+    "changesByType": {
+      "swarm_created": [
+        {
+          "type": "swarm_created",
+          "data": {
+            "swarmId": "swarm-1752792013408-c60ecozlv",
+            "swarmName": "hive-1752792013377",
+            "objective": "We have multiple front-end windows that we are comparing and contrasting features. We would like you to implement each one of them completely showing that UI's different states, how it transitions between them, how it displays input to interact with the agent or even some of them display the agent responses. Each one is different, some of them resize themselves, In which case they need to be responsible for resizing their window (see examples). I need you to go through each one of the bars in the src/components/bar folder (except floating-bar) and fully implement it as a front-end UI for our back-end Rust state. It should always reflect the back-end state, however there may be minor differences where the front-end state may differ (focused, inputting, etc). Use the 'floating-bar' or even the main app.tsx window as examples.",
+            "workerCount": 8
+          },
+          "timestamp": "2025-07-17T22:40:13.411Z"
+        }
+      ],
+      "agent_activity": [
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752792013408-c60ecozlv-0",
+            "activity": "spawned",
+            "data": {
+              "type": "researcher",
+              "name": "Researcher Worker 1"
+            }
+          },
+          "timestamp": "2025-07-17T22:40:13.413Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752792013408-c60ecozlv-1",
+            "activity": "spawned",
+            "data": {
+              "type": "coder",
+              "name": "Coder Worker 2"
+            }
+          },
+          "timestamp": "2025-07-17T22:40:13.413Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752792013408-c60ecozlv-2",
+            "activity": "spawned",
+            "data": {
+              "type": "analyst",
+              "name": "Analyst Worker 3"
+            }
+          },
+          "timestamp": "2025-07-17T22:40:13.413Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752792013408-c60ecozlv-3",
+            "activity": "spawned",
+            "data": {
+              "type": "tester",
+              "name": "Tester Worker 4"
+            }
+          },
+          "timestamp": "2025-07-17T22:40:13.413Z"
+        }
+      ]
+    },
+    "statistics": {
+      "tasksProcessed": 0,
+      "tasksCompleted": 0,
+      "memoryUpdates": 0,
+      "agentActivities": 4,
+      "consensusDecisions": 0
+    }
+  }
+}

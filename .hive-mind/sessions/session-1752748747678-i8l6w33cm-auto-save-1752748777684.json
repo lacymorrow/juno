@@ -1,0 +1,105 @@
+{
+  "sessionId": "session-1752748747678-i8l6w33cm",
+  "checkpointId": "checkpoint-1752748777685-tmvji2u6t",
+  "checkpointName": "auto-save-1752748777684",
+  "timestamp": "2025-07-17T10:39:37.688Z",
+  "data": {
+    "timestamp": "2025-07-17T10:39:37.684Z",
+    "changeCount": 7,
+    "changesByType": {
+      "swarm_created": [
+        {
+          "type": "swarm_created",
+          "data": {
+            "swarmId": "swarm-1752748747676-alg9dsuht",
+            "swarmName": "swarm-1752748688269",
+            "objective": "We have issues with the event-driven arch. Make sure everything is centralized and using centralized variables/slugs/strings from our rust constants (also generated into ts).",
+            "workerCount": 6
+          },
+          "timestamp": "2025-07-17T10:39:07.682Z"
+        }
+      ],
+      "agent_activity": [
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-0",
+            "activity": "spawned",
+            "data": {
+              "type": "researcher",
+              "name": "Researcher Worker 1"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.686Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-1",
+            "activity": "spawned",
+            "data": {
+              "type": "coder",
+              "name": "Coder Worker 2"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.686Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-2",
+            "activity": "spawned",
+            "data": {
+              "type": "analyst",
+              "name": "Analyst Worker 3"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.686Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-3",
+            "activity": "spawned",
+            "data": {
+              "type": "architect",
+              "name": "Architect Worker 4"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.686Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-4",
+            "activity": "spawned",
+            "data": {
+              "type": "reviewer",
+              "name": "Reviewer Worker 5"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.687Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1752748747676-alg9dsuht-5",
+            "activity": "spawned",
+            "data": {
+              "type": "optimizer",
+              "name": "Optimizer Worker 6"
+            }
+          },
+          "timestamp": "2025-07-17T10:39:07.687Z"
+        }
+      ]
+    },
+    "statistics": {
+      "tasksProcessed": 0,
+      "tasksCompleted": 0,
+      "memoryUpdates": 0,
+      "agentActivities": 6,
+      "consensusDecisions": 0
+    }
+  }
+}

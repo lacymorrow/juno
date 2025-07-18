@@ -110,6 +110,10 @@ pub mod tool_names {
     pub const LIST_TIMERS: &str = "list_timers";
     pub const CANCEL_TIMER: &str = "cancel_timer";
     pub const TIMER_STATUS: &str = "timer_status";
+    pub const SET_TIMER: &str = "set_timer";
+    pub const SET_SCREEN_MONITOR: &str = "set_screen_monitor";
+    pub const SET_FILE_MONITOR: &str = "set_file_monitor";
+    pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
     // Timer tools
     pub const TIMER_CREATE: &str = "timer_create";

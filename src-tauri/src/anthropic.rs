@@ -26,7 +26,8 @@ use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 // TARS Integration: Import event types
-use crate::agent::events::JunoAgentEvent;
+// TODO: Implement event system - currently disabled due to incomplete implementation
+// use crate::agent::events::JunoAgentEvent;
 
 /// Agent execution queue system to prevent concurrent execution
 #[derive(Debug)]
@@ -332,18 +333,18 @@ pub async fn submit_query(
         return Ok(());
     }
 
-    // Event-driven logging: Emit user message event for observability
-    let user_message_event = JunoAgentEvent::UserMessage {
-        content: trimmed_query.to_string(),
-        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-        session_id: Some(crate::agent::events::generate_session_id()),
-    };
-    
-    // Emit event for logging/observability (non-blocking)
-    if let Err(e) = state.emit_event(user_message_event).await {
-        warn!("Failed to emit user message event for logging: {}", e);
-        // Don't fail the entire request for logging issues
-    }
+    // TODO: Event-driven logging disabled - event system not yet implemented
+    // let user_message_event = JunoAgentEvent::UserMessage {
+    //     content: trimmed_query.to_string(),
+    //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+    //     session_id: Some(crate::agent::events::generate_session_id()),
+    // };
+    // 
+    // // Emit event for logging/observability (non-blocking)
+    // if let Err(e) = state.emit_event(user_message_event).await {
+    //     warn!("Failed to emit user message event for logging: {}", e);
+    //     // Don't fail the entire request for logging issues
+    // }
     
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
     // The event-driven refactor was incomplete and caused tool calls to not execute
@@ -424,17 +425,17 @@ async fn execute_agent_internal(
         agent::config::MAX_ITERATIONS
     );
 
-    // TARS Integration: Emit agent run start event
-    let agent_run_start_event = JunoAgentEvent::AgentRunStart {
-        session_id: execution_id.clone(),
-        agent_type: "orchestrator".to_string(),
-        max_iterations: agent::config::MAX_ITERATIONS,
-        user_query: query.clone(),
-        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-    };
-    if let Err(e) = state.emit_agent_event(agent_run_start_event).await {
-        warn!("Failed to emit agent run start event: {}", e);
-    }
+    // TODO: TARS Integration disabled - event system not yet implemented
+    // let agent_run_start_event = JunoAgentEvent::AgentRunStart {
+    //     session_id: execution_id.clone(),
+    //     agent_type: "orchestrator".to_string(),
+    //     max_iterations: agent::config::MAX_ITERATIONS,
+    //     user_query: query.clone(),
+    //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+    // };
+    // if let Err(e) = state.emit_agent_event(agent_run_start_event).await {
+    //     warn!("Failed to emit agent run start event: {}", e);
+    // }
 
     // --- FIXED: Notify Floating Bar Manager that Agent Started ---
     // This ensures the floating bar shows agent activity regardless of trigger source
@@ -841,22 +842,22 @@ async fn execute_agent_internal(
         execution_id
     );
 
-    // TARS Integration: Emit agent run end event
-    let agent_run_end_event = JunoAgentEvent::AgentRunEnd {
-        session_id: execution_id.clone(),
-        status: match &agent_result {
-            Ok(_) => "completed".to_string(),
-            Err(AgentError::Terminated) => "cancelled".to_string(),
-            Err(AgentError::MaxStepsReached) => "max_steps_reached".to_string(),
-            Err(_) => "failed".to_string(),
-        },
-        iterations: state.get_agent_current_step().unwrap_or(0),
-        elapsed_ms: 0, // We could track this if needed
-        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-    };
-    if let Err(e) = state.emit_agent_event(agent_run_end_event).await {
-        warn!("Failed to emit agent run end event: {}", e);
-    }
+    // TODO: TARS Integration disabled - event system not yet implemented
+    // let agent_run_end_event = JunoAgentEvent::AgentRunEnd {
+    //     session_id: execution_id.clone(),
+    //     status: match &agent_result {
+    //         Ok(_) => "completed".to_string(),
+    //         Err(AgentError::Terminated) => "cancelled".to_string(),
+    //         Err(AgentError::MaxStepsReached) => "max_steps_reached".to_string(),
+    //         Err(_) => "failed".to_string(),
+    //     },
+    //     iterations: state.get_agent_current_step().unwrap_or(0),
+    //     elapsed_ms: 0, // We could track this if needed
+    //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+    // };
+    // if let Err(e) = state.emit_agent_event(agent_run_end_event).await {
+    //     warn!("Failed to emit agent run end event: {}", e);
+    // }
 
     // Unregister escape key as agent execution is complete
     if let Err(e) =
@@ -870,15 +871,15 @@ async fn execute_agent_internal(
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
-            // TARS Integration: Emit assistant message event for successful completion
-            let assistant_message_event = JunoAgentEvent::AssistantMessage {
-                content: message.clone(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                session_id: Some(execution_id.clone()),
-            };
-            if let Err(e) = state.emit_agent_event(assistant_message_event).await {
-                warn!("Failed to emit assistant message event: {}", e);
-            }
+            // TODO: TARS Integration disabled - event system not yet implemented
+            // let assistant_message_event = JunoAgentEvent::AssistantMessage {
+            //     content: message.clone(),
+            //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            //     session_id: Some(execution_id.clone()),
+            // };
+            // if let Err(e) = state.emit_agent_event(assistant_message_event).await {
+            //     warn!("Failed to emit assistant message event: {}", e);
+            // }
 
             SubmitQueryResult {
                 text: message.clone(),
@@ -891,25 +892,25 @@ async fn execute_agent_internal(
         Err(e) => {
             error!("Agent run failed: {}", e);
 
-            // TARS Integration: Emit error event
-            let error_event = JunoAgentEvent::ErrorOccurred {
-                error_type: match &e {
-                    AgentError::Terminated => "user_cancelled".to_string(),
-                    AgentError::MaxStepsReached => "max_steps_reached".to_string(),
-                    AgentError::LlmError(_) => "llm_error".to_string(),
-                    _ => "unknown".to_string(),
-                },
-                message: e.to_string(),
-                recoverable: !matches!(e, AgentError::Terminated),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                context: Some(serde_json::json!({
-                    "session_id": execution_id,
-                    "agent_type": "orchestrator"
-                })),
-            };
-            if let Err(e) = state.emit_agent_event(error_event).await {
-                warn!("Failed to emit error event: {}", e);
-            }
+            // TODO: TARS Integration disabled - event system not yet implemented
+            // let error_event = JunoAgentEvent::ErrorOccurred {
+            //     error_type: match &e {
+            //         AgentError::Terminated => "user_cancelled".to_string(),
+            //         AgentError::MaxStepsReached => "max_steps_reached".to_string(),
+            //         AgentError::LlmError(_) => "llm_error".to_string(),
+            //         _ => "unknown".to_string(),
+            //     },
+            //     message: e.to_string(),
+            //     recoverable: !matches!(e, AgentError::Terminated),
+            //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            //     context: Some(serde_json::json!({
+            //         "session_id": execution_id,
+            //         "agent_type": "orchestrator"
+            //     })),
+            // };
+            // if let Err(e) = state.emit_agent_event(error_event).await {
+            //     warn!("Failed to emit error event: {}", e);
+            // }
 
             // Check if this is a network-related error
             let error_message = e.to_string();

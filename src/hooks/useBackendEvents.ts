@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/components/ChatMessage";
+import { EVENTS } from "@/lib/constants.generated";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 // Type definitions for backend events
 type SubmitQueryResult = {
@@ -180,7 +182,7 @@ export function useBackendEvents({
 
 		const setupListener = async () => {
 			unlisten = await listen<BackendResponsePayload>(
-				"backend-response",
+				EVENTS.SYSTEM_BACKEND_RESPONSE,
 				(event) => {
 					console.log("Received backend-response event (raw):", event.payload);
 					handleBackendResponse(event.payload);
@@ -194,7 +196,7 @@ export function useBackendEvents({
 
 	// Listen for agent stopping events
 	useEffect(() => {
-		const unlisten = listen("agent-stopping", async () => {
+		const unlisten = listen(EVENTS.AGENT_STOPPING, async () => {
 			console.log("Agent stopping event received - stopping TTS");
 			try {
 				await stopTTS((msg, level) =>
@@ -206,14 +208,14 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, []);
 
 	// Listen for TTS audio ready events
 	useEffect(() => {
 		const unlisten = listen<{ audio_base64: string }>(
-			"tts-audio-ready",
+			EVENTS.TTS_AUDIO_READY,
 			(event) => {
 				console.log("TTS audio ready event received");
 				const { audio_base64 } = event.payload;
@@ -224,13 +226,13 @@ export function useBackendEvents({
 		);
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [playAudioFromBase64]);
 
 	// Listen for TTS stop requests
 	useEffect(() => {
-		const unlisten = listen("tts-stop-requested", async () => {
+		const unlisten = listen(EVENTS.TTS_STOP_REQUESTED, async () => {
 			console.log("TTS stop requested event received - stopping TTS immediately");
 			try {
 				stopCurrentAudio();
@@ -243,13 +245,13 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [stopCurrentAudio]);
 
 	// Listen for agent events (thinking, tool calls, etc.) - MERGED VERSION
 	useEffect(() => {
-		const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
+		const unlistenPromise = listen<AgentEventTauri>(EVENTS.AGENT_EVENT, (event) => {
 			const { type, payload } = event.payload;
 			const currentTime = Date.now();
 
@@ -387,7 +389,7 @@ export function useBackendEvents({
 	// Listen for streaming events
 	useEffect(() => {
 		const streamStartListener = listen<StreamStartEvent>(
-			"agent-stream-start",
+			EVENTS.STREAMING_STREAM_START,
 			(event) => {
 				console.log("Stream started:", event.payload);
 				const { message_id } = event.payload;
@@ -405,7 +407,7 @@ export function useBackendEvents({
 		);
 
 		const streamTextListener = listen<StreamingTextEvent>(
-			"agent-text-stream",
+			EVENTS.STREAMING_TEXT_STREAM,
 			(event) => {
 				console.log("Stream text chunk:", event.payload);
 				const { chunk, message_id, tts_content } = event.payload;
@@ -436,7 +438,7 @@ export function useBackendEvents({
 		);
 
 		const streamEndListener = listen<StreamEndEvent>(
-			"agent-stream-end",
+			EVENTS.STREAMING_STREAM_END,
 			(event) => {
 				console.log("Stream ended:", event.payload);
 				const { message_id, complete_text, agent_state } = event.payload;
@@ -472,7 +474,7 @@ export function useBackendEvents({
 			agent_state: string;
 			error_message: string;
 			original_query: string;
-		}>("agent-error", (event) => {
+		}>(EVENTS.AGENT_ERROR, (event) => {
 			console.log("Agent error event received:", event.payload);
 			const { agent_state, error_message } = event.payload;
 
@@ -481,7 +483,7 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [setIsProcessing, addSystemMessage]);
 
@@ -493,7 +495,7 @@ export function useBackendEvents({
 			current_step: number;
 			max_steps: number;
 			message: string;
-		}>("agent-continuation-request", (event) => {
+		}>(EVENTS.CONTINUATION_AGENT_REQUEST, (event) => {
 			console.log("Agent continuation request received:", event.payload);
 			const { request_id, current_step, max_steps, message } = event.payload;
 
@@ -567,7 +569,7 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [addSystemMessage]);
 
@@ -577,7 +579,7 @@ export function useBackendEvents({
 			request_id: string;
 			approved: boolean;
 			additional_steps?: number;
-		}>("agent-continuation-response", (event) => {
+		}>(EVENTS.CONTINUATION_AGENT_RESPONSE, (event) => {
 			console.log("Agent continuation response received:", event.payload);
 			const { approved, additional_steps } = event.payload;
 
@@ -592,13 +594,13 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [addSystemMessage]);
 
 	// Listen for comprehensive agent-stop-all events
 	useEffect(() => {
-		const unlisten = listen("agent-stop-all", async () => {
+		const unlisten = listen(EVENTS.AGENT_STOP_ALL, async () => {
 			console.log("Agent stop all event received - performing comprehensive UI cleanup");
 			try {
 				await stopTTS((msg, level) =>
@@ -613,14 +615,14 @@ export function useBackendEvents({
 		});
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [setIsProcessing, stopCurrentAudio]);
 
 	// Listen for user message submitted events (from voice input)
 	useEffect(() => {
 		const unlisten = listen<{ content: string; timestamp: number }>(
-			"user-message-submitted",
+			EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
 			(event) => {
 				console.log("User message submitted event received:", event.payload);
 				const { content, timestamp } = event.payload;
@@ -637,7 +639,7 @@ export function useBackendEvents({
 		);
 
 		return () => {
-			unlisten.then((unlistenFn) => unlistenFn());
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [setConversationWithPruning]);
 }

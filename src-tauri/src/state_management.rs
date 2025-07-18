@@ -333,10 +333,8 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
 /// Initialize floating bar manager state
 async fn initialize_floating_bar_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing floating bar state...");
-
-            crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await?;
-    info!("Floating bar manager initialized successfully");
-
+    // UI Manager initialization moved to initialize_ui_manager_state to avoid duplicate initialization
+    info!("Floating bar state initialization completed");
     Ok(())
 }
 

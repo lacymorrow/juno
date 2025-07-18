@@ -5,6 +5,8 @@
 //! and cross-module communication patterns.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info, warn};
@@ -17,6 +19,32 @@ use crate::constants::errors::{templates, prefixes};
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
     template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+}
+
+// Global deduplication cache for preventing duplicate agent submissions
+lazy_static::lazy_static! {
+    static ref SUBMISSION_CACHE: Arc<Mutex<HashMap<String, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+}
+
+// Check if a query submission is a duplicate within 1 second
+fn is_duplicate_submission(query: &str) -> bool {
+    let mut cache = SUBMISSION_CACHE.lock().unwrap();
+    let now = Instant::now();
+    
+    // Clean up old entries (older than 5 seconds)
+    cache.retain(|_, time| now.duration_since(*time).as_secs() < 5);
+    
+    // Check if this query was recently submitted
+    if let Some(last_time) = cache.get(query) {
+        if now.duration_since(*last_time).as_millis() < 1000 {
+            warn!("Duplicate query submission detected within 1 second, ignoring: '{}'", query);
+            return true;
+        }
+    }
+    
+    // Record this submission
+    cache.insert(query.to_string(), now);
+    false
 }
 
 /// Setup comprehensive application integration including plugins, event coordination, and component initialization
@@ -81,6 +109,11 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                         if let Some(query_text) = query_value.as_str() {
                             let trimmed_query = query_text.trim();
                             if !trimmed_query.is_empty() {
+                                // Check for duplicate submission
+                                if is_duplicate_submission(trimmed_query) {
+                                    return;
+                                }
+                                
                                 info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
 
                                 // Emit user message event for frontend to add to conversation
