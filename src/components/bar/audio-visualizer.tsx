@@ -1,8 +1,40 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { UI } from "@/lib/constants.generated";
+import { listen } from "@tauri-apps/api/event";
+import { UI, EVENTS } from "@/lib/constants.generated";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
+// === STANDARDIZED UI API TYPES ===
+
+/**
+ * Backend State Data Structure - Matches exactly what backend emits
+ * This structure is defined in ui_commands.rs emit_bar_state_update()
+ */
+interface BarStateData {
+  // Core state
+  barState: string;
+  inputValue: string;
+  lastSubmittedValue: string;
+  currentError: string | null;
+
+  // Voice and transcription
+  transcriptionText: string;
+  spokenText: string;
+  voiceMode: string;
+  audioLevel: number;
+
+  // Status flags
+  isAgentWorking: boolean;
+  isDictationMode: boolean;
+  isAlwaysListening: boolean;
+
+  // Agent state
+  agentState: string | null;
+}
+
+
+// Component-specific AppState type for visualization
 export type AppState =
   | typeof UI.AGENT_STATUS_IDLE
   | typeof UI.AGENT_STATUS_LISTENING
@@ -39,6 +71,40 @@ export interface AudioVisualizerProps {
   animationStyle?: "smooth" | "sharp" | "organic" | "minimal";
 }
 
+// === STATE MAPPING ===
+
+/**
+ * Maps backend BarState to visualization AppState
+ */
+const mapBarStateToAppState = (barState: string): AppState => {
+  switch (barState) {
+    case UI.BAR_STATES_LISTENING:
+      return UI.AGENT_STATUS_LISTENING;
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_TRANSCRIBING:
+      return UI.AGENT_STATUS_PROCESSING;
+    case UI.BAR_STATES_SPEAKING:
+      return UI.AGENT_STATUS_SPEAKING;
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      return UI.AGENT_STATUS_RESPONDING;
+    case UI.BAR_STATES_ERROR:
+      return UI.AGENT_STATUS_ERROR;
+    case UI.BAR_STATES_SUCCESS:
+    case UI.BAR_STATES_FINISHING:
+      return UI.AGENT_STATUS_SUCCESS;
+    case UI.BAR_STATES_DICTATING:
+      return UI.AGENT_STATUS_DICTATING;
+    case UI.BAR_STATES_INPUT:
+      return UI.AGENT_STATUS_INPUT;
+    case UI.BAR_STATES_DEFAULT:
+    case UI.BAR_STATES_DICTATION_READY:
+    case UI.BAR_STATES_ALWAYS_LISTENING:
+    default:
+      return UI.AGENT_STATUS_IDLE;
+  }
+};
+
 export default function AudioVisualizer({
   appState = UI.AGENT_STATUS_IDLE,
   width = 400,
@@ -68,8 +134,65 @@ export default function AudioVisualizer({
     UI.AGENT_STATUS_IDLE
   );
   const [isTransitioning, setIsTransitioning] = useState(false);
+  
+  // Backend state integration
+  const [backendAudioLevel, setBackendAudioLevel] = useState(0);
 
-  // Update current state when appState prop changes
+  // === BACKEND EVENT INTEGRATION ===
+  
+  /**
+   * Listen to backend BAR_STATE_UPDATE events
+   * This syncs the visualizer with the backend state
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      try {
+        unlisten = await listen<BarStateData>(
+          EVENTS.BAR_STATE_UPDATE,
+          (event) => {
+            console.log("📊 AudioVisualizer: Received state update:", event.payload);
+
+            const payload = event.payload;
+            if (payload && typeof payload === "object" && "barState" in payload) {
+              // Map backend state to visualization state
+              const mappedState = mapBarStateToAppState(payload.barState);
+              
+              // Update current state if different
+              if (mappedState !== currentState) {
+                previousStateRef.current = currentState;
+                setCurrentState(mappedState);
+
+                // Start transition
+                requestAnimationFrame(() => {
+                  transitionProgressRef.current = 0;
+                  transitionStartTimeRef.current = Date.now();
+                  setIsTransitioning(true);
+                });
+              }
+              
+              // Update audio level from backend
+              setBackendAudioLevel(payload.audioLevel || 0);
+            }
+          }
+        );
+
+        console.log("✅ AudioVisualizer: Event listener established");
+      } catch (error) {
+        console.error("❌ AudioVisualizer: Failed to setup event listener:", error);
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      safeCleanupEventListener(unlisten);
+      console.log("🔄 AudioVisualizer: Event listener cleaned up");
+    };
+  }, [currentState]);
+
+  // Update current state when appState prop changes (for direct prop usage)
   useEffect(() => {
     if (appState !== currentState) {
       previousStateRef.current = currentState;
@@ -721,11 +844,15 @@ export default function AudioVisualizer({
 
     let audioData: number[] = [];
 
+    // Check if we should use backend audio level
+    const useBackendAudio = currentState === UI.AGENT_STATUS_LISTENING && backendAudioLevel > 0;
+
     if (
       isActive &&
       analyserRef.current &&
       dataArrayRef.current &&
-      currentState === UI.AGENT_STATUS_LISTENING
+      currentState === UI.AGENT_STATUS_LISTENING &&
+      !useBackendAudio
     ) {
       analyserRef.current.getByteFrequencyData(dataArrayRef.current);
       // Enhanced microphone processing for more dramatic but smooth effects
@@ -755,6 +882,19 @@ export default function AudioVisualizer({
 
         // Ensure we don't exceed reasonable bounds
         return Math.min(compressed, 255);
+      });
+    } else if (useBackendAudio) {
+      // Use backend audio level for visualization
+      const time = Date.now() * 0.0015;
+      const normalizedAudioLevel = backendAudioLevel; // Assume 0-1 range from backend
+      
+      audioData = Array.from({ length: 80 }, (_, i) => {
+        const centerDistance = Math.abs(i - 40) / 40;
+        const basePattern = generateStatePattern(time, i, centerDistance, currentState);
+        
+        // Modulate the pattern with the backend audio level
+        const audioModulation = 0.3 + (normalizedAudioLevel * 0.7);
+        return basePattern * audioModulation;
       });
     } else {
       // Generate audio data based on current state
@@ -799,7 +939,8 @@ export default function AudioVisualizer({
         previousAudioData,
         getStateLayerConfig(previousStateRef.current),
         time,
-        previousStateRef.current
+        previousStateRef.current,
+        backendAudioLevel
       );
 
       // Render current state to second canvas
@@ -811,7 +952,8 @@ export default function AudioVisualizer({
         audioData,
         getStateLayerConfig(currentState),
         time,
-        currentState
+        currentState,
+        backendAudioLevel
       );
 
       // Crossfade between the two renders
@@ -835,7 +977,8 @@ export default function AudioVisualizer({
         audioData,
         getStateLayerConfig(currentState),
         time,
-        currentState
+        currentState,
+        backendAudioLevel
       );
     }
 
@@ -852,6 +995,7 @@ export default function AudioVisualizer({
     onTransitionComplete,
     getTransitionDuration,
     getTransitionEasing,
+    backendAudioLevel,
   ]);
 
   // Extract waveform rendering into separate function for reuse
@@ -864,7 +1008,8 @@ export default function AudioVisualizer({
       audioData: number[],
       layers: any[],
       time: number,
-      state: AppState
+      state: AppState,
+      audioLevel: number = 0
     ) => {
       // Draw layers
       layers.forEach(
@@ -1026,7 +1171,7 @@ export default function AudioVisualizer({
             }
 
             const audioInfluence =
-              isActive && currentState === UI.AGENT_STATUS_LISTENING
+              (isActive || audioLevel > 0) && state === UI.AGENT_STATUS_LISTENING
                 ? (audioValue / 255) *
                   height *
                   (0.35 + depth * 0.25) *
@@ -1111,7 +1256,7 @@ export default function AudioVisualizer({
         }
       );
     },
-    [isActive, currentState]
+    []
   );
 
   // Start animation loop

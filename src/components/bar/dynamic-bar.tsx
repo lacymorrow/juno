@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { Brain, Mic, Volume2, AlertCircle, Check, Loader2 } from "lucide-react";
+import { Brain, Mic, Volume2, AlertCircle, Check, Loader2, Type, Keyboard } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 import {
   DynamicIsland,
@@ -14,6 +15,19 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+
+// Debounce utility
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), delay);
+  };
+}
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -172,7 +186,10 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
   const getWidgetIcon = () => {
     switch (widget.content.icon) {
       case "mic":
-        return <Mic className="w-4 h-4 text-blue-400" />;
+        return <Mic className={cn(
+          "w-4 h-4 text-blue-400",
+          widget.content.level && widget.content.level > 0.5 && "animate-pulse"
+        )} />;
       case "volume":
         return <Volume2 className="w-4 h-4 text-green-400" />;
       case "loader":
@@ -181,17 +198,66 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
         return <AlertCircle className="w-4 h-4 text-red-400" />;
       case "check":
         return <Check className="w-4 h-4 text-green-400" />;
+      case "type":
+        return <Type className="w-4 h-4 text-orange-400" />;
+      case "keyboard":
+        return <Keyboard className="w-4 h-4 text-purple-400" />;
       case "brain":
       default:
         return <Brain className="w-4 h-4 text-white" />;
     }
   };
 
+  // Special rendering for different widget types
+  if (widget.type === "voice" && widget.content.level !== undefined) {
+    return (
+      <div className="flex items-center justify-center h-full w-full px-4 py-2">
+        <div className="flex items-center gap-3">
+          {getWidgetIcon()}
+          <div className="flex flex-col">
+            <span className="text-white text-sm font-medium">
+              {widget.content.status}
+            </span>
+            <div className="flex items-center gap-1 mt-1">
+              {[...Array(5)].map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "w-1 h-3 rounded-full transition-all duration-100",
+                    i < Math.ceil(widget.content.level * 5)
+                      ? "bg-blue-400"
+                      : "bg-white/20"
+                  )}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (widget.id === "always-listening" && widget.content.wakeWords) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full w-full px-4 py-2">
+        <div className="flex items-center gap-2 mb-1">
+          {getWidgetIcon()}
+          <span className="text-white text-sm font-medium">
+            {widget.content.status}
+          </span>
+        </div>
+        <div className="text-xs text-white/60">
+          Say "{widget.content.wakeWords.join('" or "')}"
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center h-full w-full px-4 py-2">
       <div className="flex items-center gap-2">
         {getWidgetIcon()}
-        <span className="text-white text-sm font-medium">
+        <span className="text-white text-sm font-medium truncate max-w-[200px]">
           {widget.content.status}
         </span>
       </div>
@@ -237,8 +303,6 @@ const AIFloatingChatbot = () => {
     floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
   const defaultHeight =
     floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
-  const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
-  const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
   // === STANDARDIZED EVENT LISTENER ===
 
@@ -282,10 +346,8 @@ const AIFloatingChatbot = () => {
     setupListener();
 
     return () => {
-      if (unlisten) {
-        unlisten();
-        console.log("🔄 DynamicBar: Event listener cleaned up");
-      }
+      safeCleanupEventListener(unlisten);
+      console.log("🔄 DynamicBar: Event listener cleaned up");
     };
   }, []);
 
@@ -297,16 +359,93 @@ const AIFloatingChatbot = () => {
   const mapStateToWidget = (uiState: UIState): WidgetData => {
     switch (uiState) {
       case UI.BAR_STATES_LISTENING:
-        return MOCK_WIDGETS.listening;
+        return {
+          ...MOCK_WIDGETS.listening,
+          content: { status: "Listening...", icon: "mic", level: barState.audioLevel },
+        };
       case UI.BAR_STATES_SPEAKING:
-        return MOCK_WIDGETS.speaking;
+        return {
+          ...MOCK_WIDGETS.speaking,
+          content: { 
+            status: barState.spokenText || "Speaking...", 
+            icon: "volume" 
+          },
+        };
+      case UI.BAR_STATES_TRANSCRIBING:
+        return {
+          id: "transcribing",
+          type: "voice",
+          category: "voice",
+          content: { 
+            status: barState.transcriptionText || "Converting speech...", 
+            icon: "mic" 
+          },
+          size: "compactLong",
+        };
       case UI.BAR_STATES_LOADING:
       case UI.BAR_STATES_SUBMITTING:
-        return MOCK_WIDGETS.processing;
+        return {
+          ...MOCK_WIDGETS.processing,
+          content: { 
+            status: barState.inputValue || "Processing...", 
+            icon: "loader" 
+          },
+        };
       case UI.BAR_STATES_ERROR:
-        return MOCK_WIDGETS.error;
+        return {
+          ...MOCK_WIDGETS.error,
+          content: { 
+            status: barState.currentError || "Error occurred", 
+            icon: "alert" 
+          },
+        };
       case UI.BAR_STATES_SUCCESS:
-        return MOCK_WIDGETS.success;
+        return {
+          ...MOCK_WIDGETS.success,
+          content: { 
+            status: barState.lastSubmittedValue ? "Task completed" : "Success!", 
+            icon: "check" 
+          },
+        };
+      case UI.BAR_STATES_AGENT_RESPONDING:
+        return {
+          id: "agent",
+          type: "agent",
+          category: "system",
+          content: { 
+            status: barState.agentState || "Agent working...", 
+            icon: "brain" 
+          },
+          size: "medium",
+        };
+      case UI.BAR_STATES_DICTATING:
+        return {
+          id: "dictating",
+          type: "voice",
+          category: "voice",
+          content: { status: "Dictating...", icon: "type" },
+          size: "compact",
+        };
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        return {
+          id: "always-listening",
+          type: "voice",
+          category: "voice",
+          content: { 
+            status: "Always listening", 
+            icon: "mic",
+            wakeWords: ["Hey Juno", "Computer"]
+          },
+          size: "large",
+        };
+      case UI.BAR_STATES_INPUT:
+        return {
+          id: "input",
+          type: "input",
+          category: "system",
+          content: { status: "Type your request", icon: "keyboard" },
+          size: "long",
+        };
       case UI.BAR_STATES_DEFAULT:
       default:
         return MOCK_WIDGETS.idle;
@@ -325,7 +464,7 @@ const AIFloatingChatbot = () => {
   /**
    * Smart window sizing based on state and content
    */
-  const getWindowDimensions = (uiState: UIState, widget: WidgetData) => {
+  const getWindowDimensions = (uiState: UIState, _widget?: WidgetData) => {
     // Base dimensions from config
     const base = { width: defaultWidth, height: defaultHeight };
 
@@ -382,17 +521,20 @@ const AIFloatingChatbot = () => {
   /**
    * Enhanced window resizing with smooth transitions and content awareness
    */
-  useEffect(() => {
-    const resizeWindow = async () => {
+  const debouncedResizeWindow = useMemo(
+    () => debounce(async (
+      currentBarState: string,
+      currentWidget: any
+    ) => {
       try {
         const appWindow = getCurrentWindow();
         const dimensions = getWindowDimensions(
-          barState.barState,
-          currentWidgetData
+          currentBarState as UIState,
+          currentWidget
         );
 
         console.log(
-          `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${barState.barState}`
+          `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
         );
 
         await appWindow.setSize(
@@ -401,14 +543,19 @@ const AIFloatingChatbot = () => {
       } catch (error) {
         console.error("❌ DynamicBar: Failed to resize window:", error);
       }
-    };
+    }, 100),
+    []
+  );
 
-    resizeWindow();
+  useEffect(() => {
+    debouncedResizeWindow(
+      barState.barState,
+      currentWidgetData
+    );
   }, [
     barState.barState,
     currentWidgetData,
-    barState.spokenText,
-    barState.currentError,
+    debouncedResizeWindow,
   ]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
@@ -486,12 +633,28 @@ const AIFloatingChatbot = () => {
     return <WidgetRenderer widget={currentWidgetData} />;
   };
 
+  // Add transition effect between widget changes
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  useEffect(() => {
+    setIsTransitioning(true);
+    const timer = setTimeout(() => setIsTransitioning(false), 300);
+    return () => clearTimeout(timer);
+  }, [currentWidgetData.id]);
+
   return (
     <div className="h-full w-full relative">
       <div className="flex items-center justify-center h-full">
         <div onClick={handleIslandClick} className="cursor-pointer">
-          <DynamicIsland id="ai-chatbot-panel">
-            {renderCurrentWidget()}
+          <DynamicIsland 
+            id="ai-chatbot-panel"
+          >
+            <div className={cn(
+              "transition-all duration-300",
+              isTransitioning && "scale-95 opacity-80"
+            )}>
+              {renderCurrentWidget()}
+            </div>
           </DynamicIsland>
         </div>
       </div>
@@ -499,10 +662,10 @@ const AIFloatingChatbot = () => {
   );
 };
 
-export function DynamicIslandDemo() {
+export function DynamicBar() {
   return (
     <DynamicIslandProvider initialSize={"default"}>
-      <div className="h-full w-full">
+      <div className="h-full w-full bg-transparent">
         <AIFloatingChatbot />
       </div>
     </DynamicIslandProvider>

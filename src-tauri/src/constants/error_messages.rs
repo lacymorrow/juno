@@ -170,6 +170,19 @@ pub mod tool_errors {
     // Unreachable error messages
     pub const MOUSE_ACTION_ALREADY_MATCHED: &str = "Mouse action already matched in outer pattern";
     pub const KEYBOARD_ACTION_ALREADY_MATCHED: &str = "Keyboard action already matched in outer pattern";
+
+    // Timer tool errors
+    pub const MISSING_DELAY_SECONDS_PARAMETER: &str = "Missing or invalid 'delay_seconds' parameter";
+    pub const MISSING_CONTEXT_PARAMETER: &str = "Missing or invalid 'context' parameter";
+    pub const MISSING_DESCRIPTION_PARAMETER: &str = "Missing or invalid 'description' parameter";
+    pub const MISSING_MONITOR_TYPE_PARAMETER: &str = "Missing or invalid 'monitor_type' parameter";
+    pub const MISSING_FILE_PATH_PARAMETER: &str = "Missing or invalid 'file_path' parameter";
+    pub const MISSING_TIMER_ID_PARAMETER: &str = "Missing or invalid 'timer_id' parameter";
+    pub const INVALID_MONITOR_TYPE: &str = "Invalid monitor_type. Must be one of: created, modified, deleted, size_changed";
+    pub const SCREEN_MONITORING_MACOS_ONLY: &str = "Screen monitoring is only supported on macOS currently";
+    pub const TIMER_MANAGER_NOT_INITIALIZED: &str = "Timer manager not initialized";
+    pub const NO_EXPIRED_TIMERS_FOUND: &str = "No expired timers found";
+    pub const FOUND_EXPIRED_TIMERS_WITH_CONTEXT: &str = "Found expired timers with context to resume";
 }
 
 // Tool-specific success messages
@@ -242,4 +255,9 @@ pub mod format_strings {
     // Additional format strings for JSON parsing and bash results
     pub const FAILED_TO_PARSE_JSON_RESULT: &str = "Failed to parse bash command result as JSON. Error: {}, Raw result: '{}'";
     pub const MISSING_INVALID_STDERR: &str = "Missing or invalid 'stderr' field in bash command result: {}";
+
+    // Timer tool format strings
+    pub const SYSTEM_TIME_ERROR: &str = "System time error: {}";
+    pub const TIMER_EXPIRED_TRIGGERING_RESTART: &str = "Timer {} expired, triggering agent restart with context";
+    pub const FAILED_TO_EMIT_TIMER_EXPIRED_EVENT: &str = "Failed to emit timer-expired event: {}";
 }
