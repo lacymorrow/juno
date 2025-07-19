@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -47,7 +48,11 @@ export default function ToolApprovalModal() {
     );
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenPromise
+        .then((unlisten) => safeUnlisten(unlisten))
+        .catch((error) => {
+          console.debug("Tool approval listener cleanup error (safe to ignore):", error);
+        });
     };
   }, []);
 

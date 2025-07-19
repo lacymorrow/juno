@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 
 type ClickInfo = {
   x: number;
@@ -12,13 +13,14 @@ type ClickInfo = {
 const ClickVisualizer = () => {
   const [clicks, setClicks] = useState<ClickInfo[]>([]);
   const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem('juno-show-click-visualization') !== 'false' // Default to true
+    localStorage.getItem("juno-show-click-visualization") !== "false", // Default to true
   );
 
   // Check localStorage periodically for setting changes
   useEffect(() => {
     const checkSettings = () => {
-      const enabled = localStorage.getItem('juno-show-click-visualization') !== 'false';
+      const enabled =
+        localStorage.getItem("juno-show-click-visualization") !== "false";
       setIsEnabled(enabled);
     };
 
@@ -48,12 +50,19 @@ const ClickVisualizer = () => {
         };
 
         setClicks((prevClicks) => [...prevClicks, newClick]);
-      }
+      },
     );
 
     return () => {
       // Cleanup listener when component unmounts or is disabled
-      unlisten.then((unlistenFn) => unlistenFn());
+      unlisten
+        .then((unlistenFn) => {
+          safeUnlisten(unlistenFn);
+        })
+        .catch((error) => {
+          // Handle promise rejection during cleanup
+          console.debug("Click visualizer listener cleanup error (safe to ignore):", error);
+        });
     };
   }, [isEnabled]);
 
@@ -64,7 +73,7 @@ const ClickVisualizer = () => {
     const cleanupTimeout = setTimeout(() => {
       const now = Date.now();
       setClicks((prevClicks) =>
-        prevClicks.filter((click) => now - click.timestamp < 1000)
+        prevClicks.filter((click) => now - click.timestamp < 1000),
       ); // Remove clicks older than 1 second
     }, 100); // Check more frequently for smoother cleanup
 

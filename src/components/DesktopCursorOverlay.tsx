@@ -25,7 +25,7 @@ const DesktopCursorOverlay = () => {
     ClickVisualization[]
   >([]);
   const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false"
+    localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false",
   );
   const overlayWindowRef = useRef<any>(null);
 
@@ -45,7 +45,7 @@ const DesktopCursorOverlay = () => {
         } catch (error) {
           console.error(
             "Failed to create desktop cursor overlay window:",
-            error
+            error,
           );
           return;
         }
@@ -78,7 +78,7 @@ const DesktopCursorOverlay = () => {
   const positionOverlay = async (
     x: number,
     y: number,
-    force: boolean = false
+    force: boolean = false,
   ) => {
     if (!overlayWindowRef.current) return;
 
@@ -128,7 +128,7 @@ const DesktopCursorOverlay = () => {
           if (overlayWindowRef.current) {
             await overlayWindowRef.current.show();
           }
-        }
+        },
       );
 
       // Cursor highlight move
@@ -137,10 +137,10 @@ const DesktopCursorOverlay = () => {
         async (event) => {
           const [x, y] = event.payload;
           setCursorHighlight((prev) =>
-            prev ? { ...prev, x, y, timestamp: Date.now() } : null
+            prev ? { ...prev, x, y, timestamp: Date.now() } : null,
           );
           await positionOverlay(x, y); // Allow throttling for smooth movement
-        }
+        },
       );
 
       // Cursor highlight stop
@@ -155,7 +155,7 @@ const DesktopCursorOverlay = () => {
               await overlayWindowRef.current.hide();
             }
           }, 500);
-        }
+        },
       );
 
       // Click visualizations
@@ -185,14 +185,34 @@ const DesktopCursorOverlay = () => {
               await overlayWindowRef.current.hide();
             }
           }, 1000);
-        }
+        },
       );
 
       return () => {
-        unlistenStart();
-        unlistenMove();
-        unlistenStop();
-        unlistenClick();
+        try {
+          unlistenStart();
+        } catch (error) {
+          // Ignore cleanup errors - likely due to Tauri internals being unavailable
+          console.debug("Event listener cleanup failed:", error);
+        }
+        try {
+          unlistenMove();
+        } catch (error) {
+          // Ignore cleanup errors - likely due to Tauri internals being unavailable
+          console.debug("Event listener cleanup failed:", error);
+        }
+        try {
+          unlistenStop();
+        } catch (error) {
+          // Ignore cleanup errors - likely due to Tauri internals being unavailable
+          console.debug("Event listener cleanup failed:", error);
+        }
+        try {
+          unlistenClick();
+        } catch (error) {
+          // Ignore cleanup errors - likely due to Tauri internals being unavailable
+          console.debug("Event listener cleanup failed:", error);
+        }
       };
     };
 
@@ -206,7 +226,7 @@ const DesktopCursorOverlay = () => {
     const cleanupTimeout = setTimeout(() => {
       const now = Date.now();
       setClickVisualizations((prev) =>
-        prev.filter((click) => now - click.timestamp < 1500)
+        prev.filter((click) => now - click.timestamp < 1500),
       );
     }, 100);
 

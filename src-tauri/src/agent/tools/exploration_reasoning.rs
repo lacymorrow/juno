@@ -879,7 +879,7 @@ impl LayoutAnalyzer {
         let mut structure = AppStructureMapping::new();
 
         // Simple structure detection
-        for (state_id, state) in &graph.states {
+        for (_state_id, state) in &graph.states {
             for element in &state.interactive_elements {
                 match element.element_type.as_str() {
                     "button" => {

@@ -5,7 +5,8 @@
     "CLAUDE_FLOW_HOOKS_ENABLED": "true",
     "CLAUDE_FLOW_TELEMETRY_ENABLED": "true",
     "CLAUDE_FLOW_REMOTE_EXECUTION": "true",
-    "CLAUDE_FLOW_GITHUB_INTEGRATION": "true"
+    "CLAUDE_FLOW_GITHUB_INTEGRATION": "true",
+    "BASH_MAX_TIMEOUT_MS": "900000"
   },
   "permissions": {
     "allow": [
@@ -27,7 +28,10 @@
       "Bash(ls *)"
     ],
     "deny": [
+      "Bash(rm -rf .)",
+      "Bash(rm -rf ..)",
       "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
       "Bash(curl * | bash)",
       "Bash(wget * | sh)",
       "Bash(eval *)"
@@ -86,8 +90,5 @@
     ]
   },
   "includeCoAuthoredBy": true,
-  "enabledMcpjsonServers": [
-    "claude-flow",
-    "ruv-swarm"
-  ]
+  "enabledMcpjsonServers": ["claude-flow", "ruv-swarm"]
 }

@@ -4,7 +4,7 @@
 //! Provides commands for managing conversation sessions with persistence
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::agent::core::Message;
 use crate::agent::memory::StorageStats;

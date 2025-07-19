@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 
 type KeyPressInfo = {
   key: string;
@@ -51,7 +52,11 @@ const KeyPressOverlay = () => {
 
     return () => {
       // Cleanup listener when component unmounts or is disabled
-      unlisten.then((unlistenFn) => unlistenFn());
+      unlisten
+        .then((unlistenFn) => safeUnlisten(unlistenFn))
+        .catch((error) => {
+          console.debug("Key press overlay listener cleanup error (safe to ignore):", error);
+        });
     };
   }, [isEnabled]);
 

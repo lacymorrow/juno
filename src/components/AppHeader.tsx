@@ -1,3 +1,4 @@
+import React, { useCallback } from "react";
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator";
 import { Button } from "@/components/ui/button";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
@@ -24,7 +25,7 @@ interface AppHeaderProps {
   onToggleDevPanel: () => void;
 }
 
-export function AppHeader({
+export const AppHeader = React.memo(function AppHeader({
   serverStatus,
   isProcessing,
   currentView,
@@ -32,6 +33,10 @@ export function AppHeader({
   onViewChange,
   onToggleDevPanel,
 }: AppHeaderProps) {
+  // Memoize callbacks
+  const handleBackToChat = useCallback(() => {
+    onViewChange("chat");
+  }, [onViewChange]);
   return (
     <header className="flex items-center py-1 px-2 border-b min-h-[40px]">
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -89,7 +94,7 @@ export function AppHeader({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => onViewChange("chat")}
+            onClick={handleBackToChat}
             title="Back to Chat"
             className="h-7 w-7 p-0"
           >
@@ -115,4 +120,4 @@ export function AppHeader({
       </div>
     </header>
   );
-}
+});

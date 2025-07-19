@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { safeUnlistenAll } from "@/lib/tauri-event-utils";
 import { EVENTS, UI } from "@/lib/constants.generated";
 
 export interface VoiceState {
@@ -225,7 +226,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
     setupListeners().catch(console.error);
 
     return () => {
-      unlistenCallbacks.forEach((unlisten) => unlisten());
+      safeUnlistenAll(unlistenCallbacks);
     };
   }, []);
 

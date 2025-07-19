@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { Brain, Mic, Volume2, AlertCircle, Check, Loader2 } from "lucide-react";
 
@@ -237,8 +238,6 @@ const AIFloatingChatbot = () => {
     floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
   const defaultHeight =
     floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
-  const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
-  const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
   // === STANDARDIZED EVENT LISTENER ===
 
@@ -282,10 +281,8 @@ const AIFloatingChatbot = () => {
     setupListener();
 
     return () => {
-      if (unlisten) {
-        unlisten();
-        console.log("🔄 DynamicBar: Event listener cleaned up");
-      }
+      safeUnlisten(unlisten);
+      console.log("🔄 DynamicBar: Event listener cleaned up");
     };
   }, []);
 
@@ -325,7 +322,7 @@ const AIFloatingChatbot = () => {
   /**
    * Smart window sizing based on state and content
    */
-  const getWindowDimensions = (uiState: UIState, widget: WidgetData) => {
+  const getWindowDimensions = (uiState: UIState) => {
     // Base dimensions from config
     const base = { width: defaultWidth, height: defaultHeight };
 
@@ -387,8 +384,7 @@ const AIFloatingChatbot = () => {
       try {
         const appWindow = getCurrentWindow();
         const dimensions = getWindowDimensions(
-          barState.barState,
-          currentWidgetData
+          barState.barState
         );
 
         console.log(

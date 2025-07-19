@@ -5,10 +5,11 @@
 //!
 //! TARS Integration Phase 1.8: UI and State Management Refactor
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
+use tracing::{debug, error, info, warn};
 use async_trait::async_trait;
-use tauri::Emitter;
-use tracing::{error, info, debug, warn};
 use serde_json::json;
 
 use crate::agent::events::{EventHandler, JunoAgentEvent};

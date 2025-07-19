@@ -1,3 +1,4 @@
+import React, { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -8,8 +9,8 @@ import {
   Play,
   Square,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
+import { COMMANDS } from '../lib/constants.generated';
 interface AgentExecutionProgress {
   is_executing: boolean;
   execution_id: string | null;
@@ -25,7 +26,7 @@ interface AgentExecutionProgressIndicatorProps {
   showProgressBar?: boolean;
 }
 
-export function AgentExecutionProgressIndicator({
+export const AgentExecutionProgressIndicator = React.memo(function AgentExecutionProgressIndicator({
   className,
   compact = false,
   showProgressBar = true,
@@ -43,8 +44,7 @@ export function AgentExecutionProgressIndicator({
           setLoading(true);
         }
 
-        const result = await invoke<AgentExecutionProgress>(
-          "get_agent_execution_progress"
+        const result = await invoke<AgentExecutionProgress>(COMMANDS.CORE_GET_AGENT_EXECUTION_PROGRESS
         );
         setProgress(result);
         setError(null);
@@ -254,4 +254,4 @@ export function AgentExecutionProgressIndicator({
       )}
     </div>
   );
-}
+});

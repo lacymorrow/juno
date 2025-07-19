@@ -15,6 +15,7 @@ import { useEffect, useState, useCallback, FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import {
   Mic,
   Sparkles,
@@ -133,7 +134,7 @@ export function FloatingBar() {
   // === WINDOW CONFIGURATION ===
 
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === "floating-bar",
   );
 
   const defaultWidth =
@@ -170,19 +171,19 @@ export function FloatingBar() {
         // Set up the standard backend event listener
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
-          (event) => handleStateUpdate(event.payload)
+          (event) => handleStateUpdate(event.payload),
         );
 
         // Also listen for component-specific events from event forwarding
         document.addEventListener(`${COMPONENT_ID}-state-update`, ((
-          e: CustomEvent
+          e: CustomEvent,
         ) => handleStateUpdate(e.detail)) as EventListener);
 
         console.log("✅ FloatingBar: Event listeners established");
       } catch (error) {
         console.error(
           "❌ FloatingBar: Failed to setup event listeners:",
-          error
+          error,
         );
       }
     };
@@ -190,12 +191,10 @@ export function FloatingBar() {
     setupListener();
 
     return () => {
-      // Clean up both listeners
-      if (unlisten) {
-        unlisten();
-      }
+      // Clean up both listeners safely
+      safeUnlisten(unlisten);
       document.removeEventListener(`${COMPONENT_ID}-state-update`, ((
-        e: CustomEvent
+        e: CustomEvent,
       ) => handleStateUpdate(e.detail)) as EventListener);
       console.log("🔄 FloatingBar: Event listeners cleaned up");
     };
@@ -222,7 +221,7 @@ export function FloatingBar() {
         const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
         console.log(
-          `🔧 FloatingBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
+          `🔧 FloatingBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`,
         );
 
         await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
@@ -242,7 +241,7 @@ export function FloatingBar() {
    */
   const createInteraction = (
     interactionType: string,
-    data?: Record<string, any>
+    data?: Record<string, any>,
   ): UIInteractionEvent => ({
     element_id: COMPONENT_ID,
     interaction_type: interactionType,
@@ -312,7 +311,7 @@ export function FloatingBar() {
         console.log("⚠️ FloatingBar: Empty submission ignored");
       }
     },
-    [localInputValue]
+    [localInputValue],
   );
 
   /**
@@ -379,7 +378,7 @@ export function FloatingBar() {
       "transition-all duration-300 ease-in-out",
       "bg-black/90 backdrop-blur-md",
       sizeStyles,
-      clickable
+      clickable,
     );
   };
 
@@ -441,7 +440,7 @@ export function FloatingBar() {
             key={i}
             className={cn(
               "w-0.5 h-2 rounded-full transition-all duration-100",
-              i < barCount ? "bg-blue-400" : "bg-white/20"
+              i < barCount ? "bg-blue-400" : "bg-white/20",
             )}
           />
         ))}
@@ -461,7 +460,7 @@ export function FloatingBar() {
         }}
         onClick={
           [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-            currentUiState as any
+            currentUiState as any,
           )
             ? handleClick
             : undefined
@@ -520,7 +519,7 @@ export function FloatingBar() {
               "transition-opacity duration-300 ease-in-out",
               currentUiState === UI.BAR_STATES_INPUT
                 ? "opacity-100"
-                : "opacity-0"
+                : "opacity-0",
             )}
             data-tauri-drag-region
           >

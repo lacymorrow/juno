@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, error, info, warn};
 
+pub mod atomic_state;
 pub mod desktop_wrapper;
 pub mod event_driven_state;
 use crate::commands::shell::ShellSessions;

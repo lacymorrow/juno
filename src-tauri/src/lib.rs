@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers as ShortcutModifiers, Shortcut}; // Global shortcuts
 use tracing::{error, info, warn};
@@ -28,10 +27,12 @@ pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod error; // Structured error types
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod integration;
 pub mod menu; // Menu management for app and tray menus
+pub mod monitor; // Event-driven monitoring infrastructure
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod settings; // Centralized settings management with reactive updates
 pub mod startup; // Application startup, initialization, and bootstrapping
@@ -46,16 +47,13 @@ pub mod window_management; // Window operations, state management, and positioni
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes
+#[cfg(test)]
+pub mod test_sequence_compilation; // Test sequence compilation
 
 // Tray icon data is now handled by the menu::tray_menu module
 
 /// Parse a shortcut string into a Shortcut object
 /// Examples: "Alt+D" -> Shortcut, "Option+Space" -> Shortcut, "F1" -> Shortcut, "Ctrl+Shift+F12" -> Shortcut
-/// Get the Tauri context - centralized to avoid duplicate symbol errors
-pub fn get_tauri_context() -> tauri::Context<tauri::Wry> {
-    tauri::generate_context!()
-}
-
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {
@@ -392,7 +390,7 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(context: tauri::Context<tauri::Wry>) {
     // --- Execute Startup Sequence ---
     let (_desktop_arc, app_state) = match startup::StartupSequence::run() {
         Ok((_desktop_arc, app_state)) => (_desktop_arc, app_state),
@@ -815,6 +813,7 @@ pub fn run() {
             set_agent_execution_progress,
             set_debug_mode,
             get_debug_mode,
+            log_frontend_error,
             // Tray Icon Commands
             commands::tray_commands::set_tray_icon_default,
             commands::tray_commands::set_tray_icon_agent_active,
@@ -948,7 +947,7 @@ pub fn run() {
         });
 
     // Enhanced error handling to prevent crashes due to permission issues
-    match builder.run(get_tauri_context()) {
+    match builder.run(context) {
         Ok(()) => {
             info!("Tauri application exited successfully");
         }

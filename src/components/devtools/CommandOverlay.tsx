@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle, XCircle, Loader } from "lucide-react";
 import { EVENTS } from "@/lib/constants.generated";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 
 type CommandStatus = "executing" | "completed" | "failed";
 
@@ -53,8 +54,16 @@ export const CommandOverlay = () => {
     );
 
     return () => {
-      unlistenStart.then((f) => f());
-      unlistenEnd.then((f) => f());
+      unlistenStart
+        .then((f) => safeUnlisten(f))
+        .catch((error) => {
+          console.debug("Devtools command start listener cleanup error (safe to ignore):", error);
+        });
+      unlistenEnd
+        .then((f) => safeUnlisten(f))
+        .catch((error) => {
+          console.debug("Devtools command end listener cleanup error (safe to ignore):", error);
+        });
     };
   }, []);
 

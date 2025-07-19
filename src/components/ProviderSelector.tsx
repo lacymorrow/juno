@@ -1,3 +1,4 @@
+import React, { useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -14,7 +15,7 @@ interface ProviderSelectorProps {
   className?: string;
 }
 
-export function ProviderSelector({
+export const ProviderSelector = React.memo(function ProviderSelector({
   variant = "compact",
   className = "",
 }: ProviderSelectorProps) {
@@ -24,7 +25,7 @@ export function ProviderSelector({
     (p) => p.id === settings.activeProvider
   );
 
-  const handleProviderChange = async (providerId: string) => {
+  const handleProviderChange = useCallback(async (providerId: string) => {
     console.log(
       `Changing provider from ${settings.activeProvider} to ${providerId}`
     );
@@ -34,7 +35,7 @@ export function ProviderSelector({
     } catch (error) {
       console.error("Failed to change provider:", error);
     }
-  };
+  }, [settings.activeProvider, settings.handleActiveProviderChange]);
 
   if (settings.isLoading) {
     return (
@@ -146,4 +147,4 @@ export function ProviderSelector({
       )}
     </div>
   );
-}
+});

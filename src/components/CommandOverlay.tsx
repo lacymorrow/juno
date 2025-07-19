@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { EVENTS } from "@/lib/constants.generated";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 
 interface CommandInfo {
   id: number;
@@ -47,7 +48,7 @@ export default function CommandOverlay() {
         setTimeout(() => {
           setIsVisible(false);
         }, 5000);
-      }
+      },
     );
 
     // Listen for command execution end
@@ -93,12 +94,20 @@ export default function CommandOverlay() {
         setTimeout(() => {
           setIsVisible(false);
         }, 5000);
-      }
+      },
     );
 
     return () => {
-      unlistenStart.then((f) => f());
-      unlistenEnd.then((f) => f());
+      unlistenStart
+        .then((f) => safeUnlisten(f))
+        .catch((error) => {
+          console.debug("Command overlay start listener cleanup error (safe to ignore):", error);
+        });
+      unlistenEnd
+        .then((f) => safeUnlisten(f))
+        .catch((error) => {
+          console.debug("Command overlay end listener cleanup error (safe to ignore):", error);
+        });
     };
   }, []);
 

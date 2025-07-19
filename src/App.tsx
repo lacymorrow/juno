@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/AppHeader";
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { ModalSystem } from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { AsyncErrorBoundary, FeatureErrorBoundary } from "@/components/AsyncErrorBoundary";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -19,6 +20,7 @@ import CommandOverlay from "@/components/CommandOverlay";
 import KeyPressOverlay from "@/components/KeyPressOverlay";
 import ToolApprovalModal from "@/components/ToolApprovalModal";
 
+import { COMMANDS } from './lib/constants.generated';
 // Custom hooks
 import { useAppState } from "@/hooks/useAppState";
 import { useConversation } from "@/hooks/useConversation";
@@ -58,7 +60,7 @@ function App() {
 
       // IMMEDIATE FEEDBACK: Notify floating bar immediately
       try {
-        await invoke("notify_query_submitted", { query: trimmedQuery });
+        await invoke(COMMANDS.AGENT_NOTIFY_QUERY_SUBMITTED, { query: trimmedQuery });
       } catch (error) {
         console.warn(
           "Failed to notify floating bar of query submission:",
@@ -70,7 +72,7 @@ function App() {
       conversation.setQuery("");
 
       try {
-        await invoke("submit_query", { query: trimmedQuery });
+        await invoke(COMMANDS.AGENT_SUBMIT_QUERY, { query: trimmedQuery });
         console.log("✅ Query submitted successfully");
       } catch (error) {
         console.error("❌ Failed to submit query:", error);
@@ -98,7 +100,7 @@ function App() {
 
       try {
         await audioPlayback.stopAllAudio();
-        await invoke("stop_all_operations");
+        await invoke(COMMANDS.CORE_STOP_ALL_OPERATIONS);
         console.log("✅ All operations stopped successfully");
         conversation.addSystemMessage("🛑 All operations stopped by user");
       } catch (error) {
@@ -116,10 +118,10 @@ function App() {
     appState.setIsCheckingUpdate(true);
     try {
       console.log("🔍 Checking for updates...");
-      const updateAvailable: boolean = await invoke("check_for_updates");
+      const updateAvailable: boolean = await invoke(COMMANDS.UTILS_CHECK_FOR_UPDATES);
 
       if (updateAvailable) {
-        const latestVersion: string = await invoke("get_latest_version");
+        const latestVersion: string = await invoke(COMMANDS.UTILS_GET_LATEST_VERSION);
         appState.setUpdateInfo({
           available: true,
           version: latestVersion,
@@ -173,7 +175,7 @@ function App() {
         appState.setAppVersion(version);
 
         // Load keyboard shortcuts
-        const shortcuts = (await invoke("get_keyboard_shortcuts")) as {
+        const shortcuts = (await invoke(COMMANDS.UTILS_GET_KEYBOARD_SHORTCUTS)) as {
           agent_mode_toggle: string;
           dictation_input: string;
           stop_current_task: string;
@@ -228,7 +230,7 @@ function App() {
       setTimeout(async () => {
         // IMMEDIATE FEEDBACK: Notify floating bar immediately
         try {
-          await invoke("notify_query_submitted", { query: trimmedPrompt });
+          await invoke(COMMANDS.AGENT_NOTIFY_QUERY_SUBMITTED, { query: trimmedPrompt });
         } catch (error) {
           console.warn(
             "Failed to notify floating bar of query submission:",
@@ -240,7 +242,7 @@ function App() {
         conversation.setQuery("");
 
         try {
-          await invoke("submit_query", { query: trimmedPrompt });
+          await invoke(COMMANDS.AGENT_SUBMIT_QUERY, { query: trimmedPrompt });
           console.log("✅ Example prompt submitted successfully");
         } catch (error) {
           console.error("❌ Failed to submit example prompt:", error);
@@ -286,18 +288,29 @@ function App() {
     [conversation.handleSaveResponse, appState.setSavingMessageId]
   );
 
-  // Render main UI
+  // Render main UI with error boundary
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Header - Fixed to include required props for model/agent selection */}
-      <AppHeader
-        currentView={appState.currentView}
-        onViewChange={appState.setCurrentView}
-        onToggleDevPanel={appState.toggleDevPanel}
-        serverStatus={appState.serverStatus}
-        isProcessing={appState.isProcessing}
-        isDevPanelOpen={appState.isDevPanelOpen}
-      />
+    <AsyncErrorBoundary
+      onError={(error) => {
+        console.error('App error:', error);
+        toast.error('An unexpected error occurred. Please refresh the app.');
+        // Could also send error to backend for logging
+        invoke(COMMANDS.CORE_LOG_FRONTEND_ERROR, { 
+          error: error.toString(),
+          stack: error.stack 
+        }).catch(console.error);
+      }}
+    >
+      <div className="flex flex-col h-screen bg-background overflow-hidden">
+        {/* Header - Fixed to include required props for model/agent selection */}
+        <AppHeader
+          currentView={appState.currentView}
+          onViewChange={appState.setCurrentView}
+          onToggleDevPanel={appState.toggleDevPanel}
+          serverStatus={appState.serverStatus}
+          isProcessing={appState.isProcessing}
+          isDevPanelOpen={appState.isDevPanelOpen}
+        />
 
       {/* Main Content */}
       <div className="flex-1 min-h-0">
@@ -309,28 +322,32 @@ function App() {
               <div className="flex-1 min-h-0 p-4">
                 {appState.currentView === "chat" && (
                   <div className="flex flex-col h-full space-y-2">
-                    <ChatContainer
-                      conversation={conversation.conversation}
-                      copyingMessageId={appState.copyingMessageId}
-                      savingMessageId={appState.savingMessageId}
-                      userHasScrolledUp={appState.userHasScrolledUp}
-                      lastScrollTime={appState.lastScrollTime}
-                      setUserHasScrolledUp={appState.setUserHasScrolledUp}
-                      setLastScrollTime={appState.setLastScrollTime}
-                      onCopyResponse={handleCopyResponse}
-                      onSaveResponse={handleSaveResponse}
-                      onExamplePromptSelect={handleExamplePromptSelect}
-                    />
+                    <FeatureErrorBoundary featureName="Chat">
+                      <ChatContainer
+                        conversation={conversation.conversation}
+                        copyingMessageId={appState.copyingMessageId}
+                        savingMessageId={appState.savingMessageId}
+                        userHasScrolledUp={appState.userHasScrolledUp}
+                        lastScrollTime={appState.lastScrollTime}
+                        setUserHasScrolledUp={appState.setUserHasScrolledUp}
+                        setLastScrollTime={appState.setLastScrollTime}
+                        onCopyResponse={handleCopyResponse}
+                        onSaveResponse={handleSaveResponse}
+                        onExamplePromptSelect={handleExamplePromptSelect}
+                      />
+                    </FeatureErrorBoundary>
 
-                    <ChatInput
-                      query={conversation.query}
-                      isProcessing={appState.isProcessing}
-                      canSubmit={appState.canSubmit}
-                      onQueryChange={conversation.setQuery}
-                      onSubmit={handleSubmit}
-                      onStop={handleStop}
-                      onNewChat={conversation.startNewChat}
-                    />
+                    <FeatureErrorBoundary featureName="Chat Input">
+                      <ChatInput
+                        query={conversation.query}
+                        isProcessing={appState.isProcessing}
+                        canSubmit={appState.canSubmit}
+                        onQueryChange={conversation.setQuery}
+                        onSubmit={handleSubmit}
+                        onStop={handleStop}
+                        onNewChat={conversation.startNewChat}
+                      />
+                    </FeatureErrorBoundary>
                   </div>
                 )}
 
@@ -372,6 +389,7 @@ function App() {
         onAddSystemMessage={conversation.addSystemMessage}
       />
     </div>
+    </AsyncErrorBoundary>
   );
 }
 

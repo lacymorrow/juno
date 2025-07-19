@@ -1,13 +1,11 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import {
-  Mic,
-  Volume2,
   AlertCircle,
   CheckCircle,
   Send,
@@ -16,13 +14,7 @@ import {
   Video,
   ImageIcon,
   FileText,
-  ChevronDown,
-  ChevronUp,
   Copy,
-  Brain,
-  Loader2,
-  Check,
-  Type,
 } from "lucide-react";
 import Marquee from "react-fast-marquee";
 import AudioVisualizer, { type AppState } from "./audio-visualizer";
@@ -310,9 +302,7 @@ export function VoiceAIBarBase({
     setupListener();
 
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      safeUnlisten(unlisten);
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current);
       }
@@ -410,47 +400,6 @@ export function VoiceAIBarBase({
   //   UI.BAR_STATES_AGENT_RESPONDING,
   // ].includes(barState.barState as any);
 
-  // Render method mappings for assistant state
-  const getAssistantStateDisplay = () => {
-    const stateMapping: Record<string, string> = {
-      idle: "idle",
-      listening: "listening",
-      transcribing: "transcribing",
-      processing: "processing",
-      responding: "responding",
-      speaking: "speaking",
-      error: "error",
-      success: "success",
-      dictating: "dictating",
-      dictation_ready: "dictation_ready",
-      input: "input",
-      always_listening: "always_listening",
-    };
-
-    // Map from barState to a visual assistant state
-    const barStateToAssistantState: Record<UIState, string> = {
-      [UI.BAR_STATES_DEFAULT]: "idle",
-      [UI.BAR_STATES_EXPANDING]: "idle",
-      [UI.BAR_STATES_INPUT]: "input",
-      [UI.BAR_STATES_SHRINKING]: "idle",
-      [UI.BAR_STATES_SUBMITTING]: "processing",
-      [UI.BAR_STATES_LOADING]: "processing",
-      [UI.BAR_STATES_FINISHING]: "processing",
-      [UI.BAR_STATES_SUCCESS]: "success",
-      [UI.BAR_STATES_LISTENING]: "listening",
-      [UI.BAR_STATES_ERROR]: "error",
-      [UI.BAR_STATES_TRANSCRIBING]: "transcribing",
-      [UI.BAR_STATES_SPEAKING]: "speaking",
-      [UI.BAR_STATES_DICTATING]: "dictating",
-      [UI.BAR_STATES_DICTATION_READY]: "dictation_ready",
-      [UI.BAR_STATES_ALWAYS_LISTENING]: "always_listening",
-      [UI.BAR_STATES_AGENT_RESPONDING]: "responding",
-    };
-
-    const assistantState =
-      barStateToAssistantState[barState.barState as UIState] || "idle";
-    return stateMapping[assistantState] || "idle";
-  };
 
   // Hover handlers for idle state
   const handleIdleHover = (hovering: boolean) => {

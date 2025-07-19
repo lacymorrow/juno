@@ -77,6 +77,15 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
             let payload_str = event.payload();
             match serde_json::from_str::<serde_json::Value>(payload_str) {
                 Ok(payload_json) => {
+                    // Extract source element ID if present
+                    let source_element_id = payload_json.get("source_element_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    
+                    if let Some(source_id) = &source_element_id {
+                        info!("[Agent Mode] Query originated from element: {}", source_id);
+                    }
+                    
                     if let Some(query_value) = payload_json.get("query") {
                         if let Some(query_text) = query_value.as_str() {
                             let trimmed_query = query_text.trim();
@@ -89,7 +98,8 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                     "timestamp": std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()
-                                        .as_millis() as u64
+                                        .as_millis() as u64,
+                                    "source_element_id": source_element_id
                                 });
                                 if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
                                     error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);

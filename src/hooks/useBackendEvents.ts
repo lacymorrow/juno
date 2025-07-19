@@ -3,7 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
+import { safeUnlistenAll } from "@/lib/tauri-event-utils";
 
+import { EVENTS, COMMANDS } from '../lib/constants.generated';
 // Simple type for event payloads - keep it minimal
 type BackendEventPayload = {
   // Common fields
@@ -49,8 +51,9 @@ export const useBackendEvents = ({
   setIsProcessing,
 }: UseBackendEventsProps) => {
   const hasCheckedServer = useRef(false);
-  // Simple map for streaming messages - React is single-threaded
+  // Thread-safe streaming message storage with proper synchronization
   const streamingMessages = useRef<Map<string, string>>(new Map());
+  const streamingLock = useRef<Map<string, boolean>>(new Map());
 
   // Consolidated event handler
   const handleBackendEvent = useCallback(async (
@@ -73,61 +76,86 @@ export const useBackendEvents = ({
           setIsProcessing(false);
           break;
 
-        case "agent-stop":
+        case EVENTS.AGENT_STOP:
           console.log("Agent stop event:", payload.stopType);
           await stopCurrentAudio();
           await stopTTS((msg) => console.log(`[TTS] ${msg}`));
           setIsProcessing(false);
           break;
 
-        case "tts-stop-requested":
+        case EVENTS.TTS_STOP_REQUESTED:
           console.log("Stopping TTS...");
           await stopCurrentAudio();
           await stopTTS((msg) => console.log(`[TTS] ${msg}`));
           break;
 
         // Audio events
-        case "tts-audio-ready":
+        case EVENTS.TTS_AUDIO_READY:
           if (payload.audio_base64) {
             await playAudioFromBase64(payload.audio_base64);
           }
           break;
 
         // Streaming events - real-time streaming implementation
-        case "agent-stream-start":
+        case EVENTS.STREAMING_STREAM_START:
           console.log("Stream started:", payload.message_id);
           if (payload.message_id) {
+            // Ensure atomic initialization
+            streamingLock.current.set(payload.message_id, true);
             streamingMessages.current.set(payload.message_id, "");
             addOrUpdateStreamingMessage(payload.message_id, "", false);
+            streamingLock.current.set(payload.message_id, false);
           }
           break;
 
-        case "agent-text-stream":
+        case EVENTS.STREAMING_TEXT_STREAM:
           if (payload.message_id && payload.chunk) {
-            const existing = streamingMessages.current.get(payload.message_id) || "";
-            const newText = existing + payload.chunk;
-            streamingMessages.current.set(payload.message_id, newText);
-            addOrUpdateStreamingMessage(payload.message_id, newText, false);
+            // Wait if another operation is in progress
+            while (streamingLock.current.get(payload.message_id)) {
+              // Yield to prevent blocking
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
+            
+            streamingLock.current.set(payload.message_id, true);
+            try {
+              const existing = streamingMessages.current.get(payload.message_id) || "";
+              const newText = existing + payload.chunk;
+              streamingMessages.current.set(payload.message_id, newText);
+              addOrUpdateStreamingMessage(payload.message_id, newText, false);
+            } finally {
+              streamingLock.current.set(payload.message_id, false);
+            }
           }
           break;
 
-        case "agent-stream-end":
+        case EVENTS.STREAMING_STREAM_END:
           if (payload.message_id) {
-            const finalText = payload.complete_text || streamingMessages.current.get(payload.message_id) || "";
-            if (finalText) {
-              addOrUpdateStreamingMessage(payload.message_id, finalText, true);
+            // Wait for any pending operations
+            while (streamingLock.current.get(payload.message_id)) {
+              await new Promise(resolve => setTimeout(resolve, 0));
             }
-            streamingMessages.current.delete(payload.message_id);
             
-            const agentState = payload.agent_state;
-            console.log(`[Event] agent-stream-end with state: ${agentState}`);
-            
-            // Handle all completion states (including "Offline" for network errors)
-            if (agentState === "Finished" || agentState === "Failed" || agentState === "Cancelled" || agentState === "Offline") {
-              console.log(`[Event] Setting isProcessing to false due to agent state: ${agentState}`);
-              setIsProcessing(false);
-            } else {
-              console.log(`[Event] Keeping isProcessing true - unexpected agent state: ${agentState}`);
+            streamingLock.current.set(payload.message_id, true);
+            try {
+              const finalText = payload.complete_text || streamingMessages.current.get(payload.message_id) || "";
+              if (finalText) {
+                addOrUpdateStreamingMessage(payload.message_id, finalText, true);
+              }
+              streamingMessages.current.delete(payload.message_id);
+              streamingLock.current.delete(payload.message_id);
+              
+              const agentState = payload.agent_state;
+              console.log(`[Event] agent-stream-end with state: ${agentState}`);
+              
+              // Handle all completion states (including "Offline" for network errors)
+              if (agentState === "Finished" || agentState === "Failed" || agentState === "Cancelled" || agentState === "Offline") {
+                console.log(`[Event] Setting isProcessing to false due to agent state: ${agentState}`);
+                setIsProcessing(false);
+              } else {
+                console.log(`[Event] Keeping isProcessing true - unexpected agent state: ${agentState}`);
+              }
+            } finally {
+              streamingLock.current.delete(payload.message_id);
             }
           }
           break;
@@ -141,7 +169,7 @@ export const useBackendEvents = ({
           break;
 
         // User messages
-        case "user-message-submitted":
+        case EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED:
           if (payload.content) {
             // User messages are handled elsewhere, just log for now
             console.log("User message submitted:", payload.content);
@@ -149,7 +177,7 @@ export const useBackendEvents = ({
           break;
 
         // Agent events (generic)
-        case "agent-event":
+        case EVENTS.AGENT_EVENT:
           console.log("Agent event received:", payload);
           // These might contain thinking, tool calls, etc.
           if (payload.type === "thinking" && payload.payload?.content) {
@@ -159,7 +187,7 @@ export const useBackendEvents = ({
           break;
 
         // Tool usage events
-        case "tool-usage":
+        case EVENTS.TOOLS_USAGE:
           console.log("Tool usage event:", payload);
           // Could show tool execution feedback
           if (payload.tool_name && payload.success !== undefined) {
@@ -179,13 +207,13 @@ export const useBackendEvents = ({
   // Single useEffect for all backend events - clean and simple
   useEffect(() => {
     const eventSubscriptions: Array<() => void> = [];
-    
+
     const setupEventListeners = async () => {
       // Check server status once
       if (!hasCheckedServer.current) {
         hasCheckedServer.current = true;
         try {
-          await invoke("check_server_status");
+          await invoke(COMMANDS.UTILS_CHECK_SERVER_STATUS);
         } catch (error) {
           console.warn("Server status check failed:", error);
         }
@@ -221,16 +249,14 @@ export const useBackendEvents = ({
 
     setupEventListeners();
 
-    // Cleanup all subscriptions
+    // Cleanup all subscriptions safely
     return () => {
-      eventSubscriptions.forEach(unlisten => {
-        try {
-          unlisten();
-        } catch (error) {
-          console.error("Error cleaning up event listener:", error);
-        }
-      });
+      safeUnlistenAll(eventSubscriptions);
       eventSubscriptions.length = 0;
+      
+      // Clean up any remaining locks
+      streamingLock.current.clear();
+      streamingMessages.current.clear();
     };
   }, [handleBackendEvent]);
 

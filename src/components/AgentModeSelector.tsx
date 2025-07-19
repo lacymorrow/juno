@@ -1,3 +1,4 @@
+import React, { useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSettings } from "@/hooks/useSettings";
@@ -29,7 +30,7 @@ const AGENT_MODES = [
   },
 ];
 
-export function AgentModeSelector({
+export const AgentModeSelector = React.memo(function AgentModeSelector({
   variant = "compact",
   className = "",
 }: AgentModeSelectorProps) {
@@ -39,7 +40,7 @@ export function AgentModeSelector({
     (mode) => mode.id === settings.agentMode
   );
 
-  const handleToggle = async () => {
+  const handleToggle = useCallback(async () => {
     const newMode = settings.agentMode === "single" ? "multi" : "single";
     try {
       await settings.handleAgentModeChange(newMode);
@@ -47,7 +48,7 @@ export function AgentModeSelector({
       console.error("Failed to change agent mode:", error);
       // The error handling is already done in the hook, but we can add additional UI feedback here if needed
     }
-  };
+  }, [settings.agentMode, settings.handleAgentModeChange]);
 
   if (settings.isLoading) {
     return (
@@ -106,4 +107,4 @@ export function AgentModeSelector({
       )}
     </div>
   );
-}
+});

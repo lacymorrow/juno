@@ -12,11 +12,12 @@ use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
-use crate::{state, cli, agent, commands};
-use crate::agent::providers::factory::BrainFactory;
-// Remove unused import: use crate::constants::timeouts;
-use crate::state::AppState;
-use crate::cli::headless::HeadlessRuntime;
+use crate::settings::manager::SettingsManager;
+use crate::state;
+use crate::utils::{self as utils};
+use crate::agent;
+use crate::cli;
+use crate::commands;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -354,7 +355,7 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
                 info!("Headless Tauri app setup completed");
                 Ok(())
             })
-            .build(crate::get_tauri_context());
+            .build(tauri::generate_context!());
 
         // Send the result only after build completes (fixes race condition)
         let send_result = match result {

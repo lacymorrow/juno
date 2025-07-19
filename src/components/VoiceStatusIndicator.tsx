@@ -1,3 +1,4 @@
+import React, { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { AlertCircle, Brain, Mic, MicOff, Type, Volume2 } from "lucide-react";
 import { useVoiceState } from "@/contexts/VoiceContext";
@@ -9,15 +10,15 @@ interface VoiceStatusIndicatorProps {
   variant?: "compact" | "detailed";
 }
 
-export function VoiceStatusIndicator({
+export const VoiceStatusIndicator = React.memo(function VoiceStatusIndicator({
   className,
   showText = true,
   variant = "detailed",
 }: VoiceStatusIndicatorProps) {
   const voiceState = useVoiceState();
 
-  // Get the appropriate icon based on current state
-  const getIcon = () => {
+  // Get the appropriate icon based on current state - memoized
+  const icon = useMemo(() => {
     if (voiceState.error) {
       return <AlertCircle className="h-4 w-4 text-red-500" />;
     }
@@ -38,10 +39,10 @@ export function VoiceStatusIndicator({
       default:
         return <Mic className="h-4 w-4 text-green-500" />;
     }
-  };
+  }, [voiceState.error, voiceState.isSpeaking, voiceState.isListening, voiceState.isTranscribing, voiceState.mode]);
 
-  // Get status text
-  const getStatusText = () => {
+  // Get status text - memoized
+  const statusText = useMemo(() => {
     if (voiceState.error) {
       return "Voice Error";
     }
@@ -63,10 +64,10 @@ export function VoiceStatusIndicator({
     }
 
     return "Voice Ready";
-  };
+  }, [voiceState.error, voiceState.isSpeaking, voiceState.isTranscribing, voiceState.isListening, voiceState.mode]);
 
-  // Get color classes based on state
-  const getColorClasses = () => {
+  // Get color classes based on state - memoized
+  const colorClasses = useMemo(() => {
     if (voiceState.error) {
       return "text-red-500 border-red-200 bg-red-50";
     }
@@ -87,10 +88,10 @@ export function VoiceStatusIndicator({
       default:
         return "text-muted-foreground border-muted bg-muted/20";
     }
-  };
+  }, [voiceState.error, voiceState.isSpeaking, voiceState.mode, voiceState.isListening, voiceState.isTranscribing]);
 
   // Audio level visualization
-  const AudioLevelBar = () => {
+  const audioLevelBar = useMemo(() => {
     if (!voiceState.isListening || voiceState.mode === UI.VOICE_MODES_IDLE)
       return null;
 
@@ -109,18 +110,18 @@ export function VoiceStatusIndicator({
         ))}
       </div>
     );
-  };
+  }, [voiceState.isListening, voiceState.mode, voiceState.audioLevel]);
 
   if (variant === "compact") {
     return (
       <div className={cn("flex items-center gap-2", className)}>
-        <div className={cn("relative", getColorClasses())}>
-          {getIcon()}
+        <div className={cn("relative", colorClasses)}>
+          {icon}
           {(voiceState.isListening || voiceState.isTranscribing) && (
             <div className="absolute -top-1 -right-1 w-2 h-2 bg-current rounded-full animate-pulse" />
           )}
         </div>
-        <AudioLevelBar />
+        {audioLevelBar}
       </div>
     );
   }
@@ -129,12 +130,12 @@ export function VoiceStatusIndicator({
     <div
       className={cn(
         "flex items-center gap-3 p-3 rounded-lg border",
-        getColorClasses(),
+        colorClasses,
         className
       )}
     >
       <div className="relative">
-        {getIcon()}
+        {icon}
         {(voiceState.isListening || voiceState.isTranscribing) && (
           <div className="absolute -top-1 -right-1 w-2 h-2 bg-current rounded-full animate-pulse" />
         )}
@@ -142,7 +143,7 @@ export function VoiceStatusIndicator({
 
       <div className="flex-1 min-w-0">
         {showText && (
-          <div className="font-medium text-sm">{getStatusText()}</div>
+          <div className="font-medium text-sm">{statusText}</div>
         )}
 
         {voiceState.transcriptionText && (
@@ -156,7 +157,7 @@ export function VoiceStatusIndicator({
         )}
       </div>
 
-      <AudioLevelBar />
+      {audioLevelBar}
 
       {/* Mode indicator badge */}
       {voiceState.mode !== UI.VOICE_MODES_IDLE && (
@@ -175,4 +176,4 @@ export function VoiceStatusIndicator({
       )}
     </div>
   );
-}
+});

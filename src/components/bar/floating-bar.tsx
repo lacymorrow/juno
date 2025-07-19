@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, type FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import {
   Mic,
@@ -270,10 +271,8 @@ const FloatingBarContent = () => {
     setupListener();
 
     return () => {
-      if (unlisten) {
-        unlisten();
-        console.log("🔄 FloatingBar: Event listener cleaned up");
-      }
+      safeUnlisten(unlisten);
+      console.log("🔄 FloatingBar: Event listener cleaned up");
     };
   }, []);
 

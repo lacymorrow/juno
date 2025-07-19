@@ -19,7 +19,7 @@ import {
   XCircle,
   WifiOff,
 } from "lucide-react";
-import { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { UI } from "@/lib/constants.generated";
 import { ThinkingMessage } from "./ThinkingMessage";
 
@@ -63,13 +63,17 @@ interface ChatMessageProps {
   ) => void;
 }
 
-// Component for displaying TTS content decoratively
-function TTSContentDisplay({
+// Component for displaying TTS content decoratively - memoized
+const TTSContentDisplay = React.memo(function TTSContentDisplay({
   ttsMetadata,
 }: {
   ttsMetadata: ChatMessage["tts_metadata"];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  
+  const toggleExpanded = useCallback(() => {
+    setIsExpanded(prev => !prev);
+  }, []);
 
   if (!ttsMetadata?.has_spoken_content || !ttsMetadata.tts_parts.length) {
     return null;
@@ -78,7 +82,7 @@ function TTSContentDisplay({
   return (
     <div className="mb-2 pb-2 border-b border-border/30">
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={toggleExpanded}
         className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group"
       >
         {isExpanded ? (
@@ -132,9 +136,9 @@ function TTSContentDisplay({
       )}
     </div>
   );
-}
+});
 
-export function ChatMessageComponent({
+export const ChatMessageComponent = React.memo(function ChatMessageComponent({
   msg,
   index,
   copyingMessageId,
@@ -142,6 +146,18 @@ export function ChatMessageComponent({
   onCopyResponse,
   onSaveResponse,
 }: ChatMessageProps) {
+  // Memoize callbacks to prevent unnecessary re-renders
+  const handleCopy = useCallback(() => {
+    onCopyResponse(msg.content, index);
+  }, [msg.content, index, onCopyResponse]);
+  
+  const handleSaveHtml = useCallback(() => {
+    onSaveResponse(msg.content, "html", index);
+  }, [msg.content, index, onSaveResponse]);
+  
+  const handleSaveMarkdown = useCallback(() => {
+    onSaveResponse(msg.content, "markdown", index);
+  }, [msg.content, index, onSaveResponse]);
   // Handle special message types with existing components
   if (msg.role === "thinking") {
     return (
@@ -278,7 +294,7 @@ export function ChatMessageComponent({
                       ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
                       : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
                   )}
-                  onClick={() => onCopyResponse(msg.content, index)}
+                  onClick={handleCopy}
                   disabled={copyingMessageId === `copy-${index}`}
                   title={
                     copyingMessageId === `copy-${index}`
@@ -301,7 +317,7 @@ export function ChatMessageComponent({
                       ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
                       : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
                   )}
-                  onClick={() => onSaveResponse(msg.content, "html", index)}
+                  onClick={handleSaveHtml}
                   disabled={savingMessageId === `save-html-${index}`}
                   title={
                     savingMessageId === `save-html-${index}`
@@ -324,7 +340,7 @@ export function ChatMessageComponent({
                       ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
                       : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
                   )}
-                  onClick={() => onSaveResponse(msg.content, "markdown", index)}
+                  onClick={handleSaveMarkdown}
                   disabled={savingMessageId === `save-markdown-${index}`}
                   title={
                     savingMessageId === `save-markdown-${index}`
@@ -345,4 +361,4 @@ export function ChatMessageComponent({
       <AIMessageAvatar src={avatarSrc} name={avatarName} />
     </AIMessage>
   );
-}
+});

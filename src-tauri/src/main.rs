@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // Ensure the library name matches the `name` field in `[lib]` section of Cargo.toml
-    juno_lib::run();
+    // Generate the Tauri context in the main binary crate
+    let context = tauri::generate_context!();
+    
+    // Pass the context to the library run function
+    juno_lib::run(context);
 }

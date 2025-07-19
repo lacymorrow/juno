@@ -907,8 +907,8 @@ impl BrainFactory {
 
         for tool_def in tool_definitions {
             let tool_name = tool_def.name.clone();
-            let description = tool_def.description.clone();
-            let input_schema = tool_def.input_schema.clone();
+            let _description = tool_def.description.clone();
+            let _input_schema = tool_def.input_schema.clone();
 
             info!("🔧 Registering Safari tool: {}", tool_name);
 
@@ -917,7 +917,7 @@ impl BrainFactory {
             let tool_name_clone = tool_name.clone();
 
             let executor = move |input: serde_json::Value| {
-                let app = app_handle_clone.clone();
+                let _app = app_handle_clone.clone();
                 let name = tool_name_clone.clone();
 
                 async move {

@@ -30,6 +30,12 @@ pub mod settings {
     pub const GET_ONBOARDING_SETTINGS: &str = "get_onboarding_settings";
     pub const SET_ONBOARDING_SETTINGS: &str = "set_onboarding_settings";
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
+    pub const SET_TOOL_APPROVAL_REQUIRED: &str = "set_tool_approval_required";
+    pub const SET_SMOOTH_MOUSE_MOVEMENT_SETTING: &str = "set_smooth_mouse_movement_setting";
+    pub const SET_TOOL_CATEGORY_ENABLED: &str = "set_tool_category_enabled";
+    pub const SET_TOOL_ENABLED: &str = "set_tool_enabled";
+    pub const RESET_TOOL_CONFIGURATION: &str = "reset_tool_configuration";
+    pub const SET_NOTIFICATION_TYPE: &str = "set_notification_type";
 }
 
 /// Core system command names
@@ -42,11 +48,14 @@ pub mod core {
     pub const GET_AGENT_EXECUTION_PROGRESS: &str = "get_agent_execution_progress";
     pub const SET_AGENT_EXECUTION_PROGRESS: &str = "set_agent_execution_progress";
     pub const GET_SYSTEM_CONTEXT: &str = "get_system_context";
+    pub const STOP_ALL_OPERATIONS: &str = "stop_all_operations";
+    pub const LOG_FRONTEND_ERROR: &str = "log_frontend_error";
 }
 
 /// Agent-related command names
 pub mod agent {
     pub const SUBMIT_QUERY: &str = "submit_query";
+    pub const NOTIFY_QUERY_SUBMITTED: &str = "notify_query_submitted";
     pub const GET_AGENT_MODE: &str = "get_agent_mode";
     pub const SET_AGENT_MODE: &str = "set_agent_mode";
     pub const GET_AGENT_TRIGGER_MODE: &str = "get_agent_trigger_mode";
@@ -115,6 +124,9 @@ pub mod utils {
     pub const SET_CLIPBOARD: &str = "set_clipboard";
     pub const LIST_APPS: &str = "list_apps";
     pub const CHECK_SERVER_STATUS: &str = "check_server_status";
+    pub const CHECK_FOR_UPDATES: &str = "check_for_updates";
+    pub const GET_LATEST_VERSION: &str = "get_latest_version";
+    pub const GET_KEYBOARD_SHORTCUTS: &str = "get_keyboard_shortcuts";
 }
 
 /// Screenshot command names
@@ -123,6 +135,13 @@ pub mod screenshots {
     pub const CAPTURE_ELEMENT_SCREENSHOT: &str = "capture_element_screenshot_command";
     pub const CAPTURE_WINDOW_SCREENSHOT: &str = "capture_window_screenshot_command";
     pub const CAPTURE_FOCUSED_WINDOW_SCREENSHOT: &str = "capture_focused_window_screenshot_command";
+}
+
+/// Onboarding command names
+pub mod onboarding {
+    pub const COMPLETE_ONBOARDING: &str = "complete_onboarding";
+    pub const CLOSE_ONBOARDING_WINDOW: &str = "close_onboarding_window";
+    pub const SKIP_ONBOARDING: &str = "skip_onboarding";
 }
 
 /// Cloud connectivity command names

@@ -5,6 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 
 import { useState, useEffect } from "react";
 import { UI } from "./constants.generated";
@@ -218,7 +219,7 @@ export class UIElementManager {
         try {
             await invoke("ui_handle_interaction", {
                 elementId: this.elementId,
-                interaction: { type: "submit", elementId: this.elementId, data: { query } }
+                interaction: { type: "submit", elementId: this.elementId, data: { value: query } }
             });
             return true;
         } catch (error) {
@@ -349,11 +350,7 @@ export class UIElementManager {
 
     async cleanup(): Promise<void> {
         for (const [key, unlisten] of this.listeners) {
-            try {
-                await unlisten();
-            } catch (error) {
-                console.warn(`Failed to unlisten ${key} for ${this.elementId}:`, error);
-            }
+            safeUnlisten(unlisten);
         }
         this.listeners.clear();
     }

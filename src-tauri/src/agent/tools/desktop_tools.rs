@@ -80,8 +80,8 @@ use std::time::Duration;
 // Agents should use the unified 'computer' tool for ALL screen interactions.
 
 async fn register_additional_computer_use_tools(
-    provider: &mut LocalToolProvider,
-    app_handle: tauri::AppHandle,
+    _provider: &mut LocalToolProvider,
+    _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     info!("Additional computer use tools: All redundant tools removed for clean API compliance");
 

@@ -1,4 +1,4 @@
-// Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
+// Core/Miscellaneous commands (screenshots, app list, clipboard, wait, error logging)
 
 use tauri::State;
 use tracing::{info, error};
@@ -926,5 +926,25 @@ pub async fn load_dictation_trigger_mode_from_store(app: &AppHandle, state: &App
         .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
     info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
+    Ok(())
+}
+
+/// Log frontend errors to the backend for debugging
+#[tauri::command]
+pub async fn log_frontend_error(
+    error: String,
+    stack: Option<String>,
+    component_stack: Option<String>
+) -> Result<(), String> {
+    error!("Frontend error: {}", error);
+    
+    if let Some(stack_trace) = stack {
+        error!("Stack trace: {}", stack_trace);
+    }
+    
+    if let Some(comp_stack) = component_stack {
+        error!("Component stack: {}", comp_stack);
+    }
+    
     Ok(())
 }

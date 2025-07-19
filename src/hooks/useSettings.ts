@@ -44,13 +44,13 @@
  * ```
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO, EVENTS } from "@/lib/constants.generated";
+import { AUDIO, EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { useInvoke } from "@/hooks/useInvoke";
+import { useSafeEventListener } from "@/hooks/useSafeEventListener";
 import type {
 	ProviderInfo,
 	ProviderSettings,
@@ -271,82 +271,70 @@ export function useSettings() {
 	}, []);
 
 	// Listen for MCP state updates from backend
+	useSafeEventListener<{
+		servers: MCPServerConfig[];
+		statuses: Record<string, MCPServerStatus>;
+		tools: MCPToolInfo[];
+	}>("mcp_state_updated", (payload) => {
+		console.log("Received MCP state update:", payload);
+		setMcpServers(payload.servers);
+		setMcpServerStatuses(payload.statuses);
+		setMcpTools(payload.tools);
+	});
+
+	// Use ref to avoid stale closure capture in event listener
+	const activeProviderRef = useRef(activeProvider);
 	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setupMcpListener = async () => {
-			unlisten = await listen<{
-				servers: MCPServerConfig[];
-				statuses: Record<string, MCPServerStatus>;
-				tools: MCPToolInfo[];
-			}>("mcp_state_updated", (event) => {
-				console.log("Received MCP state update:", event.payload);
-				setMcpServers(event.payload.servers);
-				setMcpServerStatuses(event.payload.statuses);
-				setMcpTools(event.payload.tools);
-			});
-		};
-
-		setupMcpListener();
-		return () => unlisten?.();
-	}, []);
+		activeProviderRef.current = activeProvider;
+	}, [activeProvider]);
 
 	// Listen for provider settings changes from backend
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
+	useSafeEventListener<{
+		active_provider: string;
+		providers: {
+			id: string;
+			api_key?: string;
+			model?: string;
+			max_tokens?: number;
+			temperature?: number;
+			system_prompt?: string;
+		}[];
+	}>(EVENTS.SETTINGS_PROVIDER_SETTINGS_CHANGED, (payload) => {
+		console.log("useSettings: Received provider settings update:", payload);
+		const fullProviderSettings = payload;
 
-		const setupProviderListener = async () => {
-			unlisten = await listen<{
-				active_provider: string;
-				providers: {
-					id: string;
-					api_key?: string;
-					model?: string;
-					max_tokens?: number;
-					temperature?: number;
-					system_prompt?: string;
-				}[];
-			}>(EVENTS.SETTINGS_PROVIDER_SETTINGS_CHANGED, (event) => {
-				console.log("useSettings: Received provider settings update:", event.payload);
-				const fullProviderSettings = event.payload;
+		// Update active provider if it changed - use ref to get current value
+		if (fullProviderSettings.active_provider !== activeProviderRef.current) {
+			console.log(`useSettings: Active provider changed to: ${fullProviderSettings.active_provider}`);
+			setActiveProvider(fullProviderSettings.active_provider);
+		}
 
-				// Update active provider if it changed
-				if (fullProviderSettings.active_provider !== activeProvider) {
-					console.log(`useSettings: Active provider changed to: ${fullProviderSettings.active_provider}`);
-					setActiveProvider(fullProviderSettings.active_provider);
-				}
+		// Find the current provider's settings
+		const currentProviderSettings = fullProviderSettings.providers.find(
+			p => p.id === fullProviderSettings.active_provider
+		);
 
-				// Find the current provider's settings
-				const currentProviderSettings = fullProviderSettings.providers.find(
-					p => p.id === fullProviderSettings.active_provider
-				);
+		if (currentProviderSettings) {
+			console.log("useSettings: Updating provider settings for:", fullProviderSettings.active_provider);
 
-				if (currentProviderSettings) {
-					console.log("useSettings: Updating provider settings for:", fullProviderSettings.active_provider);
+			// Update provider settings state
+			setProviderSettings(currentProviderSettings);
 
-					// Update provider settings state
-					setProviderSettings(currentProviderSettings);
-
-					// Update form data to reflect the changes
-					setFormData({
-						apiKey: currentProviderSettings.api_key || "",
-						model: currentProviderSettings.model || "",
-						maxTokens: currentProviderSettings.max_tokens?.toString() || "",
-						temperature: currentProviderSettings.temperature?.toString() || "",
-						systemPrompt: currentProviderSettings.system_prompt || "",
-					});
-				} else {
-					console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
-				}
-
-				// Invalidate cache to force fresh data on next request
-				invalidateCache();
+			// Update form data to reflect the changes
+			setFormData({
+				apiKey: currentProviderSettings.api_key || "",
+				model: currentProviderSettings.model || "",
+				maxTokens: currentProviderSettings.max_tokens?.toString() || "",
+				temperature: currentProviderSettings.temperature?.toString() || "",
+				systemPrompt: currentProviderSettings.system_prompt || "",
 			});
-		};
+		} else {
+			console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
+		}
 
-		setupProviderListener();
-		return () => unlisten?.();
-	}, [activeProvider]); // Include activeProvider in deps to handle provider changes
+		// Invalidate cache to force fresh data on next request
+		invalidateCache();
+	}, []); // Remove activeProvider from deps - use ref instead
 
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
@@ -613,7 +601,7 @@ export function useSettings() {
 
 			// Update API key
 			if (formData.apiKey !== providerSettings?.api_key) {
-				await invoke("update_provider_api_key", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_API_KEY, {
 					providerId: activeProvider,
 					apiKey: formData.apiKey,
 				});
@@ -621,7 +609,7 @@ export function useSettings() {
 
 			// Update model
 			if (formData.model !== providerSettings?.model) {
-				await invoke("update_provider_model", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
 					providerId: activeProvider,
 					model: formData.model,
 				});
@@ -629,7 +617,7 @@ export function useSettings() {
 
 			// Update max tokens
 			if (formData.maxTokens && formData.maxTokens !== providerSettings?.max_tokens?.toString()) {
-				await invoke("update_provider_max_tokens", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MAX_TOKENS, {
 					providerId: activeProvider,
 					maxTokens: parseInt(formData.maxTokens),
 				});
@@ -637,7 +625,7 @@ export function useSettings() {
 
 			// Update temperature
 			if (formData.temperature && formData.temperature !== providerSettings?.temperature?.toString()) {
-				await invoke("update_provider_temperature", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_TEMPERATURE, {
 					providerId: activeProvider,
 					temperature: parseFloat(formData.temperature),
 				});
@@ -645,7 +633,7 @@ export function useSettings() {
 
 			// Update system prompt
 			if (formData.systemPrompt !== providerSettings?.system_prompt) {
-				await invoke("update_provider_system_prompt", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_SYSTEM_PROMPT, {
 					providerId: activeProvider,
 					systemPrompt: formData.systemPrompt,
 				});
@@ -716,7 +704,7 @@ export function useSettings() {
 
 	const handleAgentTriggerModeChange = async (newMode: string) => {
 		try {
-			await invoke("set_agent_trigger_mode", { mode: newMode });
+			await invoke(COMMANDS.AGENT_SET_AGENT_TRIGGER_MODE, { mode: newMode });
 			setAgentTriggerMode(newMode);
 			toast.success(`Agent trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
 		} catch (error) {
@@ -727,7 +715,7 @@ export function useSettings() {
 
 	const handleDictationClipboardChange = async (enabled: boolean) => {
 		try {
-			await invoke("set_dictation_clipboard_enabled", { enabled });
+			await invoke(COMMANDS.DICTATION_SET_DICTATION_CLIPBOARD_ENABLED, { enabled });
 			invalidateCache('dictationClipboardEnabled');
 			setDictationClipboardEnabled(enabled);
 			toast.success(`Dictation clipboard ${enabled ? "enabled" : "disabled"}`);
@@ -739,7 +727,7 @@ export function useSettings() {
 
 	const handleDictationTriggerModeChange = async (newMode: string) => {
 		try {
-			await invoke("set_dictation_trigger_mode", { mode: newMode });
+			await invoke(COMMANDS.DICTATION_SET_DICTATION_TRIGGER_MODE, { mode: newMode });
 			invalidateCache('dictationTriggerMode');
 			setDictationTriggerMode(newMode);
 			toast.success(`Dictation trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
@@ -762,7 +750,7 @@ export function useSettings() {
 
 	const handleSensitivityChange = async (sensitivity: number) => {
 		try {
-			await invoke("set_always_listening_sensitivity", { sensitivity });
+			await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_SENSITIVITY, { sensitivity });
 			setAlwaysListeningSensitivity(sensitivity);
 		} catch (error) {
 			console.error("Failed to set sensitivity:", error);
@@ -776,7 +764,7 @@ export function useSettings() {
 				.split(",")
 				.map((word) => word.trim())
 				.filter((word) => word.length > 0);
-			await invoke("set_always_listening_wake_words", { wakeWords });
+			await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_WAKE_WORDS, { wakeWords });
 			setAlwaysListeningWakeWords(wakeWords);
 			toast.success("Wake words updated successfully");
 		} catch (error) {

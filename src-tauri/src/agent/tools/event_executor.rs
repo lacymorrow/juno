@@ -5,10 +5,10 @@
 //! 
 //! TARS Integration Phase 1.7: Tool System Refactor
 
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::{debug, error, info};
 use async_trait::async_trait;
-use tracing::{error, info, debug, warn};
 
 use crate::agent::events::{EventHandler, JunoAgentEvent, now};
 use crate::agent::implementations::tool_provider::LocalToolProvider;

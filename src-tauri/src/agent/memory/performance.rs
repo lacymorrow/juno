@@ -9,15 +9,15 @@
 //! - Batch processing capabilities
 //! - Smart caching with TTL and LRU eviction
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Semaphore, Mutex as TokioMutex};
-use tracing::{debug, info};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tracing::{debug, info};
+use async_trait::async_trait;
 
-use crate::agent::core::AgentError;
+use crate::agent::events::{JunoAgentEvent, EventHandler, now};
 
 /// Configuration for performance optimizations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,109 +71,109 @@ impl Default for PerformanceConfig {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PerformanceMetrics {
     /// Total events processed
-    pub total_events_processed: AtomicU64,
+    pub total_events_processed: std::sync::atomic::AtomicU64,
     /// Average processing time per event in microseconds
-    pub avg_processing_time_us: AtomicU64,
+    pub avg_processing_time_us: std::sync::atomic::AtomicU64,
     /// Peak memory usage in bytes
-    pub peak_memory_usage: AtomicUsize,
+    pub peak_memory_usage: std::sync::atomic::AtomicUsize,
     /// Current memory usage in bytes
-    pub current_memory_usage: AtomicUsize,
+    pub current_memory_usage: std::sync::atomic::AtomicUsize,
     /// Object pool hits
-    pub pool_hits: AtomicU64,
+    pub pool_hits: std::sync::atomic::AtomicU64,
     /// Object pool misses
-    pub pool_misses: AtomicU64,
+    pub pool_misses: std::sync::atomic::AtomicU64,
     /// Cache hits
-    pub cache_hits: AtomicU64,
+    pub cache_hits: std::sync::atomic::AtomicU64,
     /// Cache misses
-    pub cache_misses: AtomicU64,
+    pub cache_misses: std::sync::atomic::AtomicU64,
     /// Batch processing count
-    pub batches_processed: AtomicU64,
+    pub batches_processed: std::sync::atomic::AtomicU64,
     /// Average batch size
-    pub avg_batch_size: AtomicU64,
+    pub avg_batch_size: std::sync::atomic::AtomicU64,
     /// Lock contention count
-    pub lock_contentions: AtomicU64,
+    pub lock_contentions: std::sync::atomic::AtomicU64,
     /// Memory allocations avoided through pooling
-    pub allocations_avoided: AtomicU64,
+    pub allocations_avoided: std::sync::atomic::AtomicU64,
 }
 
 impl PerformanceMetrics {
     pub fn record_event_processed(&self, processing_time: Duration) {
-        self.total_events_processed.fetch_add(1, Ordering::Relaxed);
+        self.total_events_processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         
         // Update rolling average processing time
-        let current_avg = self.avg_processing_time_us.load(Ordering::Relaxed);
+        let current_avg = self.avg_processing_time_us.load(std::sync::atomic::Ordering::Relaxed);
         let new_time_us = processing_time.as_micros() as u64;
-        let total_events = self.total_events_processed.load(Ordering::Relaxed);
+        let total_events = self.total_events_processed.load(std::sync::atomic::Ordering::Relaxed);
         
         if total_events > 0 {
             let new_avg = (current_avg * (total_events - 1) + new_time_us) / total_events;
-            self.avg_processing_time_us.store(new_avg, Ordering::Relaxed);
+            self.avg_processing_time_us.store(new_avg, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
     pub fn record_pool_hit(&self) {
-        self.pool_hits.fetch_add(1, Ordering::Relaxed);
-        self.allocations_avoided.fetch_add(1, Ordering::Relaxed);
+        self.pool_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.allocations_avoided.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn record_pool_miss(&self) {
-        self.pool_misses.fetch_add(1, Ordering::Relaxed);
+        self.pool_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn record_cache_hit(&self) {
-        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+        self.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn record_cache_miss(&self) {
-        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+        self.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn record_batch_processed(&self, batch_size: usize) {
-        self.batches_processed.fetch_add(1, Ordering::Relaxed);
+        self.batches_processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         
         // Update rolling average batch size
-        let current_avg = self.avg_batch_size.load(Ordering::Relaxed);
-        let batches_total = self.batches_processed.load(Ordering::Relaxed);
+        let current_avg = self.avg_batch_size.load(std::sync::atomic::Ordering::Relaxed);
+        let batches_total = self.batches_processed.load(std::sync::atomic::Ordering::Relaxed);
         
         if batches_total > 0 {
             let new_avg = (current_avg * (batches_total - 1) + batch_size as u64) / batches_total;
-            self.avg_batch_size.store(new_avg, Ordering::Relaxed);
+            self.avg_batch_size.store(new_avg, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
     pub fn record_lock_contention(&self) {
-        self.lock_contentions.fetch_add(1, Ordering::Relaxed);
+        self.lock_contentions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn update_memory_usage(&self, usage: usize) {
-        self.current_memory_usage.store(usage, Ordering::Relaxed);
+        self.current_memory_usage.store(usage, std::sync::atomic::Ordering::Relaxed);
         
         // Update peak if necessary
-        let current_peak = self.peak_memory_usage.load(Ordering::Relaxed);
+        let current_peak = self.peak_memory_usage.load(std::sync::atomic::Ordering::Relaxed);
         if usage > current_peak {
-            self.peak_memory_usage.store(usage, Ordering::Relaxed);
+            self.peak_memory_usage.store(usage, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
     /// Get performance statistics as a summary
     pub fn get_summary(&self) -> PerformanceSummary {
         PerformanceSummary {
-            total_events: self.total_events_processed.load(Ordering::Relaxed),
-            avg_processing_time_us: self.avg_processing_time_us.load(Ordering::Relaxed),
-            peak_memory_mb: self.peak_memory_usage.load(Ordering::Relaxed) / (1024 * 1024),
-            current_memory_mb: self.current_memory_usage.load(Ordering::Relaxed) / (1024 * 1024),
+            total_events: self.total_events_processed.load(std::sync::atomic::Ordering::Relaxed),
+            avg_processing_time_us: self.avg_processing_time_us.load(std::sync::atomic::Ordering::Relaxed),
+            peak_memory_mb: self.peak_memory_usage.load(std::sync::atomic::Ordering::Relaxed) / (1024 * 1024),
+            current_memory_mb: self.current_memory_usage.load(std::sync::atomic::Ordering::Relaxed) / (1024 * 1024),
             pool_hit_rate: self.calculate_hit_rate(
-                self.pool_hits.load(Ordering::Relaxed),
-                self.pool_misses.load(Ordering::Relaxed),
+                self.pool_hits.load(std::sync::atomic::Ordering::Relaxed),
+                self.pool_misses.load(std::sync::atomic::Ordering::Relaxed),
             ),
             cache_hit_rate: self.calculate_hit_rate(
-                self.cache_hits.load(Ordering::Relaxed),
-                self.cache_misses.load(Ordering::Relaxed),
+                self.cache_hits.load(std::sync::atomic::Ordering::Relaxed),
+                self.cache_misses.load(std::sync::atomic::Ordering::Relaxed),
             ),
-            batches_processed: self.batches_processed.load(Ordering::Relaxed),
-            avg_batch_size: self.avg_batch_size.load(Ordering::Relaxed),
-            allocations_avoided: self.allocations_avoided.load(Ordering::Relaxed),
-            lock_contentions: self.lock_contentions.load(Ordering::Relaxed),
+            batches_processed: self.batches_processed.load(std::sync::atomic::Ordering::Relaxed),
+            avg_batch_size: self.avg_batch_size.load(std::sync::atomic::Ordering::Relaxed),
+            allocations_avoided: self.allocations_avoided.load(std::sync::atomic::Ordering::Relaxed),
+            lock_contentions: self.lock_contentions.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -203,7 +203,7 @@ pub struct PerformanceSummary {
 
 /// High-performance object pool for frequent allocations
 pub struct ObjectPool<T> {
-    pool: Arc<TokioMutex<VecDeque<T>>>,
+    pool: Arc<tokio::sync::Mutex<std::collections::VecDeque<T>>>,
     factory: Box<dyn Fn() -> T + Send + Sync>,
     max_size: usize,
     metrics: Arc<PerformanceMetrics>,
@@ -218,7 +218,7 @@ where
         F: Fn() -> T + Send + Sync + 'static,
     {
         Self {
-            pool: Arc::new(TokioMutex::new(VecDeque::with_capacity(max_size))),
+            pool: Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::with_capacity(max_size))),
             factory: Box::new(factory),
             max_size,
             metrics,
@@ -276,11 +276,11 @@ pub struct PoolStats {
 /// RAII wrapper for pooled objects
 pub struct PooledObject<T> {
     object: Option<T>,
-    pool: Arc<TokioMutex<VecDeque<T>>>,
+    pool: Arc<tokio::sync::Mutex<std::collections::VecDeque<T>>>,
 }
 
 impl<T> PooledObject<T> {
-    fn new(object: T, pool: Arc<TokioMutex<VecDeque<T>>>) -> Self {
+    fn new(object: T, pool: Arc<tokio::sync::Mutex<std::collections::VecDeque<T>>>) -> Self {
         Self {
             object: Some(object),
             pool,
@@ -322,7 +322,7 @@ pub struct SmartCache<K, V> {
     ttl: Duration,
     max_size: usize,
     metrics: Arc<PerformanceMetrics>,
-    access_order: Arc<TokioMutex<VecDeque<K>>>,
+    access_order: Arc<tokio::sync::Mutex<std::collections::VecDeque<K>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -343,7 +343,7 @@ where
             ttl,
             max_size,
             metrics,
-            access_order: Arc::new(TokioMutex::new(VecDeque::new())),
+            access_order: Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new())),
         }
     }
 
@@ -454,8 +454,8 @@ where
     /// Get cache statistics
     pub async fn get_stats(&self) -> CacheStats {
         let data = self.data.read().await;
-        let total_hits = self.metrics.cache_hits.load(Ordering::Relaxed);
-        let total_misses = self.metrics.cache_misses.load(Ordering::Relaxed);
+        let total_hits = self.metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let total_misses = self.metrics.cache_misses.load(std::sync::atomic::Ordering::Relaxed);
         let total_requests = total_hits + total_misses;
         
         CacheStats {
@@ -481,12 +481,12 @@ pub struct CacheStats {
 
 /// Batch processor for high-throughput event processing
 pub struct BatchProcessor<T> {
-    batch: Arc<TokioMutex<Vec<T>>>,
+    batch: Arc<tokio::sync::Mutex<Vec<T>>>,
     batch_size: usize,
     timeout: Duration,
     processor: Arc<dyn Fn(Vec<T>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>> + Send + Sync>,
     metrics: Arc<PerformanceMetrics>,
-    last_flush: Arc<TokioMutex<Instant>>,
+    last_flush: Arc<tokio::sync::Mutex<Instant>>,
 }
 
 impl<T> BatchProcessor<T>
@@ -508,12 +508,12 @@ where
         });
 
         Self {
-            batch: Arc::new(TokioMutex::new(Vec::with_capacity(batch_size))),
+            batch: Arc::new(tokio::sync::Mutex::new(Vec::with_capacity(batch_size))),
             batch_size,
             timeout,
             processor,
             metrics,
-            last_flush: Arc::new(TokioMutex::new(Instant::now())),
+            last_flush: Arc::new(tokio::sync::Mutex::new(Instant::now())),
         }
     }
 
@@ -576,14 +576,14 @@ where
 
 /// Concurrent operation limiter using semaphore
 pub struct ConcurrencyLimiter {
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<tokio::sync::Semaphore>,
     metrics: Arc<PerformanceMetrics>,
 }
 
 impl ConcurrencyLimiter {
     pub fn new(max_concurrent: usize, metrics: Arc<PerformanceMetrics>) -> Self {
         Self {
-            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             metrics,
         }
     }
@@ -690,7 +690,7 @@ mod tests {
             move |batch: Vec<i32>| {
                 let count = processed_count_clone.clone();
                 async move {
-                    count.fetch_add(batch.len(), Ordering::Relaxed);
+                    count.fetch_add(batch.len(), std::sync::atomic::Ordering::Relaxed);
                     Ok(())
                 }
             },
@@ -705,7 +705,7 @@ mod tests {
         // Allow processing to complete
         sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(processed_count.load(Ordering::Relaxed), 3);
+        assert_eq!(processed_count.load(std::sync::atomic::Ordering::Relaxed), 3);
 
         // Test timeout-based flushing
         processor.add(4).await.unwrap();
@@ -714,7 +714,7 @@ mod tests {
         // Wait for timeout
         sleep(Duration::from_millis(150)).await;
 
-        assert_eq!(processed_count.load(Ordering::Relaxed), 5);
+        assert_eq!(processed_count.load(std::sync::atomic::Ordering::Relaxed), 5);
     }
 
     #[tokio::test]

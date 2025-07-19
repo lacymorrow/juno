@@ -3,9 +3,13 @@
 //! Comprehensive integration tests that validate the entire event-driven
 //! memory system working together.
 
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use serde_json::json;
+use tokio::sync::Mutex;
+use crate::agent::testing::test_utilities::TestUtilities;
+use std::time::Instant;
 use async_trait::async_trait;
-use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics, TestUtilities};
+use super::test_utilities::{TestCase, TestConfig, TestResult, TestMetrics};
 use crate::agent::traits::MemoryManager;
 
 /// Integration test for basic memory operations
@@ -149,7 +153,7 @@ impl SessionPersistenceTest {
             .map_err(|e| format!("Failed to checkpoint session: {}", e))?;
         
         // Create a new memory manager and load the session
-        let mut new_memory_manager = TestUtilities::create_test_memory_manager(config.memory_config.clone()).await?;
+        let new_memory_manager = TestUtilities::create_test_memory_manager(config.memory_config.clone()).await?;
         let loaded_messages = new_memory_manager.load_session(&session_id).await
             .map_err(|e| format!("Failed to load session: {}", e))?;
         

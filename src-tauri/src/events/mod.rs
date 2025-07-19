@@ -5,6 +5,7 @@
 //! and various application event management systems.
 
 pub mod handlers;
+pub mod sequence;
 pub mod shortcuts;
 pub mod timer_handlers;
 

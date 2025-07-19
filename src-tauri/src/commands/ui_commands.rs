@@ -356,6 +356,36 @@ impl UIManager {
         Ok(())
     }
 
+    pub async fn handle_bar_submit_with_source(&mut self, query: String, source_element_id: String) -> Result<(), String> {
+        debug!("UI Manager: Handling submit with query: '{}' from element: {}", query, source_element_id);
+
+        if query.trim().is_empty() {
+            return Ok(());
+        }
+
+        // Set immediate submitting state for UI feedback
+        self.last_submitted_value = query.clone();
+        self.current_error = None;
+        self.agent_state = None;
+        self.is_agent_working = true;
+        self.voice_mode = "agent".to_string();
+
+        self.set_bar_state(BarState::Submitting).await;
+
+        // Emit query with source window ID
+        let query_payload = serde_json::json!({
+            "query": query,
+            "source_element_id": source_element_id
+        });
+
+        if let Err(e) = self.app_handle.emit(crate::constants::events::dictation::FINISHED, query_payload) {
+            error!("Failed to emit query submission: {}", e);
+            return Err(format!("Failed to submit query: {}", e));
+        }
+
+        Ok(())
+    }
+
     pub async fn handle_backend_response(&mut self, response_text: Option<String>, agent_state: String) -> Result<(), String> {
         debug!("UI Manager: Handling backend response, agent_state: {}", agent_state);
 
@@ -895,9 +925,13 @@ pub async fn ui_handle_interaction(
                 "submit" => {
                     if let Some(data) = &interaction.data {
                         if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
-                            manager.handle_bar_submit(value.to_string()).await
+                            // Use the element_id as the source
+                            manager.handle_bar_submit_with_source(value.to_string(), element_id.clone()).await
+                        } else if let Some(value) = data.get("query").and_then(|v| v.as_str()) {
+                            // Also support "query" field for compatibility
+                            manager.handle_bar_submit_with_source(value.to_string(), element_id.clone()).await
                         } else {
-                            Err("Submit interaction missing value".to_string())
+                            Err("Submit interaction missing value or query".to_string())
                         }
                     } else {
                         Err("Submit interaction missing data".to_string())

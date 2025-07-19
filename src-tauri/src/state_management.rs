@@ -199,7 +199,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         );
     }
 
-    // Initialize dictation input monitoring system
+    // Initialize event-driven dictation monitoring
     if let Err(e) =
         crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await
     {
@@ -207,9 +207,13 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         return Err(format!("Dictation monitoring initialization failed: {}", e));
     }
 
-    // Start agent monitor task for hold behavior
-    let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle.clone());
-    info!("Agent monitor task started successfully");
+    // Initialize event-driven agent monitoring
+    if let Err(e) = crate::agent_monitor::init_agent_monitor(app_handle.clone()).await {
+        error!("Failed to initialize agent monitoring: {}", e);
+        return Err(format!("Agent monitoring initialization failed: {}", e));
+    }
+    
+    info!("Event-driven monitors initialized successfully");
 
     Ok(())
 }

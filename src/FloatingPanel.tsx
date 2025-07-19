@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { UI } from "@/lib/constants.generated";
+import { safeUnlisten } from "@/lib/tauri-event-utils";
 import "./styles/globals.css";
 
 // Constants for all panel sizes - these should match the TransparentFloatingPanel component
@@ -18,7 +19,7 @@ const SETTINGS_HEIGHT = 180 + 24; // 204
 
 // Helper function to get window dimensions for each panel mode
 function getWindowDimensionsForMode(
-  mode: "compact" | "expanded" | "chat" | "settings"
+  mode: "compact" | "expanded" | "chat" | "settings",
 ) {
   switch (mode) {
     case "compact":
@@ -60,14 +61,14 @@ export default function FloatingPanel() {
         const unlistenFocus = await appWindow.onFocusChanged(
           ({ payload: focused }) => {
             console.log("Floating panel focus changed:", focused);
-          }
+          },
         );
 
         setWindowReady(true);
 
-        // Cleanup function
+        // Cleanup function with safe unlisten
         return () => {
-          unlistenFocus();
+          safeUnlisten(unlistenFocus);
         };
       } catch (error) {
         console.error("Failed to setup floating panel window:", error);
@@ -93,13 +94,13 @@ export default function FloatingPanel() {
           timeoutId = setTimeout(async () => {
             try {
               await appWindow.setSize(
-                new LogicalSize(dimensions.width, dimensions.height)
+                new LogicalSize(dimensions.width, dimensions.height),
               );
               timeoutId = null;
             } catch (err) {
               console.error(
                 "Failed to resize floating panel window (delayed):",
-                err
+                err,
               );
             }
           }, 750);
@@ -112,7 +113,7 @@ export default function FloatingPanel() {
           }
 
           await appWindow.setSize(
-            new LogicalSize(dimensions.width, dimensions.height)
+            new LogicalSize(dimensions.width, dimensions.height),
           );
         }
       } catch (err) {
@@ -149,8 +150,8 @@ export default function FloatingPanel() {
 
     setupListeners();
     return () => {
-      unlistenEnter?.();
-      unlistenLeave?.();
+      safeUnlisten(unlistenEnter);
+      safeUnlisten(unlistenLeave);
     };
   }, []);
 
