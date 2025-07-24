@@ -1,0 +1,81 @@
+{
+  "sessionId": "session-1753380346281-e16vt1o1x",
+  "checkpointId": "checkpoint-1753380376284-14fqvlqeo",
+  "checkpointName": "auto-save-1753380376284",
+  "timestamp": "2025-07-24T18:06:16.284Z",
+  "data": {
+    "timestamp": "2025-07-24T18:06:16.284Z",
+    "changeCount": 5,
+    "changesByType": {
+      "swarm_created": [
+        {
+          "type": "swarm_created",
+          "data": {
+            "swarmId": "swarm-1753380346280-im9ociue8",
+            "swarmName": "hive-1753380346273",
+            "objective": "2025-07-24T18:02:47.963772Z ERROR [Dictation Tap Mode] Failed to start transcription: Audio device error: No suitable input config found.\n[GlobalShortcut Triggered] Shortcut: HotKey { mods: Modifiers(ALT), key: Space, id: 65598 }, State: Pressed\n[GlobalShortcut Triggered] Shortcut: HotKey { mods: Modifiers(ALT), key: Space, id: 65598 }, State: Released\n2025-07-24T18:04:31.327008Z  INFO [Dictation Input Shortcut] Tap mode - starting dictation mode transcription\n2025-07-24T18:04:31.327184Z  INFO [Plugin] start_dictation command called\n2025-07-24T18:04:31.327217Z  INFO [VoiceController] Starting dictation...\n2025-07-24T18:04:31.564260Z ERROR [Dictation Tap Mode] Failed to start transcription: Audio device error: No suitable input config found.\n[GlobalShortcut Triggered] Shortcut: HotKey { mods: Modifiers(ALT), key: Space, id: 65598 }, State: Pressed\n[GlobalShortcut Triggered] Shortcut: HotKey { mods: Modifiers(ALT), key: Space, id: 65598 }, State: Released\n2025-07-24T18:04:57.053011Z  INFO [Dictation Input Shortcut] Tap mode - starting dictation mode transcription\n2025-07-24T18:04:57.053273Z  INFO [Plugin] start_dictation command called\n2025-07-24T18:04:57.053334Z  INFO [VoiceController] Starting dictation...\n2025-07-24T18:04:57.149518Z ERROR [Dictation Tap Mode] Failed to start transcription: Audio device error: No suitable input config found.",
+            "workerCount": 8
+          },
+          "timestamp": "2025-07-24T18:05:46.282Z"
+        }
+      ],
+      "agent_activity": [
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753380346280-im9ociue8-0",
+            "activity": "spawned",
+            "data": {
+              "type": "researcher",
+              "name": "Researcher Worker 1"
+            }
+          },
+          "timestamp": "2025-07-24T18:05:46.283Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753380346280-im9ociue8-1",
+            "activity": "spawned",
+            "data": {
+              "type": "coder",
+              "name": "Coder Worker 2"
+            }
+          },
+          "timestamp": "2025-07-24T18:05:46.283Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753380346280-im9ociue8-2",
+            "activity": "spawned",
+            "data": {
+              "type": "analyst",
+              "name": "Analyst Worker 3"
+            }
+          },
+          "timestamp": "2025-07-24T18:05:46.283Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753380346280-im9ociue8-3",
+            "activity": "spawned",
+            "data": {
+              "type": "tester",
+              "name": "Tester Worker 4"
+            }
+          },
+          "timestamp": "2025-07-24T18:05:46.283Z"
+        }
+      ]
+    },
+    "statistics": {
+      "tasksProcessed": 0,
+      "tasksCompleted": 0,
+      "memoryUpdates": 0,
+      "agentActivities": 4,
+      "consensusDecisions": 0
+    }
+  }
+}

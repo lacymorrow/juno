@@ -257,7 +257,7 @@ impl VoiceController {
             .map_err(|e| Error::AudioDevice(format!("Failed to get device configs: {:?}", e)))?;
 
         let selected_config_range = supported_configs_iter
-            .filter(|c| c.channels() == 1)
+            .filter(|c| c.channels() == 1 || c.channels() == 2)  // Support both mono and stereo
             .find(|c| {
                 (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) &&
                 (c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
@@ -268,7 +268,7 @@ impl VoiceController {
         } else {
             device.supported_input_configs()
                 .map_err(|e| Error::AudioDevice(format!("Failed to get device configs for fallback: {:?}", e)))?
-                .filter(|c| c.channels() == 1)
+                .filter(|c| c.channels() == 1 || c.channels() == 2)  // Support both mono and stereo
                 .find(|c| c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
                 .map(|c| {
                     if (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) {
@@ -283,6 +283,7 @@ impl VoiceController {
         let config = supported_config.config();
         let sample_format = supported_config.sample_format();
         let actual_rate = config.sample_rate.0;
+        let channels = config.channels;
 
         // Store the actual sample rate safely
         if let Ok(mut rate_guard) = self.actual_recording_sample_rate.lock() {
@@ -298,6 +299,7 @@ impl VoiceController {
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
+        let channels_for_thread = channels;
 
         let shared_context = self.ctx.as_ref().unwrap().clone();
 
@@ -306,6 +308,7 @@ impl VoiceController {
                 shared_context,
                 last_buffer_arc_for_thread,
                 actual_rate_for_thread,
+                channels_for_thread,
                 app_handle_for_thread,
                 control_rx,
                 audio_data_tx,
@@ -327,6 +330,7 @@ impl VoiceController {
         shared_whisper_context: Arc<WhisperContext>,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,
+        channels: u16,
         app_handle: AppHandle<R>,
         control_rx: std::sync::mpsc::Receiver<AudioThreadMessage>,
         audio_data_tx: std::sync::mpsc::Sender<Vec<f32>>,
@@ -347,10 +351,22 @@ impl VoiceController {
 
         let stream = match sample_format {
             SampleFormat::F32 => {
+                let tx_clone = audio_data_tx.clone();
                 match device.build_input_stream(
                     &config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if let Err(e) = audio_data_tx.send(data.to_vec()) {
+                        let audio_data = if channels == 2 {
+                            // Convert stereo to mono by averaging channels
+                            let mono_data: Vec<f32> = data
+                                .chunks_exact(2)
+                                .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
+                                .collect();
+                            mono_data
+                        } else {
+                            data.to_vec()
+                        };
+                        
+                        if let Err(e) = tx_clone.send(audio_data) {
                             tracing::error!("Failed to send audio data: {:?}", e);
                         }
                     },
@@ -367,15 +383,25 @@ impl VoiceController {
                 }
             },
             SampleFormat::I16 => {
+                let tx_clone = audio_data_tx.clone();
                 match device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
-                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
+                        // Handle stereo to mono conversion for i16
+                        let mono_data = if channels == 2 {
+                            data.chunks_exact(2)
+                                .map(|chunk| ((chunk[0] as i32 + chunk[1] as i32) / 2) as i16)
+                                .collect::<Vec<i16>>()
+                        } else {
+                            data.to_vec()
+                        };
+                        
+                        let mut audio_f32: Vec<f32> = vec![0.0f32; mono_data.len()];
+                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(&mono_data, &mut audio_f32) {
                             tracing::error!("Failed to convert i16 to f32: {:?}", e);
                             return;
                         }
-                        if let Err(e) = audio_data_tx.send(audio_f32) {
+                        if let Err(e) = tx_clone.send(audio_f32) {
                             tracing::error!("Failed to send converted audio data: {:?}", e);
                         }
                     },
@@ -403,7 +429,11 @@ impl VoiceController {
         }
 
         info!("[AudioThread] Audio stream started.");
-        info!("[AudioThread] Recording at {} Hz, will resample to {} Hz for Whisper.", actual_rate, WHISPER_SAMPLE_RATE);
+        info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.", 
+              actual_rate, channels, WHISPER_SAMPLE_RATE);
+        if channels == 2 {
+            info!("[AudioThread] Stereo input detected - will convert to mono for processing.");
+        }
 
         // Resampler setup
         let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
