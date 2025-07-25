@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+
 import App from "./App";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import { Toaster } from "./components/ui/sonner";
@@ -8,11 +9,12 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
-import "./styles/globals.css";
 import { AppBar } from "./components/bar/app-bar";
 import { FloatingBar } from "./components/FloatingBar";
 import { VoiceAIBar } from "./components/bar/voice-ai-bar";
 import { DynamicBar } from "./components/bar/dynamic-bar";
+
+import "./styles/globals.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -27,10 +29,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/dynamic-bar" element={<DynamicBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
-          <Route
-            path="/desktop-cursor-overlay"
-            element={<DesktopCursorOverlay />}
-          />
+          <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
         </Routes>
       </BrowserRouter>
       {/* Toast notifications */}
@@ -45,5 +44,5 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         }}
       />
     </VoiceProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

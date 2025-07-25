@@ -397,6 +397,18 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         }
     });
 
+    // Listen for agent-query-ready events (when agent mode voice transcription finishes)
+    let _ = app_handle.listen("agent-query-ready", {
+        let app_handle = app_handle_clone.clone();
+        move |event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // When agent voice transcription finishes, agent processing is about to start
+                update_tray_icon_state(TrayIconState::Processing).await;
+            });
+        }
+    });
+
     let _ = app_handle.listen("always-listening-mode-changed", {
         let app_handle = app_handle_clone.clone();
         move |event| {

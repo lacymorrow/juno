@@ -163,6 +163,75 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
     });
 
+    // Listen for agent-query-ready events to trigger the agent (from agent mode voice transcription)
+    let app_handle_for_agent_query_listener = app_handle.clone();
+    app_handle.listen("agent-query-ready", move |event| {
+        info!("[Event] Received agent-query-ready event - triggering agent from voice transcription");
+
+        let app_handle_clone = app_handle_for_agent_query_listener.clone();
+        safe_spawn_async_task(move || async move {
+            // Parse the query from the event payload
+            let payload_str = event.payload();
+            match serde_json::from_str::<serde_json::Value>(payload_str) {
+                Ok(payload_json) => {
+                    if let Some(query_value) = payload_json.get("query") {
+                        if let Some(query_text) = query_value.as_str() {
+                            let trimmed_query = query_text.trim();
+                            if !trimmed_query.is_empty() {
+                                // Check for duplicate submission
+                                if is_duplicate_submission(trimmed_query) {
+                                    return;
+                                }
+                                
+                                info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
+
+                                // Emit user message event for frontend to add to conversation
+                                let user_message_data = serde_json::json!({
+                                    "content": trimmed_query,
+                                    "timestamp": std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64
+                                });
+                                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
+                                    error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);
+                                }
+
+                                // Submit the query to the agent system
+                                let app_handle_for_state = app_handle_clone.clone();
+                                let app_state = app_handle_for_state.state::<crate::state::AppState>();
+
+                                // Register escape key when agent processing starts
+                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                                    warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
+                                }
+
+                                // Submit the query to the agent system
+                                if let Err(e) = crate::anthropic::submit_query(
+                                    trimmed_query.to_string(),
+                                    app_state,
+                                    app_handle_clone.clone()
+                                ).await {
+                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                }
+                            } else {
+                                info!("[Agent Mode] Query text was empty - ignoring");
+                            }
+                        } else {
+                            error!("[Agent Mode] Query field in payload is not a string: {:?}", query_value);
+                        }
+                    } else {
+                        error!("[Agent Mode] No 'query' field found in agent-query-ready payload: {}", payload_str);
+                    }
+                }
+                Err(e) => {
+                    error!("[Agent Mode] Failed to parse agent-query-ready payload: {}", e);
+                }
+            }
+        });
+    });
+
     // Listen for voice transcription partial results
     let app_handle_for_listener = app_handle.clone();
     app_handle.listen("voice-transcription:partial-result", move |event| {

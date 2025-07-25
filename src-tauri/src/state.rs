@@ -166,6 +166,7 @@ pub struct AudioSettings {
     pub always_listening_sensitivity: f32,
     pub always_listening_wake_words: Vec<String>,
     pub notification_sound_enabled: bool,
+    pub was_always_listening_active_before_dictation: bool,
 }
 
 impl Default for AudioSettings {
@@ -191,6 +192,7 @@ impl Default for AudioSettings {
                 .map(|s| s.to_string())
                 .collect(),
             notification_sound_enabled: true,
+            was_always_listening_active_before_dictation: false,
         }
     }
 }

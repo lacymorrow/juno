@@ -184,12 +184,12 @@ function App() {
     onDictationInputShortcut: useCallback((payload: any) => {
       console.log("Dictation input shortcut event received:", payload);
       if (payload.state === "pressed" && !payload.test_mode) {
-        appState.setIsDictationActive(true);
-        toast.info("Dictation mode activated");
+        // Don't toggle local state - the backend will handle it and emit events
+        // The frontend will update based on those events
       } else if (payload.state === "released") {
-        appState.setIsDictationActive(false);
+        // For hold mode - handled by backend
       }
-    }, [appState]),
+    }, []),
   });
 
   // Dictation state events integration
@@ -246,6 +246,34 @@ function App() {
 
     initializeApp();
   }, [appState.setAppVersion, appState.setKeyboardShortcuts]);
+
+  // Listen for dictation-active events from backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen("dictation-active", (event) => {
+        const isActive = event.payload as boolean;
+        console.log("Dictation active event from backend:", isActive);
+        appState.setIsDictationActive(isActive);
+        
+        // Show toast notification
+        toast.info(isActive ? "Dictation mode activated" : "Dictation mode deactivated");
+        
+        // If dictation is deactivated, reset the dictation state
+        if (!isActive) {
+          appState.setDictationState("idle");
+        }
+      });
+    };
+
+    setupListener();
+
+    return () => {
+      unlisten?.();
+    };
+  }, [appState]);
 
   // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
   // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"
