@@ -478,19 +478,30 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     let app_state = app_handle.state::<AppState>();
 
     // Check states in order of priority
-    if app_state.is_agent_executing() {
+    let is_agent = app_state.is_agent_executing();
+    let is_dictation = app_state.is_dictation_active();
+    let is_always_listening = app_state.get_always_listening_active().unwrap_or(false);
+    
+    info!(
+        "🔍 Tray icon state check - Agent: {}, Dictation: {}, Always Listening: {}",
+        is_agent, is_dictation, is_always_listening
+    );
+
+    if is_agent {
         return TrayIconState::AgentActive;
     }
 
-    if app_state.is_dictation_active() {
+    if is_dictation {
         return TrayIconState::DictationActive;
     }
 
     // Check always listening state
-    if app_state.get_always_listening_active().unwrap_or(false) {
+    if is_always_listening {
+        info!("🟢 Always listening is active, showing green icon");
         return TrayIconState::AlwaysListening;
     }
 
+    info!("⚪ No active states, showing default white icon");
     TrayIconState::Default
 }
 

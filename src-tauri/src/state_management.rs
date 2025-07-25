@@ -200,6 +200,9 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
     } else {
         info!("Successfully loaded audio settings from centralized settings");
     }
+    
+    // Restore always listening mode if it was previously active
+    restore_always_listening_if_needed(&app_handle, &app_state).await;
 
     // Initialize voice transcription plugin configuration
     if let Err(e) = initialize_voice_transcription_config(&app_handle).await {
@@ -631,5 +634,64 @@ mod tests {
         let issues = vec!["test issue".to_string()];
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0], "test issue");
+    }
+}
+
+/// Restore always listening mode if it was previously active
+async fn restore_always_listening_if_needed(app_handle: &AppHandle, app_state: &AppState) {
+    // Check if always listening was previously active
+    if !app_state.get_always_listening_active().unwrap_or(false) {
+        return;
+    }
+    
+    info!("[State] Always listening was active in saved settings - attempting to restore...");
+    
+    // Try to start the always listening controller
+    match app_handle.try_state::<std::sync::Arc<std::sync::Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::start_always_listening(
+                app_handle.clone(),
+                controller_state
+            ).await {
+                Ok(_) => {
+                    info!("[State] Successfully restored always listening mode on startup");
+                    
+                    // Emit event to update UI
+                    if let Err(e) = app_handle.emit(crate::constants::events::always_listening::MODE_CHANGED, true) {
+                        warn!("[State] Failed to emit always-listening-mode-changed event: {}", e);
+                    }
+                    
+                    // Update floating bar UI
+                    crate::commands::ui_commands::handle_always_listening_change(app_handle, true).await;
+                }
+                Err(e) => {
+                    warn!("[State] Failed to restore always listening mode on startup: {}", e);
+                    
+                    // Reset the state since we couldn't start it
+                    let _ = app_state.set_always_listening_active(false);
+                    
+                    // Update centralized settings to reflect the failure
+                    if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                        if let Ok(mut audio_settings) = settings_manager.get_audio_settings().await {
+                            audio_settings.always_listening_active = false;
+                            let _ = settings_manager.set_audio_settings(&audio_settings).await;
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            warn!("[State] Always listening controller not available at startup - resetting state");
+            // Reset the state since controller isn't available
+            let _ = app_state.set_always_listening_active(false);
+            
+            // Update centralized settings
+            if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                if let Ok(mut audio_settings) = settings_manager.get_audio_settings().await {
+                    audio_settings.always_listening_active = false;
+                    let _ = settings_manager.set_audio_settings(&audio_settings).await;
+                }
+            }
+        }
     }
 }

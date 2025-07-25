@@ -1,0 +1,81 @@
+{
+  "sessionId": "session-1753394409627-yz7t234in",
+  "checkpointId": "checkpoint-1753394439631-2sc35udv6",
+  "checkpointName": "auto-save-1753394439631",
+  "timestamp": "2025-07-24T22:00:39.631Z",
+  "data": {
+    "timestamp": "2025-07-24T22:00:39.631Z",
+    "changeCount": 5,
+    "changesByType": {
+      "swarm_created": [
+        {
+          "type": "swarm_created",
+          "data": {
+            "swarmId": "swarm-1753394409627-0iogdryav",
+            "swarmName": "hive-1753394409619",
+            "objective": "Our tray icon colors don't seem to reflect the app state properly. It boots up in the colors white, and then we go into dictation mode and the color trans yellow. And then we end dictation mode and the color trans green, but the app goes back to idle. But is idle color green or white? Because if it's idling after just starting its white. So after dictation mode, it should eventually go back to white. It needs to reflect whatever the state of the app is.",
+            "workerCount": 8
+          },
+          "timestamp": "2025-07-24T22:00:09.629Z"
+        }
+      ],
+      "agent_activity": [
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753394409627-0iogdryav-0",
+            "activity": "spawned",
+            "data": {
+              "type": "researcher",
+              "name": "Researcher Worker 1"
+            }
+          },
+          "timestamp": "2025-07-24T22:00:09.630Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753394409627-0iogdryav-1",
+            "activity": "spawned",
+            "data": {
+              "type": "coder",
+              "name": "Coder Worker 2"
+            }
+          },
+          "timestamp": "2025-07-24T22:00:09.630Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753394409627-0iogdryav-2",
+            "activity": "spawned",
+            "data": {
+              "type": "analyst",
+              "name": "Analyst Worker 3"
+            }
+          },
+          "timestamp": "2025-07-24T22:00:09.630Z"
+        },
+        {
+          "type": "agent_activity",
+          "data": {
+            "agentId": "worker-swarm-1753394409627-0iogdryav-3",
+            "activity": "spawned",
+            "data": {
+              "type": "tester",
+              "name": "Tester Worker 4"
+            }
+          },
+          "timestamp": "2025-07-24T22:00:09.630Z"
+        }
+      ]
+    },
+    "statistics": {
+      "tasksProcessed": 0,
+      "tasksCompleted": 0,
+      "memoryUpdates": 0,
+      "agentActivities": 4,
+      "consensusDecisions": 0
+    }
+  }
+}

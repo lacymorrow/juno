@@ -9,7 +9,7 @@ import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
 import "./styles/globals.css";
-import { AppBar } from "./components/AppBar";
+import { AppBar } from "./components/bar/app-bar";
 import { FloatingBar } from "./components/FloatingBar";
 import { VoiceAIBar } from "./components/bar/voice-ai-bar";
 import { DynamicBar } from "./components/bar/dynamic-bar";
