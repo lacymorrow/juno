@@ -250,16 +250,45 @@ function App() {
   // Listen for dictation-active events from backend
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let currentDictationState = appState.isDictationActive;
+    let toastTimeout: NodeJS.Timeout | null = null;
+    let lastToastTime = 0;
+    const MIN_TOAST_INTERVAL = 1000; // Minimum 1 second between toasts
 
     const setupListener = async () => {
       const { listen } = await import("@tauri-apps/api/event");
       unlisten = await listen("dictation-active", (event) => {
         const isActive = event.payload as boolean;
         console.log("Dictation active event from backend:", isActive);
+        
+        // Update the app state
         appState.setIsDictationActive(isActive);
         
-        // Show toast notification
-        toast.info(isActive ? "Dictation mode activated" : "Dictation mode deactivated");
+        // Only show toast if state actually changed and enough time has passed
+        const now = Date.now();
+        if (currentDictationState !== isActive && (now - lastToastTime) > MIN_TOAST_INTERVAL) {
+          currentDictationState = isActive;
+          lastToastTime = now;
+          
+          // Clear any pending toast
+          if (toastTimeout) {
+            clearTimeout(toastTimeout);
+            toastTimeout = null;
+          }
+          
+          // Use a unique ID for the toast to prevent duplicates
+          const toastId = `dictation-${isActive ? 'on' : 'off'}`;
+          
+          // Dismiss any existing dictation toasts
+          toast.dismiss('dictation-on');
+          toast.dismiss('dictation-off');
+          
+          // Show the new toast
+          toast.info(
+            isActive ? "Dictation mode activated" : "Dictation mode deactivated",
+            { id: toastId, duration: 2000 }
+          );
+        }
         
         // If dictation is deactivated, reset the dictation state
         if (!isActive) {
@@ -272,6 +301,12 @@ function App() {
 
     return () => {
       unlisten?.();
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
+      }
+      // Dismiss any lingering toasts on cleanup
+      toast.dismiss('dictation-on');
+      toast.dismiss('dictation-off');
     };
   }, [appState]);
 
