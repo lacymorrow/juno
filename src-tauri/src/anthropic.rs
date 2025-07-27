@@ -25,19 +25,17 @@ use crate::agent::traits::{AgentRunnable, MemoryManager};
 use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
+use crate::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
 // TARS Integration: Import event types
 // TODO: Implement event system - currently disabled due to incomplete implementation
 // use crate::agent::events::JunoAgentEvent;
 
 /// Agent execution queue system to prevent concurrent execution
-#[derive(Debug)]
 struct AgentExecutionQueue {
-    /// Semaphore to ensure only one agent executes at a time
-    execution_semaphore: Arc<Semaphore>,
-    /// Queue of pending agent queries
-    pending_queries: Arc<Mutex<VecDeque<QueuedQuery>>>,
-    /// Currently executing query ID
-    current_execution_id: Arc<Mutex<Option<String>>>,
+    /// Atomic execution coordinator to prevent race conditions
+    coordinator: Arc<AtomicExecutionCoordinator>,
+    /// Thread-safe queue of pending queries
+    pending_queries: Arc<AtomicQueue<QueuedQuery>>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,9 +49,8 @@ struct QueuedQuery {
 impl AgentExecutionQueue {
     fn new() -> Self {
         Self {
-            execution_semaphore: Arc::new(Semaphore::new(1)), // Only one agent at a time
-            pending_queries: Arc::new(Mutex::new(VecDeque::new())),
-            current_execution_id: Arc::new(Mutex::new(None)),
+            coordinator: Arc::new(AtomicExecutionCoordinator::new()),
+            pending_queries: Arc::new(AtomicQueue::new(10)), // Max 10 pending queries
         }
     }
 
@@ -63,7 +60,7 @@ impl AgentExecutionQueue {
         query: String,
         app_handle: tauri::AppHandle,
         state: tauri::State<'_, AppState>,
-    ) -> String {
+    ) -> Result<String, String> {
         let query_id = uuid::Uuid::new_v4().to_string();
         let queued_query = QueuedQuery {
             id: query_id.clone(),
@@ -75,94 +72,72 @@ impl AgentExecutionQueue {
         // Cancel current execution if any
         self.cancel_current_execution(state).await;
 
-        // Clear pending queue and add new query
-        {
-            let mut pending = self.pending_queries.lock().await;
-            pending.clear(); // Only keep the latest query
-            pending.push_back(queued_query);
-            info!("Queued new agent query with ID: {}", query_id);
-        }
-
-        query_id
+        // Clear pending queue and add new query atomically
+        self.pending_queries.clear().await;
+        self.pending_queries.push(queued_query).await?;
+        
+        info!("Queued new agent query with ID: {}", query_id);
+        Ok(query_id)
     }
 
     /// Cancel the currently executing agent
     async fn cancel_current_execution(&self, state: tauri::State<'_, AppState>) {
-        let current_id = {
-            let current = self.current_execution_id.lock().await;
-            current.clone()
-        };
-
-        if let Some(execution_id) = current_id {
+        if let Some(execution_id) = self.coordinator.get_current_execution_id().await {
             info!("Cancelling current agent execution: {}", execution_id);
-            // Signal cancellation through the existing state mechanism
             state.signal_cancel();
             info!("Signalled cancellation for existing agent execution");
-
-            // Give existing agent a brief moment to clean up gracefully
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // Wait for cancellation with timeout
+            let start = std::time::Instant::now();
+            while self.coordinator.is_executing().await && start.elapsed().as_millis() < 500 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
         }
     }
 
     /// Execute the next queued query atomically
     async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
-        // Try to acquire execution semaphore (non-blocking check)
-        if let Ok(permit) = self.execution_semaphore.try_acquire() {
-            let next_query = {
-                let mut pending = self.pending_queries.lock().await;
-                pending.pop_front()
-            };
+        // Get next query from queue
+        let query = self.pending_queries.pop().await?;
+        
+        // Try to start execution atomically
+        let guard = match self.coordinator.try_start_execution(query.id.clone()).await {
+            Ok(guard) => guard,
+            Err(e) => {
+                warn!("Failed to start execution: {}", e);
+                // Re-queue the query
+                let _ = self.pending_queries.push(query).await;
+                return None;
+            }
+        };
+        info!("Starting atomic agent execution for query ID: {}", query.id);
 
-            if let Some(query) = next_query.clone() {
-                // Set current execution ID
-                {
-                    let mut current = self.current_execution_id.lock().await;
-                    *current = Some(query.id.clone());
-                }
+        // Execute the actual agent logic
+        let result = execute_agent_internal(
+            query.query.clone(),
+            state,
+            query.app_handle.clone()
+        ).await;
 
-                // Execute the query
-                info!("Starting atomic agent execution for query ID: {}", query.id);
+        // Guard automatically cleans up on drop
+        drop(guard);
 
-                // Execute the actual agent logic here
-                let result =
-                    execute_agent_internal(query.query.clone(), state, query.app_handle.clone())
-                        .await;
-
-                // Clear current execution
-                {
-                    let mut current = self.current_execution_id.lock().await;
-                    *current = None;
-                }
-
-                // Release the semaphore
-                drop(permit);
-
-                // Handle execution result - ensure UI cleanup happens on failure
-                match result {
-                    Ok(()) => {
-                        info!("Agent execution completed successfully for query ID: {}", query.id);
-                    }
-                    Err(e) => {
-                        error!("Agent execution failed for query {}: {}", query.id, e);
-                        // NOTE: UI cleanup is handled within execute_agent_internal for all scenarios
-                        // No additional cleanup needed here to avoid race conditions
-                    }
-                }
-
-                return Some(query);
-            } else {
-                // No queries to execute, release semaphore
-                drop(permit);
+        // Handle execution result
+        match result {
+            Ok(()) => {
+                info!("Agent execution completed successfully for query ID: {}", query.id);
+            }
+            Err(e) => {
+                error!("Agent execution failed for query {}: {}", query.id, e);
             }
         }
 
-        None
+        Some(query)
     }
 
     /// Check if execution is currently in progress
     async fn is_executing(&self) -> bool {
-        let current = self.current_execution_id.lock().await;
-        current.is_some()
+        self.coordinator.is_executing().await
     }
 }
 
@@ -352,7 +327,8 @@ pub async fn submit_query(
     
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
-    let _query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await;
+    let _query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await
+        .map_err(|e| format!("Failed to queue query: {}", e))?;
     
     // Execute the next queued query (will be the one we just queued)
     queue.execute_next_query(state.clone()).await;

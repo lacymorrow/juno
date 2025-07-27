@@ -1,5 +1,6 @@
 // Add coordinates module
 pub mod async_runtime;
+pub mod atomic_state;
 pub mod command_macros;
 pub mod coordinates;
 pub mod coordinate_validation;

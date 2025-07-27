@@ -1485,6 +1485,8 @@ impl MemoryManager for AdvancedMemoryManager {
 pub struct SimpleMemoryManager {
     messages: Arc<RwLock<Vec<Message>>>,
     pending_tool_calls: Arc<RwLock<HashSet<String>>>, // Track tool call IDs that haven't been resolved yet
+    max_messages: usize,
+    pruning_lock: Arc<TokioMutex<()>>, // Lock to prevent concurrent pruning
 }
 
 impl SimpleMemoryManager {
@@ -1492,6 +1494,8 @@ impl SimpleMemoryManager {
         SimpleMemoryManager {
             messages: Arc::new(RwLock::new(Vec::new())),
             pending_tool_calls: Arc::new(RwLock::new(HashSet::new())),
+            max_messages: 100, // Default limit
+            pruning_lock: Arc::new(TokioMutex::new(())),
         }
     }
 
@@ -1607,14 +1611,11 @@ impl SimpleMemoryManager {
 #[async_trait]
 impl MemoryManager for SimpleMemoryManager {
     async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Track tool calls and results
+        // First handle tool call tracking atomically
         match message.role {
             Role::Assistant => {
                 if let Some(tool_calls) = &message.tool_calls {
-                    // Add tool call IDs to pending list
+                    let mut pending = self.pending_tool_calls.write().await;
                     for tool_call in tool_calls {
                         pending.insert(tool_call.id.clone());
                         log::debug!("Tracking pending tool call: {}", tool_call.id);
@@ -1623,10 +1624,8 @@ impl MemoryManager for SimpleMemoryManager {
             }
             Role::Tool => {
                 if let Some(tool_call_id) = &message.tool_call_id {
-                    // Remove from pending list when result is added
-                    if pending.remove(tool_call_id) {
-                        log::debug!("Resolved pending tool call: {}", tool_call_id);
-                    } else {
+                    let mut pending = self.pending_tool_calls.write().await;
+                    if !pending.remove(tool_call_id) {
                         log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
                     }
                 }
@@ -1634,12 +1633,29 @@ impl MemoryManager for SimpleMemoryManager {
             _ => {}
         }
 
-        messages.push(message);
+        // Add message and prune if needed atomically
+        {
+            let mut messages = self.messages.write().await;
+            messages.push(message);
+            
+            // Check if pruning needed while holding lock
+            if messages.len() > self.max_messages {
+                // Acquire pruning lock to prevent concurrent pruning
+                let _pruning_guard = self.pruning_lock.lock().await;
+                
+                // Double-check after acquiring pruning lock
+                if messages.len() > self.max_messages {
+                    let excess = messages.len() - self.max_messages;
+                    messages.drain(0..excess);
+                    log::info!("Pruned {} messages to maintain limit of {}", excess, self.max_messages);
+                }
+            }
+        }
 
         log::debug!("Memory: Added message");
-
         Ok(())
     }
+
 
     async fn get_messages(&self) -> Result<Vec<Message>, AgentError> {
         let messages = self.messages.read().await.clone();

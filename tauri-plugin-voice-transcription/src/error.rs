@@ -61,6 +61,9 @@ pub enum Error {
 
     #[error("Control error: {0}")]
     ControlError(String),
+
+    #[error("Microphone permission denied. Please grant microphone access in System Settings > Privacy & Security > Microphone")]
+    MicrophonePermissionDenied,
 }
 
 impl serde::Serialize for Error {

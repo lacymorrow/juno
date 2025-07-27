@@ -468,3 +468,59 @@ pub async fn force_transcription_test<R: tauri::Runtime>(
     info!("[Plugin] Force transcription test completed");
     Ok(test_result)
 }
+
+// Microphone Permission Commands
+
+#[tauri::command]
+pub async fn check_microphone_permission() -> Result<String, Error> {
+    info!("[Plugin] check_microphone_permission command called");
+    
+    let status = crate::mic_permissions::check_microphone_permission();
+    let status_str = match status {
+        crate::mic_permissions::MicrophonePermissionStatus::Granted => "granted",
+        crate::mic_permissions::MicrophonePermissionStatus::Denied => "denied",
+        crate::mic_permissions::MicrophonePermissionStatus::Undetermined => "undetermined",
+        crate::mic_permissions::MicrophonePermissionStatus::NotApplicable => "not_applicable",
+    };
+    
+    info!("[Plugin] Microphone permission status: {}", status_str);
+    Ok(status_str.to_string())
+}
+
+#[tauri::command]
+pub async fn request_microphone_permission() -> Result<String, Error> {
+    info!("[Plugin] request_microphone_permission command called");
+    
+    match crate::mic_permissions::request_microphone_permission().await {
+        Ok(status) => {
+            let status_str = match status {
+                crate::mic_permissions::MicrophonePermissionStatus::Granted => "granted",
+                crate::mic_permissions::MicrophonePermissionStatus::Denied => "denied",
+                crate::mic_permissions::MicrophonePermissionStatus::Undetermined => "undetermined",
+                crate::mic_permissions::MicrophonePermissionStatus::NotApplicable => "not_applicable",
+            };
+            info!("[Plugin] Microphone permission request result: {}", status_str);
+            Ok(status_str.to_string())
+        }
+        Err(e) => {
+            error!("[Plugin] Failed to request microphone permission: {}", e);
+            Err(Error::Other(format!("Failed to request microphone permission: {}", e)))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn ensure_microphone_ready() -> Result<(), Error> {
+    info!("[Plugin] ensure_microphone_ready command called");
+    
+    match crate::mic_permissions::ensure_microphone_ready().await {
+        Ok(()) => {
+            info!("[Plugin] Microphone is ready");
+            Ok(())
+        }
+        Err(e) => {
+            error!("[Plugin] Failed to ensure microphone ready: {}", e);
+            Err(Error::Other(e))
+        }
+    }
+}
