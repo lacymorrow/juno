@@ -28,7 +28,13 @@ lazy_static::lazy_static! {
 
 // Check if a query submission is a duplicate within 1 second
 fn is_duplicate_submission(query: &str) -> bool {
-    let mut cache = SUBMISSION_CACHE.lock().unwrap();
+    let mut cache = match SUBMISSION_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("Submission cache mutex was poisoned, recovering...");
+            poisoned.into_inner()
+        }
+    };
     let now = Instant::now();
     
     // Clean up old entries (older than 5 seconds)

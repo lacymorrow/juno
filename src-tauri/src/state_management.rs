@@ -230,7 +230,7 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Create voice transcription config based on centralized settings
-    let voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
+    let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
         model_path: "models/ggml-tiny.en.bin".to_string(),
         sample_rate: 16000,
         channels: 1,
@@ -334,7 +334,7 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
 }
 
 /// Initialize floating bar manager state
-async fn initialize_floating_bar_state(app_handle: AppHandle) -> Result<(), String> {
+async fn initialize_floating_bar_state(_app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing floating bar state...");
     // UI Manager initialization moved to initialize_ui_manager_state to avoid duplicate initialization
     info!("Floating bar state initialization completed");

@@ -10,6 +10,7 @@ pub mod string_cache;
 
 
 pub mod log_formatter;
+pub mod resource_manager;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

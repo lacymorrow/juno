@@ -392,6 +392,15 @@ impl AgentBrain for GeminiBrain {
 
 impl Default for GeminiBrain {
     fn default() -> Self {
-        Self::new(String::new(), None, None, None, None).unwrap()
+        // Default implementation should provide safe defaults
+        // Using empty API key will fail when actually trying to use the provider
+        Self {
+            client: Client::new(),
+            api_key: String::new(),
+            model: "gemini-1.5-flash".to_string(),
+            max_tokens: 8192,
+            system_prompt: None,
+            temperature: 0.1,
+        }
     }
 }

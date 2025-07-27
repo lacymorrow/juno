@@ -896,12 +896,13 @@ impl AdvancedMemoryManager {
         };
 
         // If no current execution ID is set, fall back to regular cleaning
-        if current_execution_id_option.is_none() {
-            log::warn!("No current execution ID set, falling back to regular orphaned tool call cleanup");
-            return self.clean_orphaned_tool_calls().await;
-        }
-
-        let current_execution_id = current_execution_id_option.unwrap();
+        let current_execution_id = match current_execution_id_option {
+            Some(id) => id,
+            None => {
+                log::warn!("No current execution ID set, falling back to regular orphaned tool call cleanup");
+                return self.clean_orphaned_tool_calls().await;
+            }
+        };
         log::info!("Cleaning orphaned tool calls from previous executions (current execution: {})",
                   current_execution_id);
 
@@ -1163,7 +1164,11 @@ impl AdvancedMemoryManager {
         // Create comprehensive summary with enhanced analysis
         let summary = if self.visual_config.read().await.fallback_to_generic_description {
             let timestamp = SystemTime::now();
-            let time_str = format!("{:?}", timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+            let time_str = format!("{:?}", 
+                timestamp.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_else(|_| Duration::from_secs(0))
+                    .as_secs()
+            );
 
             format!(
                 "Screenshot captured at {} ({}). {}. {}. \

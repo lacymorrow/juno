@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Manager};
@@ -172,7 +172,10 @@ impl CloudCommandProcessor {
                 progress: None,
                 metadata: None,
             }),
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_secs(),
             error: if let Err(e) = &response_data { Some(e.to_string()) } else { None },
         };
 

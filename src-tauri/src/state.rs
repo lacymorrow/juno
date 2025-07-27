@@ -1284,11 +1284,11 @@ impl AppState {
                             let mut check_delay = 10; // Start with 10ms
                             let max_delay = 200; // Max 200ms
                             let max_checks = 20; // Max 2 seconds total wait
-                            let mut cumulative_elapsed = 0u64; // Track actual elapsed time
+                            let mut _cumulative_elapsed = 0u64; // Track actual elapsed time
 
                             for check_attempt in 0..max_checks {
                                 tokio::time::sleep(Duration::from_millis(check_delay)).await;
-                                cumulative_elapsed += check_delay;
+                                _cumulative_elapsed += check_delay;
 
                                 // Comprehensive readiness check: status + tools availability
                                 let manager_guard = manager.lock().await;

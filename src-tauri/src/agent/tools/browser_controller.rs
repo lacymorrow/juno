@@ -1663,8 +1663,47 @@ impl BrowserController {
 // Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        // No automatic cleanup in Drop.
-        // We'll only clean up explicitly when the app exits.
-        log::debug!("BrowserController dropped, but browser instance is kept alive for reuse.");
+        let connection_method = self.connection_method.clone();
+        let browser = self.browser.clone();
+        let context = self.context.clone();
+        let page = self.page.clone();
+        
+        // Schedule async cleanup in a detached task
+        tokio::spawn(async move {
+            log::info!("BrowserController dropped, scheduling cleanup...");
+            
+            // Close the page if it exists
+            {
+                let mut page_guard = page.lock().await;
+                if let Some(page) = page_guard.take() {
+                    if let Err(e) = page.close(None).await {
+                        log::error!("Failed to close browser page in Drop: {}", e);
+                    }
+                }
+            }
+            
+            // Close the context
+            if let Err(e) = context.close().await {
+                log::error!("Failed to close browser context in Drop: {}", e);
+            }
+            
+            // Close the browser
+            if let Err(e) = browser.close().await {
+                log::error!("Failed to close browser in Drop: {}", e);
+            }
+            
+            // Clean up temporary profile if needed
+            if connection_method.starts_with("TempProfile:") {
+                if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {
+                    if !temp_path.is_empty() {
+                        if let Err(e) = std::fs::remove_dir_all(temp_path) {
+                            log::warn!("Failed to clean up temp profile in Drop: {}", e);
+                        }
+                    }
+                }
+            }
+            
+            log::info!("BrowserController cleanup completed");
+        });
     }
 }

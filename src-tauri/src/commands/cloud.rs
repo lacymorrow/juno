@@ -484,7 +484,7 @@ pub async fn test_websocket_connection(
                 "duration_ms": duration.as_millis(),
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                     .as_secs()
             }))
         },
@@ -497,7 +497,7 @@ pub async fn test_websocket_connection(
                 "duration_ms": duration.as_millis(),
                 "timestamp": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                     .as_secs()
             }))
         }
@@ -537,7 +537,7 @@ pub async fn send_test_cloud_command(
         },
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs(),
         signature: None,
         metadata: None,
@@ -591,7 +591,7 @@ pub async fn send_test_cloud_command(
         },
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs(),
         error: None,
     };
@@ -605,7 +605,7 @@ pub async fn send_test_cloud_command(
         "duration_ms": duration.as_millis(),
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs()
     }))
 }
@@ -661,7 +661,7 @@ pub async fn get_websocket_diagnostics(
     let mut diagnostics = serde_json::json!({
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs(),
         "connector_available": false,
         "connection_state": "unknown",
@@ -728,7 +728,7 @@ pub async fn run_websocket_test_suite(
         "tests": test_results,
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs()
     }))
 }
@@ -908,7 +908,7 @@ pub async fn execute_remote_command(
         },
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs(),
         signature: None,
         metadata: None,

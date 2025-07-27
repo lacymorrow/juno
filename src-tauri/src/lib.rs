@@ -23,6 +23,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
@@ -942,6 +943,10 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---
+
+            // --- Initialize Cleanup Handlers ---
+            cleanup::init_cleanup_handlers(app_handle.clone());
+            // --- End of Cleanup Handlers ---
 
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module

@@ -63,8 +63,13 @@ impl EnhancedCodingToolProvider {
             📄 Key files: {}\n\
             \n💡 **IDE Recommendation**: Consider opening {} in your IDE for optimal development experience.",
             project_path,
-            project_info.get("type").unwrap_or(&json!("Unknown")).as_str().unwrap_or("Unknown"),
-            project_info.get("directories").unwrap_or(&json!([])).as_array().unwrap_or(&vec![]).len(),
+            project_info.get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown"),
+            project_info.get("directories")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0),
             key_files.len(),
             project_path
         );
@@ -334,9 +339,13 @@ impl EnhancedCodingToolProvider {
         );
 
         let mut output = result;
-        output.as_object_mut().unwrap().insert("ide_intent".to_string(), json!(ide_intent));
-        output.as_object_mut().unwrap().insert("language".to_string(), json!(language));
-        output.as_object_mut().unwrap().insert("template_applied".to_string(), json!(content_type));
+        if let Some(obj) = output.as_object_mut() {
+            obj.insert("ide_intent".to_string(), json!(ide_intent));
+            obj.insert("language".to_string(), json!(language));
+            obj.insert("template_applied".to_string(), json!(content_type));
+        } else {
+            tracing::warn!("Result was not a JSON object, could not add metadata");
+        }
 
         Ok(ToolResult {
             call_id: tool_call.id.clone(),
