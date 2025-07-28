@@ -703,15 +703,16 @@ impl BrowserController {
                 }
             }
 
-            if test_page.is_none() {
-                return Err(AgentError::ToolError(format!(
-                    "Failed to create initial page after {} attempts. Last error: {}",
-                    max_attempts,
-                    last_error.unwrap_or_else(|| "Unknown error".to_string())
-                )));
+            match test_page {
+                None => {
+                    return Err(AgentError::ToolError(format!(
+                        "Failed to create initial page after {} attempts. Last error: {}",
+                        max_attempts,
+                        last_error.unwrap_or_else(|| "Unknown error".to_string())
+                    )));
+                }
+                Some(page) => page
             }
-
-            test_page.unwrap()
         };
 
         // Try to navigate to a simple URL to verify browser works

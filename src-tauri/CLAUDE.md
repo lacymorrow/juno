@@ -378,6 +378,7 @@ async fn test_with_mock() {
 - Use `Result<T, String>` for Tauri commands
 - Never use `std::process::exit()` - implement graceful degradation
 - Log errors at appropriate levels (error, warn, info, debug)
+- **NEVER use `.unwrap()` in production code** - always handle errors properly
 
 ### Escape Key Management
 - Register escape key ONLY during agent execution
@@ -426,3 +427,116 @@ let result = tool_provider.execute_tool("tool_name", params).await?;
 let app_handle = app_state.get_app_handle();
 app_handle.emit("event_name", payload)?;
 ```
+
+## Memory Safety Guidelines
+
+### Safe Unwrapping Patterns
+
+**Production Code Rule: ZERO `.unwrap()` calls allowed**
+
+```rust
+// ❌ NEVER DO THIS IN PRODUCTION
+let value = some_option.unwrap();
+let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+let guard = mutex.lock().unwrap();
+
+// ✅ ALWAYS USE SAFE PATTERNS
+// Option handling
+let value = some_option.ok_or("Error: value not found")?;
+let value = some_option.unwrap_or_default();
+let value = some_option.unwrap_or_else(|| compute_default());
+
+// Result handling
+let result = operation().map_err(|e| format!("Operation failed: {}", e))?;
+let result = operation().unwrap_or_else(|e| {
+    tracing::error!("Operation failed: {}", e);
+    default_value
+});
+
+// SystemTime (ALWAYS use this pattern)
+let timestamp = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_else(|_| Duration::from_secs(0))
+    .as_secs();
+
+// Mutex locking
+match mutex.lock() {
+    Ok(guard) => {
+        // Use guard
+    }
+    Err(e) => {
+        tracing::error!("Mutex poisoned: {}", e);
+        return Err("Failed to acquire lock".to_string());
+    }
+}
+
+// Regex compilation
+match Regex::new(pattern) {
+    Ok(regex) => {
+        // Use regex
+    }
+    Err(e) => {
+        tracing::warn!("Invalid regex pattern '{}': {}", pattern, e);
+        // Fallback logic
+    }
+}
+```
+
+### Common Anti-Patterns to Avoid
+
+```rust
+// ❌ Checking then unwrapping
+if option.is_some() {
+    let value = option.unwrap(); // Still dangerous!
+}
+
+// ✅ Use if-let instead
+if let Some(value) = option {
+    // Use value safely
+}
+
+// ❌ Multiple unwraps in chain
+let result = some_map.get("key").unwrap().field.unwrap();
+
+// ✅ Use ? operator or and_then
+let result = some_map.get("key")
+    .and_then(|v| v.field.as_ref())
+    .ok_or("Value not found")?;
+```
+
+### Race Condition Prevention
+
+1. **Use Atomic Types**: 
+   - `AtomicBool` for flags
+   - `AtomicUsize` for counters
+   - `Arc<TokioMutex<T>>` for complex shared state
+
+2. **Semaphore Pattern**:
+```rust
+let semaphore = Arc::new(Semaphore::new(1));
+let permit = semaphore.clone().try_acquire_owned()
+    .map_err(|_| "Resource busy")?;
+```
+
+3. **RAII Resource Management**:
+```rust
+pub struct ManagedResource<T> {
+    resource: Option<T>,
+    cleanup: Option<Box<dyn FnOnce(T) + Send + 'static>>,
+}
+
+impl<T> Drop for ManagedResource<T> {
+    fn drop(&mut self) {
+        if let (Some(resource), Some(cleanup)) = 
+            (self.resource.take(), self.cleanup.take()) {
+            cleanup(resource);
+        }
+    }
+}
+```
+
+### Testing Best Practices
+
+- `.unwrap()` is acceptable in test code with clear context
+- Use `expect()` with descriptive messages in tests
+- Always test error paths, not just happy paths

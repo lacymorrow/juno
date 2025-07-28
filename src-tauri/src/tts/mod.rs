@@ -130,8 +130,16 @@ pub fn filter_tts_content(text: &str) -> String {
     // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
     // 12. Clean up whitespace and normalize
-    let whitespace_regex = Regex::new(r"\s+").unwrap();
-    filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+    match Regex::new(r"\s+") {
+        Ok(whitespace_regex) => {
+            filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+        }
+        Err(e) => {
+            tracing::warn!("Failed to compile whitespace regex: {}", e);
+            // Fallback to simple space normalization
+            filtered_text = filtered_text.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+    }
     filtered_text = filtered_text.trim().to_string();
 
     debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());

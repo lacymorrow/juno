@@ -556,7 +556,7 @@ pub async fn send_test_cloud_command(
                         "duration_ms": duration.as_millis(),
                         "timestamp": std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                             .as_secs()
                     }));
                 },
@@ -569,7 +569,7 @@ pub async fn send_test_cloud_command(
                         "duration_ms": duration.as_millis(),
                         "timestamp": std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                             .as_secs()
                     }));
                 }
@@ -630,7 +630,7 @@ pub async fn simulate_cloud_command(
                     "response": response,
                     "timestamp": std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                         .as_secs()
                 }))
             },
@@ -641,7 +641,7 @@ pub async fn simulate_cloud_command(
                     "error": e.to_string(),
                     "timestamp": std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                         .as_secs()
                 }))
             }

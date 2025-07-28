@@ -70,6 +70,7 @@ Orchestrator (src-tauri/src/anthropic.rs)
 3. **Memory Management**: Clone memory managers safely (Arc-based), use proper async patterns
 4. **Security**: All tools implement security validation (see `src-tauri/src/agent/tools/basic_tools.rs`)
 5. **Permissions**: Never terminate app on macOS permission failures, implement graceful degradation
+6. **Memory Safety**: NEVER use `.unwrap()` in production code - use proper error handling patterns
 
 ### Tool Development Pattern
 
@@ -167,6 +168,96 @@ ELEVENLABS_API_KEY=your_key_here   # Text-to-speech (optional)
 5. **Escape Key**: Dynamic registration only during agent execution
 6. **Tool Registration**: Use shared tool providers with lazy initialization
 7. **Memory Management**: Arc-based sharing with automatic pruning for context limits
+8. **Safe Unwrapping**: Use match expressions, `?` operator, or `unwrap_or_else()` instead of `.unwrap()`
+9. **Time Operations**: Always use `.unwrap_or_else(|_| Duration::from_secs(0))` for SystemTime
+10. **Mutex Locking**: Use `match lock() { Ok(guard) => ..., Err(e) => ... }` pattern
+11. **Regex Compilation**: Handle `Regex::new()` errors with proper fallbacks
+
+## Memory Safety Best Practices
+
+### Avoiding Panics in Production
+
+**NEVER use `.unwrap()` in production code.** Instead:
+
+```rust
+// ❌ BAD: Can panic
+let value = some_option.unwrap();
+let result = some_result.unwrap();
+
+// ✅ GOOD: Safe error handling
+let value = some_option.ok_or("Error message")?;
+let result = some_result.map_err(|e| format!("Failed: {}", e))?;
+
+// ✅ GOOD: With defaults
+let value = some_option.unwrap_or_default();
+let value = some_option.unwrap_or_else(|| compute_default());
+```
+
+### Common Patterns
+
+1. **SystemTime Operations**:
+```rust
+// Safe timestamp handling
+let timestamp = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_else(|_| Duration::from_secs(0))
+    .as_secs();
+```
+
+2. **Mutex Locking**:
+```rust
+// Safe mutex access
+match some_mutex.lock() {
+    Ok(guard) => {
+        // Use guard
+    }
+    Err(e) => {
+        tracing::error!("Failed to acquire lock: {}", e);
+        return Err("Lock poisoned".to_string());
+    }
+}
+```
+
+3. **Regex Compilation**:
+```rust
+// Safe regex compilation
+match Regex::new(pattern_str) {
+    Ok(regex) => {
+        // Use regex
+    }
+    Err(e) => {
+        tracing::warn!("Invalid regex pattern: {}", e);
+        // Use fallback logic
+    }
+}
+```
+
+4. **Option Chaining**:
+```rust
+// Instead of checking is_some() then unwrap()
+if some_option.is_some() {
+    let value = some_option.unwrap(); // ❌ BAD
+}
+
+// Use if-let or match
+if let Some(value) = some_option { // ✅ GOOD
+    // Use value
+}
+```
+
+### Resource Management
+
+1. **RAII Pattern**: Resources are automatically cleaned up when dropped
+2. **Arc<TokioMutex<T>>**: For thread-safe shared state
+3. **Weak References**: To prevent circular dependencies
+4. **Drop Implementations**: For custom cleanup logic
+
+### Race Condition Prevention
+
+1. **Atomic Operations**: Use `AtomicBool`, `AtomicUsize` for simple flags
+2. **Semaphores**: For limiting concurrent operations
+3. **RwLock**: For multiple readers, single writer patterns
+4. **Channels**: For message passing between threads
 
 ## Debugging
 
