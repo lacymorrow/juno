@@ -74,6 +74,17 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
 ) -> Result<(), Error> {
     info!("[Plugin] start_dictation command called");
 
+    // Check microphone permissions first
+    match crate::mic_permissions::ensure_microphone_ready().await {
+        Ok(()) => {
+            info!("[Plugin] Microphone permissions verified");
+        }
+        Err(e) => {
+            error!("[Plugin] Microphone permission check failed: {}", e);
+            return Err(Error::PermissionError(e));
+        }
+    }
+
     // Check initialization status before proceeding
     check_voice_controller_availability(&app)?;
 
@@ -279,6 +290,17 @@ pub async fn start_always_listening<R: tauri::Runtime + 'static>(
     controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
 ) -> Result<(), Error> {
     info!("[Plugin] start_always_listening command called");
+
+    // Check microphone permissions first
+    match crate::mic_permissions::ensure_microphone_ready().await {
+        Ok(()) => {
+            info!("[Plugin] Microphone permissions verified for always listening");
+        }
+        Err(e) => {
+            error!("[Plugin] Microphone permission check failed: {}", e);
+            return Err(Error::PermissionError(e));
+        }
+    }
 
     let mut always_listening_controller = controller.lock()
         .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;

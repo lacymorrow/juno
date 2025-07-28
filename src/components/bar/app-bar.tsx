@@ -181,11 +181,15 @@ export function AppBar() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let isCleanedUp = false;
+    
     const setupListener = async () => {
       try {
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
+            if (isCleanedUp) return; // Prevent updates after cleanup
+            
             console.log("📨 AppBar: Received state update:", event.payload);
             const payload = event.payload;
             if (
@@ -207,11 +211,18 @@ export function AppBar() {
         console.error("❌ AppBar: Failed to setup event listener:", error);
       }
     };
+    
     setupListener();
+    
     return () => {
+      isCleanedUp = true;
       if (unlisten) {
-        unlisten();
-        console.log("🔄 AppBar: Event listener cleaned up");
+        try {
+          unlisten();
+          console.log("🔄 AppBar: Event listener cleaned up");
+        } catch (error) {
+          console.error("❌ AppBar: Error cleaning up listener:", error);
+        }
       }
     };
   }, []);
@@ -234,34 +245,40 @@ export function AppBar() {
   };
 
   // === STANDARDIZED INTERACTION HANDLERS ===
-  const createInteraction = (
-    interactionType: string,
-    data?: Record<string, any>
-  ): UIInteractionEvent => ({
-    element_id: COMPONENT_ID,
-    interaction_type: interactionType,
-    data: data || null,
-    timestamp: Date.now(),
-  });
+  const createInteraction = useCallback(
+    (
+      interactionType: string,
+      data?: Record<string, any>
+    ): UIInteractionEvent => ({
+      element_id: COMPONENT_ID,
+      interaction_type: interactionType,
+      data: data || null,
+      timestamp: Date.now(),
+    }),
+    []
+  );
 
-  const sendInteraction = async (interaction: UIInteractionEvent) => {
-    try {
-      console.log("🔧 AppBar: Sending interaction:", interaction);
-      await invoke("ui_handle_interaction", {
-        elementId: COMPONENT_ID,
-        interaction,
-      });
-      console.log("✅ AppBar: Interaction sent successfully");
-    } catch (error) {
-      console.error("❌ AppBar: Interaction failed:", error);
-    }
-  };
+  const sendInteraction = useCallback(
+    async (interaction: UIInteractionEvent) => {
+      try {
+        console.log("🔧 AppBar: Sending interaction:", interaction);
+        await invoke("ui_handle_interaction", {
+          elementId: COMPONENT_ID,
+          interaction,
+        });
+        console.log("✅ AppBar: Interaction sent successfully");
+      } catch (error) {
+        console.error("❌ AppBar: Interaction failed:", error);
+      }
+    },
+    []
+  );
 
   // === EVENT HANDLERS ===
   const handleBarClick = useCallback(async () => {
     const interaction = createInteraction(UI.INTERACTION_TYPES_CLICK);
     await sendInteraction(interaction);
-  }, []);
+  }, [createInteraction, sendInteraction]);
 
   const handleInputChange = useCallback((value: string) => {
     setLocalInputValue(value);
@@ -278,18 +295,18 @@ export function AppBar() {
         await sendInteraction(interaction);
       }
     },
-    [localInputValue]
+    [localInputValue, createInteraction, sendInteraction]
   );
 
   const handleInputFocus = useCallback(async () => {
     const interaction = createInteraction(UI.INTERACTION_TYPES_FOCUS);
     await sendInteraction(interaction);
-  }, []);
+  }, [createInteraction, sendInteraction]);
 
   const handleInputBlur = useCallback(async () => {
     const interaction = createInteraction(UI.INTERACTION_TYPES_BLUR);
     await sendInteraction(interaction);
-  }, []);
+  }, [createInteraction, sendInteraction]);
 
   // === STYLING ===
   const getContainerStyles = () => {

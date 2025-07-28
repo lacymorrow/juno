@@ -218,29 +218,40 @@ impl ShellSession {
         self.execute_command_direct(command, cmd_id, timeout)
     }
 
-    /// Validate command for basic security (not foolproof, but helps)
+    /// Validate command for basic security - prevent only catastrophic commands
     fn validate_command(&self, command: &str) -> Result<(), String> {
-        // Basic validation - reject obviously dangerous patterns
-        let dangerous_patterns = [
-            "rm -rf /",
-            ":(){ :|:& };:",  // Fork bomb
-            "curl", "wget",   // Network access (customize as needed)
-            "> /dev/",        // Device access
-            "sudo", "su",     // Privilege escalation
-        ];
-
-        let cmd_lower = command.to_lowercase();
-        for pattern in &dangerous_patterns {
-            if cmd_lower.contains(pattern) {
-                return Err(format!("Command contains potentially dangerous pattern: {}", pattern));
-            }
-        }
-
         // Reject commands that are too long (potential buffer overflow)
         if command.len() > 10000 {
             return Err("Command is too long".to_string());
         }
 
+        // Only check for truly catastrophic patterns
+        let catastrophic_patterns = [
+            "rm -rf /",        // Delete entire filesystem
+            "rm -rf /*",       // Delete entire filesystem
+            ":(){ :|:& };:",   // Fork bomb
+            "> /dev/sda",      // Overwrite disk
+            "dd if=/dev/zero of=/dev/sda", // Wipe disk
+            "mkfs.ext4 /dev/sda",  // Format main disk
+        ];
+        
+        let cmd_lower = command.to_lowercase();
+        for pattern in &catastrophic_patterns {
+            if cmd_lower.contains(pattern) {
+                return Err(format!("Command contains catastrophic pattern that could destroy the system: {}", pattern));
+            }
+        }
+        
+        // In development mode, allow almost everything
+        if cfg!(debug_assertions) {
+            return Ok(());
+        }
+        
+        // In production, still be more permissive but block sudo
+        if cmd_lower.contains("sudo") || cmd_lower.contains("doas") {
+            return Err("Privilege escalation commands are not allowed in production".to_string());
+        }
+        
         Ok(())
     }
 

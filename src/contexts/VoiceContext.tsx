@@ -79,20 +79,21 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    const unlistenCallbacks: Array<() => void> = [];
+    const unlistenCallbacks: Array<(() => void) | undefined> = [];
 
     const setupListeners = async () => {
-      // Voice transcription events
-      unlistenCallbacks.push(
-        await listen(EVENTS.VOICE_TRANSCRIPTION_PARTIAL_RESULT, (event) => {
-          const text = event.payload as string;
-          setVoiceState((prev) => ({
-            ...prev,
-            isTranscribing: true,
-            transcriptionText: text,
-          }));
-        })
-      );
+      try {
+        // Voice transcription events
+        unlistenCallbacks.push(
+          await listen(EVENTS.VOICE_TRANSCRIPTION_PARTIAL_RESULT, (event) => {
+            const text = event.payload as string;
+            setVoiceState((prev) => ({
+              ...prev,
+              isTranscribing: true,
+              transcriptionText: text,
+            }));
+          })
+        );
 
       unlistenCallbacks.push(
         await listen(EVENTS.VOICE_TRANSCRIPTION_FINAL_RESULT, (event) => {
@@ -220,27 +221,46 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
           }));
         })
       );
+      } catch (error) {
+        console.error('Failed to setup voice event listeners:', error);
+      }
     };
 
-    setupListeners().catch(console.error);
+    setupListeners();
 
     return () => {
-      unlistenCallbacks.forEach((unlisten) => unlisten());
+      // Safely cleanup event listeners
+      unlistenCallbacks.forEach((unlisten) => {
+        if (unlisten && typeof unlisten === 'function') {
+          try {
+            unlisten();
+          } catch (error) {
+            console.error('Error cleaning up event listener:', error);
+          }
+        }
+      });
     };
-  }, []);
+  }, []); // Empty deps is correct here - we want this to run once on mount
 
   // Clear transcription text after a delay when not active
   useEffect(() => {
+    let timer: NodeJS.Timeout | undefined;
+    
     if (
       !voiceState.isListening &&
       !voiceState.isTranscribing &&
       voiceState.transcriptionText
     ) {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         setVoiceState((prev) => ({ ...prev, transcriptionText: undefined }));
       }, 3000);
-      return () => clearTimeout(timer);
     }
+    
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, [
     voiceState.isListening,
     voiceState.isTranscribing,
