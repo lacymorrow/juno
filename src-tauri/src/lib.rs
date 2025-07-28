@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 // Settings manager import
 use crate::settings::manager::SettingsManager;
 use crate::constants::errors::templates;
+use crate::state::AppState;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -925,6 +926,15 @@ pub fn run() {
                 } else {
                     tracing::info!("Application state management initialized successfully");
                 }
+            });
+
+            // --- Initialize Rate Limiter Cleanup Task ---
+            let rate_limiter_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Get the AppState from the managed state
+                let app_state = rate_limiter_app_handle.state::<AppState>();
+                app_state.initialize_rate_limiter_cleanup().await;
+                tracing::info!("Rate limiter cleanup task initialized successfully");
             });
 
             // --- Setup All Menus (App Menu + Tray Menu + Event Handling) ---

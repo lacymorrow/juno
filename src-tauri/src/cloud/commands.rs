@@ -549,7 +549,8 @@ impl CloudCommandProcessor {
         info!("Capturing screenshot for cloud");
 
         // Use existing screenshot functionality
-        match crate::commands::core::capture_screenshot_command(self.app_handle.clone()).await {
+        let state = self.app_handle.state::<AppState>();
+        match crate::commands::core::capture_screenshot_command(self.app_handle.clone(), state).await {
             Ok(screenshot_result) => {
                 let screenshot_json = serde_json::to_value(&screenshot_result)
                     .map_err(|e| CloudError::SerializationError(format!("Failed to serialize screenshot result: {}", e)))?;

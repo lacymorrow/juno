@@ -1664,14 +1664,16 @@ impl BrowserController {
 // Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        let connection_method = self.connection_method.clone();
-        let browser = self.browser.clone();
-        let context = self.context.clone();
-        let page = self.page.clone();
-        
-        // Schedule async cleanup in a detached task
-        tokio::spawn(async move {
-            log::info!("BrowserController dropped, scheduling cleanup...");
+        // Check if Tokio runtime exists before attempting async cleanup
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let connection_method = self.connection_method.clone();
+            let browser = self.browser.clone();
+            let context = self.context.clone();
+            let page = self.page.clone();
+            
+            // Schedule async cleanup in a detached task
+            handle.spawn(async move {
+                log::info!("BrowserController dropped, scheduling cleanup...");
             
             // Close the page if it exists
             {
@@ -1705,6 +1707,17 @@ impl Drop for BrowserController {
             }
             
             log::info!("BrowserController cleanup completed");
-        });
+            });
+        } else {
+            log::warn!("BrowserController dropped outside Tokio runtime - cleanup skipped");
+            // Try to at least clean up temp profile synchronously
+            if let Some(temp_path) = self.connection_method.strip_prefix("TempProfile:") {
+                if !temp_path.is_empty() {
+                    if let Err(e) = std::fs::remove_dir_all(temp_path) {
+                        log::warn!("Failed to clean up temp profile in Drop: {}", e);
+                    }
+                }
+            }
+        }
     }
 }

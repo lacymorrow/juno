@@ -568,6 +568,11 @@ pub async fn bash_command(
     use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
     use tracing::{info, error};
 
+    // Rate limiting check - use user identifier or default key
+    if let Err(e) = state.rate_limiters.shell_commands.check("default_user").await {
+        return Err(e.to_user_message());
+    }
+
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
     } else {

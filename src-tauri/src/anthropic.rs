@@ -301,6 +301,12 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query for event-driven processing: {}", query);
 
+    // --- Rate limiting check for AI operations ---
+    if let Err(e) = state.rate_limiters.ai_operations.check("default_user").await {
+        warn!("Rate limit exceeded for AI operations");
+        return Err(e.to_user_message());
+    }
+
     // --- Validate query text ---
     let trimmed_query = query.trim();
     if trimmed_query.is_empty() {
