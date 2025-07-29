@@ -368,6 +368,18 @@ RUST_LOG=debug bun run tauri dev
 - **Production Mode**: Strict validation with comprehensive audit logging
 - **Configurable Limits**: File size, command timeouts, access controls
 
+### Rate Limiting System
+
+Juno includes a comprehensive rate limiting system to prevent abuse and ensure stability:
+
+- **AI Operations**: 20/minute - Protects expensive API calls
+- **Shell Commands**: 10/second - Prevents command injection attacks
+- **Screenshots**: 5/second - Manages resource-intensive operations
+- **File Operations**: 100/second - Controls filesystem access
+- **Browser Automation**: 30/minute - Limits web scraping
+
+The rate limiter uses a token bucket algorithm with automatic cleanup and provides user-friendly error messages with retry-after information.
+
 ## Contributing
 
 ### Development Guidelines

@@ -41,6 +41,9 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
             // _up_ paths for production builds
             resource_dir.join("_up_").join("models").join(model_path),
             resource_dir.join("_up_").join(model_path),
+            // Actual bundled path from our resources configuration
+            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join("models").join("ggml-tiny.en.bin"),
+            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path),
             // Standard resource paths
             resource_dir.join("models").join(model_path),
             resource_dir.join(model_path),
@@ -108,7 +111,43 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
         }
     }
 
-    // Strategy 5: Look relative to current working directory
+    // Strategy 5: macOS App Bundle - Check in Resources directory
+    #[cfg(target_os = "macos")]
+    {
+        tracing::info!("Strategy 5: Checking macOS app bundle...");
+        if let Ok(exe_path) = std::env::current_exe() {
+            tracing::info!("  Current executable: {}", exe_path.display());
+            
+            // For macOS app bundles: executable is at Contents/MacOS/binary
+            // Resources are at Contents/Resources/
+            if let Some(macos_dir) = exe_path.parent() {
+                if let Some(contents_dir) = macos_dir.parent() {
+                    let resources_dir = contents_dir.join("Resources");
+                    tracing::info!("  Checking Resources directory: {}", resources_dir.display());
+                    
+                    let bundle_paths = vec![
+                        resources_dir.join(model_path),
+                        resources_dir.join("models").join(model_path),
+                        resources_dir.join("_up_").join(model_path),
+                        resources_dir.join("_up_").join("models").join(model_path),
+                        // Add the actual bundled path we found
+                        resources_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path),
+                        resources_dir.join("_up_").join("tauri-plugin-voice-transcription").join("models").join("ggml-tiny.en.bin"),
+                    ];
+                    
+                    for bundle_path in bundle_paths {
+                        tracing::info!("  Checking bundle path: {}", bundle_path.display());
+                        if bundle_path.exists() {
+                            tracing::info!("Found model in macOS bundle: {}", bundle_path.display());
+                            return bundle_path.to_string_lossy().to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Strategy 6: Look relative to current working directory
     let cwd_model_path = PathBuf::from(model_path);
     if cwd_model_path.exists() {
         tracing::info!("Found model in current working directory: {}", cwd_model_path.display());
@@ -117,7 +156,7 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
             .unwrap_or_else(|_| model_path.to_string());
     }
 
-    // Strategy 6: Final fallback - return original path (will likely fail, but preserves error handling)
+    // Strategy 7: Final fallback - return original path (will likely fail, but preserves error handling)
     tracing::warn!("Model file '{}' not found in any standard location. Locations checked:", model_path);
     tracing::warn!("  - Bundled resources: {}", model_path);
     tracing::warn!("  - Bundled resources (_up_ pattern): _up_/{}", model_path);

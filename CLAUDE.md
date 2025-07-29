@@ -121,6 +121,75 @@ tool_provider.register_async_tool(definition, executor).await;
 - Dangerous pattern detection and blocking
 - Comprehensive audit logging
 
+## Rate Limiting System
+
+### Overview
+
+Juno implements a comprehensive token bucket-based rate limiting system to prevent abuse and ensure system stability. The rate limiter protects against:
+- API abuse (expensive AI operations)
+- Resource exhaustion attacks
+- Shell command injection attempts
+- Screenshot flooding
+- Browser automation abuse
+
+### Default Rate Limits
+
+```rust
+// src-tauri/src/utils/rate_limiter.rs
+GlobalRateLimiters {
+    ai_operations: 20/minute,      // Expensive API calls
+    file_operations: 100/second,    // File system operations
+    shell_commands: 10/second,      // Security sensitive
+    screenshots: 5/second,          // Resource intensive
+    browser_operations: 30/minute   // Browser automation
+}
+```
+
+### Usage in Commands
+
+All Tauri commands should check rate limits before executing operations:
+
+```rust
+#[tauri::command]
+pub async fn some_command(state: State<'_, AppState>) -> Result<String, String> {
+    // Check rate limit
+    if let Err(e) = state.rate_limiters.ai_operations.check("user_id").await {
+        return Err(e.to_user_message());
+    }
+    
+    // Execute operation
+    perform_operation().await
+}
+```
+
+### Rate Limiter Initialization
+
+**IMPORTANT**: The rate limiter cleanup task must be initialized after the Tokio runtime is ready:
+
+```rust
+// In src-tauri/src/lib.rs setup()
+tauri::async_runtime::spawn(async move {
+    let app_state = app_handle.state::<AppState>();
+    app_state.initialize_rate_limiter_cleanup().await;
+});
+```
+
+### Configuration (Future Enhancement)
+
+Currently, rate limits are hardcoded. Future versions will support:
+- Configuration via settings.json
+- Per-user rate limit overrides
+- Environment-specific limits (dev vs prod)
+- Distributed rate limiting for multi-instance deployments
+
+### Best Practices
+
+1. **Always check rate limits** before expensive operations
+2. **Use appropriate limiter** for each operation type
+3. **Return user-friendly errors** with retry-after information
+4. **Monitor rate limit violations** for security analysis
+5. **Consider burst allowances** for legitimate power users
+
 ## Project Structure
 
 ### Key Directories
@@ -251,6 +320,37 @@ if let Some(value) = some_option { // ✅ GOOD
 2. **Arc<TokioMutex<T>>**: For thread-safe shared state
 3. **Weak References**: To prevent circular dependencies
 4. **Drop Implementations**: For custom cleanup logic
+
+### Tokio Runtime Safety
+
+**CRITICAL**: Never use `tokio::spawn` or async operations outside of Tokio runtime context:
+
+```rust
+// ❌ NEVER do this in Drop implementations
+impl Drop for MyStruct {
+    fn drop(&mut self) {
+        tokio::spawn(async { /* cleanup */ }); // WILL PANIC!
+    }
+}
+
+// ✅ CORRECT: Check for runtime existence
+impl Drop for MyStruct {
+    fn drop(&mut self) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async { /* cleanup */ });
+        } else {
+            // Perform synchronous cleanup or log warning
+            log::warn!("Dropped outside Tokio runtime - async cleanup skipped");
+        }
+    }
+}
+```
+
+**Common Pitfalls to Avoid:**
+1. **tokio::spawn in constructors** - Defer to async initialization methods
+2. **Async operations in Drop** - Use runtime handle check
+3. **Static/lazy initialization** - Avoid Tokio operations
+4. **Non-async functions** - Make async or check runtime exists
 
 ### Race Condition Prevention
 
