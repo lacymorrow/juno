@@ -11,7 +11,7 @@ Juno is a production-ready Tauri v2 desktop application implementing Anthropic's
 ### Build and Test Commands
 ```bash
 bun install                              # Install dependencies
-cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Rust change
+cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Rust change (NOTE: requires 15m timeout)
 bun run tauri dev                        # Development mode
 bun run build                            # Build frontend
 bun run tauri build                      # Build app
@@ -65,7 +65,7 @@ Orchestrator (src-tauri/src/anthropic.rs)
 
 ### Critical Requirements
 
-1. **Compilation Check**: Always run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
+1. **Compilation Check**: Always run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes (NOTE: requires 15m timeout)
 2. **Error Handling**: Use `AgentError` enum, never `std::process::exit()`
 3. **Memory Management**: Clone memory managers safely (Arc-based), use proper async patterns
 4. **Security**: All tools implement security validation (see `src-tauri/src/agent/tools/basic_tools.rs`)

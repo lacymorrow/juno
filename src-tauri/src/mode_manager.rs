@@ -402,6 +402,359 @@ pub async fn set_always_listening_enabled(
 }
 
 #[tauri::command]
-pub async def get_mode_status() -> Result<serde_json::Value, String> {
+pub async fn get_mode_status() -> Result<serde_json::Value, String> {
     Ok(get_mode_manager().get_status().await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Helper to create a test mode manager instance
+    fn create_test_manager() -> ModeManager {
+        ModeManager::new()
+    }
+
+    #[tokio::test]
+    async fn test_initial_state() {
+        let manager = create_test_manager();
+        
+        // Should start in idle mode
+        assert_eq!(manager.get_mode().await, AppMode::Idle);
+        
+        // Config should have sensible defaults
+        let config = manager.get_config().await;
+        assert!(!config.always_listening_enabled);
+        assert_eq!(config.wake_words, vec!["hey juno".to_string(), "ok juno".to_string()]);
+        assert_eq!(config.wake_sensitivity, 0.5);
+        
+        // History should be empty
+        let status = manager.get_status().await;
+        assert_eq!(status["history"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_valid_transitions() {
+        let manager = create_test_manager();
+        
+        // For these tests, we'll simulate the app handle behavior
+        // by checking mode changes without actual Tauri app
+        
+        // Test that mode can be set
+        {
+            let mut mode = manager.current_mode.write().await;
+            *mode = AppMode::Agent;
+        }
+        assert_eq!(manager.get_mode().await, AppMode::Agent);
+        
+        // Test transition back to idle
+        {
+            let mut mode = manager.current_mode.write().await;
+            *mode = AppMode::Idle;
+        }
+        assert_eq!(manager.get_mode().await, AppMode::Idle);
+        
+        // Test transition to dictation
+        {
+            let mut mode = manager.current_mode.write().await;
+            *mode = AppMode::Dictation;
+        }
+        assert_eq!(manager.get_mode().await, AppMode::Dictation);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_transitions() {
+        let manager = create_test_manager();
+        
+        // Test Agent -> Dictation (should fail validation)
+        assert!(!manager.is_valid_transition(AppMode::Agent, AppMode::Dictation));
+        
+        // Test Dictation -> Agent (should fail validation)
+        assert!(!manager.is_valid_transition(AppMode::Dictation, AppMode::Agent));
+        
+        // Test valid transitions
+        assert!(manager.is_valid_transition(AppMode::Idle, AppMode::Agent));
+        assert!(manager.is_valid_transition(AppMode::Idle, AppMode::Dictation));
+        assert!(manager.is_valid_transition(AppMode::Agent, AppMode::Idle));
+        assert!(manager.is_valid_transition(AppMode::Dictation, AppMode::Idle));
+    }
+
+    #[tokio::test]
+    async fn test_same_mode_transition() {
+        let manager = create_test_manager();
+        
+        // Same mode transitions should be valid
+        assert!(manager.is_valid_transition(AppMode::Idle, AppMode::Idle));
+        assert!(manager.is_valid_transition(AppMode::Agent, AppMode::Agent));
+        assert!(manager.is_valid_transition(AppMode::Dictation, AppMode::Dictation));
+    }
+
+    #[tokio::test]
+    async fn test_transition_history() {
+        let manager = create_test_manager();
+        
+        // Add some transitions to history
+        {
+            let mut history = manager.history.write().await;
+            history.push(ModeTransition {
+                from: AppMode::Idle,
+                to: AppMode::Agent,
+                reason: "Test 1".to_string(),
+                timestamp: 1000,
+            });
+            history.push(ModeTransition {
+                from: AppMode::Agent,
+                to: AppMode::Idle,
+                reason: "Test 2".to_string(),
+                timestamp: 2000,
+            });
+        }
+        
+        // Check history
+        let status = manager.get_status().await;
+        let history = status["history"].as_array().unwrap();
+        assert_eq!(history.len(), 2);
+        
+        // Verify transitions are in reverse order (most recent first)
+        assert_eq!(history[0]["reason"], "Test 2");
+        assert_eq!(history[1]["reason"], "Test 1");
+    }
+
+    #[tokio::test]
+    async fn test_history_size_limit() {
+        let manager = create_test_manager();
+        
+        // Add more than 100 transitions
+        {
+            let mut history = manager.history.write().await;
+            for i in 0..105 {
+                history.push(ModeTransition {
+                    from: AppMode::Idle,
+                    to: AppMode::Agent,
+                    reason: format!("Transition {}", i),
+                    timestamp: i as u64,
+                });
+            }
+        }
+        
+        // History should still have 105 (limit is applied during transition)
+        let history_len = manager.history.read().await.len();
+        assert_eq!(history_len, 105);
+    }
+
+    #[tokio::test]
+    async fn test_config_updates() {
+        let manager = create_test_manager();
+        
+        // Update config
+        manager.update_config(|config| {
+            config.always_listening_enabled = true;
+            config.wake_words = vec!["hello world".to_string()];
+            config.wake_sensitivity = 0.8;
+        }).await.unwrap();
+        
+        // Verify updates
+        let config = manager.get_config().await;
+        assert!(config.always_listening_enabled);
+        assert_eq!(config.wake_words, vec!["hello world".to_string()]);
+        assert_eq!(config.wake_sensitivity, 0.8);
+    }
+
+    #[tokio::test]
+    async fn test_wake_word_detection_config() {
+        let manager = create_test_manager();
+        
+        // Test wake word detection with different configs
+        let mut config = manager.get_config().await;
+        
+        // Default config
+        assert_eq!(config.wake_words.len(), 2);
+        assert!(config.wake_words.contains(&"hey juno".to_string()));
+        assert!(config.wake_words.contains(&"ok juno".to_string()));
+        
+        // Update wake words
+        manager.update_config(|c| {
+            c.wake_words = vec!["hello assistant".to_string(), "wake up".to_string()];
+        }).await.unwrap();
+        
+        config = manager.get_config().await;
+        assert_eq!(config.wake_words.len(), 2);
+        assert!(config.wake_words.contains(&"hello assistant".to_string()));
+        assert!(config.wake_words.contains(&"wake up".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_mode_access() {
+        let manager = Arc::new(create_test_manager());
+        
+        // Test concurrent reads
+        let manager1 = Arc::clone(&manager);
+        let manager2 = Arc::clone(&manager);
+        
+        let handle1 = tokio::spawn(async move {
+            manager1.get_mode().await
+        });
+        
+        let handle2 = tokio::spawn(async move {
+            manager2.get_mode().await
+        });
+        
+        let mode1 = handle1.await.unwrap();
+        let mode2 = handle2.await.unwrap();
+        
+        // Both should read the same mode
+        assert_eq!(mode1, mode2);
+        assert_eq!(mode1, AppMode::Idle);
+    }
+
+    #[tokio::test]
+    async fn test_mode_status_structure() {
+        let manager = create_test_manager();
+        
+        // Add a transition for testing
+        {
+            let mut history = manager.history.write().await;
+            history.push(ModeTransition {
+                from: AppMode::Idle,
+                to: AppMode::Agent,
+                reason: "Status test".to_string(),
+                timestamp: 12345,
+            });
+        }
+        
+        // Check status structure
+        let status = manager.get_status().await;
+        
+        assert!(status.get("current_mode").is_some());
+        assert!(status.get("config").is_some());
+        assert!(status.get("history").is_some());
+        assert!(status.get("timestamp").is_some());
+        
+        // Verify current mode
+        assert_eq!(status["current_mode"], "idle");
+        
+        // Verify timestamp is reasonable
+        let timestamp = status["timestamp"].as_u64().unwrap();
+        assert!(timestamp > 0);
+    }
+
+    #[tokio::test]
+    async fn test_mode_serialization() {
+        // Test that AppMode serializes correctly
+        let mode = AppMode::Agent;
+        let serialized = serde_json::to_string(&mode).unwrap();
+        assert_eq!(serialized, "\"agent\"");
+        
+        let mode = AppMode::Dictation;
+        let serialized = serde_json::to_string(&mode).unwrap();
+        assert_eq!(serialized, "\"dictation\"");
+        
+        let mode = AppMode::Idle;
+        let serialized = serde_json::to_string(&mode).unwrap();
+        assert_eq!(serialized, "\"idle\"");
+    }
+
+    #[tokio::test]
+    async fn test_config_serialization() {
+        let config = ModeConfig::default();
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: ModeConfig = serde_json::from_str(&serialized).unwrap();
+        
+        assert_eq!(config.always_listening_enabled, deserialized.always_listening_enabled);
+        assert_eq!(config.wake_words, deserialized.wake_words);
+        assert_eq!(config.wake_sensitivity, deserialized.wake_sensitivity);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_config_updates() {
+        let manager = Arc::new(create_test_manager());
+        
+        // Test concurrent configuration updates
+        let manager1 = Arc::clone(&manager);
+        let handle1 = tokio::spawn(async move {
+            manager1.update_config(|config| {
+                config.wake_sensitivity = 0.7;
+            }).await
+        });
+        
+        let manager2 = Arc::clone(&manager);
+        let handle2 = tokio::spawn(async move {
+            manager2.update_config(|config| {
+                config.always_listening_enabled = true;
+            }).await
+        });
+        
+        // Both updates should succeed
+        assert!(handle1.await.unwrap().is_ok());
+        assert!(handle2.await.unwrap().is_ok());
+        
+        // Verify both updates were applied
+        let config = manager.get_config().await;
+        assert_eq!(config.wake_sensitivity, 0.7);
+        assert!(config.always_listening_enabled);
+    }
+
+    #[tokio::test]
+    async fn test_mode_transition_edge_cases() {
+        let manager = create_test_manager();
+        
+        // Test empty reason string
+        {
+            let mut history = manager.history.write().await;
+            history.push(ModeTransition {
+                from: AppMode::Idle,
+                to: AppMode::Agent,
+                reason: "".to_string(),
+                timestamp: 1000,
+            });
+        }
+        
+        let status = manager.get_status().await;
+        let history = status["history"].as_array().unwrap();
+        assert_eq!(history[0]["reason"], "");
+        
+        // Test very long reason string
+        let long_reason = "a".repeat(1000);
+        {
+            let mut history = manager.history.write().await;
+            history.push(ModeTransition {
+                from: AppMode::Agent,
+                to: AppMode::Idle,
+                reason: long_reason.clone(),
+                timestamp: 2000,
+            });
+        }
+        
+        let status = manager.get_status().await;
+        let history = status["history"].as_array().unwrap();
+        assert_eq!(history[0]["reason"].as_str().unwrap().len(), 1000);
+    }
+
+    #[tokio::test]
+    async fn test_wake_sensitivity_bounds() {
+        let manager = create_test_manager();
+        
+        // Test sensitivity at boundaries
+        manager.update_config(|config| {
+            config.wake_sensitivity = 0.0;
+        }).await.unwrap();
+        assert_eq!(manager.get_config().await.wake_sensitivity, 0.0);
+        
+        manager.update_config(|config| {
+            config.wake_sensitivity = 1.0;
+        }).await.unwrap();
+        assert_eq!(manager.get_config().await.wake_sensitivity, 1.0);
+        
+        // Test values outside bounds (should be allowed, validation is elsewhere)
+        manager.update_config(|config| {
+            config.wake_sensitivity = -0.5;
+        }).await.unwrap();
+        assert_eq!(manager.get_config().await.wake_sensitivity, -0.5);
+        
+        manager.update_config(|config| {
+            config.wake_sensitivity = 1.5;
+        }).await.unwrap();
+        assert_eq!(manager.get_config().await.wake_sensitivity, 1.5);
+    }
 }

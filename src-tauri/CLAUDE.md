@@ -9,7 +9,7 @@ Rust-based Tauri v2 backend implementing a sophisticated multi-agent AI system w
 ## Development Commands
 
 ```bash
-cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Rust change
+cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Rust change (NOTE: requires 15m timeout)
 cargo build --manifest-path src-tauri/Cargo.toml  # Build backend
 cargo test --manifest-path src-tauri/Cargo.toml   # Run tests
 bun run tauri dev                                  # Full app development
