@@ -187,13 +187,26 @@ impl Drop for ExecutionGuard {
         let current_id = self.current_execution_id.clone();
         let execution_id = self.execution_id.clone();
         
-        tokio::spawn(async move {
-            let mut current = current_id.write().await;
-            if current.as_ref() == Some(&execution_id) {
-                *current = None;
-                debug!("Cleared execution ID on guard drop: {}", execution_id);
+        // Check if we're in a Tokio runtime before spawning
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let mut current = current_id.write().await;
+                if current.as_ref() == Some(&execution_id) {
+                    *current = None;
+                    debug!("Cleared execution ID on guard drop: {}", execution_id);
+                }
+            });
+        } else {
+            // Try synchronous cleanup with try_write
+            if let Ok(mut current) = current_id.try_write() {
+                if current.as_ref() == Some(&execution_id) {
+                    *current = None;
+                    debug!("Cleared execution ID on guard drop (sync): {}", execution_id);
+                }
+            } else {
+                warn!("Dropped outside Tokio runtime - async cleanup skipped for execution ID: {}", execution_id);
             }
-        });
+        }
         
         // Permit drops automatically, releasing semaphore
         info!("Execution guard dropped for: {}", self.execution_id);

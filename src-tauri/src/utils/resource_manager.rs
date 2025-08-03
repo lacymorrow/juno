@@ -203,11 +203,18 @@ impl BrowserControllerManager {
                 move |ctrl| {
                     // Cleanup function that runs when controller is dropped from pool
                     let ctrl_clone = ctrl.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = ctrl_clone.cleanup().await {
-                            error!("Failed to cleanup browser controller: {}", e);
-                        }
-                    });
+                    
+                    // Check if we're in a Tokio runtime before spawning
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        handle.spawn(async move {
+                            if let Err(e) = ctrl_clone.cleanup().await {
+                                error!("Failed to cleanup browser controller: {}", e);
+                            }
+                        });
+                    } else {
+                        // Log warning - we can't do async cleanup outside runtime
+                        warn!("Browser controller dropped outside Tokio runtime - async cleanup skipped");
+                    }
                 },
             ).await;
 
