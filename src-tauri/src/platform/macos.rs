@@ -94,7 +94,9 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
         }
 
         // Setup mouse tracking
-        mouse_tracking::setup_tracking_area(&window, app_handle.clone());
+        if let Err(e) = mouse_tracking::setup_tracking_area(&window, app_handle.clone()) {
+            error!("Failed to setup mouse tracking area: {}", e);
+        }
 
         // Ensure proper window activation
         activate_floating_bar_window(window);
@@ -155,7 +157,9 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
         }
 
         // Setup mouse tracking for floating panel
-        mouse_tracking::setup_tracking_area(&window, app_handle.clone());
+        if let Err(e) = mouse_tracking::setup_tracking_area(&window, app_handle.clone()) {
+            error!("Failed to setup mouse tracking area for floating panel: {}", e);
+        }
     } else {
         error!("Warning: floating-panel window not found during macOS specific setup.");
     }
