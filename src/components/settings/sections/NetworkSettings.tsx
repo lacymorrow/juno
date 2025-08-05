@@ -9,6 +9,7 @@ import {
   Square,
   Save,
   ExternalLink,
+  Folder,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,16 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [cloudTestPassword, setCloudTestPassword] = useState("");
   const [cloudTestStatus, setCloudTestStatus] = useState("");
   const [isCloudTesting, setIsCloudTesting] = useState(false);
+  
+  const handleOpenConfigDirectory = async () => {
+    try {
+      await invoke("open_config_directory");
+      toast.success("Opened configuration directory");
+    } catch (error) {
+      console.error("Failed to open config directory:", error);
+      toast.error("Failed to open configuration directory");
+    }
+  };
 
   // JSON coercion function to fix common JSON issues
   const coerceJson = (jsonStr: string): string => {
@@ -370,6 +381,14 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 }`}
               />
               Refresh
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenConfigDirectory}
+              className="flex items-center gap-2"
+            >
+              <Folder className="h-4 w-4" />
+              Open Config Directory
             </Button>
           </div>
 
