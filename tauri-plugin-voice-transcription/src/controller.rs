@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Runtime, Manager};
 use tracing::info;
 use crate::constants;
 
@@ -634,6 +634,14 @@ impl VoiceController {
                     let _ = app_handle.emit(constants::voice_transcription::FINAL_RESULT,
                         serde_json::json!({ "text": transcription_text }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+                    
+                    // Clear the is_dictating flag in VoiceController
+                    if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                        if let Ok(mut controller) = voice_controller_state.lock() {
+                            controller.is_dictating = false;
+                            info!("[AudioThread] Cleared is_dictating flag after successful transcription");
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {:?}", e);
@@ -643,11 +651,27 @@ impl VoiceController {
                         "message": format!("Final transcription failed: {:?}", e)
                     }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+                    
+                    // Clear the is_dictating flag in VoiceController
+                    if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                        if let Ok(mut controller) = voice_controller_state.lock() {
+                            controller.is_dictating = false;
+                            info!("[AudioThread] Cleared is_dictating flag after transcription error");
+                        }
+                    }
                 }
             }
         } else {
             info!("[AudioThread] No audio to transcribe (empty buffer)");
             let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+            
+            // Clear the is_dictating flag in VoiceController
+            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                if let Ok(mut controller) = voice_controller_state.lock() {
+                    controller.is_dictating = false;
+                    info!("[AudioThread] Cleared is_dictating flag for empty buffer");
+                }
+            }
         }
     }
 
