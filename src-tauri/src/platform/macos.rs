@@ -94,7 +94,9 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
         }
 
         // Setup mouse tracking
-        mouse_tracking::setup_tracking_area(&window, app_handle.clone());
+        if let Err(e) = mouse_tracking::setup_tracking_area(&window, app_handle.clone()) {
+            error!("Failed to setup mouse tracking area: {}", e);
+        }
 
         // Ensure proper window activation
         activate_floating_bar_window(window);
@@ -155,7 +157,9 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
         }
 
         // Setup mouse tracking for floating panel
-        mouse_tracking::setup_tracking_area(&window, app_handle.clone());
+        if let Err(e) = mouse_tracking::setup_tracking_area(&window, app_handle.clone()) {
+            error!("Failed to setup mouse tracking area for floating panel: {}", e);
+        }
     } else {
         error!("Warning: floating-panel window not found during macOS specific setup.");
     }
@@ -332,7 +336,7 @@ pub mod mouse_tracking {
     }
 
     /// Setup mouse tracking area for a window
-    pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) {
+    pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) -> Result<(), String> {
         let window_label = window.label().to_string();
         info!("Setting up macOS tracking area for window: {}", window_label);
 
@@ -341,7 +345,7 @@ pub mod mouse_tracking {
             Ok(handle) => handle.is_none(),
             Err(e) => {
                 error!("Failed to check APP_HANDLE status: {}", e);
-                return;
+                return Err(format!("Failed to check APP_HANDLE status: {}", e));
             }
         };
 
@@ -350,7 +354,7 @@ pub mod mouse_tracking {
                 Ok(mut handle) => *handle = Some(app_handle.clone()),
                 Err(e) => {
                     error!("Failed to store APP_HANDLE: {}", e);
-                    return;
+                    return Err(format!("Failed to store APP_HANDLE: {}", e));
                 }
             }
         }
@@ -359,7 +363,7 @@ pub mod mouse_tracking {
             Ok(ptr) => ptr as cocoa_id,
             Err(e) => {
                 error!("Failed to get NSWindow for tracking area setup: {}", e);
-                return;
+                return Err(format!("Failed to get NSWindow for tracking area setup: {}", e));
             }
         };
 
@@ -367,7 +371,7 @@ pub mod mouse_tracking {
             let view = ns_window.contentView();
             if view == nil {
                 error!("Failed to get contentView for tracking area setup.");
-                return;
+                return Err("Failed to get contentView for tracking area setup.".to_string());
             }
 
             // Create a unique delegate class name for this window
@@ -379,7 +383,13 @@ pub mod mouse_tracking {
                 info!("Declaring {} class...", delegate_class_name);
                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
-                let mut decl = ClassDecl::new(&delegate_class_name, superclass).unwrap();
+                let mut decl = match ClassDecl::new(&delegate_class_name, superclass) {
+                    Some(decl) => decl,
+                    None => {
+                        error!("Failed to create Objective-C class declaration for {}", delegate_class_name);
+                        return Err("Failed to create delegate class".to_string());
+                    }
+                };
 
                 // Add mouseEntered: method
                 #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
@@ -400,7 +410,13 @@ pub mod mouse_tracking {
             }
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
+            let delegate: cocoa_id = match delegate_class {
+                Some(class) => msg_send![class, new],
+                None => {
+                    error!("Delegate class was None when trying to create instance");
+                    return Err("Failed to get delegate class".to_string());
+                }
+            };
             info!("{} instance created: {:?}", delegate_class_name, delegate);
 
             // Store the mapping between delegate pointer and window label
@@ -412,7 +428,7 @@ pub mod mouse_tracking {
                 }
                 Err(e) => {
                     error!("Failed to register delegate pointer for window '{}': {}", window_label, e);
-                    return;
+                    return Err(format!("Failed to register delegate pointer for window '{}': {}", window_label, e));
                 }
             }
 
@@ -443,6 +459,8 @@ pub mod mouse_tracking {
 
             info!("NSTrackingArea added to view for window: {}", window_label);
         }
+        
+        Ok(())
     }
 }
 

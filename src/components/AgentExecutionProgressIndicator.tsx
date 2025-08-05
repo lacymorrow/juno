@@ -36,7 +36,12 @@ export function AgentExecutionProgressIndicator({
   const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
+    let isCleanedUp = false;
+    let intervalId: NodeJS.Timeout | null = null;
+    
     const fetchProgress = async () => {
+      if (isCleanedUp) return; // Prevent updates after cleanup
+      
       try {
         // Only show loading state on initial load, not during polling
         if (isInitialLoadRef.current) {
@@ -46,19 +51,24 @@ export function AgentExecutionProgressIndicator({
         const result = await invoke<AgentExecutionProgress>(
           "get_agent_execution_progress"
         );
-        setProgress(result);
-        setError(null);
+        
+        if (!isCleanedUp) {
+          setProgress(result);
+          setError(null);
 
-        if (isInitialLoadRef.current) {
-          isInitialLoadRef.current = false;
-          setLoading(false);
+          if (isInitialLoadRef.current) {
+            isInitialLoadRef.current = false;
+            setLoading(false);
+          }
         }
       } catch (err) {
-        setError(err as string);
-        console.error("Failed to fetch agent execution progress:", err);
-        if (isInitialLoadRef.current) {
-          isInitialLoadRef.current = false;
-          setLoading(false);
+        if (!isCleanedUp) {
+          setError(err as string);
+          console.error("Failed to fetch agent execution progress:", err);
+          if (isInitialLoadRef.current) {
+            isInitialLoadRef.current = false;
+            setLoading(false);
+          }
         }
       }
     };
@@ -68,12 +78,16 @@ export function AgentExecutionProgressIndicator({
 
     // Set up polling every 1 second when executing, every 5 seconds when not
     const pollInterval = progress?.is_executing ? 1000 : 5000;
-    const interval = setInterval(() => {
-      // Don't change loading state during polling - this prevents flashing
+    intervalId = setInterval(() => {
       fetchProgress();
     }, pollInterval);
 
-    return () => clearInterval(interval);
+    return () => {
+      isCleanedUp = true;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [progress?.is_executing]);
 
   const getStatusIcon = () => {

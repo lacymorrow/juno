@@ -100,9 +100,9 @@ interface UIInteractionEvent {
 // === COMPONENT CONSTANTS ===
 
 const FLOATING_BAR_DIMENSIONS = {
-  DEFAULT_WIDTH: 120,
+  DEFAULT_WIDTH: 160,
   DEFAULT_HEIGHT: 40,
-  EXPANDED_WIDTH: 280,
+  EXPANDED_WIDTH: 320,
   EXPANDED_HEIGHT: 50,
 };
 
@@ -1169,17 +1169,17 @@ const styles = \`
 
         .glass-bar-idle {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.4rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 120px;
+          width: 160px;
           height: 40px;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           overflow: hidden;
@@ -1187,25 +1187,25 @@ const styles = \`
         }
 
         .glass-bar-idle:hover {
-          background: rgba(255, 255, 255, 0.2);
-          border-color: rgba(255, 255, 255, 0.3);
+          background: rgba(255, 255, 255, 0.9);
+          border-color: rgba(255, 255, 255, 0.7);
           box-shadow: 0 6px 25px rgba(31, 38, 135, 0.4),
             inset 0 3px 15px rgba(255, 255, 255, 0.15);
         }
 
         .glass-bar-active {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          width: 240px;
+          width: 280px;
           height: 40px;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           overflow: hidden;
@@ -1213,17 +1213,17 @@ const styles = \`
 
         .glass-bar-input {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          width: 280px;
+          width: 320px;
           height: 40px;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           overflow: hidden;
@@ -1231,17 +1231,17 @@ const styles = \`
 
         .glass-bar-response {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          width: 280px;
+          width: 320px;
           height: 40px;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           overflow: hidden;
@@ -1249,17 +1249,17 @@ const styles = \`
 
         .glass-bar-response-width {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem 0.75rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          width: var(--response-width, 280px);
+          width: var(--response-width, 360px);
           height: 40px;
           transition: width 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
           overflow: hidden;
@@ -1269,17 +1269,17 @@ const styles = \`
 
         .glass-bar-response-height {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: flex-start;
           gap: 0.75rem;
-          width: var(--response-width, 320px);
+          width: var(--response-width, 360px);
           height: var(--summary-height, 60px);
           transition: height 0.6s cubic-bezier(0.23, 1, 0.32, 1);
           overflow: hidden;
@@ -1289,17 +1289,17 @@ const styles = \`
 
         .glass-bar-response-summary {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: flex-start;
           gap: 0.75rem;
-          width: var(--response-width, 320px);
+          width: var(--response-width, 360px);
           height: var(--summary-height, 60px);
           transition: height 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
           overflow: hidden;
@@ -1309,17 +1309,17 @@ const styles = \`
 
         .glass-bar-response-expanding {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: flex-start;
           gap: 0.75rem;
-          width: var(--response-width, 320px);
+          width: var(--response-width, 360px);
           height: var(--response-height, 120px);
           transition: height 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
           overflow: hidden;
@@ -1369,13 +1369,13 @@ const styles = \`
 
         .glass-bar-response-expanded {
           position: relative;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px) saturate(180%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.5);
           border-radius: 1.5rem;
           padding: 0.5rem;
-          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.3),
-            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 4px 20px rgba(31, 38, 135, 0.6),
+            inset 0 2px 10px rgba(255, 255, 255, 0.3);
           display: flex;
           align-items: flex-start;
           gap: 0.75rem;
@@ -1422,11 +1422,11 @@ const styles = \`
           left: 0;
           width: 100%;
           height: 100%;
-          background: rgba(255, 255, 255, 0.05);
+          background: rgba(255, 255, 255, 0.15);
           border-radius: 1.5rem;
           backdrop-filter: blur(1px);
-          box-shadow: inset -6px -4px 0px -7px rgba(255, 255, 255, 0.3),
-            inset 0px -5px 0px -4px rgba(255, 255, 255, 0.2);
+          box-shadow: inset -6px -4px 0px -7px rgba(255, 255, 255, 0.5),
+            inset 0px -5px 0px -4px rgba(255, 255, 255, 0.4);
           opacity: 0.6;
           z-index: -1;
           pointer-events: none;
@@ -1437,9 +1437,9 @@ const styles = \`
           position: relative;
           width: 2rem;
           height: 2rem;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(15px);
-          border: 1px solid rgba(255, 255, 255, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.6);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -1455,9 +1455,9 @@ const styles = \`
           position: relative;
           width: 2rem;
           height: 2rem;
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(15px);
-          border: 1px solid rgba(255, 255, 255, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.6);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -1471,13 +1471,13 @@ const styles = \`
 
         .glass-mic-btn:hover,
         .glass-keyboard-btn:hover {
-          background: rgba(255, 255, 255, 0.25);
+          background: rgba(255, 255, 255, 0.95);
           transform: scale(1.1);
           box-shadow: 0 4px 15px rgba(31, 38, 135, 0.4);
         }
 
         .glass-mic-btn.close-btn {
-          background: rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.9);
         }
 
         .glass-mic-btn.close-btn:hover {
@@ -1522,7 +1522,7 @@ const styles = \`
         }
 
         .glass-input:focus {
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.85);
           box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3);
         }
 
@@ -1624,7 +1624,7 @@ const styles = \`
         }
 
         .close-response-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.9);
         }
 
         .response-content {
@@ -1661,7 +1661,7 @@ const styles = \`
         .code-block,
         .image-block,
         .video-block {
-          background: rgba(255, 255, 255, 0.05);
+          background: rgba(255, 255, 255, 0.15);
           border-radius: 0.75rem;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1699,7 +1699,7 @@ const styles = \`
         }
 
         .copy-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
+          background: rgba(255, 255, 255, 0.9);
         }
 
         .text-content {
@@ -1913,12 +1913,12 @@ const styles = \`
           .glass-bar-active {
             padding: 0.4rem 0.6rem;
             gap: 0.5rem;
-            width: 180px;
+            width: 240px;
           }
 
           .glass-bar-input,
           .glass-bar-response {
-            width: 240px;
+            width: 300px;
           }
 
           .glass-bar-response-expanded {

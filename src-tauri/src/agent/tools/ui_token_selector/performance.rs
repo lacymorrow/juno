@@ -243,7 +243,7 @@ impl PerformanceTracker {
             test_name: format!("{} (iteration {})", test_name, iteration + 1),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             original_tokens,
             reduced_tokens,
@@ -308,7 +308,7 @@ impl PerformanceTracker {
             test_name: format!("{} (Average)", test_name),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_secs(),
             original_tokens: avg_original,
             reduced_tokens: avg_reduced,

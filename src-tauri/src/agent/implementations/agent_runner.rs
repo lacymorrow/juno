@@ -1116,8 +1116,7 @@ where
                             // First pass: Find our assistant message and collect its tool call IDs
                             for msg in messages.iter().rev() {
                                 if matches!(msg.role, Role::Assistant) &&
-                                   msg.tool_calls.is_some() &&
-                                   msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                                   msg.tool_calls.as_ref().map(|tc| tc.len() == tool_calls.len()).unwrap_or(false) {
                                     found_our_assistant_message = true;
                                     // Collect all tool call IDs from this assistant message
                                     if let Some(tool_calls) = &msg.tool_calls {
@@ -1133,8 +1132,9 @@ where
                             if found_our_assistant_message {
                                 for msg in messages.iter().rev() {
                                     if matches!(msg.role, Role::Tool) &&
-                                       msg.tool_call_id.is_some() &&
-                                       assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                                       msg.tool_call_id.as_ref()
+                                           .map(|id| assistant_tool_call_ids.contains(id))
+                                           .unwrap_or(false) {
                                         tool_result_count += 1;
                                     }
                                 }
@@ -1152,8 +1152,9 @@ where
                                 // Remove the assistant message with tool calls
                                 if let Some(last_message) = messages_vec.last() {
                                     if matches!(last_message.role, Role::Assistant) &&
-                                       last_message.tool_calls.is_some() &&
-                                       last_message.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+                                       last_message.tool_calls.as_ref()
+                                           .map(|tc| tc.len() == tool_calls.len())
+                                           .unwrap_or(false) {
                                         messages_vec.pop();
 
                                         // Clear and rebuild memory without the orphaned message
@@ -1376,8 +1377,9 @@ mod tests {
         // First pass: Find assistant message and collect tool call IDs
         for msg in messages.iter().rev() {
             if matches!(msg.role, Role::Assistant) &&
-               msg.tool_calls.is_some() &&
-               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+               msg.tool_calls.as_ref()
+                   .map(|tc| tc.len() == tool_calls.len())
+                   .unwrap_or(false) {
                 found_our_assistant_message = true;
                 if let Some(tool_calls) = &msg.tool_calls {
                     assistant_tool_call_ids = tool_calls.iter()
@@ -1392,8 +1394,9 @@ mod tests {
         if found_our_assistant_message {
             for msg in messages.iter().rev() {
                 if matches!(msg.role, Role::Tool) &&
-                   msg.tool_call_id.is_some() &&
-                   assistant_tool_call_ids.contains(&msg.tool_call_id.as_ref().unwrap()) {
+                   msg.tool_call_id.as_ref()
+                       .map(|id| assistant_tool_call_ids.contains(id))
+                       .unwrap_or(false) {
                     tool_result_count += 1;
                 }
             }
@@ -1415,8 +1418,9 @@ mod tests {
         // First pass
         for msg in messages2.iter().rev() {
             if matches!(msg.role, Role::Assistant) &&
-               msg.tool_calls.is_some() &&
-               msg.tool_calls.as_ref().unwrap().len() == tool_calls.len() {
+               msg.tool_calls.as_ref()
+                   .map(|tc| tc.len() == tool_calls.len())
+                   .unwrap_or(false) {
                 found_our_assistant_message2 = true;
                 if let Some(tool_calls) = &msg.tool_calls {
                     assistant_tool_call_ids2 = tool_calls.iter()
@@ -1430,10 +1434,12 @@ mod tests {
         // Second pass
         if found_our_assistant_message2 {
             for msg in messages2.iter().rev() {
-                if matches!(msg.role, Role::Tool) &&
-                   msg.tool_call_id.is_some() &&
-                   assistant_tool_call_ids2.contains(&msg.tool_call_id.as_ref().unwrap()) {
-                    tool_result_count2 += 1;
+                if matches!(msg.role, Role::Tool) {
+                    if let Some(tool_call_id) = &msg.tool_call_id {
+                        if assistant_tool_call_ids2.contains(&tool_call_id) {
+                            tool_result_count2 += 1;
+                        }
+                    }
                 }
             }
         }

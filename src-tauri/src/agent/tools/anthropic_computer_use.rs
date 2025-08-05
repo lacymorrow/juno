@@ -398,6 +398,7 @@ pub async fn execute_computer_tool(
 
             let screenshot_result = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
                 app_handle.clone(),
+                state_manager.clone()
             ).await.map_err(|e| format!("Screenshot failed: {}", e)));
 
             // The result is a struct with the screenshot data and dimensions.

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Manager};
@@ -172,7 +172,10 @@ impl CloudCommandProcessor {
                 progress: None,
                 metadata: None,
             }),
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_secs(),
             error: if let Err(e) = &response_data { Some(e.to_string()) } else { None },
         };
 
@@ -546,7 +549,8 @@ impl CloudCommandProcessor {
         info!("Capturing screenshot for cloud");
 
         // Use existing screenshot functionality
-        match crate::commands::core::capture_screenshot_command(self.app_handle.clone()).await {
+        let state = self.app_handle.state::<AppState>();
+        match crate::commands::core::capture_screenshot_command(self.app_handle.clone(), state).await {
             Ok(screenshot_result) => {
                 let screenshot_json = serde_json::to_value(&screenshot_result)
                     .map_err(|e| CloudError::SerializationError(format!("Failed to serialize screenshot result: {}", e)))?;

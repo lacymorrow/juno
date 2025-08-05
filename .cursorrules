@@ -59,6 +59,7 @@ cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | t
 - **NEW**: Hardware monitoring data collection should be async and parallel
 - **CLEAN**: All deprecated methods eliminated - modern APIs only
 - **STORE-BASED**: All configuration uses Tauri store, no file-based legacy patterns
+- **MEMORY SAFETY**: NEVER use `.unwrap()` in production code - always handle errors properly
 
 ### Implementation Status (Enhanced)
 
@@ -223,6 +224,45 @@ cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | t
 - Multiple detection mechanisms for robust permission validation
 
 See `.cursor/rules/accessibility-permission-fixes.mdc` for complete implementation details.
+
+### Memory Safety Rules 🛡️ CRITICAL
+
+**ZERO TOLERANCE for `.unwrap()` in production code**
+
+```rust
+// ❌ BANNED in production code
+value.unwrap()
+result.unwrap()
+lock.unwrap()
+
+// ✅ REQUIRED patterns
+value.ok_or("Error message")?
+value.unwrap_or_default()
+value.unwrap_or_else(|| default)
+
+// ✅ SystemTime MUST use this pattern
+SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_else(|_| Duration::from_secs(0))
+
+// ✅ Mutex locking MUST use match
+match mutex.lock() {
+    Ok(guard) => /* use guard */,
+    Err(e) => return Err(format!("Lock failed: {}", e))
+}
+
+// ✅ Regex compilation MUST handle errors
+match Regex::new(pattern) {
+    Ok(regex) => /* use regex */,
+    Err(e) => /* fallback logic */
+}
+```
+
+**Race Condition Prevention**:
+- Use `Arc<TokioMutex<T>>` for shared state
+- Use `AtomicBool`/`AtomicUsize` for simple flags
+- Implement RAII patterns for resource cleanup
+- Use semaphores for limiting concurrent operations
 
 ### Quick Reference (Enhanced)
 

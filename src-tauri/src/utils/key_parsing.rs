@@ -118,7 +118,10 @@ pub fn to_applescript_format(key_combo: &str) -> Result<String, String> {
         _ => {
             // For single character keys, use a simplified mapping
             if apple_key.len() == 1 {
-                let c = apple_key.chars().next().unwrap();
+                let c = match apple_key.chars().next() {
+                    Some(ch) => ch,
+                    None => return Err(format!("Invalid key string: {}", apple_key)),
+                };
                 if c.is_ascii_lowercase() {
                     // This is a simplified mapping - in reality you'd need a full key code table
                     return Ok(format!("tell application \"System Events\" to keystroke \"{}\"", apple_key));
@@ -157,28 +160,28 @@ mod tests {
 
     #[test]
     fn test_parse_simple_key() {
-        let parsed = parse_key_combination("a").unwrap();
+        let parsed = parse_key_combination("a").expect("Should parse simple key 'a'");
         assert_eq!(parsed.key, "a");
         assert_eq!(parsed.modifiers.len(), 0);
     }
 
     #[test]
     fn test_parse_single_modifier() {
-        let parsed = parse_key_combination("cmd+a").unwrap();
+        let parsed = parse_key_combination("cmd+a").expect("Should parse 'cmd+a'");
         assert_eq!(parsed.key, "a");
         assert_eq!(parsed.modifiers, vec!["cmd"]);
     }
 
     #[test]
     fn test_parse_multiple_modifiers() {
-        let parsed = parse_key_combination("cmd+shift+a").unwrap();
+        let parsed = parse_key_combination("cmd+shift+a").expect("Should parse 'cmd+shift+a'");
         assert_eq!(parsed.key, "a");
         assert_eq!(parsed.modifiers, vec!["cmd", "shift"]);
     }
 
     #[test]
     fn test_split_key_and_modifier() {
-        let (key, modifier) = split_key_and_modifier("cmd+a").unwrap();
+        let (key, modifier) = split_key_and_modifier("cmd+a").expect("Should split 'cmd+a'");
         assert_eq!(key, "a");
         assert_eq!(modifier, Some("cmd".to_string()));
     }

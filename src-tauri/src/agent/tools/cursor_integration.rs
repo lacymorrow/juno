@@ -149,9 +149,8 @@ impl CursorIntegration {
 
         // If column is specified and we opened successfully, navigate to column
         if let Some(col) = column {
-            if line_number.is_some() {
+            if let Some(line_num) = line_number {
                 // Use Ctrl+G (or Cmd+G) to go to specific line:column
-                let line_num = line_number.unwrap();
                 let goto_command = format!("{}:{}", line_num, col);
 
                 let navigation_steps = vec![

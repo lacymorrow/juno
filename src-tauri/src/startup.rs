@@ -240,7 +240,7 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
 }
 
 /// Handle headless CLI operations
-async fn handle_headless_cli_async(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+async fn handle_headless_cli_async(cli: &cli::Cli, _desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     use crate::cli::headless::HeadlessRuntime;
 
 

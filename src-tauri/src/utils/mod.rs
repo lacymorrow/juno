@@ -1,5 +1,6 @@
 // Add coordinates module
 pub mod async_runtime;
+pub mod atomic_state;
 pub mod command_macros;
 pub mod coordinates;
 pub mod coordinate_validation;
@@ -9,6 +10,8 @@ pub mod string_cache;
 
 
 pub mod log_formatter;
+pub mod resource_manager;
+pub mod rate_limiter;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

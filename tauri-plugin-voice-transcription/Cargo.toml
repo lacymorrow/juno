@@ -31,9 +31,17 @@ tracing = "0.1"
 thiserror = "1.0"
 once_cell = "1.17"
 crossbeam-channel = "0.5"
-tokio = { version = "1", features = ["sync", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 base64 = "0.22"
 chrono = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+objc-foundation = "0.1"
+cocoa = "0.25"
+cocoa-foundation = "0.1"
+dispatch = "0.2"
+block = "0.1"
 
 [dev-dependencies]
 tauri = { version = "2.0.0-beta", features = ["test"] }

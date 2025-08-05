@@ -27,11 +27,16 @@ pub struct ScreenshotResult {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<ScreenshotResult, String> {
+pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, AppState>) -> Result<ScreenshotResult, String> {
     use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
     use image::{ImageReader, ImageFormat};
     use std::io::Cursor;
     use base64::Engine;
+    
+    // Rate limiting check for screenshot operations
+    if let Err(e) = state.rate_limiters.screenshots.check("default_user").await {
+        return Err(e.to_user_message());
+    }
 
     match capture_and_encode_screenshot() {
         Ok(base64_string) => {

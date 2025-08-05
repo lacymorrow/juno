@@ -180,32 +180,16 @@ fn handle_agent_tap_mode(app: &AppHandle) {
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
-            // Emit agent mode start event
-            if let Err(e) = app_handle.emit(events::dictation::STARTED, ()) {
+            // Emit agent transcription start event
+            // This will be handled by the event listener in integration.rs
+            if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
                 error!(
-                    "[Agent Mode] Failed to emit dictation started event: {}",
+                    "[Agent Mode] Failed to emit agent transcription start event: {}",
                     e
                 );
             }
-
-            // Start voice transcription for agent mode
-            if let Some(voice_controller_state) =
-                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
-            {
-                match tauri_plugin_voice_transcription::commands::start_dictation(
-                    app_handle.clone(),
-                    voice_controller_state,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        info!("[Agent Mode] Started transcription successfully");
-                    }
-                    Err(e) => {
-                        error!("[Agent Mode] Failed to start transcription: {}", e);
-                    }
-                }
-            }
+            
+            info!("[Agent Mode] Emitted agent start event for handler processing");
         });
     }
 }
@@ -302,32 +286,16 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
-            // Emit dictation mode start event
-            if let Err(e) = app_handle.emit(events::dictation::ACTIVE, true) {
+            // Emit dictation transcription start event instead of active event
+            // This will be handled by the event listener in events/handlers.rs
+            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_START, ()) {
                 error!(
-                    "[Dictation Tap Mode] Failed to emit dictation-active event: {}",
+                    "[Dictation Tap Mode] Failed to emit dictation-transcription-start event: {}",
                     e
                 );
             }
-
-            // Start voice transcription for dictation mode
-            if let Some(voice_controller_state) =
-                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
-            {
-                match tauri_plugin_voice_transcription::commands::start_dictation(
-                    app_handle.clone(),
-                    voice_controller_state,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        info!("[Dictation Tap Mode] Started transcription successfully");
-                    }
-                    Err(e) => {
-                        error!("[Dictation Tap Mode] Failed to start transcription: {}", e);
-                    }
-                }
-            }
+            
+            info!("[Dictation Tap Mode] Emitted dictation start event for handler processing");
         });
     }
 }

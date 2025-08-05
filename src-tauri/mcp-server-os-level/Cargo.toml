@@ -39,6 +39,7 @@ core-graphics = "0.24.0"
 image = { version = "0.25.1", features = ["png"] }
 libc = "0.2"
 objc = "0.2.7"
+once_cell = "1.19"
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
 # objc still needed for other platform interactions

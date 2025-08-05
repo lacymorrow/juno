@@ -232,7 +232,27 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     }
 
     // Update floating bar manager for dictation mode completion
-                    crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
+    // First update the mode state, then handle the finished event
+    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
+    crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
+    
+    // Resume always listening mode if it was active before dictation
+    let should_resume_always_listening = app_state.audio_settings.lock()
+        .map(|settings| settings.was_always_listening_active_before_dictation)
+        .unwrap_or(false);
+    
+    if should_resume_always_listening {
+        info!("[Dictation Mode] Resuming always listening mode");
+        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
+            app_handle.clone(),
+            app_state.clone(),
+        )
+        .await
+        {
+            warn!("[Dictation Mode] Failed to resume always listening mode: {}", e);
+        }
+    }
+    
     info!("[Dictation Mode] Completed dictation successfully");
 }
 
@@ -252,11 +272,12 @@ async fn handle_agent_mode_result(
                     "query": text_value
                 });
 
-                info!("[Event] Emitting app-dictation-finished event for agent processing");
+                // Use a different event for agent mode to avoid confusion with dictation mode
+                info!("[Event] Emitting agent-query-ready event for agent processing");
                 if let Err(e) =
-                    app_handle.emit(constants::events::dictation::FINISHED, transformed_payload)
+                    app_handle.emit("agent-query-ready", transformed_payload)
                 {
-                    error!("[Event] Failed to emit app-dictation-finished event: {}", e);
+                    error!("[Event] Failed to emit agent-query-ready event: {}", e);
                 }
             } else {
                 error!(
@@ -270,9 +291,9 @@ async fn handle_agent_mode_result(
                 "[Event] Failed to parse final-result payload as JSON: {}, payload: {}",
                 e, payload_str
             );
-            if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, payload_str) {
+            if let Err(e) = app_handle.emit("agent-query-ready", payload_str) {
                 error!(
-                    "[Event] Failed to emit app-dictation-finished event (fallback): {}",
+                    "[Event] Failed to emit agent-query-ready event (fallback): {}",
                     e
                 );
             }
@@ -296,6 +317,24 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, pay
     if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
         warn!("Failed to play voice end sound: {}", e);
     }
+    
+    // Resume always listening mode if it was active before dictation
+    let app_state = app_handle.state::<crate::state::AppState>();
+    let should_resume_always_listening = app_state.audio_settings.lock()
+        .map(|settings| settings.was_always_listening_active_before_dictation)
+        .unwrap_or(false);
+    
+    if should_resume_always_listening {
+        info!("[Voice Transcription Stopped] Resuming always listening mode");
+        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
+            app_handle.clone(),
+            app_state.clone(),
+        )
+        .await
+        {
+            warn!("[Voice Transcription Stopped] Failed to resume always listening mode: {}", e);
+        }
+    }
 }
 
 async fn handle_voice_transcription_error(app_handle: AppHandle) {
@@ -312,6 +351,26 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     let app_state = app_handle.state::<state::AppState>();
     if let Err(e) = app_state.set_dictation_active(true) {
         warn!("Failed to set dictation active state: {}", e);
+    }
+
+    // Pause always listening mode if it's active
+    let was_always_listening_active = app_state.get_always_listening_active().unwrap_or(false);
+    
+    // Store the state so we can restore it later
+    if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
+        audio_settings.was_always_listening_active_before_dictation = was_always_listening_active;
+    }
+    
+    if was_always_listening_active {
+        info!("[Dictation Mode] Pausing always listening mode");
+        if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
+            app_handle.clone(),
+            app_state.clone(),
+        )
+        .await
+        {
+            warn!("[Dictation Mode] Failed to pause always listening mode: {}", e);
+        }
     }
 
     // Update floating bar manager to set dictation mode
@@ -419,11 +478,9 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     }
 
     // Reset state
-    {
-        let app_state = app_handle.state::<state::AppState>();
-        if let Err(e) = app_state.set_dictation_active(false) {
-            warn!("Failed to reset dictation active state: {}", e);
-        }
+    let app_state = app_handle.state::<state::AppState>();
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Force reset dictation monitor state to prevent any stuck state scenarios
@@ -448,6 +505,24 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
         );
     }
 
+    // Resume always listening mode if it was active before dictation
+    let should_resume_always_listening = app_state.audio_settings.lock()
+        .map(|settings| settings.was_always_listening_active_before_dictation)
+        .unwrap_or(false);
+    
+    if should_resume_always_listening {
+        info!("[Dictation Cancel] Resuming always listening mode");
+        let app_state_for_listening = app_handle.state::<state::AppState>();
+        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
+            app_handle.clone(),
+            app_state_for_listening.clone(),
+        )
+        .await
+        {
+            warn!("[Dictation Cancel] Failed to resume always listening mode: {}", e);
+        }
+    }
+    
     info!("[Dictation Cancel] Cleanup completed successfully");
 }
 
@@ -464,11 +539,9 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     }
 
     // Reset state
-    {
-        let app_state = app_handle.state::<state::AppState>();
-        if let Err(e) = app_state.set_dictation_active(false) {
-            warn!("Failed to reset dictation active state: {}", e);
-        }
+    let app_state = app_handle.state::<state::AppState>();
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("Failed to reset dictation active state: {}", e);
     }
 
     // Update floating bar manager
@@ -479,6 +552,24 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
             "[Dictation Mode] Failed to emit dictation-active event: {}",
             e
         );
+    }
+    
+    // Resume always listening mode if it was active before dictation
+    let should_resume_always_listening = app_state.audio_settings.lock()
+        .map(|settings| settings.was_always_listening_active_before_dictation)
+        .unwrap_or(false);
+    
+    if should_resume_always_listening {
+        info!("[Dictation Stop] Resuming always listening mode");
+        let app_state_for_listening = app_handle.state::<state::AppState>();
+        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
+            app_handle.clone(),
+            app_state_for_listening.clone(),
+        )
+        .await
+        {
+            warn!("[Dictation Stop] Failed to resume always listening mode: {}", e);
+        }
     }
 }
 

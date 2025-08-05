@@ -205,7 +205,9 @@ pub async fn register_desktop_tools(
             let block_result: Result<commands::core::ScreenshotResult, String> = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::core::capture_screenshot_command(app_handle.clone()).await // Clone app_handle for the inner async block
+                    // Get state from app_handle
+                    let state: State<AppState> = app_handle.state();
+                    commands::core::capture_screenshot_command(app_handle.clone(), state).await // Clone app_handle for the inner async block
                 })
             });
 

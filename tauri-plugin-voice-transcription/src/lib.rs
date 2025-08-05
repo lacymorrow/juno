@@ -10,6 +10,7 @@ pub mod utils;
 pub mod always_listening;
 pub mod shared_whisper;
 pub mod constants;
+pub mod mic_permissions;
 
 pub use config::VoiceTranscriptionConfig;
 pub use error::{Error, Result};
@@ -44,9 +45,31 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::set_audio_level_monitoring,
             commands::test_whisper_model,
             commands::force_transcription_test,
+            commands::check_microphone_permission,
+            commands::request_microphone_permission,
+            commands::ensure_microphone_ready,
         ])
         .setup(move |app, _api| {
             tracing::info!("=== Voice Transcription Plugin Initialization Starting ===");
+
+            // Check microphone permissions first
+            tracing::info!("Checking microphone permissions...");
+            let permission_status = mic_permissions::check_microphone_permission();
+            match permission_status {
+                mic_permissions::MicrophonePermissionStatus::Granted => {
+                    tracing::info!("✅ Microphone permission is already granted");
+                }
+                mic_permissions::MicrophonePermissionStatus::Denied => {
+                    tracing::warn!("⚠️ Microphone permission is denied. Voice features will not work until permission is granted.");
+                    tracing::warn!("💡 Please grant microphone access in System Settings > Privacy & Security > Microphone");
+                }
+                mic_permissions::MicrophonePermissionStatus::Undetermined => {
+                    tracing::info!("🔔 Microphone permission not yet requested. Will request when voice features are first used.");
+                }
+                mic_permissions::MicrophonePermissionStatus::NotApplicable => {
+                    tracing::info!("ℹ️ Microphone permission check not applicable on this platform");
+                }
+            }
 
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();

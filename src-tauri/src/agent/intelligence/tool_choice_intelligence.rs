@@ -196,168 +196,108 @@ impl ToolChoiceIntelligence {
         self.initialize_desktop_patterns();
     }
 
+    /// Helper method to create patterns from configurations with safe regex compilation
+    fn create_patterns_from_configs(
+        configs: Vec<(&str, &str, f32, &str, ForceMode)>
+    ) -> Vec<PatternMatcher> {
+        let mut patterns = Vec::new();
+        
+        for (pattern_str, tool_name, confidence, description, force_mode) in configs {
+            match Regex::new(pattern_str) {
+                Ok(pattern) => {
+                    patterns.push(PatternMatcher {
+                        pattern,
+                        tool_name: tool_name.to_string(),
+                        confidence,
+                        description: description.to_string(),
+                        force_mode,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to compile pattern regex '{}': {}",
+                        pattern_str, e
+                    );
+                }
+            }
+        }
+        
+        patterns
+    }
+
     /// Initialize screenshot tool patterns
     fn initialize_screenshot_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(take|capture|get|grab)\s+(a\s+)?(screenshot|screen\s*shot|screen\s*cap)\b").unwrap(),
-                tool_name: "screenshot".to_string(),
-                confidence: 0.9,
-                description: "Direct screenshot command".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(show\s+me\s+the\s+screen|what('s|\s+is)\s+on\s+screen)\b").unwrap(),
-                tool_name: "screenshot".to_string(),
-                confidence: 0.8,
-                description: "Implicit screenshot request".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(screen\s*shot|screenshot)\b").unwrap(),
-                tool_name: "screenshot".to_string(),
-                confidence: 0.7,
-                description: "Screenshot keyword".to_string(),
-                force_mode: ForceMode::Suggest,
-            },
+        let pattern_configs = vec![
+            (r"(?i)\b(take|capture|get|grab)\s+(a\s+)?(screenshot|screen\s*shot|screen\s*cap)\b", "screenshot", 0.9, "Direct screenshot command", ForceMode::ForceSpecific),
+            (r"(?i)\b(show\s+me\s+the\s+screen|what('s|\s+is)\s+on\s+screen)\b", "screenshot", 0.8, "Implicit screenshot request", ForceMode::ForceSpecific),
+            (r"(?i)\b(screen\s*shot|screenshot)\b", "screenshot", 0.7, "Screenshot keyword", ForceMode::Suggest),
         ];
 
-        self.pattern_matchers
-            .insert("screenshot".to_string(), patterns);
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
+        self.pattern_matchers.insert("screenshot".to_string(), patterns);
     }
 
     /// Initialize click tool patterns
     fn initialize_click_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(click|press|tap)\s+(on\s+)?(the\s+)?(\w+\s+)?(button|link|icon|element)\b").unwrap(),
-                tool_name: "click".to_string(),
-                confidence: 0.9,
-                description: "Direct click command".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(left\s+click|right\s+click|double\s+click)\b").unwrap(),
-                tool_name: "click".to_string(),
-                confidence: 0.9,
-                description: "Specific click type".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\bclick\s+(here|there|this|that)\b").unwrap(),
-                tool_name: "click".to_string(),
-                confidence: 0.8,
-                description: "Contextual click command".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
+        let pattern_configs = vec![
+            (r"(?i)\b(click|press|tap)\s+(on\s+)?(the\s+)?(\w+\s+)?(button|link|icon|element)\b", "click", 0.9, "Direct click command", ForceMode::ForceSpecific),
+            (r"(?i)\b(left\s+click|right\s+click|double\s+click)\b", "click", 0.9, "Specific click type", ForceMode::ForceSpecific),
+            (r"(?i)\bclick\s+(here|there|this|that)\b", "click", 0.8, "Contextual click command", ForceMode::ForceSpecific),
         ];
 
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
         self.pattern_matchers.insert("click".to_string(), patterns);
     }
 
     /// Initialize keyboard input patterns
     fn initialize_keyboard_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(type|enter|input|write)\s+").unwrap(),
-                tool_name: "key".to_string(),
-                confidence: 0.8,
-                description: "Text input command".to_string(),
-                force_mode: if self.mode == OperationalMode::Dictation {
-                    ForceMode::ForceSpecific
-                } else {
-                    ForceMode::Suggest
-                },
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(press|hit)\s+(the\s+)?(enter|return|space|tab|escape|esc)\s+(key|button)?\b").unwrap(),
-                tool_name: "key".to_string(),
-                confidence: 0.9,
-                description: "Specific key press".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(keyboard\s+shortcut|hotkey|key\s+combo)\b").unwrap(),
-                tool_name: "key".to_string(),
-                confidence: 0.8,
-                description: "Keyboard shortcut command".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
+        let force_mode_for_text = if self.mode == OperationalMode::Dictation {
+            ForceMode::ForceSpecific
+        } else {
+            ForceMode::Suggest
+        };
+        
+        let pattern_configs = vec![
+            (r"(?i)\b(type|enter|input|write)\s+", "key", 0.8, "Text input command", force_mode_for_text),
+            (r"(?i)\b(press|hit)\s+(the\s+)?(enter|return|space|tab|escape|esc)\s+(key|button)?\b", "key", 0.9, "Specific key press", ForceMode::ForceSpecific),
+            (r"(?i)\b(keyboard\s+shortcut|hotkey|key\s+combo)\b", "key", 0.8, "Keyboard shortcut command", ForceMode::ForceSpecific),
         ];
 
-        self.pattern_matchers
-            .insert("keyboard".to_string(), patterns);
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
+        self.pattern_matchers.insert("keyboard".to_string(), patterns);
     }
 
     /// Initialize browser-specific patterns
     fn initialize_browser_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(
-                    r"(?i)\b(open|navigate|go\s+to)\s+(a\s+)?(browser|web\s*page|url|website)\b",
-                )
-                .unwrap(),
-                tool_name: "browser_navigate".to_string(),
-                confidence: 0.8,
-                description: "Browser navigation command".to_string(),
-                force_mode: ForceMode::ForceAny,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(refresh|reload)\s+(the\s+)?(page|browser)\b").unwrap(),
-                tool_name: "browser_refresh".to_string(),
-                confidence: 0.9,
-                description: "Page refresh command".to_string(),
-                force_mode: ForceMode::ForceSpecific,
-            },
+        let pattern_configs = vec![
+            (r"(?i)\b(open|navigate|go\s+to)\s+(a\s+)?(browser|web\s*page|url|website)\b", "browser_navigate", 0.8, "Browser navigation command", ForceMode::ForceAny),
+            (r"(?i)\b(refresh|reload)\s+(the\s+)?(page|browser)\b", "browser_refresh", 0.9, "Page refresh command", ForceMode::ForceSpecific),
         ];
 
-        self.pattern_matchers
-            .insert("browser".to_string(), patterns);
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
+        self.pattern_matchers.insert("browser".to_string(), patterns);
     }
 
     /// Initialize file operation patterns
     fn initialize_file_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(open|read|view)\s+(a\s+|the\s+)?file\b").unwrap(),
-                tool_name: "str_replace_editor".to_string(),
-                confidence: 0.8,
-                description: "File read command".to_string(),
-                force_mode: ForceMode::ForceAny,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(save|write|create)\s+(a\s+|the\s+)?file\b").unwrap(),
-                tool_name: "str_replace_editor".to_string(),
-                confidence: 0.8,
-                description: "File write command".to_string(),
-                force_mode: ForceMode::ForceAny,
-            },
+        let pattern_configs = vec![
+            (r"(?i)\b(open|read|view)\s+(a\s+|the\s+)?file\b", "str_replace_editor", 0.8, "File read command", ForceMode::ForceAny),
+            (r"(?i)\b(save|write|create)\s+(a\s+|the\s+)?file\b", "str_replace_editor", 0.8, "File write command", ForceMode::ForceAny),
         ];
 
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
         self.pattern_matchers.insert("file".to_string(), patterns);
     }
 
     /// Initialize desktop interaction patterns
     fn initialize_desktop_patterns(&mut self) {
-        let patterns = vec![
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(minimize|maximize|close)\s+(the\s+)?(window|app|application)\b").unwrap(),
-                tool_name: "window_control".to_string(),
-                confidence: 0.9,
-                description: "Window control command".to_string(),
-                force_mode: ForceMode::ForceAny,
-            },
-            PatternMatcher {
-                pattern: Regex::new(r"(?i)\b(switch\s+to|focus\s+on)\s+(the\s+)?(\w+\s+)?(window|app|application)\b").unwrap(),
-                tool_name: "window_focus".to_string(),
-                confidence: 0.8,
-                description: "Window focus command".to_string(),
-                force_mode: ForceMode::ForceAny,
-            },
+        let pattern_configs = vec![
+            (r"(?i)\b(minimize|maximize|close)\s+(the\s+)?(window|app|application)\b", "window_control", 0.9, "Window control command", ForceMode::ForceAny),
+            (r"(?i)\b(switch\s+to|focus\s+on)\s+(the\s+)?(\w+\s+)?(window|app|application)\b", "window_focus", 0.8, "Window focus command", ForceMode::ForceAny),
         ];
 
-        self.pattern_matchers
-            .insert("desktop".to_string(), patterns);
+        let patterns = Self::create_patterns_from_configs(pattern_configs);
+        self.pattern_matchers.insert("desktop".to_string(), patterns);
     }
 
     /// Initialize context-based decision rules
@@ -417,7 +357,10 @@ impl ToolChoiceIntelligence {
         _context: &AnalysisContext,
     ) -> ToolChoiceDecision {
         // Sort by confidence, highest first
-        decisions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        decisions.sort_by(|a, b| {
+            b.confidence.partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Get the best decision or create default
         let mut best_decision = decisions

@@ -175,7 +175,7 @@ impl DesktopAgent {
             }
             "capture_screenshot_command" | "desktop_screenshot" => {
                 let result =
-                    commands::core::capture_screenshot_command(self.app_handle.clone()).await;
+                    commands::core::capture_screenshot_command(self.app_handle.clone(), state.clone()).await;
 
                 match result {
                     Ok(screenshot_result) => {

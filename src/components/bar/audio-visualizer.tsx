@@ -146,12 +146,15 @@ export default function AudioVisualizer({
    */
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let isCleanedUp = false;
 
     const setupListener = async () => {
       try {
         unlisten = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
+            if (isCleanedUp) return; // Prevent updates after cleanup
+            
             console.log("📊 AudioVisualizer: Received state update:", event.payload);
 
             const payload = event.payload;
@@ -160,17 +163,23 @@ export default function AudioVisualizer({
               const mappedState = mapBarStateToAppState(payload.barState);
               
               // Update current state if different
-              if (mappedState !== currentState) {
-                previousStateRef.current = currentState;
-                setCurrentState(mappedState);
-
-                // Start transition
-                requestAnimationFrame(() => {
-                  transitionProgressRef.current = 0;
-                  transitionStartTimeRef.current = Date.now();
-                  setIsTransitioning(true);
-                });
-              }
+              setCurrentState((prevState) => {
+                if (mappedState !== prevState) {
+                  previousStateRef.current = prevState;
+                  
+                  // Start transition
+                  requestAnimationFrame(() => {
+                    if (!isCleanedUp) {
+                      transitionProgressRef.current = 0;
+                      transitionStartTimeRef.current = Date.now();
+                      setIsTransitioning(true);
+                    }
+                  });
+                  
+                  return mappedState;
+                }
+                return prevState;
+              });
               
               // Update audio level from backend
               setBackendAudioLevel(payload.audioLevel || 0);
@@ -187,10 +196,11 @@ export default function AudioVisualizer({
     setupListener();
 
     return () => {
+      isCleanedUp = true;
       safeCleanupEventListener(unlisten);
       console.log("🔄 AudioVisualizer: Event listener cleaned up");
     };
-  }, [currentState]);
+  }, []); // Remove currentState dependency - not needed
 
   // Update current state when appState prop changes (for direct prop usage)
   useEffect(() => {
@@ -212,7 +222,11 @@ export default function AudioVisualizer({
 
     // Clean up any existing audio context first
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
+      try {
+        await audioContextRef.current.close();
+      } catch (error) {
+        console.error("Error closing existing audio context:", error);
+      }
     }
 
     try {
@@ -238,16 +252,23 @@ export default function AudioVisualizer({
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = undefined;
       }
+      audioContextRef.current = undefined;
+      analyserRef.current = undefined;
+      dataArrayRef.current = undefined;
     }
   }, [enableMicrophone]);
 
-  const stopAudioCapture = useCallback(() => {
+  const stopAudioCapture = useCallback(async () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = undefined;
     }
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
+      try {
+        await audioContextRef.current.close();
+      } catch (error) {
+        console.error("Error closing audio context:", error);
+      }
     }
     audioContextRef.current = undefined;
     analyserRef.current = undefined;
@@ -1261,8 +1282,26 @@ export default function AudioVisualizer({
 
   // Start animation loop
   useEffect(() => {
-    animationRef.current = requestAnimationFrame(animate);
+    let animationId: number | undefined;
+    let isCancelled = false;
+    
+    const startAnimation = () => {
+      if (!isCancelled) {
+        animationId = requestAnimationFrame(() => {
+          animate();
+          startAnimation(); // Continue animation loop
+        });
+        animationRef.current = animationId;
+      }
+    };
+    
+    startAnimation();
+    
     return () => {
+      isCancelled = true;
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
@@ -1291,23 +1330,18 @@ export default function AudioVisualizer({
     stopAudioCapture,
   ]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      // Cleanup function
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (
-        audioContextRef.current &&
-        audioContextRef.current.state !== "closed"
-      ) {
-        audioContextRef.current.close();
-      }
+      // Stop any active audio capture
+      stopAudioCapture();
+      
+      // Cancel any pending animations
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, []);
+  }, [stopAudioCapture]);
 
   return (
     <div className={`relative ${className}`}>

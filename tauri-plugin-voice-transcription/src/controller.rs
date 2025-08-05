@@ -238,6 +238,26 @@ impl VoiceController {
             return Err(Error::AlreadyDictating);
         }
 
+        // Check microphone permission
+        info!("[VoiceController] Checking microphone permission before starting dictation...");
+        let permission_status = crate::mic_permissions::check_microphone_permission();
+        match permission_status {
+            crate::mic_permissions::MicrophonePermissionStatus::Granted => {
+                info!("[VoiceController] Microphone permission is granted");
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::Denied => {
+                return Err(Error::MicrophonePermissionDenied);
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::Undetermined => {
+                // Permission will be requested when we try to use the microphone
+                info!("[VoiceController] Microphone permission is undetermined, will be requested");
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::NotApplicable => {
+                // Non-macOS platform, continue
+                info!("[VoiceController] Microphone permission check not applicable on this platform");
+            }
+        }
+
         info!("[VoiceController] Starting dictation...");
 
         // Emit dictation started event

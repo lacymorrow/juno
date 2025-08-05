@@ -368,3 +368,5 @@ tauri-plugin-voice-transcription/target/
 # Backend server artifacts (if applicable)
 backend-server/dist/
 backend-server/build/
+
+.hive-mind/

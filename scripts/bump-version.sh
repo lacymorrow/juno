@@ -37,21 +37,30 @@ echo "✓ Rust crate versions updated."
 # ----------------------
 # 2. Node packages (if any)
 # ----------------------
-if command -v bunx >/dev/null 2>&1; then
-  if bunx --yes @changesets/cli --help >/dev/null 2>&1; then
-    echo "Updating package.json versions via changesets…"
-    bunx --yes @changesets/cli version --snapshot "$NEW_VERSION"
+# Always update the root package.json first
+if [ -f "package.json" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    echo "Updating root package.json..."
+    jq --arg v "$NEW_VERSION" '.version = $v' "package.json" > "package.json.tmp" && mv "package.json.tmp" "package.json"
+  elif command -v bunx >/dev/null 2>&1; then
+    echo "Updating root package.json with npm..."
+    bunx npm version "$NEW_VERSION" --no-git-tag-version
   else
-    # Fallback: patch all package.json files with jq
-    if command -v jq >/dev/null 2>&1; then
-      echo "Updating package.json files with jq…"
-      for pkg in $(git ls-files -- '*.json' | grep -E 'package\.json$'); do
-        jq --arg v "$NEW_VERSION" '(.version) |= $v' "$pkg" > "$pkg.tmp" && mv "$pkg.tmp" "$pkg"
-      done
-    else
-      echo "Skipping Node version bump – jq not available."
-    fi
+    echo "⚠️  Cannot update package.json - no jq or npm available"
   fi
+fi
+
+# Update other package.json files
+if command -v jq >/dev/null 2>&1; then
+  echo "Updating other package.json files..."
+  for pkg in $(find . -name "package.json" -type f | grep -v node_modules | grep -v target | grep -v "^\./package.json$"); do
+    if [ -f "$pkg" ]; then
+      echo "  Updating $pkg"
+      jq --arg v "$NEW_VERSION" '(.version) |= $v' "$pkg" > "$pkg.tmp" && mv "$pkg.tmp" "$pkg"
+    fi
+  done
+else
+  echo "Skipping other package.json updates – jq not available."
 fi
 
 echo "\n✅  Version bump complete. Commit the changes with:\n   git commit -am \"chore: bump version to $NEW_VERSION\"\n"
