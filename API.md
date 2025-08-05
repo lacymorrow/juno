@@ -144,6 +144,42 @@ await listen('transcription-result', (event) => {
 'tool-execution': { tool: string, status: 'started' | 'completed' | 'error' }
 ```
 
+## Rate Limiting
+
+All API endpoints are protected by rate limiting to ensure system stability and prevent abuse. Rate limits are enforced per operation type:
+
+### Rate Limits by Category
+
+| Operation Type | Rate Limit | Description |
+|----------------|------------|-------------|
+| AI Operations | 20/minute | Expensive API calls (submit_query, etc.) |
+| Shell Commands | 10/second | Security-sensitive operations |
+| Screenshots | 5/second | Resource-intensive operations |
+| File Operations | 100/second | Filesystem access |
+| Browser Operations | 30/minute | Web automation tasks |
+
+### Rate Limit Errors
+
+When a rate limit is exceeded, commands return an error with:
+- Error message indicating rate limit exceeded
+- Retry-after duration in seconds
+- User-friendly explanation
+
+```typescript
+// Example error response
+{
+  error: "Rate limit exceeded for AI operations. Please retry after 30 seconds."
+}
+```
+
+### Implementation
+
+Rate limiting uses a token bucket algorithm with:
+- Automatic token refill based on time
+- Burst capacity for occasional spikes
+- Per-user tracking (currently using default user)
+- Automatic cleanup of stale buckets
+
 ## Configuration Environment
 
 ### Required API Keys

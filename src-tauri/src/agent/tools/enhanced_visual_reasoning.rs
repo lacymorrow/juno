@@ -543,7 +543,7 @@ impl VisualReasoningEngine {
             history.push_back(StateSnapshot {
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                     .as_millis() as u64,
                 elements: result.scene_understanding.primary_elements.clone(),
                 layout_hash: self.calculate_layout_hash(&result.scene_understanding),

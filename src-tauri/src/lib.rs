@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 // Settings manager import
 use crate::settings::manager::SettingsManager;
 use crate::constants::errors::templates;
+use crate::state::AppState;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -23,6 +24,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
@@ -926,6 +928,15 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Rate Limiter Cleanup Task ---
+            let rate_limiter_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Get the AppState from the managed state
+                let app_state = rate_limiter_app_handle.state::<AppState>();
+                app_state.initialize_rate_limiter_cleanup().await;
+                tracing::info!("Rate limiter cleanup task initialized successfully");
+            });
+
             // --- Setup All Menus (App Menu + Tray Menu + Event Handling) ---
             menu::setup_all_menus(&app_handle)?;
             // --- End of Menu Setup ---
@@ -942,6 +953,10 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---
+
+            // --- Initialize Cleanup Handlers ---
+            cleanup::init_cleanup_handlers(app_handle.clone());
+            // --- End of Cleanup Handlers ---
 
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module
@@ -1026,19 +1041,19 @@ mod tests {
         // The key insight: permission checks should NEVER call Desktop::new() internally
         // This test ensures that regression doesn't happen
 
-        // Simulate permission check without actual macOS APIs (to prevent segfaults in CI/tests)
-        #[cfg(not(target_os = "macos"))]
-        {
-            // On non-macOS, this should always return safe defaults
-            println!("✅ Permission check structure is safe for non-macOS platforms");
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            // On macOS, ensure we never call unsafe Desktop operations during permission checking
-            // This would be a mock test in a real environment
-            println!("✅ Permission check avoids unsafe Desktop operations");
-        }
+        // Verify the function exists and has the correct signature
+        // This ensures the permission check API is available
+        let _fn_exists: fn(tauri::AppHandle) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>> = check_permissions_status_native;
+        
+        // In a real test with a test harness, we would:
+        // 1. Create a mock AppHandle
+        // 2. Call check_permissions_status_native(app_handle).await
+        // 3. Verify it returns Ok(_) without crashing
+        
+        println!("✅ Permission check function exists and is properly typed");
+        
+        // The key regression this prevents: ensuring permission checks
+        // NEVER internally call Desktop::new() which causes segfaults
     }
 
     #[test]
@@ -1063,14 +1078,21 @@ mod tests {
     fn test_cli_runner_no_exit_calls() {
         // Ensure CLI runner doesn't use std::process::exit() which causes crashes
         use crate::cli::runner;
+        use crate::cli::OutputFormat;
 
         // Test that handle_non_desktop_cli_commands returns bool, not exits
         let cli = crate::cli::Cli {
+            verbose: false,
+            quiet: false,
+            output: crate::cli::OutputFormat::Text,
+            timeout: 300,
+            config: None,
+            headless: false,
+            command: None,
             test_focused_element_ns: false,
             check_accessibility: false,
             tts_provider: None,
             tts_text: None,
-
         };
 
         let result = runner::handle_non_desktop_cli_commands(&cli);

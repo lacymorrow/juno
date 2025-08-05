@@ -675,12 +675,17 @@ impl AnthropicBrain {
     fn strip_tts_tags(&self, text: &str) -> String {
         // CRITICAL FIX: Remove TTS tags completely - content was already processed for immediate TTS
         // We don't want TTS content appearing in the final display text
-        let tts_regex = Regex::new(r"<TTS>.*?</TTS>").unwrap();
-        tts_regex
-            .replace_all(text, "")
-            .to_string()
-            .trim()
-            .to_string()
+        match Regex::new(r"<TTS>.*?</TTS>") {
+            Ok(tts_regex) => tts_regex
+                .replace_all(text, "")
+                .to_string()
+                .trim()
+                .to_string(),
+            Err(e) => {
+                tracing::warn!("Failed to compile TTS regex: {}", e);
+                text.to_string()
+            }
+        }
     }
 
     // Helper function to convert our internal Message format to Anthropic's API format

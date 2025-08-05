@@ -896,12 +896,13 @@ impl AdvancedMemoryManager {
         };
 
         // If no current execution ID is set, fall back to regular cleaning
-        if current_execution_id_option.is_none() {
-            log::warn!("No current execution ID set, falling back to regular orphaned tool call cleanup");
-            return self.clean_orphaned_tool_calls().await;
-        }
-
-        let current_execution_id = current_execution_id_option.unwrap();
+        let current_execution_id = match current_execution_id_option {
+            Some(id) => id,
+            None => {
+                log::warn!("No current execution ID set, falling back to regular orphaned tool call cleanup");
+                return self.clean_orphaned_tool_calls().await;
+            }
+        };
         log::info!("Cleaning orphaned tool calls from previous executions (current execution: {})",
                   current_execution_id);
 
@@ -1163,7 +1164,11 @@ impl AdvancedMemoryManager {
         // Create comprehensive summary with enhanced analysis
         let summary = if self.visual_config.read().await.fallback_to_generic_description {
             let timestamp = SystemTime::now();
-            let time_str = format!("{:?}", timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+            let time_str = format!("{:?}", 
+                timestamp.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_else(|_| Duration::from_secs(0))
+                    .as_secs()
+            );
 
             format!(
                 "Screenshot captured at {} ({}). {}. {}. \
@@ -1476,212 +1481,6 @@ impl MemoryManager for AdvancedMemoryManager {
 
     async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
         AdvancedMemoryManager::clean_orphaned_tool_calls_from_previous_executions(self).await
-    }
-}
-
-/// A simple in-memory implementation of the MemoryManager trait (existing implementation)
-/// Kept for backward compatibility
-#[derive(Debug, Clone)]
-pub struct SimpleMemoryManager {
-    messages: Arc<RwLock<Vec<Message>>>,
-    pending_tool_calls: Arc<RwLock<HashSet<String>>>, // Track tool call IDs that haven't been resolved yet
-}
-
-impl SimpleMemoryManager {
-    pub fn new() -> Self {
-        SimpleMemoryManager {
-            messages: Arc::new(RwLock::new(Vec::new())),
-            pending_tool_calls: Arc::new(RwLock::new(HashSet::new())),
-        }
-    }
-
-    /// Remove orphaned tool calls that don't have corresponding tool results
-    /// This method should be called when starting a new agent execution to clean up
-    /// any incomplete tool calls from previous cancelled executions
-    pub async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Find all tool call IDs that have results
-        let mut resolved_tool_calls = HashSet::new();
-        for message in messages.iter() {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    resolved_tool_calls.insert(tool_call_id.clone());
-                }
-            }
-        }
-
-        // Remove any Assistant messages with tool calls that don't have corresponding results
-        let mut orphaned_tool_call_ids = HashSet::new();
-        messages.retain(|message| {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
-                    if !all_resolved {
-                        // Mark these tool calls as orphaned
-                        for tc in tool_calls {
-                            if !resolved_tool_calls.contains(&tc.id) {
-                                orphaned_tool_call_ids.insert(tc.id.clone());
-                            }
-                        }
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        // Clean up pending tool calls
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id));
-
-        if !orphaned_tool_call_ids.is_empty() {
-            log::info!("Cleaned up {} orphaned tool calls: {:?}",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids);
-        }
-
-        Ok(())
-    }
-
-    /// Clear all pending tool calls (useful when starting a fresh conversation)
-    pub async fn clear_pending_tool_calls(&mut self) -> Result<(), AgentError> {
-        let mut pending = self.pending_tool_calls.write().await;
-        pending.clear();
-        log::info!("Cleared all pending tool calls");
-        Ok(())
-    }
-
-    /// Get a list of currently pending tool call IDs
-    pub async fn get_pending_tool_calls(&self) -> Result<Vec<String>, AgentError> {
-        let pending = self.pending_tool_calls.read().await;
-        Ok(pending.iter().cloned().collect())
-    }
-
-    /// Clean up orphaned tool results that don't have corresponding tool calls
-    /// This method removes tool result messages that have no matching tool_use blocks
-    pub async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        let mut messages = self.messages.write().await;
-
-        // Find all tool call IDs that exist in assistant messages
-        let mut valid_tool_call_ids = std::collections::HashSet::new();
-        for message in messages.iter() {
-            if message.role == Role::Assistant {
-                if let Some(tool_calls) = &message.tool_calls {
-                    for tool_call in tool_calls {
-                        valid_tool_call_ids.insert(tool_call.id.clone());
-                    }
-                }
-            }
-        }
-
-        // Count orphaned tool results before removal
-        let mut orphaned_count = 0;
-        let mut orphaned_ids = Vec::new();
-
-        // Remove tool result messages that don't have corresponding tool calls
-        messages.retain(|message| {
-            if message.role == Role::Tool {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    if !valid_tool_call_ids.contains(tool_call_id) {
-                        orphaned_count += 1;
-                        orphaned_ids.push(tool_call_id.clone());
-                        log::warn!("Removing orphaned tool result with ID: {}", tool_call_id);
-                        return false; // Remove this message
-                    }
-                }
-            }
-            true // Keep the message
-        });
-
-        if orphaned_count > 0 {
-            log::info!("Cleaned up {} orphaned tool results: {:?}", orphaned_count, orphaned_ids);
-        }
-
-        Ok(orphaned_count)
-    }
-}
-
-#[async_trait]
-impl MemoryManager for SimpleMemoryManager {
-    async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        // Track tool calls and results
-        match message.role {
-            Role::Assistant => {
-                if let Some(tool_calls) = &message.tool_calls {
-                    // Add tool call IDs to pending list
-                    for tool_call in tool_calls {
-                        pending.insert(tool_call.id.clone());
-                        log::debug!("Tracking pending tool call: {}", tool_call.id);
-                    }
-                }
-            }
-            Role::Tool => {
-                if let Some(tool_call_id) = &message.tool_call_id {
-                    // Remove from pending list when result is added
-                    if pending.remove(tool_call_id) {
-                        log::debug!("Resolved pending tool call: {}", tool_call_id);
-                    } else {
-                        log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        messages.push(message);
-
-        log::debug!("Memory: Added message");
-
-        Ok(())
-    }
-
-    async fn get_messages(&self) -> Result<Vec<Message>, AgentError> {
-        let messages = self.messages.read().await.clone();
-        Ok(messages)
-    }
-
-    async fn get_last_n_messages(&self, n: usize) -> Result<Vec<Message>, AgentError> {
-        let messages = self.messages.read().await;
-        let start_idx = if messages.len() > n { messages.len() - n } else { 0 };
-        let result = messages[start_idx..].to_vec();
-        Ok(result)
-    }
-
-    async fn clear_memory(&mut self) -> Result<(), AgentError> {
-        let mut messages = self.messages.write().await;
-        let mut pending = self.pending_tool_calls.write().await;
-
-        messages.clear();
-        pending.clear();
-
-        log::info!("Memory cleared");
-        Ok(())
-    }
-
-    async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        // Delegate to the existing implementation
-        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
-    }
-
-    async fn clean_orphaned_tool_results(&mut self) -> Result<usize, AgentError> {
-        // Delegate to the existing implementation
-        SimpleMemoryManager::clean_orphaned_tool_results(self).await
-    }
-
-    async fn set_current_execution_id(&mut self, _execution_id: &str) -> Result<(), AgentError> {
-        // SimpleMemoryManager doesn't track execution IDs, so this is a no-op
-        Ok(())
-    }
-
-    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
-        // For simple memory manager, just clean all orphaned tool calls
-        SimpleMemoryManager::clean_orphaned_tool_calls(self).await
     }
 }
 

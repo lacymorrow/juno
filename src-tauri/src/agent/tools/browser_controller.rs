@@ -703,15 +703,16 @@ impl BrowserController {
                 }
             }
 
-            if test_page.is_none() {
-                return Err(AgentError::ToolError(format!(
-                    "Failed to create initial page after {} attempts. Last error: {}",
-                    max_attempts,
-                    last_error.unwrap_or_else(|| "Unknown error".to_string())
-                )));
+            match test_page {
+                None => {
+                    return Err(AgentError::ToolError(format!(
+                        "Failed to create initial page after {} attempts. Last error: {}",
+                        max_attempts,
+                        last_error.unwrap_or_else(|| "Unknown error".to_string())
+                    )));
+                }
+                Some(page) => page
             }
-
-            test_page.unwrap()
         };
 
         // Try to navigate to a simple URL to verify browser works
@@ -1663,8 +1664,60 @@ impl BrowserController {
 // Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        // No automatic cleanup in Drop.
-        // We'll only clean up explicitly when the app exits.
-        log::debug!("BrowserController dropped, but browser instance is kept alive for reuse.");
+        // Check if Tokio runtime exists before attempting async cleanup
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let connection_method = self.connection_method.clone();
+            let browser = self.browser.clone();
+            let context = self.context.clone();
+            let page = self.page.clone();
+            
+            // Schedule async cleanup in a detached task
+            handle.spawn(async move {
+                log::info!("BrowserController dropped, scheduling cleanup...");
+            
+            // Close the page if it exists
+            {
+                let mut page_guard = page.lock().await;
+                if let Some(page) = page_guard.take() {
+                    if let Err(e) = page.close(None).await {
+                        log::error!("Failed to close browser page in Drop: {}", e);
+                    }
+                }
+            }
+            
+            // Close the context
+            if let Err(e) = context.close().await {
+                log::error!("Failed to close browser context in Drop: {}", e);
+            }
+            
+            // Close the browser
+            if let Err(e) = browser.close().await {
+                log::error!("Failed to close browser in Drop: {}", e);
+            }
+            
+            // Clean up temporary profile if needed
+            if connection_method.starts_with("TempProfile:") {
+                if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {
+                    if !temp_path.is_empty() {
+                        if let Err(e) = std::fs::remove_dir_all(temp_path) {
+                            log::warn!("Failed to clean up temp profile in Drop: {}", e);
+                        }
+                    }
+                }
+            }
+            
+            log::info!("BrowserController cleanup completed");
+            });
+        } else {
+            log::warn!("BrowserController dropped outside Tokio runtime - cleanup skipped");
+            // Try to at least clean up temp profile synchronously
+            if let Some(temp_path) = self.connection_method.strip_prefix("TempProfile:") {
+                if !temp_path.is_empty() {
+                    if let Err(e) = std::fs::remove_dir_all(temp_path) {
+                        log::warn!("Failed to clean up temp profile in Drop: {}", e);
+                    }
+                }
+            }
+        }
     }
 }

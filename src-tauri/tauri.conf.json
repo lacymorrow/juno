@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Juno",
-  "identifier": "com.juno.app",
+  "identifier": "com.juno.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -69,8 +69,8 @@
       {
         "label": "voice-bar",
         "url": "/voice-bar",
-        "width": 210,
-        "height": 160,
+        "width": 380,
+        "height": 180,
         "x": 300,
         "y": 100,
         "decorations": false,

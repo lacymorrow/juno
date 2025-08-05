@@ -137,6 +137,26 @@ impl AlwaysListeningController {
             return Ok(()); // Already active
         }
 
+        // Check microphone permission
+        info!("[AlwaysListeningController] Checking microphone permission before starting...");
+        let permission_status = crate::mic_permissions::check_microphone_permission();
+        match permission_status {
+            crate::mic_permissions::MicrophonePermissionStatus::Granted => {
+                info!("[AlwaysListeningController] Microphone permission is granted");
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::Denied => {
+                return Err(Error::MicrophonePermissionDenied);
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::Undetermined => {
+                // Permission will be requested when we try to use the microphone
+                info!("[AlwaysListeningController] Microphone permission is undetermined, will be requested");
+            }
+            crate::mic_permissions::MicrophonePermissionStatus::NotApplicable => {
+                // Non-macOS platform, continue
+                info!("[AlwaysListeningController] Microphone permission check not applicable on this platform");
+            }
+        }
+
         info!("[AlwaysListeningController] Starting always listening mode...");
 
         // Emit always listening started event
