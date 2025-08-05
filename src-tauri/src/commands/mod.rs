@@ -23,6 +23,7 @@ pub mod always_listening;
 pub mod cloud;
 pub mod cloud_test;
 pub mod collaborative_ai_commands;
+pub mod config_file;
 pub mod debug_tools;
 pub mod dictation_state_manager;
 pub mod element;
@@ -77,6 +78,7 @@ pub use self::dictation::*;
 pub use self::always_listening::*;
 pub use self::cloud::*;
 pub use self::cloud_test::*;
+pub use self::config_file::*;
 pub use self::collaborative_ai_commands::*;
 pub use self::debug_tools::*; // Re-export debug tool commands
 pub use self::dictation_state_manager::{

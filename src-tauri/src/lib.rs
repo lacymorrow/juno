@@ -310,6 +310,11 @@ use commands::cloud::{
     test_cloud_connection, update_cloud_config,
 };
 
+// Config File Commands
+use commands::config_file::{
+    open_config_directory, open_config_file, get_config_directory_path,
+};
+
 // Environment loading functions moved to startup module
 
 /// Load environment variables from bundled .env file in production
@@ -900,6 +905,10 @@ pub fn run() {
             commands::tool_choice::set_tool_choice_enabled,
             commands::tool_choice::get_tool_choice_enabled,
             commands::tool_choice::validate_tool_choice_config,
+            // Config file commands
+            open_config_directory,
+            open_config_file,
+            get_config_directory_path,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
