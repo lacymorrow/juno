@@ -184,12 +184,12 @@ function App() {
     onDictationInputShortcut: useCallback((payload: any) => {
       console.log("Dictation input shortcut event received:", payload);
       if (payload.state === "pressed" && !payload.test_mode) {
-        appState.setIsDictationActive(true);
-        toast.info("Dictation mode activated");
+        // Don't toggle local state - the backend will handle it and emit events
+        // The frontend will update based on those events
       } else if (payload.state === "released") {
-        appState.setIsDictationActive(false);
+        // For hold mode - handled by backend
       }
-    }, [appState]),
+    }, []),
   });
 
   // Dictation state events integration
@@ -246,6 +246,69 @@ function App() {
 
     initializeApp();
   }, [appState.setAppVersion, appState.setKeyboardShortcuts]);
+
+  // Listen for dictation-active events from backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let currentDictationState = appState.isDictationActive;
+    let toastTimeout: NodeJS.Timeout | null = null;
+    let lastToastTime = 0;
+    const MIN_TOAST_INTERVAL = 1000; // Minimum 1 second between toasts
+
+    const setupListener = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen("dictation-active", (event) => {
+        const isActive = event.payload as boolean;
+        console.log("Dictation active event from backend:", isActive);
+        
+        // Update the app state
+        appState.setIsDictationActive(isActive);
+        
+        // Only show toast if state actually changed and enough time has passed
+        const now = Date.now();
+        if (currentDictationState !== isActive && (now - lastToastTime) > MIN_TOAST_INTERVAL) {
+          currentDictationState = isActive;
+          lastToastTime = now;
+          
+          // Clear any pending toast
+          if (toastTimeout) {
+            clearTimeout(toastTimeout);
+            toastTimeout = null;
+          }
+          
+          // Use a unique ID for the toast to prevent duplicates
+          const toastId = `dictation-${isActive ? 'on' : 'off'}`;
+          
+          // Dismiss any existing dictation toasts
+          toast.dismiss('dictation-on');
+          toast.dismiss('dictation-off');
+          
+          // Show the new toast
+          toast.info(
+            isActive ? "Dictation mode activated" : "Dictation mode deactivated",
+            { id: toastId, duration: 2000 }
+          );
+        }
+        
+        // If dictation is deactivated, reset the dictation state
+        if (!isActive) {
+          appState.setDictationState("idle");
+        }
+      });
+    };
+
+    setupListener();
+
+    return () => {
+      unlisten?.();
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
+      }
+      // Dismiss any lingering toasts on cleanup
+      toast.dismiss('dictation-on');
+      toast.dismiss('dictation-off');
+    };
+  }, [appState]);
 
   // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
   // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"

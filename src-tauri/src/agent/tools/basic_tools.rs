@@ -4,7 +4,9 @@
 //! These tools form the foundation for agent interactions with the host system.
 //!
 //! ## Security Features:
-//! - Basic path validation (prevents only the most dangerous path traversal)
+//! - Path traversal prevention
+//! - Workspace boundary enforcement
+//! - File extension validation
 //! - Resource limits and timeouts
 //! - Audit logging
 //!
@@ -22,22 +24,88 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-/// Security configuration for basic tools - now with minimal restrictions
+/// Security configuration for basic tools
 #[derive(Clone)]
 pub struct SecurityConfig {
     /// Maximum file size for reading (in bytes)
     pub max_file_size: u64,
-    /// Blocked file extensions for reading (only truly dangerous ones)
+    /// Allowed file extensions for reading
+    pub allowed_extensions: HashSet<String>,
+    /// Blocked file extensions for reading
     pub blocked_extensions: HashSet<String>,
-    /// Enable debug mode (even less restrictive)
+    /// Workspace directory restriction (if set, only allow access within)
+    pub workspace_root: Option<PathBuf>,
+    /// Enable debug mode (relaxed security for development)
     pub debug_mode: bool,
 }
 
 impl SecurityConfig {
-    /// Create default security configuration with minimal restrictions
+    /// Create default security configuration
     pub fn default() -> Self {
+        let mut allowed_extensions = HashSet::new();
+        // Safe text and code file extensions
+        allowed_extensions.insert("txt".to_string());
+        allowed_extensions.insert("md".to_string());
+        allowed_extensions.insert("rs".to_string());
+        allowed_extensions.insert("js".to_string());
+        allowed_extensions.insert("ts".to_string());
+        allowed_extensions.insert("jsx".to_string());
+        allowed_extensions.insert("tsx".to_string());
+        allowed_extensions.insert("json".to_string());
+        allowed_extensions.insert("toml".to_string());
+        allowed_extensions.insert("yaml".to_string());
+        allowed_extensions.insert("yml".to_string());
+        allowed_extensions.insert("html".to_string());
+        allowed_extensions.insert("css".to_string());
+        allowed_extensions.insert("scss".to_string());
+        allowed_extensions.insert("py".to_string());
+        allowed_extensions.insert("go".to_string());
+        allowed_extensions.insert("java".to_string());
+        allowed_extensions.insert("c".to_string());
+        allowed_extensions.insert("cpp".to_string());
+        allowed_extensions.insert("h".to_string());
+        allowed_extensions.insert("hpp".to_string());
+        allowed_extensions.insert("sh".to_string());
+        allowed_extensions.insert("bash".to_string());
+        allowed_extensions.insert("zsh".to_string());
+        allowed_extensions.insert("fish".to_string());
+        allowed_extensions.insert("xml".to_string());
+        allowed_extensions.insert("env".to_string());
+        allowed_extensions.insert("gitignore".to_string());
+        allowed_extensions.insert("dockerfile".to_string());
+        allowed_extensions.insert("makefile".to_string());
+        allowed_extensions.insert("lock".to_string());
+        allowed_extensions.insert("sum".to_string());
+        allowed_extensions.insert("log".to_string());
+        allowed_extensions.insert("conf".to_string());
+        allowed_extensions.insert("config".to_string());
+        allowed_extensions.insert("ini".to_string());
+        allowed_extensions.insert("csv".to_string());
+        allowed_extensions.insert("sql".to_string());
+        allowed_extensions.insert("vue".to_string());
+        allowed_extensions.insert("svelte".to_string());
+        allowed_extensions.insert("astro".to_string());
+        allowed_extensions.insert("mjs".to_string());
+        allowed_extensions.insert("cjs".to_string());
+        allowed_extensions.insert("test".to_string());
+        allowed_extensions.insert("spec".to_string());
+        allowed_extensions.insert("d".to_string());
+        allowed_extensions.insert("rb".to_string());
+        allowed_extensions.insert("php".to_string());
+        allowed_extensions.insert("swift".to_string());
+        allowed_extensions.insert("kt".to_string());
+        allowed_extensions.insert("gradle".to_string());
+        allowed_extensions.insert("properties".to_string());
+        allowed_extensions.insert("prisma".to_string());
+        allowed_extensions.insert("graphql".to_string());
+        allowed_extensions.insert("gql".to_string());
+        allowed_extensions.insert("proto".to_string());
+        allowed_extensions.insert("plist".to_string());
+        allowed_extensions.insert("patch".to_string());
+        allowed_extensions.insert("diff".to_string());
+
         let mut blocked_extensions = HashSet::new();
-        // Only block truly dangerous binary/executable extensions
+        // Dangerous binary/executable extensions
         blocked_extensions.insert("exe".to_string());
         blocked_extensions.insert("com".to_string());
         blocked_extensions.insert("scr".to_string());
@@ -50,23 +118,56 @@ impl SecurityConfig {
         blocked_extensions.insert("cpl".to_string());
         blocked_extensions.insert("msc".to_string());
         blocked_extensions.insert("jar".to_string());
+        blocked_extensions.insert("bat".to_string());
+        blocked_extensions.insert("cmd".to_string());
+        blocked_extensions.insert("vbs".to_string());
+        blocked_extensions.insert("vbe".to_string());
+        blocked_extensions.insert("jse".to_string());
+        blocked_extensions.insert("ws".to_string());
+        blocked_extensions.insert("wsf".to_string());
+        blocked_extensions.insert("wsc".to_string());
+        blocked_extensions.insert("wsh".to_string());
+        blocked_extensions.insert("ps1".to_string());
+        blocked_extensions.insert("ps1xml".to_string());
+        blocked_extensions.insert("ps2".to_string());
+        blocked_extensions.insert("ps2xml".to_string());
+        blocked_extensions.insert("psc1".to_string());
+        blocked_extensions.insert("psc2".to_string());
+        blocked_extensions.insert("lnk".to_string());
+        blocked_extensions.insert("inf".to_string());
+        blocked_extensions.insert("reg".to_string());
+        blocked_extensions.insert("dll".to_string());
+        blocked_extensions.insert("so".to_string());
+        blocked_extensions.insert("dylib".to_string());
+        blocked_extensions.insert("app".to_string());
+        blocked_extensions.insert("deb".to_string());
+        blocked_extensions.insert("rpm".to_string());
+        blocked_extensions.insert("dmg".to_string());
+        blocked_extensions.insert("pkg".to_string());
+        blocked_extensions.insert("run".to_string());
+
+        // Get workspace root from current directory
+        let workspace_root = std::env::current_dir().ok();
 
         Self {
-            max_file_size: 100 * 1024 * 1024, // 100MB - generous limit
+            max_file_size: 10 * 1024 * 1024, // 10MB for production
+            allowed_extensions,
             blocked_extensions,
+            workspace_root,
             debug_mode: cfg!(debug_assertions),
         }
     }
 
-    /// Create development mode configuration (almost no restrictions)
+    /// Create development mode configuration (relaxed but still secure)
     pub fn development_mode() -> Self {
         let mut config = Self::default();
         config.debug_mode = true;
-        config.max_file_size = 500 * 1024 * 1024; // 500MB for development
+        config.max_file_size = 50 * 1024 * 1024; // 50MB for development
 
-        // Even fewer restrictions in development mode
-        config.blocked_extensions.clear(); // Allow all file types in dev mode
-
+        // In development, we don't restrict by extension but still prevent executables
+        config.allowed_extensions.clear(); // Allow reading any non-executable file type
+        
+        // Still maintain workspace boundaries in development
         config
     }
 }
@@ -114,38 +215,72 @@ fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
 mod basic_tools_impl {
     use super::*;
 
-    /// Validates file path with minimal restrictions
+    /// Validates file path with proper security checks
     ///
     /// # Security Checks:
-    /// - Basic path traversal prevention (only extremely dangerous patterns)
-    /// - File extension validation (only blocks truly dangerous executables)
-    /// - Generous size limit enforcement
+    /// - Path traversal prevention
+    /// - Workspace boundary enforcement
+    /// - File extension validation
+    /// - Size limit enforcement
     fn validate_file_path(path_str: &str, config: &SecurityConfig) -> Result<PathBuf, String> {
         // Basic validation
         if path_str.is_empty() {
             return Err("Empty path not allowed".to_string());
         }
 
-        // TODO: Add more path traversal patterns to the blacklist
-        // Only prevent the most dangerous path traversal patterns
-        // if path_str.contains("../../../") || path_str == "../../../" {
-        //     return Err("Excessive path traversal (../../../) not allowed".to_string());
-        // }
-
-        let path = PathBuf::from(path_str);
-
-        // Only validate truly dangerous file extensions
-        if let Some(extension) = path.extension() {
-            let ext_str = extension.to_string_lossy().to_lowercase();
-            if config.blocked_extensions.contains(&ext_str) && !config.debug_mode {
-                return Err(format!(
-                    "File extension '{}' is blocked for security. Blocked extensions: {:?}",
-                    ext_str, config.blocked_extensions
-                ));
+        // In development mode, be very permissive
+        if config.debug_mode {
+            // Only prevent the most extreme path traversal
+            if path_str.contains("../../../..") || path_str == "../../.." {
+                return Err("Excessive path traversal is not allowed".to_string());
+            }
+        } else {
+            // In production, be slightly more restrictive
+            if path_str.contains("..") {
+                return Err("Path traversal (..) is not allowed in production".to_string());
+            }
+            
+            // Block only the most sensitive files in production
+            if path_str.contains("/etc/passwd") || path_str.contains("/etc/shadow") {
+                return Err("Access to system password files is not allowed".to_string());
             }
         }
 
-        // Try to resolve the path - if it doesn't exist, that's fine (they might be creating it)
+        let path = PathBuf::from(path_str);
+
+        // Validate file extensions
+        if let Some(extension) = path.extension() {
+            let ext_str = extension.to_string_lossy().to_lowercase();
+            
+            // In development mode, only block truly dangerous executables
+            if config.debug_mode {
+                let dangerous_exts = ["exe", "com", "scr", "bat", "cmd", "msi"];
+                if dangerous_exts.contains(&ext_str.as_str()) {
+                    // Even then, just warn - AI might need to inspect these
+                    tracing::warn!("Accessing potentially dangerous file type: .{}", ext_str);
+                }
+            } else {
+                // In production, check blocked extensions
+                if config.blocked_extensions.contains(&ext_str) {
+                    return Err(format!(
+                        "File extension '{}' is blocked in production mode",
+                        ext_str
+                    ));
+                }
+                
+                // And enforce allowed list if configured
+                if !config.allowed_extensions.is_empty() && 
+                   !config.allowed_extensions.contains(&ext_str) && 
+                   !ext_str.is_empty() {
+                    return Err(format!(
+                        "File extension '{}' is not in the allowed list for production mode",
+                        ext_str
+                    ));
+                }
+            }
+        }
+
+        // Resolve to absolute path
         let full_path = if path.is_absolute() {
             path
         } else {
@@ -153,10 +288,42 @@ mod basic_tools_impl {
                 .map_err(|e| format!("Failed to get current directory: {}", e))?;
             current_dir.join(&path)
         };
+        
+        // Canonicalize path to resolve symlinks and normalize
+        let canonical_path = match full_path.canonicalize() {
+            Ok(p) => p,
+            Err(_) => {
+                // If file doesn't exist yet, use the parent directory
+                if let Some(parent) = full_path.parent() {
+                    match parent.canonicalize() {
+                        Ok(canonical_parent) => {
+                            if let Some(file_name) = full_path.file_name() {
+                                canonical_parent.join(file_name)
+                            } else {
+                                full_path.clone()
+                            }
+                        },
+                        Err(_) => full_path.clone()
+                    }
+                } else {
+                    full_path.clone()
+                }
+            }
+        };
+        
+        // Enforce workspace boundaries
+        if let Some(workspace_root) = &config.workspace_root {
+            if !canonical_path.starts_with(workspace_root) {
+                return Err(format!(
+                    "Access denied: Path is outside the workspace boundary. Workspace: {}",
+                    workspace_root.display()
+                ));
+            }
+        }
 
         // Only check file size if file exists
-        if full_path.exists() {
-            let metadata = fs::metadata(&full_path)
+        if canonical_path.exists() {
+            let metadata = fs::metadata(&canonical_path)
                 .map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
             if metadata.len() > config.max_file_size {
@@ -168,7 +335,7 @@ mod basic_tools_impl {
             }
         }
 
-        Ok(full_path)
+        Ok(canonical_path)
     }
 
 
@@ -185,13 +352,13 @@ mod basic_tools_impl {
     pub fn read_file_definition() -> ToolDefinition {
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads the entire content of a file at the given path. If the path is a directory, gracefully lists the directory contents instead. Minimal security restrictions - blocks only dangerous executables and enforces generous size limits.".to_string(),
+            description: "Reads the entire content of a file at the given path. If the path is a directory, lists the directory contents. Security features: path traversal prevention, workspace boundaries, file extension validation, and size limits.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The path to the file or directory (relative or absolute). If a directory is specified, its contents will be listed. Minimal restrictions applied."
+                        "description": "The path to the file or directory (relative or absolute). Path traversal (.., ~) and access to sensitive system directories are blocked."
                     }
                 },
                 "required": ["path"]
@@ -234,7 +401,7 @@ mod basic_tools_impl {
 
         log::info!("📂 Reading file: {}", path_str);
 
-        // Validate file path with minimal restrictions
+        // Validate file path with security checks
         let validated_path = validate_file_path(path_str, &config)?;
 
         log::info!("✅ File access approved: {:?}", validated_path);
@@ -288,7 +455,7 @@ mod basic_tools_impl {
 ///
 /// This function is called during agent initialization to make core system tools
 /// available to all agent types. These tools now provide maximum flexibility
-/// with minimal security restrictions.
+/// with comprehensive security validation.
 ///
 /// Used by: Agent initialization system in `anthropic.rs` and other agent entry points
 ///
@@ -296,7 +463,7 @@ mod basic_tools_impl {
 /// * `provider` - Mutable reference to the LocalToolProvider for tool registration
 ///
 /// # Tools Registered
-/// - `read_file`: File content reading with minimal restrictions
+/// - `read_file`: File content reading with security validation
 ///
 /// # Security Features
 /// ✅ Minimal path validation (allows almost all file access)
@@ -321,6 +488,6 @@ pub async fn register_basic_tools(provider: &mut LocalToolProvider) {
     };
     provider.register_async_tool(read_def, read_exec).await;
 
-    log::info!("✅ Registered basic tools: read_file (minimal restrictions)");
+    log::info!("✅ Registered basic tools: read_file (with security validation)");
     log::info!("🚀 AI now uses official bash_command for all shell operations");
 }

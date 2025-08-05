@@ -34,6 +34,19 @@ bun run tauri dev
 ✅ **Streaming AI responses** for real-time interaction
 ✅ **Dynamic system tray integration** with state-aware icons and context menus
 ✅ **Comprehensive test suite** with 95%+ pass rate
+✅ **Production-grade memory safety** with zero `.unwrap()` tolerance and comprehensive error handling
+
+## 🛡️ Memory Safety
+
+Juno implements strict memory safety practices for production reliability:
+
+- **Zero `.unwrap()` in production code** - All potential panics eliminated
+- **Safe error handling patterns** throughout the codebase
+- **Race condition prevention** with atomic operations and RAII patterns
+- **Resource leak prevention** with automatic cleanup
+- **Comprehensive error recovery** for all edge cases
+
+See [Memory Safety Guidelines](docs/MEMORY_SAFETY.md) for detailed patterns and practices.
 
 ## 🧪 Testing
 
@@ -354,6 +367,18 @@ RUST_LOG=debug bun run tauri dev
 - **Development Mode**: Relaxed security for development workflow
 - **Production Mode**: Strict validation with comprehensive audit logging
 - **Configurable Limits**: File size, command timeouts, access controls
+
+### Rate Limiting System
+
+Juno includes a comprehensive rate limiting system to prevent abuse and ensure stability:
+
+- **AI Operations**: 20/minute - Protects expensive API calls
+- **Shell Commands**: 10/second - Prevents command injection attacks
+- **Screenshots**: 5/second - Manages resource-intensive operations
+- **File Operations**: 100/second - Controls filesystem access
+- **Browser Automation**: 30/minute - Limits web scraping
+
+The rate limiter uses a token bucket algorithm with automatic cleanup and provides user-friendly error messages with retry-after information.
 
 ## Contributing
 

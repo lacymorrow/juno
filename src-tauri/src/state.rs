@@ -32,6 +32,7 @@ use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::{audio, events, errors::templates};
 use crate::utils::string_cache::format_error_cached;
+use crate::utils::rate_limiter::GlobalRateLimiters;
 
 // Helper function for error formatting - uses cached templates for better performance
 fn format_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
@@ -166,6 +167,7 @@ pub struct AudioSettings {
     pub always_listening_sensitivity: f32,
     pub always_listening_wake_words: Vec<String>,
     pub notification_sound_enabled: bool,
+    pub was_always_listening_active_before_dictation: bool,
 }
 
 impl Default for AudioSettings {
@@ -191,6 +193,7 @@ impl Default for AudioSettings {
                 .map(|s| s.to_string())
                 .collect(),
             notification_sound_enabled: true,
+            was_always_listening_active_before_dictation: false,
         }
     }
 }
@@ -304,6 +307,9 @@ pub struct AppState {
     pub permissions_checked: Arc<StdMutex<bool>>,
     pub cloud_enabled: Arc<StdMutex<bool>>,
 
+    // Rate limiting for command safety
+    pub rate_limiters: Arc<GlobalRateLimiters>,
+
     // Dynamic storage for other state components
     state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
@@ -312,6 +318,10 @@ impl AppState {
     pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false); // Initial state: not cancelled
         info!("Initializing AppState with simplified grouped structure");
+        
+        // Create rate limiters (cleanup task will be started later in async context)
+        let rate_limiters = Arc::new(GlobalRateLimiters::new());
+        
         Self {
             desktop: DesktopWrapper::new(desktop),
             shell_sessions: ShellSessions::default(),
@@ -370,9 +380,18 @@ impl AppState {
             permissions_checked: Arc::new(StdMutex::new(false)),
             cloud_enabled: Arc::new(StdMutex::new(false)),
 
+            // Use the rate limiters created above
+            rate_limiters,
+
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
+    }
+
+    /// Initialize rate limiter cleanup task (must be called after Tokio runtime is ready)
+    pub async fn initialize_rate_limiter_cleanup(&self) {
+        info!("Starting rate limiter cleanup task");
+        self.rate_limiters.clone().start_cleanup_task();
     }
 
     // Audio Settings - Getter/Setter methods that operate on actual shared state
@@ -1282,11 +1301,11 @@ impl AppState {
                             let mut check_delay = 10; // Start with 10ms
                             let max_delay = 200; // Max 200ms
                             let max_checks = 20; // Max 2 seconds total wait
-                            let mut cumulative_elapsed = 0u64; // Track actual elapsed time
+                            let mut _cumulative_elapsed = 0u64; // Track actual elapsed time
 
                             for check_attempt in 0..max_checks {
                                 tokio::time::sleep(Duration::from_millis(check_delay)).await;
-                                cumulative_elapsed += check_delay;
+                                _cumulative_elapsed += check_delay;
 
                                 // Comprehensive readiness check: status + tools availability
                                 let manager_guard = manager.lock().await;

@@ -66,6 +66,41 @@ SecurityConfig::default() {
 - ✅ **100% Crash Vectors** eliminated (50+ dangerous .unwrap() calls fixed)
 - ✅ **95% Resource Exhaustion Vectors** eliminated with size limits
 
+#### Rate Limiting Protection
+**Location**: `src-tauri/src/utils/rate_limiter.rs`
+
+**Protection Against**:
+- ✅ **API Abuse**: Limits expensive AI operations to 20/minute
+- ✅ **Command Injection Attempts**: Shell commands limited to 10/second
+- ✅ **Resource Exhaustion**: Screenshots limited to 5/second
+- ✅ **Filesystem Abuse**: File operations limited to 100/second
+- ✅ **Web Scraping Abuse**: Browser operations limited to 30/minute
+
+**Rate Limiting Features**:
+```rust
+GlobalRateLimiters {
+    ai_operations: 20/minute,      // Expensive API calls
+    file_operations: 100/second,    // Filesystem access
+    shell_commands: 10/second,      // Security sensitive
+    screenshots: 5/second,          // Resource intensive
+    browser_operations: 30/minute   // Web automation
+}
+```
+
+**Implementation Details**:
+- Token bucket algorithm with automatic refill
+- Per-user tracking capability (extensible)
+- Automatic cleanup of stale buckets (5-minute intervals)
+- User-friendly error messages with retry-after information
+- Thread-safe implementation using Arc<Mutex<HashMap>>
+
+**Security Benefits**:
+- Prevents denial-of-service attacks
+- Limits financial exposure from API abuse
+- Protects against automated exploitation attempts
+- Ensures fair resource usage across users
+- Provides audit trail of rate limit violations
+
 ## 🍎 macOS Permission System
 
 ### Critical Permission Requirements

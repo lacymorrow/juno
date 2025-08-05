@@ -33,27 +33,47 @@ const ClickVisualizer = () => {
     // Only listen for events if overlay is enabled
     if (!isEnabled) return;
 
-    // Listen for click visualization events from the backend
-    const unlisten = listen<[number, number, string]>(
-      "click-visualization",
-      (event) => {
-        const [x, y, color] = event.payload;
-        // Add new click with unique ID
-        const newClick: ClickInfo = {
-          x,
-          y,
-          color,
-          id: Date.now(), // Use timestamp as a unique ID
-          timestamp: Date.now(),
-        };
+    let unlistenFn: (() => void) | null = null;
+    let isCleanedUp = false;
 
-        setClicks((prevClicks) => [...prevClicks, newClick]);
+    // Listen for click visualization events from the backend
+    const setupListener = async () => {
+      try {
+        unlistenFn = await listen<[number, number, string]>(
+          "click-visualization",
+          (event) => {
+            if (isCleanedUp) return; // Prevent updates after cleanup
+            
+            const [x, y, color] = event.payload;
+            // Add new click with unique ID
+            const newClick: ClickInfo = {
+              x,
+              y,
+              color,
+              id: Date.now() + Math.random(), // More unique ID
+              timestamp: Date.now(),
+            };
+
+            setClicks((prevClicks) => [...prevClicks, newClick]);
+          }
+        );
+      } catch (error) {
+        console.error("Failed to setup click visualization listener:", error);
       }
-    );
+    };
+
+    setupListener();
 
     return () => {
+      isCleanedUp = true;
       // Cleanup listener when component unmounts or is disabled
-      unlisten.then((unlistenFn) => unlistenFn());
+      if (unlistenFn) {
+        try {
+          unlistenFn();
+        } catch (error) {
+          console.error("Error cleaning up click visualization listener:", error);
+        }
+      }
     };
   }, [isEnabled]);
 
@@ -61,15 +81,17 @@ const ClickVisualizer = () => {
   useEffect(() => {
     if (clicks.length === 0 || !isEnabled) return;
 
-    const cleanupTimeout = setTimeout(() => {
+    const cleanupInterval = setInterval(() => {
       const now = Date.now();
-      setClicks((prevClicks) =>
-        prevClicks.filter((click) => now - click.timestamp < 1000)
-      ); // Remove clicks older than 1 second
+      setClicks((prevClicks) => {
+        const filtered = prevClicks.filter((click) => now - click.timestamp < 1000);
+        // Only update if something changed to prevent unnecessary re-renders
+        return filtered.length !== prevClicks.length ? filtered : prevClicks;
+      });
     }, 100); // Check more frequently for smoother cleanup
 
-    return () => clearTimeout(cleanupTimeout);
-  }, [clicks, isEnabled]);
+    return () => clearInterval(cleanupInterval);
+  }, [clicks.length > 0, isEnabled]); // Only depend on whether there are clicks, not the array itself
 
   // Don't render anything if disabled
   if (!isEnabled) {

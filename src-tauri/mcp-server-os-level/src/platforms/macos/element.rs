@@ -226,8 +226,11 @@ pub fn get_focused_element_ns_workspace(
     use_background_apps: bool,
     activate_app: bool,
 ) -> Result<UIElement, AutomationError> {
+    use crate::platforms::macos::memory_safety::with_autorelease_pool;
+    
     debug!("Attempting to get focused element via NSWorkspace");
-    unsafe {
+    
+    with_autorelease_pool(|| unsafe {
         // 1. Get NSWorkspace shared instance
         let workspace_class = class!(NSWorkspace);
         let shared_workspace: *mut objc::runtime::Object =
@@ -309,7 +312,7 @@ pub fn get_focused_element_ns_workspace(
                 Err(AutomationError::NoFocusedElement(error_msg))
             }
         }
-    }
+    })
 }
 
 impl UIElementImpl for MacOSUIElement {

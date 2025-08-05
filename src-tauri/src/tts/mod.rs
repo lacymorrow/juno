@@ -72,21 +72,28 @@ pub fn filter_tts_content(text: &str) -> String {
 
     let mut filtered_text = text.to_string();
 
+    // Helper function to safely apply regex replacement
+    let safe_regex_replace = |text: &str, pattern: &str, replacement: &str| -> String {
+        match Regex::new(pattern) {
+            Ok(regex) => regex.replace_all(text, replacement).to_string(),
+            Err(e) => {
+                warn!("Failed to compile regex '{}': {}", pattern, e);
+                text.to_string()
+            }
+        }
+    };
+
     // Remove any TTS XML tags completely - content should have been processed by streaming system
-    let tts_tag_regex = Regex::new(r"</?TTS>").unwrap();
-    filtered_text = tts_tag_regex.replace_all(&filtered_text, "").to_string();
+    filtered_text = safe_regex_replace(&filtered_text, r"</?TTS>", "");
 
     // 1. Remove code blocks (```...```)
-    let code_block_regex = Regex::new(r"```[\s\S]*?```").unwrap();
-    filtered_text = code_block_regex.replace_all(&filtered_text, " ").to_string();
+    filtered_text = safe_regex_replace(&filtered_text, r"```[\s\S]*?```", " ");
 
     // 2. Remove inline code (`...`)
-    let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
-    filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
+    filtered_text = safe_regex_replace(&filtered_text, r"`[^`]+`", " ");
 
     // 3. Remove HTML/JSX tags (including self-closing tags)
-    let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
-    filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
+    filtered_text = safe_regex_replace(&filtered_text, r"<[^>]*>", " ");
 
     // // 4. Remove function calls and method chaining (e.g., getData(), object.method())
     // let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
@@ -123,8 +130,16 @@ pub fn filter_tts_content(text: &str) -> String {
     // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
     // 12. Clean up whitespace and normalize
-    let whitespace_regex = Regex::new(r"\s+").unwrap();
-    filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+    match Regex::new(r"\s+") {
+        Ok(whitespace_regex) => {
+            filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+        }
+        Err(e) => {
+            tracing::warn!("Failed to compile whitespace regex: {}", e);
+            // Fallback to simple space normalization
+            filtered_text = filtered_text.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+    }
     filtered_text = filtered_text.trim().to_string();
 
     debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());

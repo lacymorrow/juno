@@ -354,6 +354,7 @@ impl ToolMappingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::agent::test_strings;
 
     #[test]
     fn test_tool_categorization() {

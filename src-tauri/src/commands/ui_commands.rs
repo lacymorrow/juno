@@ -674,7 +674,7 @@ impl UIManager {
             state: self.get_element_state(&element_id),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
         };
 
@@ -694,7 +694,7 @@ impl UIManager {
             state: self.get_element_state(&element_id),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
         };
 

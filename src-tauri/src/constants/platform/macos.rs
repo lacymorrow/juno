@@ -134,7 +134,10 @@ pub fn key_name_to_keycode(key_name: &str) -> Option<CGKeyCode> {
         "up" | "arrowup" => Some(key_codes::ARROW_UP),
         _ => {
             if key_lower.len() == 1 {
-                let c = key_lower.chars().next().unwrap();
+                let c = match key_lower.chars().next() {
+                    Some(ch) => ch,
+                    None => return None, // Should not happen if len == 1, but safety first
+                };
 
                 // Handle alphabetic keys
                 if c.is_ascii_alphabetic() {

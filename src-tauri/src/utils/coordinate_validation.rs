@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn test_valid_integer_coordinates() {
         let coord = json!([100, 200]);
-        let result = validate_coordinate_strict(&coord).unwrap();
+        let result = validate_coordinate_strict(&coord).expect("Should validate valid coordinate");
         assert_eq!(result.x, 100);
         assert_eq!(result.y, 200);
     }
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn test_valid_float_integers() {
         let coord = json!([100.0, 200.0]);
-        let result = validate_coordinate_strict(&coord).unwrap();
+        let result = validate_coordinate_strict(&coord).expect("Should validate valid coordinate");
         assert_eq!(result.x, 100);
         assert_eq!(result.y, 200);
     }
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_coordinate_parameter_validation() {
         let input = json!({"coordinate": [150, 250]});
-        let result = validate_coordinate_parameter(&input, "coordinate").unwrap();
+        let result = validate_coordinate_parameter(&input, "coordinate").expect("Should validate coordinate parameter");
         assert_eq!(result.x, 150);
         assert_eq!(result.y, 250);
     }

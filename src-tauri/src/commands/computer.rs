@@ -44,8 +44,26 @@ pub async fn computer(
 ) -> Result<ComputerResult, String> {
     info!("Computer command called with action: {}", input.action);
 
+    // Apply rate limiting based on action type
+    match input.action.as_str() {
+        "screenshot" => {
+            if let Err(e) = state.rate_limiters.screenshots.check("default_user").await {
+                return Err(e.to_user_message());
+            }
+        }
+        "type" | "key" | "hold_key" => {
+            // Light rate limiting for keyboard operations
+            if let Err(e) = state.rate_limiters.file_operations.check("default_user").await {
+                return Err(e.to_user_message());
+            }
+        }
+        _ => {
+            // No rate limiting for other operations like mouse movements
+        }
+    }
+
     let result = match input.action.as_str() {
-        "screenshot" => handle_screenshot(&app_handle).await,
+        "screenshot" => handle_screenshot(&app_handle, &state).await,
         "click" => handle_click(&input, &app_handle, state).await,
         "right_click" => handle_right_click(&input, &app_handle, state).await,
         "middle_click" => handle_middle_click(&input, &app_handle, state).await,
@@ -89,8 +107,8 @@ pub async fn computer(
 
 // --- Action Handlers ---
 
-async fn handle_screenshot(app_handle: &AppHandle) -> Result<ComputerResult, String> {
-    let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone())
+async fn handle_screenshot(app_handle: &AppHandle, state: &State<'_, AppState>) -> Result<ComputerResult, String> {
+    let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone(), state.clone())
         .await
         .map_err(|e| format!("Screenshot failed: {}", e))?;
 
