@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 export interface VoiceState {
   mode:
@@ -231,13 +232,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
     return () => {
       // Safely cleanup event listeners
       unlistenCallbacks.forEach((unlisten) => {
-        if (unlisten && typeof unlisten === 'function') {
-          try {
-            unlisten();
-          } catch (error) {
-            console.error('Error cleaning up event listener:', error);
-          }
-        }
+        safeCleanupEventListener(unlisten);
       });
     };
   }, []); // Empty deps is correct here - we want this to run once on mount
