@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { safeCleanupEventListener } from '@/lib/safeEventCleanup';
 
 export function useEventListener<T = any>(
   eventName: string,
@@ -29,9 +30,8 @@ export function useEventListener<T = any>(
     setupListener();
 
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      // Use safeCleanupEventListener for proper cleanup
+      safeCleanupEventListener(unlisten);
     };
   }, [eventName, ...dependencies]);
 }

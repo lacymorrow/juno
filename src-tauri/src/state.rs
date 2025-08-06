@@ -1252,7 +1252,7 @@ impl AppState {
         let all_server_configs = manager_guard.get_server_configs().await;
         let enabled_servers: Vec<_> = all_server_configs
             .into_iter()
-            .filter(|config| config.enabled && config.auto_start)
+            .filter(|config| config.enabled)
             .collect();
         drop(manager_guard);
 
