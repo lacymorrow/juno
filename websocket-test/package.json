@@ -1,6 +1,6 @@
 {
   "name": "juno-websocket-test-server",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "WebSocket test server for Juno AI cloud connectivity testing",
   "main": "websocket-test-server.js",
   "scripts": {

@@ -323,7 +323,7 @@ impl MCPServerConnection {
             "id": self.next_request_id(),
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": "2024-11-05",
                 "capabilities": {
                     "tools": {
                         "execution": true
