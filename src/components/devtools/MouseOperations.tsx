@@ -21,7 +21,8 @@ const MouseOperations: React.FC = () => {
         '• Click: computer tool with action: "click"\n' +
         '• Right-click: computer tool with action: "right_click"\n' +
         '• Middle-click: computer tool with action: "middle_click"\n' +
-        '• Drag: computer tool with action: "left_click_drag"',
+        '• Double-click: computer tool with action: "double_click"\n' +
+        '• Drag: computer tool with action: "drag"',
       { duration: 10000 }
     );
   };
@@ -106,7 +107,25 @@ const MouseOperations: React.FC = () => {
     );
   };
 
-  // Double-click action not exposed
+  const handleMouseDoubleClick = async () => {
+    const x = parseInt(mouseX, 10);
+    const y = parseInt(mouseY, 10);
+
+    if (isNaN(x)) {
+      toast.error("Invalid X coordinate. Please enter a number.");
+      return;
+    }
+    if (isNaN(y)) {
+      toast.error("Invalid Y coordinate. Please enter a number.");
+      return;
+    }
+
+    await invokeCommand(
+      "computer",
+      { action: "double_click", coordinate: [x, y] },
+      "mouseDoubleClick"
+    );
+  };
 
   const handleMouseDrag = async () => {
     const startX = parseInt(dragStartX, 10);
@@ -166,7 +185,7 @@ const MouseOperations: React.FC = () => {
           <Button onClick={handleMouseClick}>Click</Button>
           <Button onClick={handleRightClick}>Right Click</Button>
           <Button onClick={handleMiddleClick}>Middle Click</Button>
-          {/* Double Click removed from devtools */}
+          <Button onClick={handleMouseDoubleClick}>Double Click</Button>
         </div>
       </div>
 

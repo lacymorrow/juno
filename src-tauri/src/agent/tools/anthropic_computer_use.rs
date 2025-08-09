@@ -11,7 +11,8 @@ use crate::utils::coordinates;
 use super::tool_versioning::{ToolVersionManager, ToolVersionConfig};
 // Keep the mouse command imports from main branch (proper command usage)
 use crate::commands::mouse::{
-    left_click, right_click, middle_click
+    left_click, right_click, middle_click, double_click, triple_click,
+    left_click_drag
 };
 use serde_json::{json, Value};
 use tauri::Manager;
@@ -407,8 +408,8 @@ pub async fn execute_computer_tool(
                 Err(e) => Ok::<Value, String>(create_anthropic_error_response(format!("Failed to serialize screenshot data: {}", e)))
             }
         }
-        "left_click" | "right_click" | "middle_click" |
-        "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" => {
             // Validate accessibility permission for mouse operations
             handle_anthropic_result!(validate_permission(
                 app_handle,
@@ -465,7 +466,91 @@ pub async fn execute_computer_tool(
                         "success": true
                     }))
                 }
-                
+                "double_click" => {
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                    let (x, y) = coordinate.to_f64();
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Double click failed: {}", e)));
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "triple_click" => {
+                    // Strict coordinate validation per Anthropic Computer Use API specification
+                    let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                    let (x, y) = coordinate.to_f64();
+
+                    // Transform coordinates from scaled screenshot to screen coordinates
+                    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    handle_anthropic_result!(triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                        .map_err(|e| format!("Triple click failed: {}", e)));
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
+                "left_click_drag" => {
+                    // Proper Anthropic Computer Use API specification compliance
+                    // Support both single coordinate (standard) and dual coordinate formats
+                    let (start_x, start_y, end_x, end_y) = if input.get("start_coordinate").is_some() {
+                        // Format: start_coordinate + coordinate (end) - explicit start/end coordinates
+                        let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "start_coordinate", "coordinate"));
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
+                    } else if input.get("end_coordinate").is_some() {
+                        // Format: coordinate (start) + end_coordinate - explicit start/end coordinates
+                        let (start_coord, end_coord) = handle_anthropic_result!(validate_coordinate_pair(&input, "coordinate", "end_coordinate"));
+                        let (start_x, start_y) = start_coord.to_f64();
+                        let (end_x, end_y) = end_coord.to_f64();
+                        (start_x, start_y, end_x, end_y)
+                    } else {
+                        // Standard format: single coordinate (end position) - drag from current cursor position
+                        // This is the official Anthropic Computer Use API specification behavior
+                        let end_coord = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
+                        let (end_x, end_y) = end_coord.to_f64();
+
+                        // Get current cursor position as start point (already in screen coordinates)
+                        let (start_x, start_y) = handle_anthropic_result!(crate::commands::mouse::get_cursor_position(
+                            app_handle.clone(),
+                            state_manager.clone(),
+                        ).await.map_err(|e| format!("Failed to get cursor position for drag: {}", e)));
+
+                        // Transform only the end coordinates since start coordinates are already screen coordinates
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
+                        // Return start coordinates as-is (already screen coordinates) and transformed end coordinates
+                        (start_x, start_y, screen_end_x, screen_end_y)
+                    };
+
+                    // Transform coordinates from scaled screenshot to screen coordinates (only for explicit coordinate cases)
+                    let (screen_start_x, screen_start_y, screen_end_x, screen_end_y) = if input.get("start_coordinate").is_some() || input.get("end_coordinate").is_some() {
+                        // Both coordinates need transformation for explicit coordinate cases
+                        let (screen_start_x, screen_start_y) = coordinates::transform_to_screen_coordinates(start_x, start_y);
+                        let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+                        (screen_start_x, screen_start_y, screen_end_x, screen_end_y)
+                    } else {
+                        // For cursor position case, coordinates are already handled above
+                        (start_x, start_y, end_x, end_y)
+                    };
+
+                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
+                    handle_anthropic_result!(left_click_drag(app_handle.clone(), state_manager, screen_start_x, screen_start_y, screen_end_x, screen_end_y).await
+                        .map_err(|e| format!("Left click drag failed: {}", e)));
+
+                    Ok(json!({
+                        "success": true
+                    }))
+                }
                 "mouse_move" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
                     let coordinate = handle_anthropic_result!(validate_coordinate_parameter(&input, "coordinate"));
@@ -935,7 +1020,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-        "enum": ["screenshot", "left_click", "right_click", "middle_click", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
+                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
                 },
                 "coordinate": {
                     "type": "array",

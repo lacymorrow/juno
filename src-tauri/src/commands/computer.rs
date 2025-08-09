@@ -67,7 +67,9 @@ pub async fn computer(
         "click" => handle_click(&input, &app_handle, state).await,
         "right_click" => handle_right_click(&input, &app_handle, state).await,
         "middle_click" => handle_middle_click(&input, &app_handle, state).await,
-        
+        "double_click" => handle_double_click(&input, &app_handle, state).await,
+        "triple_click" => handle_triple_click(&input, &app_handle, state).await,
+        "left_click_drag" => handle_drag(&input, &app_handle, state).await,
         "move" => handle_move(&input, &app_handle, state).await,
         "scroll" => handle_scroll(&input, &app_handle, state).await,
         "type" => handle_type(&input, &app_handle, state).await,
@@ -207,7 +209,109 @@ async fn handle_middle_click(
     })
 }
 
-// Removed: double_click, triple_click, and left_click_drag actions (not in official API)
+async fn handle_double_click(
+    input: &ComputerInput,
+    app_handle: &AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    let coordinates = input.coordinate.as_ref()
+        .ok_or("Double click action requires coordinate parameter")?;
+
+    if coordinates.len() != 2 {
+        return Err("Coordinate must be an array of [x, y]".to_string());
+    }
+
+    let x = coordinates[0];
+    let y = coordinates[1];
+
+    crate::commands::mouse::double_click(app_handle.clone(), state, x, y, None)
+        .await
+        .map_err(|e| format!("Double click failed: {}", e))?;
+
+    Ok(ComputerResult {
+        success: true,
+        action: "double_click".to_string(),
+        message: Some(format!("Double clicked at ({}, {})", x, y)),
+        screenshot: None,
+        error: None,
+        coordinate: None,
+    })
+}
+
+async fn handle_triple_click(
+    input: &ComputerInput,
+    app_handle: &AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    let coordinates = input.coordinate.as_ref()
+        .ok_or("Triple click action requires coordinate parameter")?;
+
+    if coordinates.len() != 2 {
+        return Err("Coordinate must be an array of [x, y]".to_string());
+    }
+
+    let x = coordinates[0];
+    let y = coordinates[1];
+
+    crate::commands::mouse::triple_click(app_handle.clone(), state, x, y, None)
+        .await
+        .map_err(|e| format!("Triple click failed: {}", e))?;
+
+    Ok(ComputerResult {
+        success: true,
+        action: "triple_click".to_string(),
+        message: Some(format!("Triple clicked at ({}, {})", x, y)),
+        screenshot: None,
+        error: None,
+        coordinate: None,
+    })
+}
+
+async fn handle_drag(
+    input: &ComputerInput,
+    app_handle: &AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    // Following official Anthropic Computer Use specification:
+    // Drag starts from current cursor position and ends at 'coordinate'
+    let end_coords = input.coordinate.as_ref()
+        .ok_or("Drag action requires coordinate parameter (end position)")?;
+
+    if end_coords.len() != 2 {
+        return Err("Coordinate must be an array of [x, y]".to_string());
+    }
+
+    // Get current cursor position as start point (returns screen coordinates)
+    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
+        .await
+        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+
+    let end_x = end_coords[0];
+    let end_y = end_coords[1];
+
+    // Transform end coordinates from screenshot space to screen space to match start coordinates
+    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
+
+    crate::commands::mouse::left_click_drag(
+        app_handle.clone(),
+        state.clone(),
+        start_x,
+        start_y,
+        screen_end_x,
+        screen_end_y,
+    )
+    .await
+    .map_err(|e| format!("Drag failed: {}", e))?;
+
+    Ok(ComputerResult {
+        success: true,
+        action: "left_click_drag".to_string(),
+        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
+        screenshot: None,
+        error: None,
+        coordinate: None,
+    })
+}
 
 async fn handle_move(
     input: &ComputerInput,
