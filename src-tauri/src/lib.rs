@@ -511,7 +511,6 @@ pub fn run() {
             press_key,
             global_type_text,
             hold_key,
-            release_key,
             // Note: Production keyboard functions (type_text, press_key, etc.) already registered above with debug capabilities
             // Production app functions with debug capabilities
             open_application,
@@ -604,9 +603,7 @@ pub fn run() {
             left_click,
             right_click,
             middle_click,
-            double_click,
-            triple_click,
-            left_click_drag,
+            
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
