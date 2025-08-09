@@ -85,7 +85,7 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     // Additional desktop tools that are actually registered
     map.insert("scroll", ToolCategory::Desktop);
     map.insert("wait", ToolCategory::Desktop);
-    map.insert("release_key", ToolCategory::Desktop);
+    // Removed: release_key (not part of official Computer Use API surface)
     map.insert("get_focused_element_info", ToolCategory::Desktop);
     map.insert("capture_screenshot", ToolCategory::Desktop);
     map.insert("capture_element_screenshot", ToolCategory::Desktop);

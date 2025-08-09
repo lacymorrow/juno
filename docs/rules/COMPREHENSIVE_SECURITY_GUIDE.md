@@ -110,7 +110,7 @@ GlobalRateLimiters {
 **System Location**: `System Settings > Privacy & Security > Accessibility`
 
 **Functions Requiring Accessibility Permission**:
-- **Mouse Control**: `desktop_click`, `left_click`, `right_click`, `double_click`, `triple_click`, `left_click_drag`, `mouse_move`, `scroll`
+- **Mouse Control**: `left_click`, `right_click`, `middle_click`, `mouse_move`, `scroll`
 - **Keyboard Control**: `type_text`, `key`, `hold_key`, `press_key` (with modifiers)
 - **Application Management**: `open_application`, `focus_application`, `quit_application`, `get_running_applications`
 - **Window Management**: `focus_window`, `get_window_info`, `list_windows`, window operations

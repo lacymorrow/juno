@@ -8,7 +8,7 @@ import { invokeCommand } from "@/lib/utils";
 const KeyboardOperations: React.FC = () => {
   const [textToType, setTextToType] = useState<string>("");
   const [globalTextToType, setGlobalTextToType] = useState<string>("");
-  const [keyToRelease, setKeyToRelease] = useState<string>("");
+  // release_key removed from API
   const [clipboardContent, setClipboardContent] = useState<string>("");
   const [clipboardResult, setClipboardResult] = useState<string | null>(null);
   const [selectedTextResult, setSelectedTextResult] = useState<string | null>(
@@ -35,13 +35,7 @@ const KeyboardOperations: React.FC = () => {
     );
   };
 
-  const handleReleaseKey = async () => {
-    if (!keyToRelease.trim()) {
-      toast.error("Please enter a key to release.");
-      return;
-    }
-    await invokeCommand("release_key", { key: keyToRelease }, "releaseKey");
-  };
+  
 
   const handleGetClipboard = async () => {
     setClipboardResult(null);
@@ -112,21 +106,7 @@ const KeyboardOperations: React.FC = () => {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center space-x-2">
-          <Keyboard className="h-4 w-4" />
-          <Input
-            placeholder="Key to release (e.g., shift, cmd)"
-            value={keyToRelease}
-            onChange={(e) => setKeyToRelease(e.target.value)}
-          />
-          <Button onClick={handleReleaseKey}>Release Key</Button>
-        </div>
-        <p className="text-xs text-gray-500">
-          Note: Release key provides unique functionality not available in
-          computer tool
-        </p>
-      </div>
+      
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">
