@@ -13,7 +13,7 @@ This audit documents the actual tools registered in the Juno AI Computer Use Age
 ### Primary Computer Tool
 
 - **`computer`** - Main unified tool for all computer operations
-  - Actions: `screenshot`, `left_click`, `right_click`, `middle_click`, `mouse_move`, `left_mouse_down`, `left_mouse_up`, `key`, `hold_key`, `type`, `scroll`, `cursor_position`, `wait`
+  - Actions: `screenshot`, `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click`, `left_click_drag`, `mouse_move`, `left_mouse_down`, `left_mouse_up`, `key`, `hold_key`, `type`, `scroll`, `cursor_position`, `wait`
   - Coordinates automatically transformed from screenshot to screen coordinates
   - Supports all 17 official Anthropic Computer Use actions
   - **100% compliance** with official Anthropic Computer Use API specification
@@ -91,7 +91,7 @@ This audit documents the actual tools registered in the Juno AI Computer Use Age
 
 - ❌ **`scroll`** - **REMOVED** (redundant with `computer` tool's `scroll` action)
 - ❌ **`wait`** - **REMOVED** (redundant with `computer` tool's `wait` action)  
-Removed non-API: double_click, triple_click, left_click_drag, release_key
+- ❌ **`release_key`** - **REMOVED** (mouse operations automatically release keys)
 
 **Usage:** Use the unified `computer` tool for all screen interactions:
 
@@ -278,7 +278,9 @@ This audit is now **systematically verified** against the actual codebase implem
 - `dev_left_click`, `desktop_click`, `left_click` → Use `computer` tool with `action: "click"`
 - `dev_right_click`, `right_click` → Use `computer` tool with `action: "right_click"`
 - `dev_middle_click`, `middle_click` → Use `computer` tool with `action: "middle_click"`
-Removed mappings for double/triple/left_click_drag
+- `dev_double_click`, `double_click` → Use `computer` tool with `action: "double_click"`
+- `dev_triple_click`, `triple_click` → Use `computer` tool with `action: "triple_click"`
+- `dev_left_click_drag`, `left_click_drag` → Use `computer` tool with `action: "drag"`
 - `dev_left_mouse_down`, `left_mouse_down` → Use `computer` tool with `action: "drag"`
 - `dev_left_mouse_up`, `left_mouse_up` → Use `computer` tool with `action: "drag"`
 - `mouse_move` → Use `computer` tool (movement automatic)

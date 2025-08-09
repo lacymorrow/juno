@@ -1299,7 +1299,8 @@ pub struct MemoryConfig {
 2. **click** - Mouse click operations
 3. **right_click** - Right-click context menus
 4. **middle_click** - Middle mouse button
-5. Removed non-API actions: double_click, triple_click
+5. **double_click** - Double-click actions
+6. **triple_click** - Triple-click selection
 7. **drag** - Click and drag operations
 8. **type** - Text input with smooth typing
 9. **key** - Keyboard key presses
