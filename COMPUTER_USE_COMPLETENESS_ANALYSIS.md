@@ -8,7 +8,7 @@
 - **Beta header**: Compatible with `computer-use-2025-01-24`
 - **Status**: ✅ **UP TO DATE**
 
-### Computer Use Actions Implemented (per current spec)
+### All 17 Computer Use Actions Implemented
 
 #### Basic Actions (Required by Anthropic)
 
@@ -20,11 +20,11 @@
 
 #### Enhanced Actions (computer_20250124 specification)
 
-6. Removed: left_click_drag (non-API)
+6. ✅ **left_click_drag** - Drag operations between coordinates
 7. ✅ **right_click** - Right mouse button with modifiers
 8. ✅ **middle_click** - Middle mouse button support
-9. Removed: double_click (non-API)
-10. Removed: triple_click (non-API)
+9. ✅ **double_click** - Double-click operations
+10. ✅ **triple_click** - Triple-click operations
 11. ✅ **left_mouse_down** - Fine-grained mouse control
 12. ✅ **left_mouse_up** - Fine-grained mouse control
 13. ✅ **scroll** - Directional scrolling with amount control

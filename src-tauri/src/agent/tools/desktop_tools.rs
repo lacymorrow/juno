@@ -65,7 +65,7 @@ use std::time::Duration;
 /// - `wait`: Pause execution for specified duration
 /// - `press_key`: Single key or key combination presses
 /// - `hold_key`: Hold key down for duration or until released
-// - release_key removed (not part of Computer Use API)
+/// - `release_key`: Release previously held keys
 /// - `left_mouse_down`: Press left mouse button down at coordinates
 /// - `left_mouse_up`: Release left mouse button at coordinates
 /// - `triple_click`: Perform triple-click at coordinates
@@ -385,14 +385,17 @@ pub async fn register_desktop_tools(
 
     // Note: scroll tool is already registered in register_additional_computer_use_tools
 
-    // Note: hold_key tool is registered via keyboard commands; release_key removed
+    // Note: triple_click tool is already registered in register_additional_computer_use_tools
+
+    // Note: hold_key and release_key tools are already registered in register_additional_computer_use_tools
 
     // Note: left_mouse_down and left_mouse_up tools are already registered in register_additional_computer_use_tools
 
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
     // All mouse operations now use the computer tool with appropriate actions:
     // - Standard clicks: action: "click", "right_click", "middle_click"
-    // - Drag operations: use computer tool with end coordinate from cursor
+    // - Special clicks: action: "double_click", "triple_click"
+    // - Drag operations: action: "drag" with start/end coordinates
     // - Mouse movement: automatic with any click action
     //
     // This eliminates 11 redundant tools and ~400 lines of duplicate code for 100% API compliance.
