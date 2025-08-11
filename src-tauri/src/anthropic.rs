@@ -19,7 +19,7 @@ use crate::agent::tools::{
     basic_tools::register_basic_tools, browser_tools::get_browser_tool_definitions,
     desktop_tools::setup_tools,
 };
-use crate::agent::traits::{AgentRunnable, MemoryManager};
+use crate::agent::traits::{AgentRunnable, MemoryManager, ToolProvider};
 use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
@@ -590,8 +590,57 @@ async fn execute_agent_internal(
             }
             info!("✅ Registered full Computer Use tools for single agent mode");
 
-            // Create single agent brain
-            let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
+            // Create single agent brain with enriched system prompt including available MCP tools
+            let brain = match {
+                // Load prompt manager to render system prompt with variables
+                let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        warn!("Failed to create settings manager: {}. Using default prompts.", e);
+                        None
+                    }
+                };
+
+                // Collect available tool names including MCP tools (enabled only)
+                let mut available_tool_names: Vec<String> = {
+                    match single_agent_tool_provider.list_tools().await {
+                        Ok(defs) => defs.into_iter().map(|d| d.name).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                };
+
+                // Derive available MCP tools from MCP manager
+                let mcp_tools: Vec<String> = {
+                    let mcp_manager = state.get_mcp_manager().await;
+                    let guard = mcp_manager.lock().await;
+                    guard.get_all_tools().await.into_iter().map(|t| t.tool_definition.name).collect()
+                };
+
+                // Ensure MCP tools are included in the total list
+                available_tool_names.extend(mcp_tools.clone());
+
+                // Build prompt context
+                let mut prompt_manager = if let Some(ref sm) = settings_manager {
+                    PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
+                } else {
+                    PromptManager::new()
+                };
+
+                let prompt_context = crate::agent::prompts::types::PromptContext {
+                    user_preferences: None,
+                    task_context: None,
+                    available_tools: available_tool_names,
+                    available_mcp_tools: mcp_tools,
+                    provider_constraints: None,
+                    custom_variables: std::collections::HashMap::new(),
+                };
+
+                let system_prompt = prompt_manager
+                    .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
+                    .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
+
+                BrainFactory::create_brain_with_system_prompt(system_prompt)
+            } {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
@@ -617,7 +666,7 @@ async fn execute_agent_internal(
                     return Err(err_msg);
                 }
             };
-            info!("✅ Single agent brain initialized");
+            info!("✅ Single agent brain initialized with enriched system prompt");
 
             // Create single agent runner with direct tools (no delegation)
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
@@ -738,10 +787,67 @@ async fn execute_agent_internal(
                 info!("✅ Registered browser tool for specialist agents: {}", definition.name);
             }
 
-            // Create orchestrator brain with delegation personality
-            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(
-                get_orchestrator_personality_prompt(&app_handle).await,
-            ) {
+            // Create orchestrator provider first and enrich it with MCP tools so it can directly use custom MCP tools
+            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+            let mcp_manager_for_orchestrator = state.get_mcp_manager().await;
+            orchestrator_tool_provider.set_mcp_manager(mcp_manager_for_orchestrator.clone());
+            if let Err(e) = orchestrator_tool_provider.refresh_mcp_tools().await {
+                warn!("Failed to refresh MCP tools for orchestrator provider: {}", e);
+            }
+
+            // Build orchestrator system prompt with available MCP tools listed for visibility
+            let orchestrator_brain = match {
+                // Settings → PromptManager
+                let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        warn!("Failed to create settings manager: {}. Using default prompts.", e);
+                        None
+                    }
+                };
+
+                let mut prompt_manager = if let Some(ref sm) = settings_manager {
+                    PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
+                } else {
+                    PromptManager::new()
+                };
+
+                // Collect tool names the orchestrator can see (delegation + MCP)
+                let available_tool_names: Vec<String> = orchestrator_tool_provider
+                    .list_tools()
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|d| d.name)
+                    .collect();
+
+                // Collect MCP tool names explicitly
+                let mcp_tool_names: Vec<String> = {
+                    let guard = mcp_manager_for_orchestrator.lock().await;
+                    guard
+                        .get_all_tools()
+                        .await
+                        .into_iter()
+                        .map(|t| t.tool_definition.name)
+                        .collect()
+                };
+
+                // Prepare prompt context
+                let prompt_context = crate::agent::prompts::types::PromptContext {
+                    user_preferences: None,
+                    task_context: None,
+                    available_tools: available_tool_names,
+                    available_mcp_tools: mcp_tool_names,
+                    provider_constraints: None,
+                    custom_variables: std::collections::HashMap::new(),
+                };
+
+                let system_prompt = prompt_manager
+                    .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
+                    .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
+
+                BrainFactory::create_brain_with_system_prompt(system_prompt)
+            } {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
@@ -767,12 +873,9 @@ async fn execute_agent_internal(
                     return Err(err_msg);
                 }
             };
-            info!("✅ Orchestrator brain initialized");
+            info!("✅ Orchestrator brain initialized with MCP tools visibility");
 
-            // Create orchestrator with ONLY delegation tools (no direct tools)
-            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
-
-            // Register delegation tools for the orchestrator
+            // Register delegation tools for the orchestrator (on the same provider enriched with MCP)
             register_orchestrator_delegation_tools(
                 &mut orchestrator_tool_provider,
                 specialist_agent_tool_provider,

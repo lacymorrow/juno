@@ -65,8 +65,8 @@ impl AudioPlaybackHandle {
     }
 }
 
-/// Filter content to prevent code, emojis, and unwanted content from being spoken
-/// NOTE: This no longer handles TTS XML extraction - that's handled by the streaming system
+/// Minimal TTS filtering: remove explicit TTS tags and normalize whitespace only.
+/// The AI is expected to produce speakable text; avoid deterministic content stripping here.
 pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
 
@@ -83,17 +83,8 @@ pub fn filter_tts_content(text: &str) -> String {
         }
     };
 
-    // Remove any TTS XML tags completely - content should have been processed by streaming system
+    // Remove only TTS tags (if present); do not strip other content
     filtered_text = safe_regex_replace(&filtered_text, r"</?TTS>", "");
-
-    // 1. Remove code blocks (```...```)
-    filtered_text = safe_regex_replace(&filtered_text, r"```[\s\S]*?```", " ");
-
-    // 2. Remove inline code (`...`)
-    filtered_text = safe_regex_replace(&filtered_text, r"`[^`]+`", " ");
-
-    // 3. Remove HTML/JSX tags (including self-closing tags)
-    filtered_text = safe_regex_replace(&filtered_text, r"<[^>]*>", " ");
 
     // // 4. Remove function calls and method chaining (e.g., getData(), object.method())
     // let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
@@ -129,7 +120,7 @@ pub fn filter_tts_content(text: &str) -> String {
     // let emoji_regex = Regex::new(r"[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]").unwrap();
     // filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 12. Clean up whitespace and normalize
+    // Clean up whitespace and normalize
     match Regex::new(r"\s+") {
         Ok(whitespace_regex) => {
             filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
@@ -773,111 +764,101 @@ mod tests {
     #[test]
     fn test_filter_code_blocks() {
         let input = "Here's some text ```rust\nfn hello() {\n    println!(\"world\");\n}\n``` and more text.";
-        let expected = "Here's some text   and more text.";
+        // Minimal filtering retains code; only whitespace normalized
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("```"));
     }
 
     #[test]
     fn test_filter_inline_code() {
         let input = "Use the `console.log()` function to debug your `variable` values.";
-        let expected = "Use the   function to debug your   values.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("`console.log()`"));
     }
 
     #[test]
     fn test_filter_jsx_tags() {
         let input = "Here's a React component: <Card><CardContent><div className=\"flex justify-center my-4\">Hello</div></CardContent></Card>";
-        let expected = "Here's a React component:";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("<Card>"));
     }
 
     #[test]
     fn test_filter_html_tags() {
         let input = "This is <strong>bold</strong> and <em>italic</em> text.";
-        let expected = "This is   and   text.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("<strong>bold</strong>"));
     }
 
     #[test]
     fn test_filter_function_calls() {
         let input = "Call the function getData() and then processResult(data) to continue.";
-        let expected = "Call the function   and then   to continue.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("getData()"));
     }
 
     #[test]
     fn test_filter_method_chaining() {
         let input = "Use object.method().anotherMethod() to chain calls.";
-        let expected = "Use   to chain calls.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("object.method().anotherMethod()"));
     }
 
     #[test]
     fn test_filter_property_access() {
         let input = "Access config.server.port for the port number.";
-        let expected = "Access   for the port number.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("config.server.port"));
     }
 
     #[test]
     fn test_filter_urls_and_paths() {
         let input = "Visit https://example.com or check /home/user/file.txt and ~/documents/readme.md";
-        let expected = "Visit   or check   and";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("https://example.com"));
     }
 
     #[test]
     fn test_filter_programming_keywords() {
         let input = "const myVar = 5; let result = getData(); if (condition) { return value; }";
-        let expected = "5;   getData(); { value; }";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("const myVar = 5;"));
     }
 
     #[test]
     fn test_filter_emojis() {
         let input = "Hello world! 😀 This is great! 🎉 Let's code! 💻";
-        let expected = "Hello world!   This is great!   Let's code!";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("😀"));
     }
 
     #[test]
     fn test_filter_json_structures() {
         let input = "The config is {\"port\": 8080, \"host\": \"localhost\"} and array is [1, 2, 3].";
-        let expected = "The config is   and array is .";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("\"port\": 8080"));
     }
 
     #[test]
     fn test_filter_css() {
         let input = "Add .button { color: red; } to your stylesheet.";
-        let expected = "Add   to your stylesheet.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains(".button { color: red; }"));
     }
 
     #[test]
-    fn test_mostly_code_content_returns_empty() {
+    fn test_mostly_code_content_returns_not_empty() {
         let input = "```javascript\nconst x = 5;\n```";
+        // Minimal filtering keeps content
         let result = filter_tts_content(input);
-        assert_eq!(result, "");
+        assert!(!result.is_empty());
     }
 
     #[test]
     fn test_jsx_example_from_logs() {
         let input = "<Card><CardContent><div className=\"flex justify-center my-4\">Content here</div></CardContent></Card>";
         let result = filter_tts_content(input);
-        assert_eq!(result, "");
+        assert!(result.contains("Content here"));
     }
 
     #[test]
@@ -890,9 +871,10 @@ mod tests {
     #[test]
     fn test_mixed_content() {
         let input = "Here's normal text. ```code block``` More normal text with `inline code` and regular content.";
-        let expected = "Here's normal text.   More normal text with   and regular content.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        // Ensure content is largely preserved and whitespace normalized
+        assert!(result.contains("```code block```"));
+        assert!(result.contains("inline code"));
     }
 
     #[test]
@@ -913,8 +895,8 @@ mod tests {
     #[test]
     fn test_variable_assignments() {
         let input = "Set myVariable = 42 and config: value to proceed.";
-        let expected = "Set   and   to proceed.";
         let result = filter_tts_content(input);
-        assert_eq!(result, expected);
+        assert!(result.contains("myVariable = 42"));
+        assert!(result.contains("config: value"));
     }
 }
