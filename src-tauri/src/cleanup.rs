@@ -3,9 +3,7 @@
 
 use crate::utils::resource_manager::ResourceManager;
 use crate::state::AppState;
-use crate::agent::core::AgentError;
 use tracing::{info, error};
-use std::sync::Arc;
 use tauri::{Listener, Manager};
 
 /// Initialize cleanup handlers for the application
@@ -20,16 +18,9 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
         
         // Spawn cleanup in a blocking task since we're exiting anyway
         std::thread::spawn(move || {
-            match tokio::runtime::Runtime::new() {
-                Ok(runtime) => {
-                    runtime.block_on(async {
-                        cleanup_application(&handle).await;
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to create runtime for cleanup: {}", e);
-                }
-            }
+            tauri::async_runtime::block_on(async {
+                cleanup_application(&handle).await;
+            });
         });
     });
     
@@ -40,16 +31,9 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
         let handle = app_handle_ctrl_c.clone();
         
         std::thread::spawn(move || {
-            match tokio::runtime::Runtime::new() {
-                Ok(runtime) => {
-                    runtime.block_on(async {
-                        cleanup_application(&handle).await;
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to create runtime for cleanup: {}", e);
-                }
-            }
+            tauri::async_runtime::block_on(async {
+                cleanup_application(&handle).await;
+            });
             std::process::exit(0);
         });
     }).expect("Error setting Ctrl-C handler");

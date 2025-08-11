@@ -87,6 +87,11 @@ accessibility_click(1)  // Clicks the Save button
 **When to use**: Only when accessibility methods fail or for visual analysis
 **Limitations**: Slower, less accurate, requires coordinate guessing
 
+**Screenshot policy**:
+- Do NOT take screenshots after every action
+- Only take a screenshot when explicitly asked or when you truly need a fresh visual to plan the next step or verify a complex result
+- Prefer semantic state from accessibility tools over visual verification
+
 **🚀 OPTIMAL WORKFLOW STRATEGIES**:
 
 ### **Strategy 1: Full Accessibility Interface (Preferred)**
@@ -167,8 +172,8 @@ accessibility_scan
 accessibility_click(save_button_id)
 
 Option C (Fallback):
-computer -> screenshot
-computer -> click([x, y])
+ // Only if both accessibility methods fail
+ computer -> click([x, y])
 ```
 
 **🔍 TROUBLESHOOTING GUIDE**:
@@ -332,9 +337,10 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 
 **Intelligent Tool Usage Strategy**:
 1. **Assess the Request**: What type of task is this? Could external data or services help?
-2. **Check Available MCP Tools**: Before using basic tools, see if specialized MCP servers can provide better results
-3. **Combine Capabilities**: Use MCP tools for data/analysis, then use computer use tools for action
-4. **Be Resourceful**: If you don't have a specific tool, suggest MCP servers the user could add"#
+2. **CRITICAL RULE: Prefer MCP first**: If an MCP tool can accomplish the task (data retrieval, analysis, API access, content generation, etc.), use it BEFORE any browser automation
+3. **Use browser only when necessary**: Reserve browser automation for UI interaction tasks that truly require navigating a web page or clicking DOM elements
+4. **Combine Capabilities**: Use MCP tools for data/analysis, then use computer use tools for local actions
+5. **Be Resourceful**: If you don't have a specific tool, suggest MCP servers the user could add"#
     }
 
     /// 🦘 **SAFARI BROWSER AUTOMATION** - Specialized Safari DOM interaction
@@ -634,8 +640,7 @@ Task: "Type 'hello world' and press enter"
 Response:
 [
   {"name": "computer", "input": {"action": "type", "text": "hello world"}},
-  {"name": "computer", "input": {"action": "key", "text": "Return"}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "key", "text": "Return"}}
 ]
 
 Task: "Move mouse in a square pattern"
@@ -813,7 +818,7 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 ## **✅ OFFICIAL UTILITY ACTIONS** (via `computer` tool):
 
 1. **`{"action": "screenshot"}`** - Take screenshot
-   - Use for: Capturing current screen state for analysis
+   - Use sparingly: Only when explicitly asked or when a fresh visual is required to plan or verify
    - Example: `{"action": "screenshot"}`
 
 ## **🚫 FORBIDDEN REDUNDANT TOOLS** (DO NOT USE):
@@ -839,11 +844,10 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 
 ## **📋 CORRECT USAGE EXAMPLES**:
 
-**Click button and take screenshot**:
+**Click a button**:
 ```json
 [
-  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 300]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "left_click", "coordinate": [200, 300]}}
 ]
 ```
 
@@ -858,48 +862,42 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 **Right-click for context menu**:
 ```json
 [
-  {"name": "computer", "input": {"action": "right_click", "coordinate": [150, 250]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "right_click", "coordinate": [150, 250]}}
 ]
 ```
 
 **Middle-click to open in new tab**:
 ```json
 [
-  {"name": "computer", "input": {"action": "middle_click", "coordinate": [300, 400]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "middle_click", "coordinate": [300, 400]}}
 ]
 ```
 
 **Double-click to open file**:
 ```json
 [
-  {"name": "computer", "input": {"action": "double_click", "coordinate": [200, 150]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "double_click", "coordinate": [200, 150]}}
 ]
 ```
 
 **Triple-click to select line**:
 ```json
 [
-  {"name": "computer", "input": {"action": "triple_click", "coordinate": [250, 300]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "triple_click", "coordinate": [250, 300]}}
 ]
 ```
 
 **Drag and drop operation**:
 ```json
 [
-  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [200, 200]}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "left_click_drag", "coordinate": [200, 200]}}
 ]
 ```
 
-**Scroll down and screenshot**:
+**Scroll down**:
 ```json
 [
-  {"name": "computer", "input": {"action": "scroll", "coordinate": [400, 300], "scrollCount": 3}},
-  {"name": "computer", "input": {"action": "screenshot"}}
+  {"name": "computer", "input": {"action": "scroll", "coordinate": [400, 300], "scrollCount": 3}}
 ]
 ```
 

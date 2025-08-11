@@ -39,17 +39,8 @@ pub(crate) fn handle_cli_commands(
             provider, text
         );
 
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| {
-                JunoError::SystemError(format!(
-                    "Failed to create Tokio runtime for TTS test: {}",
-                    e
-                ))
-            })?;
-
-        match rt.block_on(tts::invoke_tts_for_provider(text, None, provider)) {
+        // Reuse the global runtime provided by Tauri
+        match tauri::async_runtime::block_on(tts::invoke_tts_for_provider(text, None, provider)) {
             Ok(base64_audio) => {
                 info!("[CLI TTS Success] Received base64 audio data ({} bytes). Attempting playback...", base64_audio.len());
                 match BASE64_STANDARD.decode(base64_audio) {
@@ -219,12 +210,8 @@ async fn run_test_command(
         let _text = "Testing TTS functionality";
         let _provider = "system";
 
-        // Create a runtime for blocking on async function
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {}", e))?;
-
-        // Use the system TTS test instead of full TTS
-        match rt.block_on(test_tts(app_handle)) {
+        // Reuse the global runtime provided by Tauri
+        match tauri::async_runtime::block_on(test_tts(app_handle)) {
             Ok(()) => {
                 info!("✅ TTS test completed successfully");
                 Ok(())

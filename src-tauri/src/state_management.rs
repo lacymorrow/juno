@@ -257,8 +257,9 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
     // Initialize MCP servers from configuration in background to prevent blocking app startup
     let app_state_bg = app_state.inner().clone();
     tokio::spawn(async move {
-        // Add a small delay to let the main app fully initialize first
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+        // Start MCP servers promptly to reduce first-call latency
+        // Keep a short delay to avoid racing app startup
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
         match app_state_bg.initialize_mcp_servers().await {
             Ok(_) => {
@@ -613,6 +614,7 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

@@ -218,7 +218,7 @@ impl ShellSession {
         self.execute_command_direct(command, cmd_id, timeout)
     }
 
-    /// Validate command for basic security - prevent only catastrophic commands
+    /// Validate command for basic security - prevent catastrophic and unsafe redirections/paths
     fn validate_command(&self, command: &str) -> Result<(), String> {
         // Reject commands that are too long (potential buffer overflow)
         if command.len() > 10000 {
@@ -247,9 +247,29 @@ impl ShellSession {
             return Ok(());
         }
         
-        // In production, still be more permissive but block sudo
+        // In production, be stricter: block sudo/doas and dangerous redirections/absolute destructive paths
         if cmd_lower.contains("sudo") || cmd_lower.contains("doas") {
             return Err("Privilege escalation commands are not allowed in production".to_string());
+        }
+
+        // Block writing to root/system-sensitive absolute paths via redirection
+        // Simple heuristic without full shell parsing; covers common cases safely
+        let redir_patterns = [
+            ">/etc/",            "> /etc/",
+            ">/bin/",            "> /bin/",
+            ">/usr/bin/",        "> /usr/bin/",
+            ">/usr/local/bin/",  "> /usr/local/bin/",
+            ">/System/",         "> /System/",
+        ];
+        for pat in &redir_patterns {
+            if cmd_lower.contains(pat) {
+                return Err("Redirection to system directories is not allowed".to_string());
+            }
+        }
+
+        // Block obvious path traversal attempts in redirections
+        if cmd_lower.contains("> ../") || cmd_lower.contains(">../../") {
+            return Err("Path traversal in redirection is not allowed".to_string());
         }
         
         Ok(())

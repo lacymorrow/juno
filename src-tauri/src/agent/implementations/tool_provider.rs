@@ -743,6 +743,7 @@ impl LocalToolProvider {
     }
 
     /// Simple recovery strategy - SIMPLIFIED from complex configuration logic
+    #[allow(dead_code)]
     fn determine_recovery_strategy(&self, error_type: &ToolErrorType, retry_count: u32) -> bool {
         // Simple rule: retry up to 3 times for recoverable errors
         retry_count < 3 && error_type.should_retry()
@@ -804,6 +805,7 @@ impl LocalToolProvider {
     }
 
     /// Reset tool state for recovery (tool-specific implementations)
+    #[allow(dead_code)]
     async fn reset_tool_state(&self, tool_name: &str) -> Result<(), String> {
         match tool_name {
             "computer" => {
@@ -969,7 +971,7 @@ impl LocalToolProvider {
     }
 
     /// Validate individual parameter values against schema
-    fn validate_parameter_value(&self, param_name: &str, value: &Value, schema: &Value) -> Result<(), String> {
+    fn validate_parameter_value(&self, _param_name: &str, value: &Value, schema: &Value) -> Result<(), String> {
         // Type validation
         if let Some(expected_type) = schema.get("type").and_then(|t| t.as_str()) {
             let actual_type = match value {
@@ -1154,6 +1156,7 @@ impl LocalToolProvider {
     /// - Output size limits prevent memory exhaustion in multi-agent systems (Anthropic Claude Research, 2025)
     /// - Error pattern detection improves reliability by 28% (Microsoft Azure AI Foundry, 2025)
     /// - Screenshot validation critical for computer use agents (https://azure.microsoft.com/en-us/blog/announcing-the-responses-api-and-computer-using-agent-in-azure-ai-foundry/)
+    #[allow(dead_code)]
     async fn validate_tool_output(&self, tool_name: &str, tool_result: &ToolResult) -> Result<(), AgentError> {
         // 1. Basic structure validation
         if tool_result.output.is_null() {
@@ -1204,6 +1207,7 @@ impl LocalToolProvider {
     }
 
     /// Computer tool specific output validation
+    #[allow(dead_code)]
     async fn validate_computer_tool_output(&self, tool_result: &ToolResult) -> Result<(), AgentError> {
         if let Some(output_obj) = tool_result.output.as_object() {
             // Screenshot validation
@@ -1239,6 +1243,7 @@ impl LocalToolProvider {
     }
 
     /// Browser tool specific output validation
+    #[allow(dead_code)]
     async fn validate_browser_tool_output(&self, tool_result: &ToolResult) -> Result<(), AgentError> {
         if let Some(output_obj) = tool_result.output.as_object() {
             // URL validation
@@ -1267,6 +1272,7 @@ impl LocalToolProvider {
     }
 
     /// File tool specific output validation
+    #[allow(dead_code)]
     async fn validate_file_tool_output(&self, tool_result: &ToolResult) -> Result<(), AgentError> {
         if let Some(output_obj) = tool_result.output.as_object() {
             // File path validation
@@ -1444,6 +1450,17 @@ impl ToolProvider for LocalToolProvider {
                 }
             }
         }
+
+        // Reorder tools: prefer MCP tools first to guide the brain towards MCP before browser/desktop
+        all_tools.sort_by(|a, b| {
+            let a_is_mcp = self.is_mcp_tool_name(&a.name);
+            let b_is_mcp = self.is_mcp_tool_name(&b.name);
+            match (a_is_mcp, b_is_mcp) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.cmp(&b.name),
+            }
+        });
 
         // Debug logging to identify duplicates and deduplicate if needed
         let mut tool_names = std::collections::HashSet::new();
