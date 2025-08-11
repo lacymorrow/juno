@@ -306,7 +306,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     let app_handle_clone = app_handle.clone();
 
     // Listen for various state change events
-    let _ = app_handle.listen("agent-active", {
+    let _ = app_handle.listen(crate::constants::events::agent::ACTIVE, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -324,7 +324,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for dictation state changes (both immediate and confirmed)
-    let _ = app_handle.listen("dictation-active", {
+    let _ = app_handle.listen(crate::constants::events::dictation::ACTIVE, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -342,7 +342,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for immediate dictation input state changes (when user presses/releases shortcut)
-    let _ = app_handle.listen("dictation-input-state-changed", {
+    let _ = app_handle.listen(crate::constants::events::dictation_state::INPUT_CHANGED, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -360,7 +360,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for immediate agent mode starts (when user presses agent shortcut)
-    let _ = app_handle.listen("app-dictation-started", {
+    let _ = app_handle.listen(crate::constants::events::dictation::STARTED, {
         let app_handle = app_handle_clone.clone();
         move |_event| {
             let app_handle = app_handle.clone();
@@ -372,7 +372,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for dictation completion events (when transcription finishes)
-    let _ = app_handle.listen("app-dictation-finished", {
+    let _ = app_handle.listen(crate::constants::events::dictation::FINISHED, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -398,7 +398,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for agent-query-ready events (when agent mode voice transcription finishes)
-    let _ = app_handle.listen("agent-query-ready", {
+    let _ = app_handle.listen(crate::constants::events::agent::QUERY_READY, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -409,7 +409,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         }
     });
 
-    let _ = app_handle.listen("always-listening-mode-changed", {
+    let _ = app_handle.listen(crate::constants::events::always_listening::MODE_CHANGED, {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
@@ -427,7 +427,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for floating bar state changes to detect processing states
-    let _ = app_handle.listen("floating-bar-state-changed", {
+    let _ = app_handle.listen(crate::constants::events::ui::BAR_STATE_CHANGED, {
         move |event| {
             tauri::async_runtime::spawn(async move {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
@@ -451,7 +451,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for voice system errors
-    let _ = app_handle.listen("voice-error", {
+    let _ = app_handle.listen(crate::constants::events::dictation::ERROR, {
         let app_handle = app_handle_clone.clone();
         move |_event| {
             let app_handle = app_handle.clone();
@@ -467,7 +467,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     });
 
     // Listen for voice transcription errors
-    let _ = app_handle.listen("voice-transcription:error", {
+    let _ = app_handle.listen(crate::constants::events::voice_transcription::ERROR, {
         let app_handle = app_handle_clone.clone();
         move |_event| {
             let app_handle = app_handle.clone();

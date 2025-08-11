@@ -275,7 +275,7 @@ async fn handle_agent_mode_result(
                 // Use a different event for agent mode to avoid confusion with dictation mode
                 info!("[Event] Emitting agent-query-ready event for agent processing");
                 if let Err(e) =
-                    app_handle.emit("agent-query-ready", transformed_payload)
+                    app_handle.emit(crate::constants::events::agent::QUERY_READY, transformed_payload)
                 {
                     error!("[Event] Failed to emit agent-query-ready event: {}", e);
                 }
@@ -291,7 +291,7 @@ async fn handle_agent_mode_result(
                 "[Event] Failed to parse final-result payload as JSON: {}, payload: {}",
                 e, payload_str
             );
-            if let Err(e) = app_handle.emit("agent-query-ready", payload_str) {
+            if let Err(e) = app_handle.emit(crate::constants::events::agent::QUERY_READY, payload_str) {
                 error!(
                     "[Event] Failed to emit agent-query-ready event (fallback): {}",
                     e
