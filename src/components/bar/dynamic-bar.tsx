@@ -645,7 +645,13 @@ const AIFloatingChatbot = () => {
   return (
     <div className="h-full w-full relative">
       <div className="flex items-center justify-center h-full">
-        <div onClick={handleIslandClick} className="cursor-pointer">
+        <button
+          type="button"
+          onClick={handleIslandClick}
+          className="cursor-pointer bg-transparent p-0 m-0 border-0"
+          aria-label="Activate AI panel"
+          aria-controls="ai-chatbot-panel"
+        >
           <DynamicIsland 
             id="ai-chatbot-panel"
           >
@@ -656,7 +662,7 @@ const AIFloatingChatbot = () => {
               {renderCurrentWidget()}
             </div>
           </DynamicIsland>
-        </div>
+        </button>
       </div>
     </div>
   );

@@ -804,6 +804,7 @@ const styles = \`
               onFocus={handleFocus}
               onBlur={handleBlur}
               placeholder="Type your request..."
+              aria-label="Assistant input"
               className="glass-input"
               autoFocus
             />
@@ -850,7 +851,12 @@ const styles = \`
             <div className="response-container">
               {/* Compact view when collapsed */}
               {!isExpanded && (
-                <div className="response-summary" onClick={toggleExpanded}>
+                <button
+                  type="button"
+                  className="response-summary bg-transparent p-0 m-0 border-0"
+                  onClick={toggleExpanded}
+                  aria-label="Expand AI response"
+                >
                   <div
                     className="response-icon animate-fade-in-delayed"
                     style={{ animationDelay: "200ms" }}
@@ -868,7 +874,7 @@ const styles = \`
                       </span>
                     )}
                   </div>
-                </div>
+                </button>
               )}
 
               {/* Expanded view with full content */}
@@ -884,8 +890,10 @@ const styles = \`
                   >
                     <h3>AI Response</h3>
                     <button
+                      type="button"
                       onClick={closeResponse}
                       className="close-response-btn"
+                      aria-label="Close AI response"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1008,6 +1016,20 @@ const styles = \`
                 ? handleClick
                 : undefined
             }
+            role="button"
+            tabIndex={0}
+            aria-label="Activate assistant"
+            onKeyDown={(e) => {
+              if (
+                (e.key === "Enter" || e.key === " ") &&
+                [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+                  barState.barState as any
+                )
+              ) {
+                e.preventDefault();
+                handleClick();
+              }
+            }}
           >
             <div
               className={`idle-waveform ${
