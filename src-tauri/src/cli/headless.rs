@@ -364,68 +364,93 @@ impl HeadlessRuntime {
         let (done_tx, done_rx) = oneshot::channel::<Value>();
         let done_tx = Arc::new(Mutex::new(Some(done_tx)));
 
-        // Set up event listeners for capturing agent response and tool calls
-        // Track listener IDs so we can unlisten and avoid leaks/duplicates
-        let app_handle = self.app_handle.clone();
+        // Set up event listeners with robust cleanup via RAII guard to prevent leaks
+        struct EventListenersGuard {
+            app_handle: AppHandle,
+            ids: Vec<EventId>,
+        }
+        impl EventListenersGuard {
+            fn new(app_handle: AppHandle) -> Self { Self { app_handle, ids: Vec::new() } }
+            fn push(&mut self, id: EventId) { self.ids.push(id); }
+            fn cleanup(&mut self) {
+                for id in self.ids.drain(..) {
+                    self.app_handle.unlisten(id);
+                }
+            }
+        }
+        impl Drop for EventListenersGuard { fn drop(&mut self) { self.cleanup(); } }
+
+        let mut listener_guard = EventListenersGuard::new(self.app_handle.clone());
 
         // TEXT_STREAM listener
         let text_acc_clone = Arc::clone(&accumulated_text);
-        let text_stream_id: EventId = app_handle.listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
-            if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
-                if let Some(chunk) = payload.get("chunk").and_then(|v| v.as_str()) {
-                    if let Ok(mut guard) = text_acc_clone.lock() {
-                        guard.push_str(chunk);
+        let text_stream_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
+                if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
+                    if let Some(chunk) = payload.get("chunk").and_then(|v| v.as_str()) {
+                        if let Ok(mut guard) = text_acc_clone.lock() {
+                            guard.push_str(chunk);
+                        }
                     }
                 }
-            }
-        });
+            });
+        listener_guard.push(text_stream_id);
 
         // Capture generic agent events to collect tool calls/results
-        let app_handle_for_agent_events = self.app_handle.clone();
         let tool_events_clone = Arc::clone(&tool_events);
-        let agent_event_id: EventId = app_handle_for_agent_events.listen(crate::constants::events::agent::EVENT, move |event| {
-            if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
-                // We store all agent events; caller can filter by `type`
-                if let Ok(mut guard) = tool_events_clone.lock() {
-                    guard.push(payload);
+        let agent_event_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::agent::EVENT, move |event| {
+                if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
+                    if let Ok(mut guard) = tool_events_clone.lock() {
+                        guard.push(payload);
+                    }
                 }
-            }
-        });
+            });
+        listener_guard.push(agent_event_id);
 
         // On stream end, produce final JSON and signal completion
-        let app_handle_for_end = self.app_handle.clone();
         let text_acc_for_end = Arc::clone(&accumulated_text);
         let tool_events_for_end = Arc::clone(&tool_events);
         let done_tx_for_end = Arc::clone(&done_tx);
-        let stream_end_id: EventId = app_handle_for_end.listen(crate::constants::events::streaming::STREAM_END, move |event| {
-            // Attempt to use complete_text if provided
-            let final_text = match serde_json::from_str::<Value>(event.payload()) {
-                Ok(v) => v.get("complete_text")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        // Fallback to accumulated chunks
-                        text_acc_for_end.lock().ok().map(|s| s.clone())
-                    })
-                    .unwrap_or_default(),
-                Err(_) => text_acc_for_end.lock().ok().map(|s| s.clone()).unwrap_or_default(),
-            };
+        let stream_end_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::streaming::STREAM_END, move |event| {
+                let final_text = match serde_json::from_str::<Value>(event.payload()) {
+                    Ok(v) => v
+                        .get("complete_text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| text_acc_for_end.lock().ok().map(|s| s.clone()))
+                        .unwrap_or_default(),
+                    Err(_) => text_acc_for_end
+                        .lock()
+                        .ok()
+                        .map(|s| s.clone())
+                        .unwrap_or_default(),
+                };
 
-            let tools_snapshot = if let Ok(guard) = tool_events_for_end.lock() { (*guard).clone() } else { Vec::new() };
-            let result_obj = json!({
-                "text": final_text,
-                "tool_events": tools_snapshot,
-            });
+                let tools_snapshot = if let Ok(guard) = tool_events_for_end.lock() {
+                    (*guard).clone()
+                } else {
+                    Vec::new()
+                };
+                let result_obj = json!({
+                    "text": final_text,
+                    "tool_events": tools_snapshot,
+                });
 
-            if let Ok(mut tx_guard) = done_tx_for_end.lock() {
-                if let Some(tx) = tx_guard.take() {
-                    let _ = tx.send(result_obj);
+                if let Ok(mut tx_guard) = done_tx_for_end.lock() {
+                    if let Some(tx) = tx_guard.take() {
+                        let _ = tx.send(result_obj);
+                    }
                 }
-            }
-        });
+            });
+        listener_guard.push(stream_end_id);
 
-        // Ensure listeners are fully registered before submitting the query to avoid races
-        tokio::task::yield_now().await;
+        // Brief delay to ensure listener registration completes before emissions
+        tokio::time::sleep(Duration::from_millis(5)).await;
 
         // Submit the query to the agent
         let state = self
@@ -439,25 +464,19 @@ impl HeadlessRuntime {
         let result = match timeout(self.timeout_duration, done_rx).await {
             Ok(Ok(v)) => v,
             Ok(Err(_)) => {
-                // Cleanup listeners before returning error
-                self.app_handle.unlisten(text_stream_id);
-                self.app_handle.unlisten(agent_event_id);
-                self.app_handle.unlisten(stream_end_id);
+                // Ensure cleanup on channel failure
+                listener_guard.cleanup();
                 return Err(JunoError::ApplicationError("Failed to receive query result".to_string()));
             }
             Err(_) => {
                 // Timeout - cleanup listeners and surface error
-                self.app_handle.unlisten(text_stream_id);
-                self.app_handle.unlisten(agent_event_id);
-                self.app_handle.unlisten(stream_end_id);
+                listener_guard.cleanup();
                 return Err(JunoError::ApplicationError("Query execution timed out".to_string()));
             }
         };
 
-        // Cleanup listeners to prevent leaks and duplicate processing on subsequent queries
-        self.app_handle.unlisten(text_stream_id);
-        self.app_handle.unlisten(agent_event_id);
-        self.app_handle.unlisten(stream_end_id);
+        // Cleanup listeners to prevent leaks and duplicates
+        listener_guard.cleanup();
 
         // Build final output as JSON string
         let output = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
