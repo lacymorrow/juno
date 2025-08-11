@@ -55,7 +55,8 @@ run_cli_test() {
     return 1
   fi
   # Basic success check: look for \"success\": true at top level
-  if ! grep -q '"success"\s*:\s*true' "$outfile"; then
+  # Portable grep: avoid non-POSIX \s; use basic classes
+  if ! grep -E '"success"[[:space:]]*:[[:space:]]*true' "$outfile" >/dev/null; then
     echo "❌ $name: success=false (see $outfile)" | tee -a "$LOG_DIR/errors.log"
     return 1
   fi

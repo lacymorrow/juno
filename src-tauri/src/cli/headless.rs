@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::info;
-use tauri::{AppHandle, Manager, Listener};
+use tauri::{AppHandle, Manager, Listener, EventId};
 use serde_json::{json, Value};
 use crate::agent::providers::factory::{BrainFactory, Provider};
 use crate::settings::manager::SettingsManager;
@@ -183,28 +183,13 @@ impl HeadlessRuntime {
 
     /// Execute voice subcommands
     async fn execute_voice_command(&self, _command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual voice commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Voice command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        // Not implemented in headless mode yet: surface explicit error for production safety
+        Err(JunoError::ApplicationError("Voice subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute dictation subcommands
     async fn execute_dictation_command(&self, _command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual dictation commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Dictation command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("Dictation subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute agent subcommands
@@ -226,41 +211,17 @@ impl HeadlessRuntime {
 
     /// Execute config subcommands
     async fn execute_config_command(&self, _command: &crate::cli::ConfigCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual config commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Config command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("Config subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute system subcommands
     async fn execute_system_command(&self, _command: &crate::cli::SystemCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual system commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "System command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("System subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute daemon subcommands
     async fn execute_daemon_command(&self, _command: &crate::cli::DaemonCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual daemon commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Daemon command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("Daemon subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute test subcommands
@@ -365,9 +326,12 @@ impl HeadlessRuntime {
         let done_tx = Arc::new(Mutex::new(Some(done_tx)));
 
         // Set up event listeners for capturing agent response and tool calls
+        // Track listener IDs so we can unlisten and avoid leaks/duplicates
         let app_handle = self.app_handle.clone();
+
+        // TEXT_STREAM listener
         let text_acc_clone = Arc::clone(&accumulated_text);
-        app_handle.listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
+        let text_stream_id: EventId = app_handle.listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
             if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
                 if let Some(chunk) = payload.get("chunk").and_then(|v| v.as_str()) {
                     if let Ok(mut guard) = text_acc_clone.lock() {
@@ -380,7 +344,7 @@ impl HeadlessRuntime {
         // Capture generic agent events to collect tool calls/results
         let app_handle_for_agent_events = self.app_handle.clone();
         let tool_events_clone = Arc::clone(&tool_events);
-        app_handle_for_agent_events.listen(crate::constants::events::agent::EVENT, move |event| {
+        let agent_event_id: EventId = app_handle_for_agent_events.listen(crate::constants::events::agent::EVENT, move |event| {
             if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
                 // We store all agent events; caller can filter by `type`
                 if let Ok(mut guard) = tool_events_clone.lock() {
@@ -394,7 +358,7 @@ impl HeadlessRuntime {
         let text_acc_for_end = Arc::clone(&accumulated_text);
         let tool_events_for_end = Arc::clone(&tool_events);
         let done_tx_for_end = Arc::clone(&done_tx);
-        app_handle_for_end.listen(crate::constants::events::streaming::STREAM_END, move |event| {
+        let stream_end_id: EventId = app_handle_for_end.listen(crate::constants::events::streaming::STREAM_END, move |event| {
             // Attempt to use complete_text if provided
             let final_text = match serde_json::from_str::<Value>(event.payload()) {
                 Ok(v) => v.get("complete_text")
@@ -421,18 +385,40 @@ impl HeadlessRuntime {
             }
         });
 
+        // Ensure listeners are fully registered before submitting the query to avoid races
+        tokio::task::yield_now().await;
+
         // Submit the query to the agent
         let state = self
             .app_handle
             .try_state::<AppState>()
             .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
-        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
+        let submit_result = crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
-        let result = timeout(self.timeout_duration, done_rx).await
-            .map_err(|_| JunoError::ApplicationError("Query execution timed out".to_string()))?
-            .map_err(|_| JunoError::ApplicationError("Failed to receive query result".to_string()))?;
+        let result = match timeout(self.timeout_duration, done_rx).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => {
+                // Cleanup listeners before returning error
+                self.app_handle.unlisten(text_stream_id);
+                self.app_handle.unlisten(agent_event_id);
+                self.app_handle.unlisten(stream_end_id);
+                return Err(JunoError::ApplicationError("Failed to receive query result".to_string()));
+            }
+            Err(_) => {
+                // Timeout - cleanup listeners and surface error
+                self.app_handle.unlisten(text_stream_id);
+                self.app_handle.unlisten(agent_event_id);
+                self.app_handle.unlisten(stream_end_id);
+                return Err(JunoError::ApplicationError("Query execution timed out".to_string()));
+            }
+        };
+
+        // Cleanup listeners to prevent leaks and duplicate processing on subsequent queries
+        self.app_handle.unlisten(text_stream_id);
+        self.app_handle.unlisten(agent_event_id);
+        self.app_handle.unlisten(stream_end_id);
 
         // Build final output as JSON string
         let output = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
@@ -539,7 +525,7 @@ impl HeadlessRuntime {
         // Gather provider/model/agent mode from centralized settings where possible
         let mut provider_id: String = "unknown".to_string();
         let mut model_id: String = "unknown".to_string();
-        let mut agent_mode_str: String = "unknown".to_string();
+        let agent_mode_str: String;
 
         // Agent mode via BrainFactory helper
         let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&self.app_handle).await;
