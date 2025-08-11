@@ -13,10 +13,6 @@ use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
 use crate::{state, cli, agent, commands};
-use crate::agent::providers::factory::BrainFactory;
-// Remove unused import: use crate::constants::timeouts;
-use crate::state::AppState;
-use crate::cli::headless::HeadlessRuntime;
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
@@ -265,13 +261,8 @@ async fn handle_headless_cli_async(cli: &cli::Cli, _desktop_arc: &Option<Arc<Des
 
 /// Synchronous wrapper for headless CLI handling
 fn handle_headless_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
-    use tokio::runtime::Runtime;
-
-    let rt = Runtime::new().map_err(|e| {
-        crate::error_handling::JunoError::SystemError(format!("Failed to create async runtime: {}", e))
-    })?;
-
-    rt.block_on(handle_headless_cli_async(cli, desktop_arc))
+    // Reuse existing async runtime managed by Tauri instead of creating a new one
+    tauri::async_runtime::block_on(handle_headless_cli_async(cli, desktop_arc))
 }
 
 /// Handle legacy CLI flags for backward compatibility

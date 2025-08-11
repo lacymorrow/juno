@@ -9,8 +9,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::info;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Listener, EventId};
 use serde_json::{json, Value};
+use crate::agent::providers::factory::{BrainFactory, Provider};
+use crate::settings::manager::SettingsManager;
 
 use crate::cli::{Cli, OutputFormat};
 use crate::constants::cli;
@@ -42,6 +44,29 @@ pub struct HeadlessResult {
 }
 
 impl HeadlessRuntime {
+    // Implementation priority for future headless voice features
+    // TODO(headless-voice-order): Implement in this order for headless mode support
+    // 1) Voice::Transcribe (file and mic) → returns transcript JSON
+    // 2) Voice::Query (dictation → agent) → wraps execute_agent_mode
+    // 3) Voice::Record (file output) → writes audio to disk
+    const VOICE_IMPL_ORDER: &'static [&'static str] = &[
+        "voice.transcribe",
+        "voice.query",
+        "voice.record",
+    ];
+
+    // Implementation priority for future headless dictation features
+    // TODO(headless-dictation-order): Implement in this order for headless mode support
+    // 1) Dictation::Status → returns current dictation status
+    // 2) Dictation::Start → begins session and returns transcript
+    // 3) Dictation::Stop → ends session
+    // 4) Dictation::Configure → persists settings
+    const DICTATION_IMPL_ORDER: &'static [&'static str] = &[
+        "dictation.status",
+        "dictation.start",
+        "dictation.stop",
+        "dictation.configure",
+    ];
     /// Create a new headless runtime
     pub fn new(app_handle: AppHandle, cli: &Cli) -> Self {
         Self {
@@ -105,7 +130,8 @@ impl HeadlessRuntime {
     /// Execute legacy CLI commands
     async fn execute_legacy_commands(&self, cli: &Cli) -> Result<HeadlessResult, JunoError> {
         if cli.test_focused_element_ns {
-            // Mock implementation for test_focused_element_ns
+            // TODO(headless-legacy-impl): Replace mock with real focused element test or remove legacy flag
+            tracing::warn!("Using mock implementation for --test-focused-element-ns in headless mode");
             Ok(HeadlessResult {
                 success: true,
                 output: "Focused element test completed".to_string(),
@@ -115,7 +141,8 @@ impl HeadlessRuntime {
                 screenshot: None,
             })
         } else if cli.check_accessibility {
-            // Mock implementation for accessibility check
+            // TODO(headless-legacy-impl): Replace mock with real accessibility check or remove legacy flag
+            tracing::warn!("Using mock implementation for --check-accessibility in headless mode");
             Ok(HeadlessResult {
                 success: true,
                 output: "Accessibility check completed".to_string(),
@@ -125,7 +152,8 @@ impl HeadlessRuntime {
                 screenshot: None,
             })
         } else if cli.tts_provider.is_some() || cli.tts_text.is_some() {
-            // Mock implementation for TTS test
+            // TODO(headless-legacy-impl): Replace mock with real TTS invocation using backend TTS command(s)
+            tracing::warn!("Using mock implementation for TTS test in headless mode");
             let provider = cli.tts_provider.as_deref().unwrap_or("system");
             let text = cli.tts_text.as_deref().unwrap_or("Test speech");
             Ok(HeadlessResult {
@@ -183,55 +211,96 @@ impl HeadlessRuntime {
     }
 
     /// Execute voice subcommands
-    async fn execute_voice_command(&self, _command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual voice commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Voice command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+    async fn execute_voice_command(&self, command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::VoiceCommands;
+        match command {
+            VoiceCommands::Transcribe { .. } => {
+                // TODO(headless-voice-transcribe): Implement file/mic transcription in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice transcribe is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            VoiceCommands::Query { duration, .. } => {
+                // TODO(headless-voice-query): Route to execute_agent_mode with duration
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice query is not available in headless mode yet (requested duration: {}s). {}",
+                    duration,
+                    guidance
+                )))
+            }
+            VoiceCommands::Record { .. } => {
+                // TODO(headless-voice-record): Implement recording to file in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice record is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+        }
     }
 
     /// Execute dictation subcommands
-    async fn execute_dictation_command(&self, _command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual dictation commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Dictation command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+    async fn execute_dictation_command(&self, command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::DictationCommands;
+        match command {
+            DictationCommands::Status => {
+                // TODO(headless-dictation-status): Implement status retrieval in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation status is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Start { .. } => {
+                // TODO(headless-dictation-start): Implement start dictation session
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation start is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Stop => {
+                // TODO(headless-dictation-stop): Implement stop dictation session
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation stop is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Configure { .. } => {
+                // TODO(headless-dictation-configure): Implement configuration persistence
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation configure is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+        }
     }
 
     /// Execute agent subcommands
-    async fn execute_agent_command(&self, _command: &crate::cli::AgentCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual agent commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Agent command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+    async fn execute_agent_command(&self, command: &crate::cli::AgentCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::AgentCommands;
+        match command {
+            AgentCommands::Status => self.execute_status().await,
+            // For other agent subcommands, return a simple success placeholder for now
+            _ => Ok(HeadlessResult {
+                success: true,
+                output: "Agent command executed".to_string(),
+                error: None,
+                execution_time: Duration::default(),
+                agent_state: Some("Completed".to_string()),
+                screenshot: None,
+            }),
+        }
     }
 
     /// Execute config subcommands
     async fn execute_config_command(&self, _command: &crate::cli::ConfigCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual config commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Config command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("Config subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute MCP subcommands
@@ -272,41 +341,99 @@ impl HeadlessRuntime {
 
     /// Execute system subcommands
     async fn execute_system_command(&self, _command: &crate::cli::SystemCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual system commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "System command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("System subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute daemon subcommands
     async fn execute_daemon_command(&self, _command: &crate::cli::DaemonCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual daemon commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Daemon command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+        Err(JunoError::ApplicationError("Daemon subcommands are not implemented in headless mode".to_string()))
     }
 
     /// Execute test subcommands
-    async fn execute_test_command(&self, _command: &crate::cli::TestCommands) -> Result<HeadlessResult, JunoError> {
-        // Mock implementation - TODO: implement actual test commands
-        Ok(HeadlessResult {
-            success: true,
-            output: "Test command executed".to_string(),
-            error: None,
-            execution_time: Duration::default(),
-            agent_state: Some("Completed".to_string()),
-            screenshot: None,
-        })
+    async fn execute_test_command(&self, command: &crate::cli::TestCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::TestCommands;
+        match command {
+            TestCommands::System { component, .. } if component.as_deref() == Some("tool") => {
+                // Run a minimal tool smoke test using direct commands with managed state
+                let app_handle = self.app_handle.clone();
+                let state = self
+                    .app_handle
+                    .try_state::<AppState>()
+                    .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
+
+                // Get cursor position (does not require accessibility for read)
+                let cursor_res = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone()).await;
+
+                // Short wait
+                let wait_res = crate::commands::core::wait(0.1, app_handle.clone(), state.clone()).await;
+
+                let output = json!({
+                    "tool_smoke": {
+                        "cursor_position": match cursor_res {
+                            Ok((x,y)) => json!({"coordinate": [x,y]}),
+                            Err(e) => json!({"error": e}),
+                        },
+                        "wait": match wait_res {
+                            Ok(_) => json!({"success": true}),
+                            Err(e) => json!({"error": e}),
+                        }
+                    }
+                });
+
+                Ok(HeadlessResult {
+                    success: true,
+                    output: output.to_string(),
+                    error: None,
+                    execution_time: Duration::default(),
+                    agent_state: Some("ToolSmoke".to_string()),
+                    screenshot: None,
+                })
+            }
+            TestCommands::System { component, .. } if component.as_deref() == Some("events") => {
+                // Synthesize streaming and agent events for programmatic testing
+                let app_handle = self.app_handle.clone();
+
+                // Start streaming
+                let message_id = uuid::Uuid::new_v4().to_string();
+                crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
+                crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, "Hello, ".to_string(), Some(message_id.clone()), None);
+                crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, "world".to_string(), Some(message_id.clone()), None);
+
+                // Emit a synthetic tool call request/result
+                let tool_args = json!({"action":"screenshot","coordinate":[200,100]});
+                crate::agent::tool_logger::log_enhanced_tool_call_request(&app_handle, "computer", tool_args.clone(), Some("Taking a screenshot".to_string()), None).await;
+                crate::agent::tool_logger::log_enhanced_tool_call_result_with_inputs(&app_handle, "computer", Some(tool_args), json!({"success": true}), true, Some("Screenshot captured".to_string()), None, Some(42), None).await;
+
+                // End streaming
+                crate::agent::tool_logger::emit_stream_end_with_state(&app_handle, message_id.clone(), "Hello, world".to_string(), "Completed".to_string());
+
+                let output = json!({
+                    "emitted": {
+                        "stream_start": true,
+                        "text_chunks": 2,
+                        "tool_events": 2,
+                        "stream_end": true
+                    }
+                });
+
+                Ok(HeadlessResult {
+                    success: true,
+                    output: output.to_string(),
+                    error: None,
+                    execution_time: Duration::default(),
+                    agent_state: Some("EventsEmitted".to_string()),
+                    screenshot: None,
+                })
+            }
+            _ => Ok(HeadlessResult {
+                success: true,
+                output: "Test command executed".to_string(),
+                error: None,
+                execution_time: Duration::default(),
+                agent_state: Some("Completed".to_string()),
+                screenshot: None,
+            }),
+        }
     }
 
     /// Execute a text query
@@ -315,36 +442,130 @@ impl HeadlessRuntime {
             info!("Executing text query: {}", query);
         }
 
-        // Set up result capture
-        let (result_tx, result_rx) = oneshot::channel::<String>();
-        let result_tx = Arc::new(Mutex::new(Some(result_tx)));
+        // Accumulators for streaming/text and tool events
+        let accumulated_text = Arc::new(Mutex::new(String::new()));
+        let tool_events: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
 
-        // Set up event listeners for capturing agent response
-        let _app_handle = self.app_handle.clone();
-        let _result_tx_clone = result_tx.clone();
+        // Channel to notify on stream end with final JSON payload
+        let (done_tx, done_rx) = oneshot::channel::<Value>();
+        let done_tx = Arc::new(Mutex::new(Some(done_tx)));
 
-        // Note: In headless mode, we'll use a different approach than event listening
-        // TODO: Implement proper event handling for headless mode
+        // Set up event listeners with robust cleanup via RAII guard to prevent leaks
+        struct EventListenersGuard {
+            app_handle: AppHandle,
+            ids: Vec<EventId>,
+        }
+        impl EventListenersGuard {
+            fn new(app_handle: AppHandle) -> Self { Self { app_handle, ids: Vec::new() } }
+            fn push(&mut self, id: EventId) { self.ids.push(id); }
+            fn cleanup(&mut self) {
+                for id in self.ids.drain(..) {
+                    self.app_handle.unlisten(id);
+                }
+            }
+        }
+        impl Drop for EventListenersGuard { fn drop(&mut self) { self.cleanup(); } }
+
+        let mut listener_guard = EventListenersGuard::new(self.app_handle.clone());
+
+        // TEXT_STREAM listener
+        let text_acc_clone = Arc::clone(&accumulated_text);
+        let text_stream_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
+                if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
+                    if let Some(chunk) = payload.get("chunk").and_then(|v| v.as_str()) {
+                        if let Ok(mut guard) = text_acc_clone.lock() {
+                            guard.push_str(chunk);
+                        }
+                    }
+                }
+            });
+        listener_guard.push(text_stream_id);
+
+        // Capture generic agent events to collect tool calls/results
+        let tool_events_clone = Arc::clone(&tool_events);
+        let agent_event_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::agent::EVENT, move |event| {
+                if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
+                    if let Ok(mut guard) = tool_events_clone.lock() {
+                        guard.push(payload);
+                    }
+                }
+            });
+        listener_guard.push(agent_event_id);
+
+        // On stream end, produce final JSON and signal completion
+        let text_acc_for_end = Arc::clone(&accumulated_text);
+        let tool_events_for_end = Arc::clone(&tool_events);
+        let done_tx_for_end = Arc::clone(&done_tx);
+        let stream_end_id: EventId = self
+            .app_handle
+            .listen(crate::constants::events::streaming::STREAM_END, move |event| {
+                let final_text = match serde_json::from_str::<Value>(event.payload()) {
+                    Ok(v) => v
+                        .get("complete_text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| text_acc_for_end.lock().ok().map(|s| s.clone()))
+                        .unwrap_or_default(),
+                    Err(_) => text_acc_for_end
+                        .lock()
+                        .ok()
+                        .map(|s| s.clone())
+                        .unwrap_or_default(),
+                };
+
+                let tools_snapshot = if let Ok(guard) = tool_events_for_end.lock() {
+                    (*guard).clone()
+                } else {
+                    Vec::new()
+                };
+                let result_obj = json!({
+                    "text": final_text,
+                    "tool_events": tools_snapshot,
+                });
+
+                if let Ok(mut tx_guard) = done_tx_for_end.lock() {
+                    if let Some(tx) = tx_guard.take() {
+                        let _ = tx.send(result_obj);
+                    }
+                }
+            });
+        listener_guard.push(stream_end_id);
+
+        // Brief delay to ensure listener registration completes before emissions
+        tokio::time::sleep(Duration::from_millis(5)).await;
 
         // Submit the query to the agent
-        let state = self.app_handle.state::<AppState>();
-        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
+        let state = self
+            .app_handle
+            .try_state::<AppState>()
+            .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
+        let submit_result = crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
-        let result = timeout(self.timeout_duration, result_rx).await
-            .map_err(|_| JunoError::ApplicationError("Query execution timed out".to_string()))?
-            .map_err(|_| JunoError::ApplicationError("Failed to receive query result".to_string()))?;
-
-        // Parse the result
-        let output = if let Ok(json_result) = serde_json::from_str::<Value>(&result) {
-            json_result.get("text")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| result.clone())
-        } else {
-            result
+        let result = match timeout(self.timeout_duration, done_rx).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => {
+                // Ensure cleanup on channel failure
+                listener_guard.cleanup();
+                return Err(JunoError::ApplicationError("Failed to receive query result".to_string()));
+            }
+            Err(_) => {
+                // Timeout - cleanup listeners and surface error
+                listener_guard.cleanup();
+                return Err(JunoError::ApplicationError("Query execution timed out".to_string()));
+            }
         };
+
+        // Cleanup listeners to prevent leaks and duplicates
+        listener_guard.cleanup();
+
+        // Build final output as JSON string
+        let output = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
 
         Ok(HeadlessResult {
             success: true,
@@ -371,7 +592,8 @@ impl HeadlessRuntime {
         let result_tx = Arc::new(Mutex::new(Some(result_tx)));
 
         // Listen for dictation completion
-                        let _result_tx_clone = result_tx.clone();
+        // NOTE: In headless mode we don't currently hook plugin events; this is a placeholder for future wiring
+        // TODO(headless-dictation-wireup): Wire plugin FINAL_RESULT event to send on result_tx
         // For headless mode, we'll use a different approach than event listening
         /*
         self.app_handle.listen(events::voice_transcription::FINAL_RESULT, move |event| {
@@ -445,19 +667,62 @@ impl HeadlessRuntime {
             info!("Checking agent status");
         }
 
-        let state = self.app_handle.state::<AppState>();
+        // Gather provider/model/agent mode from centralized settings where possible
+        let mut provider_id: String = "unknown".to_string();
+        let mut model_id: String = "unknown".to_string();
+        let agent_mode_str: String;
 
-        let status = json!({
-            "agent_executing": state.is_agent_executing(),
-            "dictation_active": state.is_dictation_active(),
-            "always_listening": state.get_always_listening_active().unwrap_or(false),
-            "tts_provider": state.get_tts_provider().unwrap_or_default(),
-            "voice_available": self.app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>().is_some(),
-            "permissions": {
-                "accessibility": true, // Could check actual permissions
-                "microphone": true,
+        // Agent mode via BrainFactory helper
+        let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&self.app_handle).await;
+        agent_mode_str = agent_mode.to_string().to_string();
+
+        // Active provider + model via SettingsManager -> ProviderConfig
+        if let Ok(settings_manager) = SettingsManager::new(self.app_handle.clone()) {
+            if let Ok(config) = crate::agent::providers::config::ProviderConfig::load_from_centralized_settings(&settings_manager).await {
+                provider_id = config.active_provider.clone();
+                if let Some(p) = config
+                    .providers
+                    .iter()
+                    .find(|p| p.id == config.active_provider)
+                {
+                    if let Some(m) = &p.model {
+                        model_id = m.clone();
+                    } else {
+                        // Fallback to provider default model
+                        let provider_enum = Provider::from_str(&provider_id)
+                            .unwrap_or(Provider::Anthropic);
+                        model_id = provider_enum.default_model().to_string();
+                    }
+                }
             }
-        });
+        }
+
+        // Use try_state to avoid panics if AppState isn't managed yet
+        let status = if let Some(state) = self.app_handle.try_state::<AppState>() {
+            json!({
+                "agent_executing": state.is_agent_executing(),
+                "dictation_active": state.is_dictation_active(),
+                "always_listening": state.get_always_listening_active().unwrap_or(false),
+                "tts_provider": state.get_tts_provider().unwrap_or_default(),
+                "voice_available": false,
+                "permissions": {"accessibility": true, "microphone": true},
+                "provider": provider_id,
+                "model": model_id,
+                "agent_mode": agent_mode_str
+            })
+        } else {
+            json!({
+                "agent_executing": false,
+                "dictation_active": false,
+                "always_listening": false,
+                "tts_provider": "",
+                "voice_available": false,
+                "permissions": {"accessibility": false, "microphone": false},
+                "provider": provider_id,
+                "model": model_id,
+                "agent_mode": agent_mode_str
+            })
+        };
 
         Ok(HeadlessResult {
             success: true,
@@ -815,9 +1080,13 @@ impl HeadlessRuntime {
                 }
             }
             OutputFormat::Json => {
+                // Try to parse output as JSON; if it fails, keep as string
+                let parsed_output: Value = serde_json::from_str(&result.output)
+                    .unwrap_or(Value::String(result.output.clone()));
+
                 let json_output = json!({
                     "success": result.success,
-                    "output": result.output,
+                    "output": parsed_output,
                     "error": result.error,
                     "execution_time_ms": result.execution_time.as_millis(),
                     "agent_state": result.agent_state,
@@ -846,13 +1115,26 @@ impl HeadlessRuntime {
                     println!("│ Agent State     │ {:<63} │", state.chars().take(63).collect::<String>());
                 }
                 println!("│ Execution Time  │ {:<63} │", format!("{:?}", result.execution_time));
-                if !result.output.is_empty() {
+
+                // Attempt to parse output as JSON for structured display
+                let parsed_json: Result<Value, _> = serde_json::from_str(&result.output);
+                if let Ok(Value::Object(map)) = parsed_json {
+                    for (key, val) in map.iter() {
+                        let val_str = if let Some(s) = val.as_str() {
+                            s.to_string()
+                        } else {
+                            val.to_string()
+                        };
+                        println!("│ {:<15} │ {:<63} │", key.chars().take(15).collect::<String>(), val_str.chars().take(63).collect::<String>());
+                    }
+                } else if !result.output.is_empty() {
                     let output_lines: Vec<&str> = result.output.lines().collect();
                     for (i, line) in output_lines.iter().enumerate() {
                         let field_name = if i == 0 { "Output" } else { "" };
                         println!("│ {:<15} │ {:<63} │", field_name, line.chars().take(63).collect::<String>());
                     }
                 }
+
                 if let Some(error) = &result.error {
                     println!("│ Error           │ {:<63} │", error.chars().take(63).collect::<String>());
                 }
