@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { Brain, Mic, Volume2, AlertCircle, Check, Loader2, Type, Keyboard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +14,7 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 // Debounce utility
@@ -527,7 +527,7 @@ const AIFloatingChatbot = () => {
       currentWidget: any
     ) => {
       try {
-        const appWindow = getCurrentWindow();
+        const { resizeWindowIfChanged } = useWindowSize("floating-bar");
         const dimensions = getWindowDimensions(
           currentBarState as UIState,
           currentWidget
@@ -536,10 +536,15 @@ const AIFloatingChatbot = () => {
         console.log(
           `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
         );
+        // Clamp to config bounds if present
+        const minW = floatingBarConfig?.minWidth as number | undefined;
+        const minH = floatingBarConfig?.minHeight as number | undefined;
+        const maxW = floatingBarConfig?.maxWidth as number | undefined;
+        const maxH = floatingBarConfig?.maxHeight as number | undefined;
+        const targetWidth = Math.max(minW ?? dimensions.width, Math.min(maxW ?? dimensions.width, dimensions.width));
+        const targetHeight = Math.max(minH ?? dimensions.height, Math.min(maxH ?? dimensions.height, dimensions.height));
 
-        await appWindow.setSize(
-          new LogicalSize(dimensions.width, dimensions.height)
-        );
+        await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
         console.error("❌ DynamicBar: Failed to resize window:", error);
       }

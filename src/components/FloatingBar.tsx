@@ -15,6 +15,7 @@ import { useEffect, useState, useCallback, FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import {
   Mic,
   Sparkles,
@@ -207,32 +208,29 @@ export function FloatingBar() {
    * Responsive window resizing based on UI state
    * Compact states use small dimensions, expanded states use larger dimensions
    */
+  const lastSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = getCurrentWindow();
         const currentUiState = barState.barState;
 
-        // Define compact states that use small window size
         const isCompact = [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
         ].includes(currentUiState as any);
-        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+        const targetWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
+        const targetHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
-        console.log(
-          `🔧 FloatingBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
-        );
-
-        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+        await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
         console.error("❌ FloatingBar: Failed to resize window:", error);
       }
     };
 
     resizeWindow();
-  }, [barState.barState]); // ✅ Only depend on the actual state that changes
+  }, [barState.barState]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
