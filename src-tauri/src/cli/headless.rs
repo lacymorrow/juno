@@ -44,6 +44,29 @@ pub struct HeadlessResult {
 }
 
 impl HeadlessRuntime {
+    // Implementation priority for future headless voice features
+    // TODO(headless-voice-order): Implement in this order for headless mode support
+    // 1) Voice::Transcribe (file and mic) → returns transcript JSON
+    // 2) Voice::Query (dictation → agent) → wraps execute_agent_mode
+    // 3) Voice::Record (file output) → writes audio to disk
+    const VOICE_IMPL_ORDER: &'static [&'static str] = &[
+        "voice.transcribe",
+        "voice.query",
+        "voice.record",
+    ];
+
+    // Implementation priority for future headless dictation features
+    // TODO(headless-dictation-order): Implement in this order for headless mode support
+    // 1) Dictation::Status → returns current dictation status
+    // 2) Dictation::Start → begins session and returns transcript
+    // 3) Dictation::Stop → ends session
+    // 4) Dictation::Configure → persists settings
+    const DICTATION_IMPL_ORDER: &'static [&'static str] = &[
+        "dictation.status",
+        "dictation.start",
+        "dictation.stop",
+        "dictation.configure",
+    ];
     /// Create a new headless runtime
     pub fn new(app_handle: AppHandle, cli: &Cli) -> Self {
         Self {
@@ -107,7 +130,8 @@ impl HeadlessRuntime {
     /// Execute legacy CLI commands
     async fn execute_legacy_commands(&self, cli: &Cli) -> Result<HeadlessResult, JunoError> {
         if cli.test_focused_element_ns {
-            // Mock implementation for test_focused_element_ns
+            // TODO(headless-legacy-impl): Replace mock with real focused element test or remove legacy flag
+            tracing::warn!("Using mock implementation for --test-focused-element-ns in headless mode");
             Ok(HeadlessResult {
                 success: true,
                 output: "Focused element test completed".to_string(),
@@ -117,7 +141,8 @@ impl HeadlessRuntime {
                 screenshot: None,
             })
         } else if cli.check_accessibility {
-            // Mock implementation for accessibility check
+            // TODO(headless-legacy-impl): Replace mock with real accessibility check or remove legacy flag
+            tracing::warn!("Using mock implementation for --check-accessibility in headless mode");
             Ok(HeadlessResult {
                 success: true,
                 output: "Accessibility check completed".to_string(),
@@ -127,7 +152,8 @@ impl HeadlessRuntime {
                 screenshot: None,
             })
         } else if cli.tts_provider.is_some() || cli.tts_text.is_some() {
-            // Mock implementation for TTS test
+            // TODO(headless-legacy-impl): Replace mock with real TTS invocation using backend TTS command(s)
+            tracing::warn!("Using mock implementation for TTS test in headless mode");
             let provider = cli.tts_provider.as_deref().unwrap_or("system");
             let text = cli.tts_text.as_deref().unwrap_or("Test speech");
             Ok(HeadlessResult {
@@ -185,14 +211,74 @@ impl HeadlessRuntime {
     }
 
     /// Execute voice subcommands
-    async fn execute_voice_command(&self, _command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
-        // Not implemented in headless mode yet: surface explicit error for production safety
-        Err(JunoError::ApplicationError("Voice subcommands are not implemented in headless mode".to_string()))
+    async fn execute_voice_command(&self, command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::VoiceCommands;
+        match command {
+            VoiceCommands::Transcribe { .. } => {
+                // TODO(headless-voice-transcribe): Implement file/mic transcription in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice transcribe is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            VoiceCommands::Query { duration, .. } => {
+                // TODO(headless-voice-query): Route to execute_agent_mode with duration
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice query is not available in headless mode yet (requested duration: {}s). {}",
+                    duration,
+                    guidance
+                )))
+            }
+            VoiceCommands::Record { .. } => {
+                // TODO(headless-voice-record): Implement recording to file in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::VOICE_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "voice record is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+        }
     }
 
     /// Execute dictation subcommands
-    async fn execute_dictation_command(&self, _command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
-        Err(JunoError::ApplicationError("Dictation subcommands are not implemented in headless mode".to_string()))
+    async fn execute_dictation_command(&self, command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
+        use crate::cli::DictationCommands;
+        match command {
+            DictationCommands::Status => {
+                // TODO(headless-dictation-status): Implement status retrieval in headless mode
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation status is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Start { .. } => {
+                // TODO(headless-dictation-start): Implement start dictation session
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation start is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Stop => {
+                // TODO(headless-dictation-stop): Implement stop dictation session
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation stop is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+            DictationCommands::Configure { .. } => {
+                // TODO(headless-dictation-configure): Implement configuration persistence
+                let guidance = format!("Not implemented. Planned order: {}", Self::DICTATION_IMPL_ORDER.join(" -> "));
+                Err(JunoError::ApplicationError(format!(
+                    "dictation configure is not available in headless mode yet. {}",
+                    guidance
+                )))
+            }
+        }
     }
 
     /// Execute agent subcommands
@@ -506,7 +592,8 @@ impl HeadlessRuntime {
         let result_tx = Arc::new(Mutex::new(Some(result_tx)));
 
         // Listen for dictation completion
-                        let _result_tx_clone = result_tx.clone();
+        // NOTE: In headless mode we don't currently hook plugin events; this is a placeholder for future wiring
+        // TODO(headless-dictation-wireup): Wire plugin FINAL_RESULT event to send on result_tx
         // For headless mode, we'll use a different approach than event listening
         /*
         self.app_handle.listen(events::voice_transcription::FINAL_RESULT, move |event| {
