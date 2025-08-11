@@ -177,7 +177,12 @@ impl DisplayOptimizer {
         });
 
         // Keep only the most important background tokens
-        let keep_count = (background_tokens.len() as f32 * background_reduction_factor).ceil() as usize;
+        // Use floor to ensure some reduction occurs for small counts
+        let mut keep_count = (background_tokens.len() as f32 * background_reduction_factor).floor() as usize;
+        // Ensure we always keep at least 1 background token if any exist
+        if background_tokens.len() > 0 && keep_count == 0 {
+            keep_count = 1;
+        }
         let kept_background_tokens: Vec<_> = background_tokens
             .into_iter()
             .take(keep_count)
