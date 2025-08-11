@@ -328,6 +328,12 @@ impl PromptManager {
             result = result.replace("{{available_tools}}", &tools_list);
         }
 
+        // Apply available MCP tools if present
+        if !context.available_mcp_tools.is_empty() {
+            let mcp_tools_list = context.available_mcp_tools.join(", ");
+            result = result.replace("{{available_mcp_tools}}", &mcp_tools_list);
+        }
+
         // Apply provider constraints
         if let Some(ref constraints) = context.provider_constraints {
             for (key, value) in constraints {

@@ -26,9 +26,9 @@ Canonical Entry Points (effective immediately)
 Phases
 
 1) Phase 1 – Banners and Indexes (current)
-   - Add "Archived – see canonical docs" banners to noisy/conflicting root Markdown
-   - Create docs/SIMPLE_DOCS.md (minimal, stable)
-   - Publish this consolidation plan
+   - Completed: docs/SIMPLE_DOCS.md created (minimal, stable)
+   - Completed: README simplified to single entry path
+   - Completed: Legacy root Markdown removed; recover via git history
 
 2) Phase 2 – Merge & Normalize
    - For each root Markdown, decide: Merge → docs/, or Archive → docs/archive/
@@ -49,12 +49,13 @@ Validation Checklist (apply to every doc during Phase 2)
 
 Initial Root Files Tagged for Archival Banner (Phase 1)
 
-- COMPUTER_USE_COMPLETENESS_ANALYSIS.md
-- COMPUTER_USE_COMPLETENESS_SUMMARY.md
-- JUNO_AI_AGENT_TOOLS_AUDIT.md
-- ANTHROPIC_COMPUTER_USE_COMPLIANCE_REPORT.md
-- AGENT_MODE_ARCHITECTURE_FIX.md
-- AGENT_IMPROVEMENT_ANALYSIS.md
+- Legacy analysis/compliance docs removed (recoverable from git history)
+
+Planned Relocations (Phase 2)
+
+- Completed: DEVELOPMENT.md → docs/development/DEVELOPMENT.md (root stub removed)
+- Completed: ARCHITECTURE.md → docs/architecture/ARCHITECTURE.md (root stub removed)
+- Completed: API.md → docs/api/API.md (root stub removed)
 
 Acceptance Criteria for Phase 1
 
