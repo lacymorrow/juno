@@ -1050,8 +1050,15 @@ mod tests {
         // The key insight: permission checks should NEVER call Desktop::new() internally
         // This test ensures that regression doesn't happen
 
-        // Verify the function symbol exists (type will be inferred by compiler)
-        let _fn_exists = check_permissions_status_native;
+        // Verify the function exists and is async (returns a Send future)
+        // We avoid asserting the exact output type to prevent brittle tests when return types evolve
+        fn assert_async_send<F, Fut>(_f: F)
+        where
+            F: Fn(tauri::AppHandle) -> Fut,
+            Fut: std::future::Future + Send + 'static,
+        {}
+
+        assert_async_send(check_permissions_status_native);
         
         // In a real test with a test harness, we would:
         // 1. Create a mock AppHandle

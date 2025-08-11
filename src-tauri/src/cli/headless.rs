@@ -163,6 +163,9 @@ impl HeadlessRuntime {
             Commands::Config { command } => {
                 self.execute_config_command(command).await
             }
+            Commands::Mcp { command } => {
+                self.execute_mcp_command(command).await
+            }
             Commands::System { command } => {
                 self.execute_system_command(command).await
             }
@@ -212,6 +215,42 @@ impl HeadlessRuntime {
     /// Execute config subcommands
     async fn execute_config_command(&self, _command: &crate::cli::ConfigCommands) -> Result<HeadlessResult, JunoError> {
         Err(JunoError::ApplicationError("Config subcommands are not implemented in headless mode".to_string()))
+    }
+
+    /// Execute MCP subcommands
+    async fn execute_mcp_command(&self, command: &crate::cli::McpCommands) -> Result<HeadlessResult, JunoError> {
+        match command {
+            crate::cli::McpCommands::AddServer { name, http_url, enabled, auto_start, timeout } => {
+                // Build config and call backend command to persist
+                use crate::agent::tools::MCPServerConfig;
+                let cfg = MCPServerConfig {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: name.clone(),
+                    description: Some("HTTP MCP server".to_string()),
+                    command: "http".to_string(),
+                    args: vec![http_url.clone()],
+                    working_directory: None,
+                    environment_variables: std::collections::HashMap::new(),
+                    enabled: *enabled,
+                    auto_start: *auto_start,
+                    timeout_seconds: *timeout,
+                    max_retries: 3,
+                };
+
+                let state = self.app_handle.state::<AppState>();
+                match crate::commands::mcp::add_mcp_server(self.app_handle.clone(), state, cfg).await {
+                    Ok(_) => Ok(HeadlessResult {
+                        success: true,
+                        output: format!("MCP server '{}' added", name),
+                        error: None,
+                        execution_time: Duration::default(),
+                        agent_state: Some("Completed".to_string()),
+                        screenshot: None,
+                    }),
+                    Err(e) => Err(JunoError::ApplicationError(format!("Failed to add MCP server: {}", e))),
+                }
+            }
+        }
     }
 
     /// Execute system subcommands

@@ -314,83 +314,30 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
 /// Create a minimal Tauri application for CLI operations
 async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::JunoError> {
     use crate::error_handling::JunoError;
-    use tokio::sync::oneshot;
-    use std::sync::{Arc, Mutex};
 
-    let (tx, rx) = oneshot::channel::<Result<AppHandle, JunoError>>();
-    let app_handle_container = Arc::new(Mutex::new(None::<AppHandle>));
-    let app_handle_container_clone = app_handle_container.clone();
+    // Pre-initialize minimal app state so it is available during plugin initialization
+    let desktop_arc = init_desktop_engine();
+    let app_state = init_app_state(desktop_arc);
 
-    // Create the app in a thread with proper lifecycle management
-    std::thread::spawn(move || {
-        let result = tauri::Builder::default()
-            .plugin(tauri_plugin_store::Builder::default().build())
-            .plugin(tauri_plugin_voice_transcription::init())
-            .plugin(tauri_plugin_process::init())
-            .setup(move |app| {
-                let app_handle = app.handle().clone();
+    // Build a minimal Tauri app on the current (main) thread to satisfy macOS EventLoop requirements
+    let mut app = tauri::Builder::default()
+        // Make `AppState` available to plugins that may access it during initialization
+        .manage(app_state)
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_voice_transcription::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|_app| {
+            // Additional setup not required for headless mode
+            info!("Headless Tauri app setup completed");
+            Ok(())
+        })
+        .build(crate::get_tauri_context())
+        .map_err(|e| JunoError::SystemError(format!("Failed to build Tauri app: {}", e)))?;
 
-                // Initialize minimal app state for CLI operations
-                let desktop_arc = init_desktop_engine(); // This is safe and won't crash
-                let app_state = init_app_state(desktop_arc);
-                app.manage(app_state);
-
-                // Store the handle in the container - don't send yet, build must complete first
-                if let Ok(mut container) = app_handle_container_clone.lock() {
-                    *container = Some(app_handle);
-                } else {
-                    error!("Failed to store app handle in container");
-                }
-
-                info!("Headless Tauri app setup completed");
-                Ok(())
-            })
-            .build(crate::get_tauri_context());
-
-        // Send the result only after build completes (fixes race condition)
-        let send_result = match result {
-            Ok(_app) => {
-                info!("Headless Tauri app created successfully");
-
-                // Get the app handle from the container now that build succeeded
-                match app_handle_container.lock() {
-                    Ok(container) => {
-                        if let Some(handle) = container.as_ref() {
-                            tx.send(Ok(handle.clone()))
-                        } else {
-                            tx.send(Err(JunoError::SystemError("App handle not captured during setup".to_string())))
-                        }
-                    }
-                    Err(e) => {
-                        tx.send(Err(JunoError::SystemError(format!("Failed to access app handle container: {}", e))))
-                    }
-                }
-            },
-            Err(e) => {
-                error!("Failed to create headless Tauri app: {}", e);
-                // Properly propagate build errors through the channel
-                tx.send(Err(JunoError::SystemError(format!("Failed to build Tauri app: {}", e))))
-            }
-        };
-
-        // Handle channel send failures appropriately
-        if let Err(_) = send_result {
-            error!("Failed to send app initialization result - receiver may have timed out");
-        }
-
-        // Keep the thread alive for CLI operations with reasonable timeout (fixes thread leak)
-        // Use sleep instead of indefinite parking to prevent permanent thread leak
-        std::thread::sleep(std::time::Duration::from_secs(300)); // 5 minutes for CLI operations
-        info!("Headless Tauri app thread exiting after timeout - preventing thread leak");
-    });
-
-    // Wait for the app handle with timeout to prevent deadlock
-    tokio::time::timeout(
-        tokio::time::Duration::from_secs(15),
-        rx
-    ).await
-    .map_err(|_| JunoError::SystemError("Timeout waiting for headless Tauri app initialization".to_string()))?
-    .map_err(|_| JunoError::SystemError("Failed to receive app handle from initialization thread".to_string()))?
+    // Leak the app to keep it alive for the duration of headless execution
+    let app_ref: &'static mut tauri::App = Box::leak(Box::new(app));
+    let handle = app_ref.handle().clone();
+    Ok(handle)
 }
 
 /// Initialize application state with desktop instance
