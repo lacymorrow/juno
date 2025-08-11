@@ -90,6 +90,8 @@ pub struct PromptContext {
     pub task_context: Option<String>,
     /// Available tools for the agent
     pub available_tools: Vec<String>,
+    /// Available MCP tools (subset of available_tools)
+    pub available_mcp_tools: Vec<String>,
     /// Provider-specific constraints
     pub provider_constraints: Option<HashMap<String, String>>,
     /// Custom variables from configuration

@@ -1,5 +1,7 @@
 # Juno AI Computer Use Agent - Consolidated Documentation
 
+> Verification banner: This comprehensive doc is under active verification for accuracy against the current codebase. For stable entry points, prefer `docs/SIMPLE_DOCS.md` and `docs/rules/INDEX.md`.
+
 **Status**: ✅ **PRODUCTION READY** - Enterprise-Grade AI Agent Complete  
 **Version**: 2.0  
 **Last Updated**: January 2025  
@@ -38,7 +40,7 @@ Juno AI Computer Use Agent is a **production-ready** Tauri v2 desktop applicatio
 
 ### 🏆 Key Achievements
 
-- **✅ 100% Computer Use Integration**: All Anthropic Computer Use actions implemented
+- **✅ Complete Computer Use Integration**: All 17 Anthropic Computer Use actions implemented
 - **✅ Enterprise Security Framework**: Attack surface eliminated, comprehensive validation
 - **✅ Production-Grade Architecture**: 50+ commands across 10 categories
 - **✅ Advanced Memory Management**: Token-aware conversation handling
@@ -82,8 +84,8 @@ bun run tauri dev
 ### Essential Shortcuts
 
 - **Option+D**: Agent Mode (voice → AI → computer actions)
-- **Configurable Key**: Dictation Mode (voice → direct text insertion)
-- **Escape**: Stop any operation (TTS, transcription, agent processing)
+- **Configurable key**: Dictation Mode (voice → direct text insertion)
+- **Escape**: Stop all operations (TTS, transcription, dictation, agent processing)
 
 ---
 
@@ -291,7 +293,7 @@ SecurityConfig::default() {
 
 **Whitelisted Commands**: `["cargo", "npm", "bun", "git", "ls", "cat", "grep", "find", "wc", "head", "tail", "echo", "pwd", "which"]`
 
-**Blocked Patterns**: `["rm -rf", "sudo", "su", "chmod 777", "wget", "curl", "nc", "netcat", "&", "||", "&&", ";", "|", "$(", "`"]`
+**Blocked Patterns**: `["rm -rf", "sudo", "su", "chmod 777", "wget", "curl", "nc", "netcat", "&", "||", "&&", ";", "|", "$(", "\`"]`
 
 **Security Measures**:
 

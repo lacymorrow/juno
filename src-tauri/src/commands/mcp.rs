@@ -22,6 +22,13 @@ pub async fn add_mcp_server(
 ) -> Result<(), String> {
     info!("Adding MCP server: {}", config.name);
 
+    // Capture needed fields before moving `config`
+    let cfg_enabled = config.enabled;
+    let cfg_auto_start = config.auto_start;
+    let cfg_command_lower = config.command.to_lowercase();
+    let cfg_name = config.name.clone();
+    let cfg_id = config.id.clone();
+
     // Add to MCP manager
     let mcp_manager = state.get_mcp_manager().await;
     {
@@ -33,11 +40,18 @@ pub async fn add_mcp_server(
     {
         let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
-        config_guard.add_mcp_server(config);
+        config_guard.add_mcp_server(config.clone());
     }
 
     // Save configuration
     state.save_tool_config(&app_handle).await?;
+
+    // If server is HTTP type and enabled/auto_start, attempt to start immediately for feedback
+    if cfg_enabled && cfg_auto_start && (cfg_command_lower == "http" || cfg_command_lower == "https") {
+        if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), cfg_id.clone()).await {
+            warn!("HTTP MCP server '{}' failed to start immediately: {}", cfg_name, e);
+        }
+    }
 
     // Sync tools
     state.sync_mcp_tools().await?;
@@ -280,7 +294,11 @@ pub async fn test_mcp_server_connection(
 
             // Check the status
             let statuses = test_manager.get_server_statuses().await;
-            if let Some(status) = statuses.get(&config.id) {
+            // If ID changed inside manager (e.g. via new()), also try by name lookup
+            let status = statuses.get(&config.id).or_else(|| {
+                statuses.iter().find(|(id, _)| *id == &config.id).map(|(_, s)| s)
+            });
+            if let Some(status) = status {
                 match status {
                     MCPServerStatus::Connected => {
                         let tools = test_manager.get_all_tools().await;

@@ -349,7 +349,7 @@ impl Default for ToolSettings {
             tools: HashMap::new(),
             category_enabled: HashMap::new(),
             mcp_servers: Vec::new(),
-            smooth_mouse_movement: false,
+            smooth_mouse_movement: true,
         }
     }
 }

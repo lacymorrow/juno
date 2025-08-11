@@ -89,7 +89,7 @@ impl<T> AtomicQueue<T> {
     /// Remove and return first item atomically
     pub async fn pop(&self) -> Option<T> {
         let mut items = self.items.lock().await;
-        let item = items.drain(..1).next();
+        let item = if items.is_empty() { None } else { Some(items.remove(0)) };
         
         // Release permit if we removed an item
         if item.is_some() {

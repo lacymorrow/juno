@@ -124,6 +124,13 @@ pub enum Commands {
         command: ConfigCommands,
     },
 
+    /// MCP management
+    #[command(about = "Manage MCP servers")] 
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommands,
+    },
+
     /// System and diagnostic operations
     #[command(about = "System information and diagnostics")]
     System {
@@ -399,6 +406,33 @@ pub enum ConfigCommands {
         /// Merge with existing configuration
         #[arg(short, long, help = "Merge with existing configuration")]
         merge: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum McpCommands {
+    /// Add an MCP server (HTTP transport)
+    #[command(about = "Add an MCP server (HTTP JSON-RPC)")]
+    AddServer {
+        /// Server name
+        #[arg(long, help = "Server name")] 
+        name: String,
+
+        /// HTTP endpoint URL
+        #[arg(long, help = "HTTP JSON-RPC endpoint URL")] 
+        http_url: String,
+
+        /// Enable the server
+        #[arg(long, default_value_t = true, help = "Enable server")] 
+        enabled: bool,
+
+        /// Auto-start the server
+        #[arg(long, default_value_t = true, help = "Auto-start server")] 
+        auto_start: bool,
+
+        /// Timeout seconds
+        #[arg(long, default_value_t = 30, help = "Timeout seconds")] 
+        timeout: u64,
     },
 }
 

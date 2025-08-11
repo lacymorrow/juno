@@ -93,6 +93,9 @@ pub struct MCPServerConnection {
     stdin_writer: Option<BufWriter<tokio::process::ChildStdin>>,
     stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
     stderr_reader: Option<BufReader<tokio::process::ChildStderr>>,
+    // HTTP transport (for servers exposed via HTTP JSON-RPC)
+    http_client: Option<reqwest::Client>,
+    http_url: Option<String>,
     // Error recovery tracking
     connection_attempts: u32,
     last_failure_time: Option<std::time::Instant>,
@@ -111,12 +114,46 @@ impl MCPServerConnection {
             stdin_writer: None,
             stdout_reader: None,
             stderr_reader: None,
+            http_client: None,
+            http_url: None,
             // Initialize error recovery fields
             connection_attempts: 0,
             last_failure_time: None,
             consecutive_failures: 0,
             last_successful_communication: None,
         }
+    }
+
+    fn is_http_transport(&self) -> bool {
+        let cmd = self.config.command.to_lowercase();
+        cmd == "http" || cmd == "https"
+    }
+
+    fn ensure_http_url(&mut self) -> Result<String, String> {
+        if let Some(url) = &self.http_url {
+            return Ok(url.clone());
+        }
+        let url = self
+            .config
+            .args
+            .get(0)
+            .cloned()
+            .ok_or_else(|| "HTTP MCP server requires args[0] to be the endpoint URL".to_string())?;
+        self.http_url = Some(url.clone());
+        Ok(url)
+    }
+
+    fn get_http_client(&mut self) -> Result<reqwest::Client, String> {
+        if let Some(c) = &self.http_client {
+            return Ok(c.clone());
+        }
+        let timeout = Duration::from_secs(self.config.timeout_seconds);
+        let client = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+        self.http_client = Some(client.clone());
+        Ok(client)
     }
 
     /// Calculate backoff delay based on consecutive failures
@@ -192,6 +229,22 @@ impl MCPServerConnection {
 
         self.status = MCPServerStatus::Connecting;
         info!("Starting MCP server: {} (command: {} {:?})", self.config.name, self.config.command, self.config.args);
+
+        // HTTP transport branch: do not spawn a process; connect via HTTP JSON-RPC
+        if self.is_http_transport() {
+            let url = self.ensure_http_url()?;
+            let _client = self.get_http_client()?;
+
+            // Initialize via HTTP and discover tools
+            self.initialize().await?;
+            self.send_initialized_notification().await.ok();
+            self.discover_tools().await?;
+
+            self.status = MCPServerStatus::Connected;
+            self.record_success();
+            info!("Successfully connected to HTTP MCP server at {}: {}", url, self.config.name);
+            return Ok(());
+        }
 
         // Start the server process
         let mut command = Command::new(&self.config.command);
@@ -336,7 +389,11 @@ impl MCPServerConnection {
             }
         });
 
-        let response = self.send_request(request).await?;
+        let response = if self.is_http_transport() {
+            self.send_http_request(request).await?
+        } else {
+            self.send_request(request).await?
+        };
 
         if response.get("error").is_some() {
             return Err(format!("MCP server initialization failed: {}", response));
@@ -353,19 +410,25 @@ impl MCPServerConnection {
             "method": "notifications/initialized"
         });
 
-        let notification_str = serde_json::to_string(&notification)
-            .map_err(|e| format!("Failed to serialize notification: {}", e))?;
-
-        // Send notification (no response expected)
-        if let Some(ref mut writer) = self.stdin_writer {
-            writer.write_all(notification_str.as_bytes()).await
-                .map_err(|e| format!("Failed to write notification: {}", e))?;
-            writer.write_all(b"\n").await
-                .map_err(|e| format!("Failed to write newline: {}", e))?;
-            writer.flush().await
-                .map_err(|e| format!("Failed to flush notification: {}", e))?;
+        if self.is_http_transport() {
+            // Best-effort: notify over HTTP, ignore response
+            let _ = self.send_http_request(notification).await;
+            return Ok(());
         } else {
-            return Err("No stdin writer available".to_string());
+            let notification_str = serde_json::to_string(&notification)
+                .map_err(|e| format!("Failed to serialize notification: {}", e))?;
+
+            // Send notification (no response expected)
+            if let Some(ref mut writer) = self.stdin_writer {
+                writer.write_all(notification_str.as_bytes()).await
+                    .map_err(|e| format!("Failed to write notification: {}", e))?;
+                writer.write_all(b"\n").await
+                    .map_err(|e| format!("Failed to write newline: {}", e))?;
+                writer.flush().await
+                    .map_err(|e| format!("Failed to flush notification: {}", e))?;
+            } else {
+                return Err("No stdin writer available".to_string());
+            }
         }
 
         debug!("MCP server '{}' initialized notification sent successfully", self.config.name);
@@ -381,7 +444,11 @@ impl MCPServerConnection {
             "params": {}
         });
 
-        let response = self.send_request(request).await?;
+        let response = if self.is_http_transport() {
+            self.send_http_request(request).await?
+        } else {
+            self.send_request(request).await?
+        };
 
         if let Some(error) = response.get("error") {
             return Err(format!("Failed to list tools from MCP server: {}", error));
@@ -454,7 +521,11 @@ impl MCPServerConnection {
             }
         });
 
-        let response = self.send_request(request).await?;
+        let response = if self.is_http_transport() {
+            self.send_http_request(request).await?
+        } else {
+            self.send_request(request).await?
+        };
 
         if let Some(error) = response.get("error") {
             return Err(format!("Tool execution failed: {}", error));
@@ -464,10 +535,7 @@ impl MCPServerConnection {
             .unwrap_or(&json!({}))
             .clone();
 
-        Ok(ToolResult {
-            call_id,
-            output: result,
-        })
+        Ok(ToolResult { call_id, output: result })
     }
 
     /// Send request with enhanced error handling for EPIPE and connection issues
@@ -599,6 +667,27 @@ impl MCPServerConnection {
                 self.record_failure();
                 format!("Request timeout for MCP server '{}' ({}s)", self.config.name, self.config.timeout_seconds)
             })?
+    }
+
+    /// Send a JSON-RPC request over HTTP to the configured endpoint
+    async fn send_http_request(&mut self, request: Value) -> Result<Value, String> {
+        let client = self.get_http_client()?;
+        let url = self.ensure_http_url()?;
+        let req_timeout = Duration::from_secs(self.config.timeout_seconds);
+        let resp = client
+            .post(url.clone())
+            .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+            .json(&request)
+            .timeout(req_timeout)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed to {}: {}", url, e))?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| format!("Failed reading HTTP response: {}", e))?;
+        if !status.is_success() {
+            return Err(format!("HTTP MCP server returned {}: {}", status, text));
+        }
+        serde_json::from_str::<Value>(&text).map_err(|e| format!("Failed to parse HTTP JSON-RPC response: {} - {}", e, text))
     }
 
     /// Disconnect from the MCP server
