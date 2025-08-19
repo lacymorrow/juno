@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import {
   Mic,
   Volume2,
@@ -175,11 +175,10 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
 
   // === WINDOW RESIZING ===
 
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
   const debouncedResizeWindow = useMemo(
     () => debounce(async (currentUiState: string) => {
       try {
-        const appWindow = getCurrentWindow();
-
         const isCompact = [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
@@ -200,11 +199,7 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
           ? FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT
           : defaultHeight;
 
-        console.log(
-          `🔧 VoiceAIBarDark: Resizing to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
-        );
-
-        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+        await resizeWindowIfChanged({ width: currentWidth, height: currentHeight });
       } catch (error) {
         console.error("❌ VoiceAIBarDark: Failed to resize window:", error);
       }
