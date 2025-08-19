@@ -145,6 +145,34 @@ Opening the calculator app...
 | **Dictation Mode** | Configurable key | Direct voice-to-text typing | Immediate transcription |
 | **Always Listening** | Background | Wake word detection and intent monitoring | Continuous background monitoring |
 
+### End-to-End Voice Mode Traces
+
+- Agent Mode (Option+D → Agent)
+  - Shortcut handling: `src-tauri/src/events/shortcuts.rs`
+    - Unified: both press and release are forwarded to `agent_monitor`; the monitor branches on trigger mode (tap vs hold)
+  - Transcription lifecycle: `src-tauri/src/integration.rs`
+    - Listens to `agent-transcription-start` → starts transcription; `agent-transcription-stop` → stops to produce final result
+  - Result routing: `src-tauri/src/events/handlers.rs`
+    - `voice-transcription:final-result` → emits `agent-query-ready` with `{ query }`
+  - Agent submission: `src-tauri/src/integration.rs`
+    - Listens to `agent-query-ready` and `app-dictation-finished` → calls `anthropic::submit_query`
+  - Streaming UI: `EVENTS.AGENT_ACTIVE`, `EVENTS.AGENT_THOUGHT_PROCESS`, `EVENTS.STREAMING_*` consumed by `src/contexts/VoiceContext.tsx`
+
+- Dictation Mode (Option+Space → Type at cursor)
+  - Shortcut handling: `src-tauri/src/events/shortcuts.rs`
+    - Tap: emits `dictation-transcription-start` on release; Hold: uses `dictation_monitor` for press/release
+  - Transcription lifecycle: `src-tauri/src/events/handlers.rs`
+    - On `dictation-transcription-start` → start transcription; `voice-transcription:final-result` → route to typing
+  - Typing behavior: `src-tauri/src/events/handlers.rs`
+    - Uses `commands::keyboard::global_type_text` and optional clipboard store
+  - UI sync: `ui_commands::handle_dictation_mode_change` and `EVENTS.DICTATION_ACTIVE`
+
+- Always Listening (Background → Wake word → Agent)
+  - Activation and transcription: `tauri-plugin-voice-transcription` emits `always-listening:*`
+  - Integration: `src-tauri/src/integration.rs`
+    - `always-listening:activated` → UI wake indicator; `always-listening:transcription` → if not dictation, submit to agent
+  - Safety: Skips agent activation when Dictation Mode is active; auto-return to wake mode after processing
+
 ### Voice Pipeline Architecture
 
 ```

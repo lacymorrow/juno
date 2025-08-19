@@ -459,15 +459,17 @@ const FloatingBarContent = () => {
       {/* Compact States - Default and Dictation Ready */}
       {isCompact && (
         <DynamicContainer className="flex items-center justify-center h-full w-full">
-          <div
-            className="flex items-center gap-2 cursor-pointer"
+          <button
+            type="button"
+            className="flex items-center gap-2 cursor-pointer bg-transparent p-0 m-0 border-0"
             onClick={handleClick}
+            aria-label="Activate assistant"
           >
             {getMainIcon()}
             {barState.voiceMode !== UI.VOICE_MODES_IDLE && (
               <VoiceStatusIndicator variant="compact" className="ml-1" />
             )}
-          </div>
+          </button>
         </DynamicContainer>
       )}
 

@@ -366,7 +366,9 @@ export function AppBar() {
 
   return (
     <div className="relative">
-      <div
+      <button
+        type="button"
+        aria-label="Activate assistant"
         className={getContainerStyles()}
         style={{ opacity: uiConfig.opacity }}
         onClick={
@@ -376,6 +378,9 @@ export function AppBar() {
             ? handleBarClick
             : undefined
         }
+        disabled={![UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+          (barState.barState || UI.BAR_STATES_DEFAULT) as any
+        )}
       >
         {/* Default State */}
         {(barState.barState === UI.BAR_STATES_DEFAULT ||
@@ -470,7 +475,7 @@ export function AppBar() {
         )}
 
         {/* Other states would go here similar to FloatingBar... */}
-      </div>
+      </button>
     </div>
   );
 }

@@ -6,12 +6,32 @@ interface WindowSizeConfig {
   height: number;
 }
 
+// Cache last applied sizes per window to avoid redundant resizes
+const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map();
+
 export function useWindowSize(windowLabel: string) {
   const resizeWindow = useCallback(async (config: WindowSizeConfig) => {
     try {
       const appWindow = await Window.getByLabel(windowLabel);
       if (appWindow) {
         await appWindow.setSize(new LogicalSize(config.width, config.height));
+      }
+    } catch (error) {
+      console.error(`Failed to resize window ${windowLabel}:`, error);
+    }
+  }, [windowLabel]);
+
+  const resizeWindowIfChanged = useCallback(async (config: WindowSizeConfig) => {
+    try {
+      const prev = lastSizeByLabel.get(windowLabel);
+      if (prev && prev.width === config.width && prev.height === config.height) {
+        return; // no-op
+      }
+
+      const appWindow = await Window.getByLabel(windowLabel);
+      if (appWindow) {
+        await appWindow.setSize(new LogicalSize(config.width, config.height));
+        lastSizeByLabel.set(windowLabel, { width: config.width, height: config.height });
       }
     } catch (error) {
       console.error(`Failed to resize window ${windowLabel}:`, error);
@@ -37,6 +57,7 @@ export function useWindowSize(windowLabel: string) {
 
   return {
     resizeWindow,
+    resizeWindowIfChanged,
     getWindowSize,
   };
 }

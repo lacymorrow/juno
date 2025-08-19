@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import {
   Mic,
   Volume2,
@@ -226,25 +227,22 @@ export function VoiceAIBar({
    * Responsive window resizing based on UI state
    * Compact states use small dimensions, expanded states use larger dimensions
    */
+  const lastSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = getCurrentWindow();
         const currentUiState = barState.barState;
 
-        // Define compact states that use small window size
         const isCompact = [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
         ].includes(currentUiState as any);
-        const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+        const targetWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
+        const targetHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
-        console.log(
-          `🔧 VoiceAIBar: Resizing window to ${currentWidth}x${currentHeight} for state: ${currentUiState}`
-        );
-
-        await appWindow.setSize(new LogicalSize(currentWidth, currentHeight));
+        await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
         console.error("❌ VoiceAIBar: Failed to resize window:", error);
       }
@@ -804,6 +802,7 @@ const styles = \`
               onFocus={handleFocus}
               onBlur={handleBlur}
               placeholder="Type your request..."
+              aria-label="Assistant input"
               className="glass-input"
               autoFocus
             />
@@ -850,7 +849,12 @@ const styles = \`
             <div className="response-container">
               {/* Compact view when collapsed */}
               {!isExpanded && (
-                <div className="response-summary" onClick={toggleExpanded}>
+                <button
+                  type="button"
+                  className="response-summary bg-transparent p-0 m-0 border-0"
+                  onClick={toggleExpanded}
+                  aria-label="Expand AI response"
+                >
                   <div
                     className="response-icon animate-fade-in-delayed"
                     style={{ animationDelay: "200ms" }}
@@ -868,7 +872,7 @@ const styles = \`
                       </span>
                     )}
                   </div>
-                </div>
+                </button>
               )}
 
               {/* Expanded view with full content */}
@@ -884,8 +888,10 @@ const styles = \`
                   >
                     <h3>AI Response</h3>
                     <button
+                      type="button"
                       onClick={closeResponse}
                       className="close-response-btn"
+                      aria-label="Close AI response"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1008,6 +1014,20 @@ const styles = \`
                 ? handleClick
                 : undefined
             }
+            role="button"
+            tabIndex={0}
+            aria-label="Activate assistant"
+            onKeyDown={(e) => {
+              if (
+                (e.key === "Enter" || e.key === " ") &&
+                [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
+                  barState.barState as any
+                )
+              ) {
+                e.preventDefault();
+                handleClick();
+              }
+            }}
           >
             <div
               className={`idle-waveform ${

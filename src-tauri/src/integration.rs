@@ -82,7 +82,7 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     // Listen for voice transcription start events
     let app_handle_for_listener = app_handle.clone();
-    app_handle.listen("voice-transcription:started", move |event| {
+    app_handle.listen(constants::events::voice_transcription::DICTATION_STARTED, move |_event| {
         info!("[Event] Received voice-transcription:started event");
         let app_handle_clone = app_handle_for_listener.clone();
         safe_spawn_async_task(move || async move {
@@ -100,9 +100,9 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
     });
 
-    // Listen for app-dictation-finished events to trigger the agent
+    // Listen for app-dictation-finished events to trigger the agent (legacy UI path)
     let app_handle_for_agent_listener = app_handle.clone();
-    app_handle.listen("app-dictation-finished", move |event| {
+    app_handle.listen(constants::events::dictation::FINISHED, move |event| {
         info!("[Event] Received app-dictation-finished event - triggering agent");
 
         let app_handle_clone = app_handle_for_agent_listener.clone();
@@ -130,7 +130,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                         .unwrap_or_default()
                                         .as_millis() as u64
                                 });
-                                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
+                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
                                     error!("{} Failed to emit user-message-submitted event: {}", prefixes::AGENT_MODE, e);
                                 }
 
@@ -169,9 +169,9 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         });
     });
 
-    // Listen for agent-query-ready events to trigger the agent (from agent mode voice transcription)
+    // Listen for unified agent query submission events (from agent mode voice transcription or UI)
     let app_handle_for_agent_query_listener = app_handle.clone();
-    app_handle.listen("agent-query-ready", move |event| {
+    app_handle.listen(crate::constants::events::agent::QUERY_READY, move |event| {
         info!("[Event] Received agent-query-ready event - triggering agent from voice transcription");
 
         let app_handle_clone = app_handle_for_agent_query_listener.clone();
@@ -240,7 +240,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
     // Listen for voice transcription partial results
     let app_handle_for_listener = app_handle.clone();
-    app_handle.listen("voice-transcription:partial-result", move |event| {
+    app_handle.listen(constants::events::voice_transcription::PARTIAL_RESULT, move |event| {
         info!(
             "[Event] Received voice-transcription:partial-result event: {:?}",
             event.payload()
@@ -273,7 +273,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 fn setup_force_stop_listeners(app_handle: &AppHandle) {
     // Listen for force stop events (timeout/stuck transcription)
     let app_handle_for_force_stop = app_handle.clone();
-    app_handle.listen("dictation-transcription-force-stop", move |_event| {
+    app_handle.listen(constants::events::dictation::TRANSCRIPTION_FORCE_STOP, move |_event| {
         warn!(
             "[Event] Received dictation-transcription-force-stop event - force stopping dictation"
         );
@@ -286,7 +286,7 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
 
     // Listen for force cleanup events (stuck state recovery)
     let app_handle_for_force_cleanup = app_handle.clone();
-    app_handle.listen("dictation-transcription-force-cleanup", move |_event| {
+    app_handle.listen(constants::events::dictation::TRANSCRIPTION_FORCE_CLEANUP, move |_event| {
         warn!(
             "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
         );
@@ -383,7 +383,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
     // Listen for always listening wake word activation
     let app_handle_for_wake_word = app_handle.clone();
-    app_handle.listen("always-listening:activated", move |_event| {
+    app_handle.listen(constants::events::always_listening::ACTIVATED, move |_event| {
         info!("[AlwaysListening] Wake word detected - preparing for agent activation");
 
         let app_handle_clone = app_handle_for_wake_word.clone();
@@ -402,7 +402,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
     // Listen for always listening transcription results (after wake word)
     let app_handle_for_always_listening = app_handle.clone();
-    app_handle.listen("always-listening:transcription", move |event| {
+    app_handle.listen(constants::events::always_listening::TRANSCRIPTION, move |event| {
         info!(
             "[AlwaysListening] Received transcription after wake word: {:?}",
             event.payload()
@@ -480,7 +480,7 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
     // Listen for always listening stop requests (from stop words)
     let app_handle_for_stop_request = app_handle.clone();
-    app_handle.listen("always-listening:stop-requested", move |event| {
+    app_handle.listen(constants::events::always_listening::STOP_REQUESTED, move |event| {
         info!(
             "[AlwaysListening] Received stop request: {:?}",
             event.payload()
@@ -494,7 +494,7 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
 
     // Listen for command processed events (to auto-stop or return to wake word mode)
     let app_handle_for_command_processed = app_handle.clone();
-    app_handle.listen("always-listening:command-processed", move |_event| {
+    app_handle.listen(constants::events::always_listening::COMMAND_PROCESSED, move |_event| {
         info!("[AlwaysListening] Command processed - considering auto-stop");
 
         let app_handle_clone = app_handle_for_command_processed.clone();
@@ -505,7 +505,7 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
 
     // Listen for return to wake word mode events
     let app_handle_for_wake_word_return = app_handle.clone();
-    app_handle.listen("always-listening:return-to-wake-word", move |_event| {
+    app_handle.listen(constants::events::always_listening::RETURN_TO_WAKE_WORD, move |_event| {
         info!("[AlwaysListening] Returning to wake word detection mode");
 
         let app_handle_clone = app_handle_for_wake_word_return.clone();
@@ -586,7 +586,7 @@ fn setup_agent_mode_integration(app_handle: &AppHandle) {
 fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
     // Listen for agent transcription start events (hold mode)
     let app_handle_for_agent_start = app_handle.clone();
-    app_handle.listen("agent-transcription-start", move |_event| {
+    app_handle.listen(constants::events::agent::TRANSCRIPTION_START, move |_event| {
         info!("[Event] Received agent-transcription-start event - starting agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_start.clone();
@@ -597,7 +597,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
 
     // Listen for agent transcription stop events (hold mode - threshold reached)
     let app_handle_for_agent_transcription_stop = app_handle.clone();
-    app_handle.listen("agent-transcription-stop", move |_event| {
+    app_handle.listen(constants::events::agent::TRANSCRIPTION_STOP, move |_event| {
         info!("[Event] Received agent-transcription-stop event - stopping transcription to process result");
 
         let app_handle_clone = app_handle_for_agent_transcription_stop.clone();
@@ -611,7 +611,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
 fn setup_agent_control_listeners(app_handle: &AppHandle) {
     // Listen for agent stop events (hold mode - normal completion)
     let app_handle_for_agent_stop = app_handle.clone();
-    app_handle.listen("agent-stop", move |_event| {
+    app_handle.listen(constants::events::agent::STOP_ALL, move |_event| {
         info!("[Event] Received agent-stop event - stopping agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_stop.clone();
@@ -622,7 +622,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
 
     // Listen for agent cancel events (hold mode - cancelled before threshold)
     let app_handle_for_agent_cancel = app_handle.clone();
-    app_handle.listen("agent-cancel", move |_event| {
+    app_handle.listen(constants::events::agent::CANCEL, move |_event| {
         info!("[Event] Received agent-cancel event - cancelling agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_cancel.clone();
@@ -633,7 +633,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
 
     // Listen for agent force-stop events (hold mode - timeout or stuck)
     let app_handle_for_agent_force_stop = app_handle.clone();
-    app_handle.listen("agent-force-stop", move |_event| {
+    app_handle.listen(constants::events::agent::FORCE_STOP, move |_event| {
         info!("[Event] Received agent-force-stop event - force stopping agent mode");
 
         let app_handle_clone = app_handle_for_agent_force_stop.clone();
@@ -647,7 +647,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
 fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
     // Listen for comprehensive agent-stop-all events (from stop button or emergency situations)
     let app_handle_for_agent_stop_all = app_handle.clone();
-    app_handle.listen("agent-stop-all", move |_event| {
+    app_handle.listen(constants::events::agent::STOP_ALL, move |_event| {
         info!("[Event] Received agent-stop-all event - performing comprehensive agent shutdown");
 
         let app_handle_clone = app_handle_for_agent_stop_all.clone();
