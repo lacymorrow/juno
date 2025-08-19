@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { Brain, Mic, Volume2, AlertCircle, Check, Loader2, Type, Keyboard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +14,7 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 // Debounce utility
@@ -464,7 +464,12 @@ const AIFloatingChatbot = () => {
   /**
    * Smart window sizing based on state and content
    */
-  const getWindowDimensions = (uiState: UIState, _widget?: WidgetData) => {
+  const getWindowDimensions = (
+    uiState: UIState,
+    _widget?: WidgetData,
+    stateSnapshot?: BarStateData
+  ) => {
+    const state = stateSnapshot || barState;
     // Base dimensions from config
     const base = { width: defaultWidth, height: defaultHeight };
 
@@ -480,7 +485,7 @@ const AIFloatingChatbot = () => {
 
       case UI.BAR_STATES_SPEAKING:
         // Size based on content length
-        const textLength = barState.spokenText?.length || 0;
+        const textLength = state.spokenText?.length || 0;
         const dynamicWidth = Math.min(320, Math.max(180, 180 + textLength * 2));
         return { width: dynamicWidth, height: 45 };
 
@@ -495,7 +500,7 @@ const AIFloatingChatbot = () => {
 
       case UI.BAR_STATES_ERROR:
         // Size based on error message length
-        const errorLength = barState.currentError?.length || 0;
+        const errorLength = state.currentError?.length || 0;
         const errorWidth = Math.min(
           350,
           Math.max(200, 200 + errorLength * 1.5)
@@ -521,41 +526,58 @@ const AIFloatingChatbot = () => {
   /**
    * Enhanced window resizing with smooth transitions and content awareness
    */
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+
   const debouncedResizeWindow = useMemo(
-    () => debounce(async (
-      currentBarState: string,
-      currentWidget: any
-    ) => {
-      try {
-        const appWindow = getCurrentWindow();
-        const dimensions = getWindowDimensions(
-          currentBarState as UIState,
-          currentWidget
-        );
+    () =>
+      debounce(
+        async (
+          currentBarState: string,
+          currentWidget: any,
+          stateSnapshot: BarStateData
+        ) => {
+          try {
+            const dimensions = getWindowDimensions(
+              currentBarState as UIState,
+              currentWidget,
+              stateSnapshot
+            );
 
-        console.log(
-          `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
-        );
+            console.log(
+              `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
+            );
+            // Clamp to config bounds if present (only min constraints available in typing)
+            const minW = floatingBarConfig?.minWidth as number | undefined;
+            const minH = floatingBarConfig?.minHeight as number | undefined;
+            const targetWidth = Math.max(
+              minW ?? dimensions.width,
+              dimensions.width
+            );
+            const targetHeight = Math.max(
+              minH ?? dimensions.height,
+              dimensions.height
+            );
 
-        await appWindow.setSize(
-          new LogicalSize(dimensions.width, dimensions.height)
-        );
-      } catch (error) {
-        console.error("❌ DynamicBar: Failed to resize window:", error);
-      }
-    }, 100),
-    []
+            await resizeWindowIfChanged({
+              width: targetWidth,
+              height: targetHeight,
+            });
+          } catch (error) {
+            console.error("❌ DynamicBar: Failed to resize window:", error);
+          }
+        },
+        100
+      ),
+    [resizeWindowIfChanged, floatingBarConfig?.minWidth, floatingBarConfig?.minHeight]
   );
 
   useEffect(() => {
-    debouncedResizeWindow(
-      barState.barState,
-      currentWidgetData
-    );
+    debouncedResizeWindow(barState.barState, currentWidgetData, barState);
   }, [
     barState.barState,
     currentWidgetData,
     debouncedResizeWindow,
+    barState,
   ]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
@@ -645,7 +667,13 @@ const AIFloatingChatbot = () => {
   return (
     <div className="h-full w-full relative">
       <div className="flex items-center justify-center h-full">
-        <div onClick={handleIslandClick} className="cursor-pointer">
+        <button
+          type="button"
+          onClick={handleIslandClick}
+          className="cursor-pointer bg-transparent p-0 m-0 border-0"
+          aria-label="Activate AI panel"
+          aria-controls="ai-chatbot-panel"
+        >
           <DynamicIsland 
             id="ai-chatbot-panel"
           >
@@ -656,7 +684,7 @@ const AIFloatingChatbot = () => {
               {renderCurrentWidget()}
             </div>
           </DynamicIsland>
-        </div>
+        </button>
       </div>
     </div>
   );

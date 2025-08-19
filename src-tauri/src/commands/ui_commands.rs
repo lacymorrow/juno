@@ -362,13 +362,13 @@ impl UIManager {
 
         self.set_bar_state(BarState::Submitting).await;
 
-        // Emit query through the clean app-dictation-finished event path
-        let query_payload = serde_json::json!({
-            "query": query
-        });
-
-        if let Err(e) = self.app_handle.emit(events::dictation::FINISHED, query_payload) {
-            error!("Failed to emit query submission: {}", e);
+        // Emit unified agent query submission event
+        let query_payload = serde_json::json!({ "query": query });
+        if let Err(e) = self
+            .app_handle
+            .emit(events::agent::QUERY_READY, query_payload)
+        {
+            error!("Failed to emit agent query submission: {}", e);
             return Err(format!("Failed to submit query: {}", e));
         }
 
@@ -795,7 +795,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Complete transition events
     let manager_clone = manager.clone();
-    app_handle.listen("floating-bar-complete-transition", move |event| {
+        app_handle.listen(crate::constants::events::bar::COMPLETE_TRANSITION, move |event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
@@ -814,7 +814,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Clear error events
     let manager_clone = manager.clone();
-    app_handle.listen("floating-bar-clear-error", move |event| {
+        app_handle.listen(crate::constants::events::bar::CLEAR_ERROR, move |event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
@@ -834,7 +834,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Agent stream start events
     let manager_clone = manager.clone();
-    app_handle.listen("agent-stream-start", move |_event| {
+        app_handle.listen(crate::constants::events::streaming::STREAM_START, move |_event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;

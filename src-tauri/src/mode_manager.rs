@@ -147,7 +147,7 @@ impl ModeManager {
         self.setup_new_mode(new_mode, app_handle).await?;
 
         // Emit mode change event
-        if let Err(e) = app_handle.emit("mode:changed", serde_json::json!({
+        if let Err(e) = app_handle.emit(crate::constants::events::system::STATUS_UPDATE, serde_json::json!({
             "from": current,
             "to": new_mode,
             "reason": reason,

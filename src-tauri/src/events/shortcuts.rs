@@ -110,89 +110,20 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         );
     }
 
-    // FIXED: Check agent trigger mode to determine behavior
-    let app_state = app.state::<state::AppState>();
-    let trigger_mode = app_state
-        .get_agent_trigger_mode()
-        .unwrap_or(state::AgentTriggerMode::Tap);
-
-    match trigger_mode {
-        state::AgentTriggerMode::Tap => {
-            // Tap mode: Only handle key release (press+release = tap)
-            if event.state() == ShortcutState::Released {
-                handle_agent_tap_mode(app);
-            }
+    // Unified behavior: forward both press and release to agent_monitor.
+    // AgentMonitor will branch based on AgentTriggerMode (tap vs hold).
+    let app_clone = app.clone();
+    let event_state = event.state();
+    tauri::async_runtime::spawn(async move {
+        if event_state == ShortcutState::Pressed {
+            crate::agent_monitor::on_agent_input_pressed().await;
+        } else if event_state == ShortcutState::Released {
+            crate::agent_monitor::on_agent_input_released(&app_clone).await;
         }
-        state::AgentTriggerMode::Hold => {
-            // Hold mode: Handle both press and release, route to agent_monitor
-            let app_clone = app.clone();
-            let event_state = event.state();
-            tauri::async_runtime::spawn(async move {
-                if event_state == ShortcutState::Pressed {
-                    crate::agent_monitor::on_agent_input_pressed().await;
-                } else if event_state == ShortcutState::Released {
-                    crate::agent_monitor::on_agent_input_released(&app_clone).await;
-                }
-            });
-        }
-    }
+    });
 }
 
-/// Handle agent tap mode (original behavior)
-fn handle_agent_tap_mode(app: &AppHandle) {
-    // Check if dictation is currently active by checking the VoiceController directly
-    let is_dictation_active =
-        if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-            voice_controller_state
-                .lock()
-                .map(|controller| controller.is_dictating())
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-    if is_dictation_active {
-        info!("[Agent Mode Shortcut] Tap mode - stopping active dictation");
-
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn(async move {
-            // Stop dictation
-            if let Some(voice_controller_state) =
-                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
-            {
-                match tauri_plugin_voice_transcription::commands::stop_dictation(
-                    app_handle.clone(),
-                    voice_controller_state,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        info!("[Agent Mode] Stopped dictation successfully");
-                    }
-                    Err(e) => {
-                        error!("[Agent Mode] Failed to stop dictation: {}", e);
-                    }
-                }
-            }
-        });
-    } else {
-        info!("[Agent Mode Shortcut] Tap mode - starting agent mode transcription");
-
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn(async move {
-            // Emit agent transcription start event
-            // This will be handled by the event listener in integration.rs
-            if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
-                error!(
-                    "[Agent Mode] Failed to emit agent transcription start event: {}",
-                    e
-                );
-            }
-            
-            info!("[Agent Mode] Emitted agent start event for handler processing");
-        });
-    }
-}
+// Removed handle_agent_tap_mode - unified through AgentMonitor
 
 /// Handle dictation input shortcut (Option+Space by default)
 fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
