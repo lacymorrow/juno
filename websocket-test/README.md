@@ -1,5 +1,7 @@
 # Juno WebSocket Test Server
 
+Note: For deployment, use the consolidated `remote-control-server/` directory which provides a minimal, deployment-ready server with Docker configs. This `websocket-test/` folder remains for local experiments and ad-hoc testing scripts.
+
 A Node.js WebSocket server for testing Juno AI's cloud connectivity and remote command functionality.
 
 ## Features
@@ -44,7 +46,7 @@ npx nodemon websocket-test-server.js
 
 ### 3. Server Information
 
-- **WebSocket Endpoint**: `ws://localhost:8080`
+- **WebSocket Endpoint**: `ws://localhost:8080/ws`
 - **Health Endpoint**: `http://localhost:8080/health`
 - **Status Endpoint**: `http://localhost:8080/status`
 
@@ -54,7 +56,7 @@ npx nodemon websocket-test-server.js
 
 In the Juno app's Cloud Test Panel:
 
-1. Set server URL to: `ws://localhost:8080`
+1. Set server URL to: `ws://localhost:8080/ws`
 2. Enable cloud connectivity
 3. Start the cloud connector
 

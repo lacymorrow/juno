@@ -558,18 +558,8 @@ impl ProductionCloudConnector {
         // Store the WebSocket sender for later use
         *self.ws_sender.lock().await = Some(ws_sender);
 
-        // Authenticate first
-        let auth_data = self.auth.create_auth_message()?;
-        let auth_message = WebSocketMessage {
-            message_type: MessageType::Auth,
-            data: auth_data,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        };
-
-        let auth_json = serde_json::to_string(&auth_message)?;
+        // Ensure we have credentials (register if necessary) and build auth payload
+        let auth_json = self.prepare_auth_message().await?;
 
         // Send authentication message using stored sender
         {
@@ -728,15 +718,55 @@ impl ProductionCloudConnector {
                     debug!("📨 Additional auth message received post-authentication");
                 }
                 MessageType::Command => {
-                    if let Ok(command) =
-                        serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data)
+                    // Execute command immediately and send a response back
+                    match serde_json::from_value::<crate::cloud::types::CloudCommand>(ws_message.data)
                     {
-                        // Emit command to be handled by the app
-                        if let Err(e) = app_handle.emit(events::cloud::COMMAND_RECEIVED, &command) {
-                            error!("Failed to emit cloud command: {}", e);
+                        Ok(command) => {
+                            let app_handle_clone = app_handle.clone();
+                            let connection_state_clone = connection_state.clone();
+                            tokio::spawn(async move {
+                                // Retrieve connector from state to access processor and sender
+                                let state = app_handle_clone.state::<crate::state::AppState>();
+                                if let Some(connector) = state.get_production_cloud_connector() {
+                                    // Process the command
+                                    match connector.command_processor.process_command(command.clone()).await {
+                                        Ok(device_response) => {
+                                            // Send response back over WS
+                                            if let Err(e) = Self::send_response_via_ws(&connector, device_response).await {
+                                                error!("Failed to send response via WebSocket: {}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to execute cloud command: {}", e);
+                                            // Attempt to send error response
+                                            let error_response = crate::cloud::types::DeviceResponse {
+                                                command_id: command.id.clone(),
+                                                status: crate::cloud::types::ResponseStatus::Error,
+                                                data: crate::cloud::types::ResponseData {
+                                                    text: None,
+                                                    audio_base64: None,
+                                                    screenshot_data: None,
+                                                    agent_state: Some("error".to_string()),
+                                                    progress: None,
+                                                    metadata: None,
+                                                },
+                                                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                                                error: Some(e.to_string()),
+                                            };
+                                            if let Err(e2) = Self::send_response_via_ws(&connector, error_response).await {
+                                                error!("Also failed to send error response via WebSocket: {}", e2);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    warn!("Production cloud connector not available in state; cannot process command");
+                                }
+                                drop(connection_state_clone);
+                            });
                         }
-                    } else {
-                        warn!("⚠️ Failed to parse cloud command from message");
+                        Err(_) => {
+                            warn!("⚠️ Failed to parse cloud command from message");
+                        }
                     }
                 }
                 MessageType::Heartbeat => {
@@ -748,6 +778,165 @@ impl ProductionCloudConnector {
             }
         } else {
             warn!("⚠️ Failed to parse WebSocket message: {}", text);
+        }
+    }
+
+    /// Build and send an authentication message, registering the device if necessary
+    async fn prepare_auth_message(&self) -> Result<String, CloudError> {
+        // Ensure we have API key and (runtime) HMAC secret in DeviceAuth credentials
+        let settings_manager = crate::settings::manager::SettingsManager::new(self.app_handle.clone())
+            .map_err(|e| CloudError::ConfigError(format!("Failed to create settings manager: {}", e)))?;
+
+        // If api_key missing, register device to obtain credentials
+        let mut config = self.config.clone();
+        if config.api_key.is_none() || config.device_id.is_none() {
+            info!("No API credentials found; registering device at cloud backend");
+            let api_url = config.get_api_url();
+            let register_url = format!("{}/register", api_url.trim_end_matches('/'));
+
+            #[derive(Serialize)]
+            struct RegistrationPayload<'a> {
+                device_name: &'a str,
+                device_type: &'a str,
+                platform: &'a str,
+            }
+
+            let payload = RegistrationPayload {
+                device_name: &config.device_name,
+                device_type: "desktop",
+                platform: std::env::consts::OS,
+            };
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(&register_url)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| CloudError::NetworkError(format!("Registration request failed: {}", e)))?;
+
+            if !resp.status().is_success() {
+                return Err(CloudError::AuthenticationFailed(format!(
+                    "Registration failed with status {}",
+                    resp.status()
+                )));
+            }
+
+            #[derive(Deserialize)]
+            struct RegistrationResponse {
+                success: bool,
+                device_id: String,
+                api_key: String,
+                hmac_secret: String,
+            }
+
+            let reg: RegistrationResponse = resp
+                .json()
+                .await
+                .map_err(|e| CloudError::SerializationError(format!("Failed to parse registration response: {}", e)))?;
+
+            if !reg.success {
+                return Err(CloudError::AuthenticationFailed("Registration response reported failure".to_string()));
+            }
+
+            // Persist API key and device_id
+            config.device_id = Some(reg.device_id.clone());
+            config.api_key = Some(reg.api_key.clone());
+            config
+                .save_to_centralized_settings(&settings_manager)
+                .await
+                .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud settings: {}", e)))?;
+
+            // Store HMAC secret in auth credentials at runtime (we re-use credentials.api_key field for secret)
+            let creds = super::auth::CloudCredentials {
+                device_id: reg.device_id,
+                api_key: reg.hmac_secret, // Store HMAC secret here for signing
+                token: None,
+                expires_at: None,
+            };
+            let mut auth_mut = self.auth.clone();
+            auth_mut.set_credentials(creds);
+        }
+
+        // Compose WS auth message compatible with backend: requires HMAC signature
+        let device_id = config
+            .device_id
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let api_key = config
+            .api_key
+            .clone()
+            .ok_or_else(|| CloudError::AuthenticationFailed("API key missing in configuration".to_string()))?;
+
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        // Prepare signing string: method:path:body:timestamp
+        let method = "POST";
+        let path = "/api/auth";
+        let body = ""; // empty body per server's HMAC scheme
+        let signing_payload = format!("{}:{}:{}:{}", method, path, body, timestamp);
+
+        // Use HMAC secret stored in auth credentials (in the api_key field as per above)
+        let hmac_secret = match self.auth.get_credentials() {
+            Some(creds) => creds.api_key.clone(),
+            None => return Err(CloudError::AuthenticationFailed("No HMAC secret available for signing".to_string())),
+        };
+
+        let signature = Self::compute_hmac_sha256_hex(&hmac_secret, &signing_payload)?;
+
+        let auth_payload = serde_json::json!({
+            "api_key": api_key,
+            "timestamp": timestamp,
+            "signature": signature,
+            "method": method,
+            "path": path,
+            "body": body,
+            "device_id": device_id,
+        });
+
+        let auth_message = WebSocketMessage {
+            message_type: MessageType::Auth,
+            data: auth_payload,
+            timestamp,
+        };
+
+        serde_json::to_string(&auth_message).map_err(|e| CloudError::SerializationError(e.to_string()))
+    }
+
+    fn compute_hmac_sha256_hex(secret: &str, data: &str) -> Result<String, CloudError> {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+            .map_err(|e| CloudError::SecurityError(format!("Failed to create HMAC: {}", e)))?;
+        mac.update(data.as_bytes());
+        let result = mac.finalize();
+        let bytes = result.into_bytes();
+        Ok(hex::encode(bytes))
+    }
+
+    async fn send_response_via_ws(
+        connector: &ProductionCloudConnector,
+        response: crate::cloud::types::DeviceResponse,
+    ) -> Result<(), CloudError> {
+        // Wrap response in WS message
+        let ws_message = WebSocketMessage {
+            message_type: MessageType::Response,
+            data: serde_json::to_value(&response)?,
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+        };
+        let message_json = serde_json::to_string(&ws_message)?;
+
+        let mut sender_guard = connector.ws_sender.lock().await;
+        if let Some(ref mut sender) = sender_guard.as_mut() {
+            use tokio_tungstenite::tungstenite::Message;
+            sender
+                .send(Message::Text(message_json))
+                .await
+                .map_err(|e| CloudError::NetworkError(format!("Failed to send response: {}", e)))?;
+            Ok(())
+        } else {
+            Err(CloudError::NetworkError("WebSocket sender not available".to_string()))
         }
     }
 

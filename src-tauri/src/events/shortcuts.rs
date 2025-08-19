@@ -7,10 +7,11 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state;
 use crate::constants::{events, errors::templates};
+use crate::commands::native_permissions::NativePermissionChecker;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -20,6 +21,136 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     crate::parse_shortcut_string(shortcut_str)
+}
+
+/// Check if we have necessary permissions for voice transcription
+fn has_required_permissions() -> bool {
+    // Check accessibility permission (required for voice transcription to work properly)
+    match NativePermissionChecker::check_accessibility_permission() {
+        Ok(granted) => {
+            if !granted {
+                warn!("[Permissions] Accessibility permission not granted - voice transcription will not work");
+            }
+            granted
+        }
+        Err(e) => {
+            error!("[Permissions] Failed to check accessibility permission: {}", e);
+            false // Assume not granted on error
+        }
+    }
+}
+
+/// Show notification when permissions are missing with action to open settings
+fn show_permission_error_notification(app: &AppHandle) {
+    let app_clone = app.clone();
+    let app_clone2 = app.clone();
+    
+    // Emit toast notification for immediate visual feedback
+    if let Err(e) = app_clone2.emit("show-toast", serde_json::json!({
+        "title": "Permissions Required",
+        "message": "Accessibility permission needed. Click to open Settings.",
+        "type": "error",
+        "duration": 5000,
+        "action": "open_accessibility_settings"
+    })) {
+        info!("[Permissions] Could not emit toast event: {}", e);
+    }
+    
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_notification::NotificationExt;
+        
+        // Also show system notification for redundancy
+        // Note: macOS notifications don't support click actions directly,
+        // but we can emit an event for the UI to show a dialog with a button
+        if let Err(e) = app_clone.notification()
+            .builder()
+            .title("Permissions Required")
+            .body("Accessibility permission needed. Please grant access in System Settings > Privacy & Security > Accessibility.")
+            .show() 
+        {
+            info!("[Permissions] Could not show system notification: {}", e);
+        }
+        
+        // Emit an event to the frontend to show a dialog with an "Open Settings" button
+        // This gives the user control over when to open settings
+        if let Err(e) = app_clone.emit("permissions-required", serde_json::json!({
+            "type": "accessibility",
+            "message": "Voice features require Accessibility permission",
+            "action": "open_settings"
+        })) {
+            error!("[Permissions] Failed to emit permissions-required event: {}", e);
+        }
+        
+        info!("[Permissions] Notified user about missing permissions - awaiting user action");
+    });
+}
+
+/// Show immediate agent mode notification for better user feedback
+fn show_agent_mode_notification(app: &AppHandle) {
+    // Use both system notification and toast for immediate feedback
+    // This provides instant visual feedback that the shortcut was recognized
+    let app_clone = app.clone();
+    let app_clone2 = app.clone();
+    
+    // Emit toast notification event for frontend
+    if let Err(e) = app_clone2.emit("show-toast", serde_json::json!({
+        "title": "Agent Mode",
+        "message": "Listening...",
+        "type": "info",
+        "duration": 2000
+    })) {
+        info!("[Agent Mode] Could not emit toast event: {}", e);
+    }
+    
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_notification::NotificationExt;
+        
+        // Also show system notification for users who prefer that
+        // This notification appears immediately, before voice controller initialization
+        if let Err(e) = app_clone.notification()
+            .builder()
+            .title("Agent Mode")
+            .body("Listening...")
+            .show() 
+        {
+            info!("[Agent Mode] Could not show system notification: {}", e);
+            // Don't treat this as a critical error - the mode still works without the notification
+        }
+    });
+}
+
+/// Show immediate dictation mode notification for better user feedback
+fn show_dictation_mode_notification(app: &AppHandle) {
+    // Use both system notification and toast for immediate feedback
+    // This provides instant visual feedback that the shortcut was recognized
+    let app_clone = app.clone();
+    let app_clone2 = app.clone();
+    
+    // Emit toast notification event for frontend
+    if let Err(e) = app_clone2.emit("show-toast", serde_json::json!({
+        "title": "Dictation Mode",
+        "message": "Listening...",
+        "type": "info",
+        "duration": 2000
+    })) {
+        info!("[Dictation Mode] Could not emit toast event: {}", e);
+    }
+    
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_notification::NotificationExt;
+        
+        // Also show system notification for users who prefer that
+        // This notification appears immediately, before voice controller initialization
+        if let Err(e) = app_clone.notification()
+            .builder()
+            .title("Dictation Mode")
+            .body("Listening...")
+            .show() 
+        {
+            info!("[Dictation Mode] Could not show system notification: {}", e);
+            // Don't treat this as a critical error - the mode still works without the notification
+        }
+    });
 }
 
 /// Handle global shortcut events
@@ -127,6 +258,17 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
             // Hold mode: Handle both press and release, route to agent_monitor
             let app_clone = app.clone();
             let event_state = event.state();
+            
+            // Check permissions and show appropriate notification on press
+            if event_state == ShortcutState::Pressed {
+                if !has_required_permissions() {
+                    warn!("[Agent Mode] Cannot start - missing required permissions");
+                    show_permission_error_notification(app);
+                    return; // Don't try to initialize voice controller without permissions
+                }
+                show_agent_mode_notification(app);
+            }
+            
             tauri::async_runtime::spawn(async move {
                 if event_state == ShortcutState::Pressed {
                     crate::agent_monitor::on_agent_input_pressed().await;
@@ -177,6 +319,16 @@ fn handle_agent_tap_mode(app: &AppHandle) {
         });
     } else {
         info!("[Agent Mode Shortcut] Tap mode - starting agent mode transcription");
+
+        // Check permissions first before trying to initialize voice controller
+        if !has_required_permissions() {
+            warn!("[Agent Mode] Cannot start - missing required permissions");
+            show_permission_error_notification(app);
+            return; // Don't try to initialize voice controller without permissions
+        }
+
+        // Immediately show notification for better user feedback
+        show_agent_mode_notification(app);
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -233,6 +385,17 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         }
         state::DictationTriggerMode::Hold => {
             // Hold mode: Handle both press and release, route to dictation_monitor
+            
+            // Check permissions and show appropriate notification on press
+            if event_state == ShortcutState::Pressed {
+                if !has_required_permissions() {
+                    warn!("[Dictation Mode] Cannot start - missing required permissions");
+                    show_permission_error_notification(&app_clone);
+                    return; // Don't try to initialize voice controller without permissions
+                }
+                show_dictation_mode_notification(&app_clone);
+            }
+            
             tauri::async_runtime::spawn(async move {
                 if event_state == ShortcutState::Pressed {
                     crate::dictation_monitor::on_dictation_input_pressed().await;
@@ -284,6 +447,16 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     } else {
         info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
 
+        // Check permissions first before trying to initialize voice controller
+        if !has_required_permissions() {
+            warn!("[Dictation Mode] Cannot start - missing required permissions");
+            show_permission_error_notification(app);
+            return; // Don't try to initialize voice controller without permissions
+        }
+
+        // Immediately show notification for better user feedback
+        show_dictation_mode_notification(app);
+
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit dictation transcription start event instead of active event
@@ -325,4 +498,22 @@ pub async fn trigger_shortcut_test_event(
     }
 
     Ok(())
+}
+
+/// Command for frontend to open accessibility settings when user clicks the button
+#[tauri::command]
+pub async fn open_accessibility_settings_on_request() -> Result<(), String> {
+    info!("[Permissions] User requested to open accessibility settings");
+    
+    // Use the existing command to open the settings
+    match crate::commands::permissions::open_system_preferences("accessibility".to_string()).await {
+        Ok(_) => {
+            info!("[Permissions] Successfully opened Accessibility settings per user request");
+            Ok(())
+        }
+        Err(e) => {
+            error!("[Permissions] Failed to open Accessibility settings: {}", e);
+            Err(format!("Failed to open System Settings: {}", e))
+        }
+    }
 }

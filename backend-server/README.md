@@ -1,5 +1,7 @@
 # Juno Cloud Backend Server
 
+Note: If you need a minimal, deployment-ready remote control server without authentication/DB, use `remote-control-server/`. This `backend-server/` is the production backend with full features (auth, DB, metrics, rate limit, etc.).
+
 A production-ready Node.js WebSocket backend for the Juno AI Computer Use Agent, providing authentication, cloud control, and premium features.
 
 ## ✅ Production Status
@@ -8,7 +10,7 @@ A production-ready Node.js WebSocket backend for the Juno AI Computer Use Agent,
 
 - Status: ✅ Healthy and operational
 - Region: Atlanta (atl)
-- Last deployed: June 9, 2025
+- Health endpoint: `https://juno-cloud-backend.fly.dev/health`
 
 ## 🌟 Features
 

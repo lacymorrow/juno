@@ -7,6 +7,8 @@ import { WebSocketServer } from 'ws';
 
 // Import our modules
 import { AuthService } from './auth/AuthService.js';
+import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import { Database } from './database/Database.js';
 import { RateLimiter } from './middleware/rateLimiter.js';
 import { CommandProcessor } from './services/CommandProcessor.js';
@@ -14,6 +16,7 @@ import { HealthCheck } from './services/HealthCheck.js';
 import { logger } from './utils/logger.js';
 import { validateEnv } from './utils/validation.js';
 import { WebSocketManager } from './websocket/WebSocketManager.js';
+import { GitHubOAuthService } from './auth/GitHubOAuth.js';
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +31,7 @@ class JunoCloudServer {
         this.wsManager = null;
         this.commandProcessor = null;
         this.healthCheck = null;
+        this.githubOAuth = null;
 
         this.isShuttingDown = false;
         this.activeConnections = new Set();
@@ -48,6 +52,14 @@ class JunoCloudServer {
             // Initialize auth service
             this.authService = new AuthService(this.database);
             logger.info('✅ Auth service initialized');
+
+            // Initialize GitHub OAuth service (optional)
+            this.githubOAuth = new GitHubOAuthService(this.database);
+            if (this.githubOAuth.isEnabled()) {
+                logger.info('✅ GitHub OAuth enabled');
+            } else {
+                logger.warn('⚠️ GitHub OAuth not configured (set GITHUB_CLIENT_ID/SECRET/CALLBACK_URL)');
+            }
 
             // Initialize command processor
             this.commandProcessor = new CommandProcessor(this.database, this.authService);
@@ -125,6 +137,57 @@ class JunoCloudServer {
             } catch (error) {
                 logger.error('Authentication failed:', error);
                 res.status(401).json({ error: error.message });
+            }
+        });
+
+        // GitHub OAuth endpoints (optional)
+        this.app.get('/auth/github/login', (req, res) => {
+            if (!this.githubOAuth?.isEnabled()) {
+                return res.status(503).json({ error: 'GitHub OAuth not configured' });
+            }
+            const { url } = this.githubOAuth.createAuthUrl();
+            res.redirect(url);
+        });
+
+        this.app.get('/auth/github/callback', async (req, res) => {
+            try {
+                if (!this.githubOAuth?.isEnabled()) {
+                    return res.status(503).json({ error: 'GitHub OAuth not configured' });
+                }
+                const { code, state } = req.query;
+                if (!code || !state) {
+                    return res.status(400).json({ error: 'Missing code or state' });
+                }
+                if (!this.githubOAuth.validateState(state)) {
+                    return res.status(400).json({ error: 'Invalid OAuth state' });
+                }
+
+                // Exchange code for token and fetch user
+                const accessToken = await this.githubOAuth.exchangeCodeForToken(code);
+                const ghUser = await this.githubOAuth.fetchGitHubUser(accessToken);
+
+                // Ensure user record exists
+                const userId = await this.githubOAuth.ensureUser(ghUser.email, ghUser.name);
+
+                // Issue app session token (JWT) tied to user (no device yet)
+                const sessionId = uuidv4();
+                const jwtPayload = { user_id: userId, provider: 'github', type: 'user_session' };
+                const jwtToken = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+                    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+                    issuer: 'juno-cloud-server'
+                });
+
+                // Respond with minimal HTML to copy token or redirect URL if provided
+                const redirect = process.env.GITHUB_POST_LOGIN_REDIRECT_URL;
+                if (redirect) {
+                    const url = new URL(redirect);
+                    url.searchParams.set('token', jwtToken);
+                    return res.redirect(url.toString());
+                }
+                res.send(`<html><body><h3>GitHub login successful</h3><p>Copy this token:</p><pre>${jwtToken}</pre></body></html>`);
+            } catch (error) {
+                logger.error('GitHub OAuth callback failed:', error);
+                res.status(500).json({ error: 'GitHub OAuth failed' });
             }
         });
 

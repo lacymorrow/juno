@@ -61,18 +61,48 @@ export default function OnboardingWindow() {
 
   const handleOnboardingComplete = async () => {
     try {
-      // Use backend command to mark onboarding as completed
-      await invoke("complete_onboarding");
-      console.log("Onboarding completed via backend");
+      // Re-check permissions at completion
+      const permissionsResult = await invoke<{
+        accessibility: { granted: boolean; required: boolean };
+        screen_recording: { granted: boolean; required: boolean };
+        microphone: { granted: boolean; required: boolean };
+        input_monitoring: { granted: boolean; required: boolean };
+        all_granted: boolean;
+        app_name: string;
+      }>("check_permissions_status_native");
 
-      // Notify main window of completion
-      const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
-      if (mainWindow) {
-        await mainWindow.emit("onboarding-complete", {});
+      if (permissionsResult.all_granted) {
+        // If backend restart policy requires it, it will handle internally
+        try {
+          const restartNeeded = await invoke<boolean>(
+            "check_restart_needed_after_permissions"
+          );
+          if (restartNeeded) {
+            await invoke("restart_app_after_permissions");
+            return;
+          }
+        } catch (_e) {
+          // Fallback: proceed without restart if command unavailable or returns error
+        }
+
+        // Mark onboarding as complete and open main window
+        await invoke("complete_onboarding");
+        await invoke("open_main_window");
+        await invoke("close_onboarding_window");
+
+        // Optionally notify main window
+        try {
+          const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
+          if (mainWindow) {
+            await mainWindow.emit("onboarding-complete", {});
+          }
+        } catch (_err) {
+          // ignore
+        }
+      } else {
+        // Not all required granted; keep onboarding open
+        // Optionally guide user; nothing to do here
       }
-
-      // Close the onboarding window via backend
-      await invoke("close_onboarding_window");
     } catch (error) {
       console.error("Error completing onboarding:", error);
       // Try to close anyway

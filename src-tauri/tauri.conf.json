@@ -63,7 +63,7 @@
         "alwaysOnTop": true,
         "resizable": false,
         "skipTaskbar": true,
-        "visible": true,
+        "visible": false,
         "shadow": true
       },
       {
@@ -78,7 +78,7 @@
         "alwaysOnTop": true,
         "resizable": false,
         "skipTaskbar": true,
-        "visible": true,
+        "visible": false,
         "shadow": true
       },
       {
@@ -93,7 +93,7 @@
         "alwaysOnTop": true,
         "resizable": false,
         "skipTaskbar": true,
-        "visible": true,
+        "visible": false,
         "shadow": true
       },
       {
@@ -106,7 +106,7 @@
         "minHeight": 300,
         "hiddenTitle": false,
         "resizable": false,
-        "visible": true,
+        "visible": false,
         "skipTaskbar": false,
         "shadow": true,
         "transparent": false,

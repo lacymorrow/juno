@@ -1,0 +1,29 @@
+{
+  "name": "juno-remote-control-server",
+  "version": "0.1.0",
+  "description": "Minimal WebSocket remote control server for Juno AI (deployment-ready)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "juno",
+    "websocket",
+    "remote-control",
+    "ai"
+  ],
+  "author": "Juno AI",
+  "license": "MIT"
+}
+

@@ -219,6 +219,20 @@ export class Database {
         return result;
     }
 
+    async getUserByEmail(email) {
+        return await this.get(
+            'SELECT * FROM users WHERE email = ?',
+            [email]
+        );
+    }
+
+    async updateUserName(id, name) {
+        return await this.run(
+            'UPDATE users SET name = ?, updated_at = strftime("%s", "now") WHERE id = ?',
+            [name, id]
+        );
+    }
+
     async createDevice(deviceData) {
         const { id, user_id, device_name, device_type, api_key, hmac_secret } = deviceData;
         const result = await this.run(

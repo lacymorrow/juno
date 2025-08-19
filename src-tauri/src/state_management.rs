@@ -327,6 +327,28 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
         } else {
             info!("Cloud client started successfully");
         }
+
+        // Auto-start production cloud connector if configured
+        let config = app_state.get_cloud_config().await;
+        if config.auto_connect {
+            info!("Attempting to auto-start production cloud connector (auto_connect=true)...");
+            match crate::cloud::ProductionCloudConnector::new(app_handle.clone()).await {
+                Ok(connector) => {
+                    match connector.start().await {
+                        Ok(()) => {
+                            app_state.set_production_cloud_connector(connector).await;
+                            info!("Production cloud connector auto-started successfully");
+                        }
+                        Err(e) => {
+                            warn!("Failed to auto-start production cloud connector: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to create production cloud connector: {}", e);
+                }
+            }
+        }
     } else {
         info!("Cloud connectivity is disabled in configuration");
     }

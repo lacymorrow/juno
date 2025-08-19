@@ -5,8 +5,10 @@
 //! and various application event management systems.
 
 pub mod handlers;
+pub mod mode_handlers;
 pub mod shortcuts;
 pub mod timer_handlers;
+pub mod payloads;
 
 // Re-export key functionality
 pub use handlers::*;

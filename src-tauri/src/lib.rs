@@ -981,6 +981,36 @@ pub fn run() {
             // NOTE: All specialized event listeners (dictation, always listening, agent mode)
             // are now handled by the integration module to prevent code duplication
 
+            // --- Permissions Gate: decide initial window to show ---
+            {
+                let gate_app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use crate::commands::permissions::check_permissions_status_native;
+                    use crate::window_management::{open_main_window, open_onboarding_window};
+
+                    // Best-effort permission check; on error, fall back to onboarding
+                    match check_permissions_status_native(gate_app_handle.clone()).await {
+                        Ok(state) => {
+                            if state.all_granted {
+                                if let Err(e) = open_main_window(gate_app_handle.clone()).await {
+                                    tracing::warn!("Failed to open main window: {}", e);
+                                }
+                            } else {
+                                if let Err(e) = open_onboarding_window(gate_app_handle.clone()).await {
+                                    tracing::warn!("Failed to open onboarding window: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Permission check failed (showing onboarding): {}", e);
+                            if let Err(e2) = open_onboarding_window(gate_app_handle.clone()).await {
+                                tracing::warn!("Failed to open onboarding window after error: {}", e2);
+                            }
+                        }
+                    }
+                });
+            }
+
             Ok(())
         });
 

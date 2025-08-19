@@ -14,6 +14,9 @@ macro_rules! generate_invoke_handler {
             check_server_status,
             test_system_context,
 
+            // === UI & MODAL COMMANDS ===
+            show_error_toast,
+
             // === AI AGENT COMMANDS ===
             submit_query,
             submit_orchestrated_query,

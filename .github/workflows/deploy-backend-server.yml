@@ -1,0 +1,59 @@
+name: Deploy Backend Server to Fly.io
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend-server/**'
+  workflow_dispatch:
+
+env:
+  FLY_APP_NAME: ${{ secrets.FLY_APP_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: Set Fly.io app name fallback
+        run: |
+          if [ -z "${FLY_APP_NAME}" ]; then
+            echo "FLY_APP_NAME=juno-cloud-backend" >> $GITHUB_ENV
+          fi
+
+      - name: Set Fly.io secrets (optional)
+        working-directory: backend-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
+          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          GITHUB_CALLBACK_URL: ${{ secrets.GITHUB_CALLBACK_URL }}
+          GITHUB_POST_LOGIN_REDIRECT_URL: ${{ secrets.GITHUB_POST_LOGIN_REDIRECT_URL }}
+        run: |
+          set -e
+          # Only set secrets that are provided
+          [ -n "${JWT_SECRET}" ] && flyctl secrets set JWT_SECRET=${JWT_SECRET} --app ${FLY_APP_NAME} || true
+          [ -n "${HMAC_SECRET}" ] && flyctl secrets set HMAC_SECRET=${HMAC_SECRET} --app ${FLY_APP_NAME} || true
+          [ -n "${GITHUB_CLIENT_ID}" ] && flyctl secrets set GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID} --app ${FLY_APP_NAME} || true
+          [ -n "${GITHUB_CLIENT_SECRET}" ] && flyctl secrets set GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET} --app ${FLY_APP_NAME} || true
+          [ -n "${GITHUB_CALLBACK_URL}" ] && flyctl secrets set GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL} --app ${FLY_APP_NAME} || true
+          [ -n "${GITHUB_POST_LOGIN_REDIRECT_URL}" ] && flyctl secrets set GITHUB_POST_LOGIN_REDIRECT_URL=${GITHUB_POST_LOGIN_REDIRECT_URL} --app ${FLY_APP_NAME} || true
+
+      - name: Deploy to Fly.io
+        working-directory: backend-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only --app ${FLY_APP_NAME}
+
+

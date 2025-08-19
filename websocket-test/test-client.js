@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
 // Test client configuration
-const SERVER_URL = 'ws://localhost:8080';
+const SERVER_URL = 'ws://localhost:8080/ws';
 const TEST_COMMANDS = [
     {
         name: 'Status Request',

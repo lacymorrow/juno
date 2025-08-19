@@ -18,6 +18,7 @@ import ClickVisualizer from "@/components/ClickVisualizer";
 import CommandOverlay from "@/components/CommandOverlay";
 import KeyPressOverlay from "@/components/KeyPressOverlay";
 import ToolApprovalModal from "@/components/ToolApprovalModal";
+import { ErrorToast } from "@/components/ErrorToast";
 
 // Custom hooks
 import { useAppState } from "@/hooks/useAppState";
@@ -466,6 +467,7 @@ function App() {
       <CommandOverlay />
       <KeyPressOverlay />
       <ToolApprovalModal />
+      <ErrorToast />
 
       {/* Modal System - Fixed to match expected props */}
       <ModalSystem

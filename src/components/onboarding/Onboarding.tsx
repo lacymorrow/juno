@@ -69,6 +69,30 @@ const permissions = [
   },
 ];
 
+// Map each permission to the specific app features it enables
+const permissionFeatures: Record<string, string[]> = {
+  "accessibility": [
+    "Control macOS UI (click, type, scroll)",
+    "Window management (focus, move, resize)",
+    "App automation (buttons, menus, dialogs)",
+  ],
+  "screen-recording": [
+    "Computer vision on on-screen content",
+    "Visual reasoning and context awareness",
+    "Screenshot capture for the agent",
+  ],
+  "microphone": [
+    "Voice dictation",
+    "Voice agent mode",
+    "Wake words (Always Listening)",
+  ],
+  "input-monitoring": [
+    "Reliable shortcut detection",
+    "Escape-to-cancel from anywhere",
+    "Gesture/typing context for smarter actions",
+  ],
+};
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false
@@ -463,6 +487,18 @@ function PermissionCard({
                 )}
                 <span>{permissionStatus.instructions}</span>
               </div>
+            </div>
+          )}
+
+          {/* Feature transparency */}
+          {permissionFeatures[permission.id] && (
+            <div className="mt-2 mb-3">
+              <p className="text-xs font-medium text-gray-700">What this enables</p>
+              <ul className="mt-1 list-disc pl-5 text-xs text-gray-600">
+                {permissionFeatures[permission.id].map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
             </div>
           )}
 
