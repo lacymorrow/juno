@@ -24,6 +24,8 @@ pub mod agent {
     pub const COMMITTED: &str = "agent-committed";
     pub const FORCE_STOP: &str = "agent-force-stop";
     pub const FORCE_CLEANUP: &str = "agent-force-cleanup";
+    /// Normalized agent submission event for any source (voice or UI)
+    pub const QUERY_READY: &str = "agent-query-ready";
 }
 
 /// Streaming events
@@ -196,6 +198,7 @@ pub mod cloud {
 /// System and application events
 pub mod system {
     pub const ERROR_OCCURRED: &str = "error-occurred";
+    pub const STATUS_UPDATE: &str = "system-status-update";
     pub const MCP_STATE_UPDATED: &str = "mcp_state_updated";
     pub const MOUSE_ENTERED_WINDOW: &str = "mouse-entered-window";
     pub const MOUSE_LEFT_WINDOW: &str = "mouse-left-window";

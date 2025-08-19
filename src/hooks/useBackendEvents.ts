@@ -194,6 +194,21 @@ export function useBackendEvents({
 		return () => unlisten?.();
 	}, [handleBackendResponse]);
 
+	// Listen for system status updates for observability
+	useEffect(() => {
+		const unlisten = listen(EVENTS.SYSTEM_STATUS_UPDATE, (event) => {
+			try {
+				console.log("System status update:", event.payload);
+			} catch (e) {
+				console.warn("Failed to handle system status update:", e);
+			}
+		});
+
+		return () => {
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
+		};
+	}, []);
+
 	// Listen for agent stopping events
 	useEffect(() => {
 		const unlisten = listen(EVENTS.AGENT_STOPPING, async () => {

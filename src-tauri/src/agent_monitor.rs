@@ -199,6 +199,12 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
     let mut state = AGENT_INPUT_STATE.lock().await;
     let (agent_started, threshold_reached, duration) = state.end_hold();
 
+    // Branch based on AgentTriggerMode
+    let trigger_mode = app_handle
+        .state::<AppState>()
+        .get_agent_trigger_mode()
+        .unwrap_or(AgentTriggerMode::Tap);
+
     if threshold_reached {
         info!("[AgentMonitor] Agent input released after threshold reached - stopping transcription to process with agent");
 
@@ -222,6 +228,13 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
             error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
         }
     } else {
+        // Tap mode: no start yet on press; release should initiate agent transcription
+        if matches!(trigger_mode, AgentTriggerMode::Tap) {
+            info!("[AgentMonitor] Tap trigger: starting agent transcription on release");
+            if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
+                error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
+            }
+        }
         debug!(
             "[AgentMonitor] Agent input released without starting agent ({}ms) - no action needed",
             duration.as_millis()

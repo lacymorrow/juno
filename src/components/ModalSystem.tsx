@@ -1,4 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 // Types for the modal system
 export type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
@@ -680,8 +687,17 @@ export function ModalSystem({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      {modalContent()}
-    </div>
+    <Dialog open={!!activeModal} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent aria-labelledby="modal-system-title" aria-describedby="modal-system-description" className="max-w-2xl">
+        {/* Provide hidden, consistent labelling for assistive tech */}
+        <DialogHeader className="sr-only">
+          <DialogTitle id="modal-system-title">Application modal</DialogTitle>
+          <DialogDescription id="modal-system-description">
+            Modal content for help, feedback, export, import, or update actions.
+          </DialogDescription>
+        </DialogHeader>
+        {modalContent()}
+      </DialogContent>
+    </Dialog>
   );
 }

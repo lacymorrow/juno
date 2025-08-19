@@ -143,4 +143,31 @@ describe('utils', () => {
       expect(result.name).toBe('test');
     });
   });
+  
+  // Sanity test: de-duplication helper behavior akin to window resize caching
+  describe('size de-duplication helper', () => {
+    beforeEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('calls setter only when size changes', async () => {
+      const lastSize = { current: null as null | { width: number; height: number } };
+      const setter = vi.fn(async (_w: number, _h: number) => {});
+
+      const setIfChanged = async (w: number, h: number) => {
+        if (!lastSize.current || lastSize.current.width !== w || lastSize.current.height !== h) {
+          await setter(w, h);
+          lastSize.current = { width: w, height: h };
+        }
+      };
+
+      await setIfChanged(200, 40);
+      await setIfChanged(200, 40); // no-op
+      await setIfChanged(220, 40);
+
+      expect(setter).toHaveBeenCalledTimes(2);
+      expect(setter).toHaveBeenNthCalledWith(1, 200, 40);
+      expect(setter).toHaveBeenNthCalledWith(2, 220, 40);
+    });
+  });
 });
