@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+// No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
 import {
   Mic,
@@ -227,12 +227,11 @@ export function VoiceAIBar({
    * Responsive window resizing based on UI state
    * Compact states use small dimensions, expanded states use larger dimensions
    */
-  const lastSizeRef = useRef<{ width: number; height: number } | null>(null);
   const { resizeWindowIfChanged } = useWindowSize("floating-bar");
   useEffect(() => {
     const resizeWindow = async () => {
       try {
-        const appWindow = getCurrentWindow();
+        // Window instance not needed; resize handled by custom hook
         const currentUiState = barState.barState;
 
         const isCompact = [
