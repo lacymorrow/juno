@@ -19,23 +19,23 @@ import {
 import { useEffect, useState } from "react";
 import AudioVisualizer from "../bar/audio-visualizer";
 
-// Permission status interface matching backend
+// Permission status interface matching backend (snake_case)
 interface PermissionStatus {
-  permissionType: string;
+  permission_type: string;
   granted: boolean;
   required: boolean;
   description: string;
   instructions: string;
 }
 
-// Complete permissions state interface
+// Complete permissions state interface (snake_case)
 interface PermissionsState {
   accessibility: PermissionStatus;
-  screenRecording: PermissionStatus;
+  screen_recording: PermissionStatus;
   microphone: PermissionStatus;
-  inputMonitoring: PermissionStatus;
-  allGranted: boolean;
-  appName: string;
+  input_monitoring: PermissionStatus;
+  all_granted: boolean;
+  app_name: string;
 }
 
 const permissions = [
@@ -564,9 +564,9 @@ export default function OnboardingFlow({
         COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
       );
       setPermissionsState(result);
-      setActualPermissionsGranted(result.allGranted);
+      setActualPermissionsGranted(result.all_granted);
       console.log("OnboardingFlow: Updated permissions state:", result);
-      return result.allGranted;
+      return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
       setPermissionsError(error as string);
@@ -873,7 +873,7 @@ export default function OnboardingFlow({
                       <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {permissionsState.allGranted ? (
+                            {permissionsState.all_granted ? (
                               <>
                                 <CheckCircle className="w-5 h-5 text-green-600" />
                                 <span className="font-medium text-green-800">
