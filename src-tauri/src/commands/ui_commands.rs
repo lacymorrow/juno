@@ -432,6 +432,26 @@ impl UIManager {
         Ok(())
     }
 
+    /// Visual-only submit handler to provide immediate UI feedback without emitting agent events
+    pub async fn handle_submit_visual_only(&mut self, query: String) -> Result<(), String> {
+        debug!("UI Manager: Handling visual-only submit with query: '{}'", query);
+
+        if query.trim().is_empty() {
+            return Ok(());
+        }
+
+        // Update state for immediate visual feedback (no QUERY_READY emission here)
+        self.last_submitted_value = query;
+        self.current_error = None;
+        self.agent_state = None;
+        self.is_agent_working = true; // Shows activity immediately
+        self.voice_mode = ui::voice_modes::AGENT.to_string();
+
+        // Transition to Submitting for quicker perceived responsiveness
+        self.set_bar_state(BarState::Submitting).await;
+        Ok(())
+    }
+
     // === VOICE & DICTATION FUNCTIONALITY ===
 
     pub async fn handle_dictation_mode_change(&mut self, is_active: bool) -> Result<(), String> {
@@ -1164,6 +1184,19 @@ pub async fn handle_tts_finished(app_handle: &AppHandle) {
         if let Err(e) = manager.handle_tts_finished().await {
             error!("Failed to handle TTS finished: {}", e);
         }
+    }
+}
+
+#[tauri::command]
+pub async fn notify_query_submitted(
+    query: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    if let Some(manager) = get_ui_manager().await {
+        let mut manager = manager.lock().await;
+        manager.handle_submit_visual_only(query).await
+    } else {
+        Err("UI Manager not initialized".to_string())
     }
 }
 

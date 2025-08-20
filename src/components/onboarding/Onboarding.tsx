@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { safeUnlisten } from "@/lib/tauri-event-utils";
 import { AnimatePresence, motion } from "framer-motion";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
   CheckCircle,
   ChevronRight,
@@ -19,24 +19,23 @@ import {
 import { useEffect, useState } from "react";
 import AudioVisualizer from "../bar/audio-visualizer";
 
-import { EVENTS, COMMANDS } from '../../lib/constants.generated';
-// Permission status interface matching backend
+// Permission status interface matching backend (snake_case)
 interface PermissionStatus {
-  permissionType: string;
+  permission_type: string;
   granted: boolean;
   required: boolean;
   description: string;
   instructions: string;
 }
 
-// Complete permissions state interface
+// Complete permissions state interface (snake_case)
 interface PermissionsState {
   accessibility: PermissionStatus;
-  screenRecording: PermissionStatus;
+  screen_recording: PermissionStatus;
   microphone: PermissionStatus;
-  inputMonitoring: PermissionStatus;
-  allGranted: boolean;
-  appName: string;
+  input_monitoring: PermissionStatus;
+  all_granted: boolean;
+  app_name: string;
 }
 
 const permissions = [
@@ -72,7 +71,7 @@ const permissions = [
 
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
-  isDevelopmentMode: boolean = false,
+  isDevelopmentMode: boolean = false
 ) => [
   {
     id: "welcome",
@@ -291,14 +290,7 @@ function KeyboardShortcut({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       if (backendListenerPromise) {
-        backendListenerPromise
-          .then((unlisten: any) => {
-            safeUnlisten(unlisten);
-          })
-          .catch((error) => {
-            // Handle any errors that occurred during setup
-            console.debug("Backend listener cleanup error (safe to ignore):", error);
-          });
+        backendListenerPromise.then((unlisten: any) => unlisten());
       }
     };
   }, [pressedKeys, onShortcutPressed, modifiers, key]);
@@ -411,8 +403,8 @@ function PermissionCard({
         granted
           ? "border-green-200 bg-green-50/30"
           : isRequired
-            ? "border-red-200 bg-red-50/30"
-            : "border-yellow-200 bg-yellow-50/30"
+          ? "border-red-200 bg-red-50/30"
+          : "border-yellow-200 bg-yellow-50/30"
       }`}
     >
       <div className="flex items-start gap-4">
@@ -423,8 +415,8 @@ function PermissionCard({
               granted
                 ? "bg-green-100 text-green-600"
                 : isRequired
-                  ? "bg-red-100 text-red-600"
-                  : "bg-yellow-100 text-yellow-600"
+                ? "bg-red-100 text-red-600"
+                : "bg-yellow-100 text-yellow-600"
             }`}
           >
             {granted ? (
@@ -540,7 +532,7 @@ export default function OnboardingFlow({
   const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
     // Always start with false to ensure we re-check permissions on mount
     // This is critical for the "Restart onboarding" functionality
-    false,
+    false
   );
 
   // New state for granular permissions
@@ -561,19 +553,20 @@ export default function OnboardingFlow({
     "actualPermissionsGranted:",
     actualPermissionsGranted,
     "permissionsAlreadyGranted prop:",
-    permissionsAlreadyGranted,
+    permissionsAlreadyGranted
   );
 
   // Function to check current permissions status
   const checkPermissionsStatus = async () => {
     try {
       setPermissionsError(null);
-      const result = await invoke<PermissionsState>(COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS,
+      const result = await invoke<PermissionsState>(
+        COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
       );
       setPermissionsState(result);
-      setActualPermissionsGranted(result.allGranted);
+      setActualPermissionsGranted(result.all_granted);
       console.log("OnboardingFlow: Updated permissions state:", result);
-      return result.allGranted;
+      return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
       setPermissionsError(error as string);
@@ -590,16 +583,16 @@ export default function OnboardingFlow({
       let commandName = "";
       switch (permissionType) {
         case "accessibility":
-          commandName = "request_accessibility_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION;
           break;
         case "screen_recording":
-          commandName = "request_screen_recording_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION;
           break;
         case "microphone":
-          commandName = "request_microphone_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION;
           break;
         case "input_monitoring":
-          commandName = "request_input_monitoring_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION;
           break;
         default:
           throw new Error(`Unknown permission type: ${permissionType}`);
@@ -647,13 +640,13 @@ export default function OnboardingFlow({
 
         // Test if backend shortcuts are working
         const shortcutsWorking = await invoke<boolean>(
-          "test_global_shortcuts_working",
+          "test_global_shortcuts_working"
         );
         setBackendShortcutsWorking(shortcutsWorking);
 
         // Load keyboard shortcuts as fallback
         try {
-          const shortcuts = await invoke(COMMANDS.UTILS_GET_KEYBOARD_SHORTCUTS);
+          const shortcuts = await invoke("get_keyboard_shortcuts");
           if (!keyboardShortcuts) {
             setKeyboardShortcuts(shortcuts);
           }
@@ -668,7 +661,7 @@ export default function OnboardingFlow({
     // Add window focus listener to re-check permissions when window gains focus
     const handleWindowFocus = async () => {
       console.log(
-        "OnboardingFlow: Window gained focus, re-checking permissions",
+        "OnboardingFlow: Window gained focus, re-checking permissions"
       );
       await checkPermissionsStatus();
     };
@@ -683,12 +676,12 @@ export default function OnboardingFlow({
 
   const onboardingSteps = getOnboardingSteps(
     actualPermissionsGranted,
-    isDevelopmentMode,
+    isDevelopmentMode
   );
 
   console.log(
     "OnboardingFlow: Generated onboarding steps:",
-    onboardingSteps.map((step) => ({ id: step.id, title: step.title })),
+    onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
   );
 
   const handleNext = () => {
@@ -800,11 +793,11 @@ export default function OnboardingFlow({
                       {shortcutPressed
                         ? "Perfect! You've got it."
                         : keyboardShortcuts?.agent_mode_toggle
-                          ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
-                              /\+/g,
-                              " + ",
-                            )} to activate agent mode`
-                          : "Press the keys above together to activate agent mode"}
+                        ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
+                            /\+/g,
+                            " + "
+                          )} to activate agent mode`
+                        : "Press the keys above together to activate agent mode"}
                     </p>
                   </div>
                 )}
@@ -851,7 +844,7 @@ export default function OnboardingFlow({
                       {permissions.map((permission) => {
                         const permissionKey = permission.id.replace(
                           "-",
-                          "_",
+                          "_"
                         ) as keyof PermissionsState;
                         const permissionStatus =
                           (permissionsState?.[
@@ -880,7 +873,7 @@ export default function OnboardingFlow({
                       <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {permissionsState.allGranted ? (
+                            {permissionsState.all_granted ? (
                               <>
                                 <CheckCircle className="w-5 h-5 text-green-600" />
                                 <span className="font-medium text-green-800">

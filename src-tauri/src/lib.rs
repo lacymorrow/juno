@@ -663,6 +663,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             ui_set_bar_config,
             ui_set_panel_click_through,
             ui_set_panel_level,
+            notify_query_submitted,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,
