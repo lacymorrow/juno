@@ -32,17 +32,49 @@ impl AgentOrchestrator {
         // Update state machine to processing
         let state_machine = self.app_state.agent_state_machine.clone();
         {
-            let state = AgentState::Processing {
-                session_id: session_id.to_string(),
-                current_step: 1,
-                max_steps: max_iterations,
-                started_at: now(),
-            };
-            
             let machine = state_machine.lock().await;
-            if let Err(e) = machine.transition_to(state).await {
-                error!("Failed to transition agent state to processing: {}", e);
-                return Err(e);
+            let current_state = machine.get_state().await;
+            
+            // Check if we're already processing - if so, check if it's a stale session
+            if let AgentState::Processing { session_id: existing_id, started_at, .. } = &current_state {
+                if existing_id != session_id {
+                    // Different session trying to start
+                    let elapsed = now() - started_at;
+                    if elapsed < 100 {
+                        // Recent session still active, reject this one
+                        warn!("Rejecting agent start - another session {} is already active (started {}ms ago)", 
+                              existing_id, elapsed);
+                        return Err("Another agent session is already active".to_string());
+                    } else {
+                        // Old session seems abandoned, force transition
+                        warn!("Force transitioning from stale session {} to new session {} (old session started {}ms ago)",
+                              existing_id, session_id, elapsed);
+                        let new_state = AgentState::Processing {
+                            session_id: session_id.to_string(),
+                            current_step: 1,
+                            max_steps: max_iterations,
+                            started_at: now(),
+                        };
+                        machine.force_transition_to(new_state).await;
+                    }
+                } else {
+                    // Same session ID, this is likely a duplicate event
+                    warn!("Ignoring duplicate agent start for session {}", session_id);
+                    return Ok(vec![]);
+                }
+            } else {
+                // Not currently processing, normal transition
+                let state = AgentState::Processing {
+                    session_id: session_id.to_string(),
+                    current_step: 1,
+                    max_steps: max_iterations,
+                    started_at: now(),
+                };
+                
+                if let Err(e) = machine.transition_to(state).await {
+                    error!("Failed to transition agent state to processing: {}", e);
+                    return Err(e);
+                }
             }
         }
         

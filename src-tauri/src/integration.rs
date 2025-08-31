@@ -5,14 +5,28 @@
 //! and cross-module communication patterns.
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_voice_transcription::controller::VoiceController;
+use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
 
 use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
 use crate::constants::events;
 use crate::constants::errors::{templates, prefixes};
+
+// Deduplication state for preventing multiple agent executions
+#[derive(Clone)]
+struct QueryDeduplicationState {
+    last_query: String,
+    last_query_time: Instant,
+    source_element_id: Option<String>,
+}
+
+lazy_static::lazy_static! {
+    static ref QUERY_DEDUP_STATE: Arc<TokioMutex<Option<QueryDeduplicationState>>> = Arc::new(TokioMutex::new(None));
+}
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -90,6 +104,33 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                         if let Some(query_text) = query_value.as_str() {
                             let trimmed_query = query_text.trim();
                             if !trimmed_query.is_empty() {
+                                // Check for duplicate queries within a short time window
+                                let mut dedup_state = QUERY_DEDUP_STATE.lock().await;
+                                let now = Instant::now();
+                                
+                                // Check if this is a duplicate query
+                                let is_duplicate = if let Some(ref last_state) = *dedup_state {
+                                    last_state.last_query == trimmed_query && 
+                                    now.duration_since(last_state.last_query_time) < Duration::from_millis(500) &&
+                                    last_state.source_element_id == source_element_id
+                                } else {
+                                    false
+                                };
+                                
+                                if is_duplicate {
+                                    info!("[Agent Mode] Duplicate query detected from element {:?}, ignoring: '{}'", 
+                                          source_element_id, trimmed_query);
+                                    return;
+                                }
+                                
+                                // Update deduplication state
+                                *dedup_state = Some(QueryDeduplicationState {
+                                    last_query: trimmed_query.to_string(),
+                                    last_query_time: now,
+                                    source_element_id: source_element_id.clone(),
+                                });
+                                drop(dedup_state); // Release the lock early
+                                
                                 info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
 
                                 // Emit user message event for frontend to add to conversation

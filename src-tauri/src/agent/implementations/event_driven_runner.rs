@@ -139,17 +139,30 @@ impl EventDrivenAgentRunner {
     async fn start_agent_run(&self, content: &str, session_id: &str) -> Result<Vec<JunoAgentEvent>, String> {
         info!("Starting event-driven agent run for session: {}", session_id);
         
-        // Transition state machine to processing
-        let state = AgentState::Processing {
-            session_id: session_id.to_string(),
-            current_step: 1,
-            max_steps: self.max_iterations,
-            started_at: now(),
-        };
+        // Check current state before transitioning
+        let current_state = self.state_machine.get_state().await;
         
-        if let Err(e) = self.state_machine.transition_to(state).await {
-            error!("Failed to transition to processing state: {}", e);
-            return Err(e);
+        // If already processing a different session, skip this one
+        if let AgentState::Processing { session_id: existing_id, .. } = &current_state {
+            if existing_id != session_id {
+                warn!("EventDrivenAgentRunner: Skipping agent start - another session {} is already active", existing_id);
+                return Ok(vec![]);
+            }
+            // Same session - already processing, just continue
+            info!("EventDrivenAgentRunner: Session {} already processing, continuing...", session_id);
+        } else {
+            // Not processing, transition to processing state
+            let state = AgentState::Processing {
+                session_id: session_id.to_string(),
+                current_step: 1,
+                max_steps: self.max_iterations,
+                started_at: now(),
+            };
+            
+            if let Err(e) = self.state_machine.transition_to(state).await {
+                error!("Failed to transition to processing state: {}", e);
+                return Err(e);
+            }
         }
         
         // Add user message to memory

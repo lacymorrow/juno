@@ -44,9 +44,14 @@ impl EventSystemManager {
         info!("Initializing event-driven system with all handlers...");
         
         // Register core event handlers in priority order
-        self.register_user_input_handler().await?;
-        self.register_agent_orchestrator().await?;
-        self.register_event_driven_runner().await?;
+        // NOTE: UserInputHandler is disabled to prevent duplicate AgentRunStart events
+        // User input flow is handled by integration.rs -> submit_query which already emits AgentRunStart
+        // self.register_user_input_handler().await?;
+        
+        // NOTE: AgentOrchestrator and EventDrivenRunner are also disabled to prevent duplicate executions
+        // The main agent execution is handled by anthropic.rs execute_agent_internal
+        // self.register_agent_orchestrator().await?;
+        // self.register_event_driven_runner().await?;
         self.register_tool_coordinator().await?;
         self.register_event_driven_tool_executor().await?;
         self.register_event_driven_state_manager().await?;

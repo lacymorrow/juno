@@ -283,8 +283,17 @@ impl AgentStateMachine {
             // To Idle - reset is always allowed
             (_, Idle) => true,
             
-            // Same state transitions (for updates)
-            (Processing { session_id: id1, .. }, Processing { session_id: id2, .. }) => id1 == id2,
+            // Same state transitions (for updates) - but allow different sessions under certain conditions
+            (Processing { session_id: id1, started_at: start1, .. }, Processing { session_id: id2, started_at: start2, .. }) => {
+                if id1 == id2 {
+                    true // Same session ID is always allowed
+                } else {
+                    // Different session IDs - allow if the old session is stale (>100ms old)
+                    // This handles concurrent agent starts from multiple bars
+                    let time_diff = start2.saturating_sub(*start1);
+                    time_diff > 100 // milliseconds
+                }
+            },
             (WaitingForTool { session_id: id1, .. }, WaitingForTool { session_id: id2, .. }) => id1 == id2,
             (Responding { session_id: id1, .. }, Responding { session_id: id2, .. }) => id1 == id2,
             

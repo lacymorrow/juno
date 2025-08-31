@@ -1181,21 +1181,10 @@ async fn execute_agent_internal(
         });
     }
 
-    // --- Emit final stream end event with agent state ---
-    // This ensures the frontend knows the actual outcome of the agent execution
-    let final_stream_handle = app_handle.clone();
-    let final_agent_state = final_response.agent_state.clone();
-    let final_text = final_response.text.clone();
-    tauri::async_runtime::spawn(async move {
-        // Generate a unique message ID for the final stream end event
-        let final_message_id = uuid::Uuid::new_v4().to_string();
-        crate::agent::tool_logger::emit_stream_end_with_state(
-            &final_stream_handle,
-            final_message_id,
-            final_text,
-            final_agent_state,
-        );
-    });
+    // --- REMOVED: Duplicate stream end event ---
+    // The streaming system already emits a stream end event when the agent completes.
+    // This duplicate event was causing messages to appear twice in the UI.
+    // The agent state is already included in the streaming system's stream end event.
 
     // Final response is now fully handled by streaming events
     // The frontend will reconstruct the complete response from stream events
