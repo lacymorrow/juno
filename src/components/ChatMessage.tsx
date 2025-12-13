@@ -22,6 +22,7 @@ import {
 import { useState } from "react";
 import { UI } from "@/lib/constants.generated";
 import { ThinkingMessage } from "./ThinkingMessage";
+import { formatAgentChatErrorText } from "@/lib/error-handling";
 
 // Type for conversation messages (imported from App.tsx)
 export type ChatMessage = {
@@ -142,6 +143,9 @@ export function ChatMessageComponent({
   onCopyResponse,
   onSaveResponse,
 }: ChatMessageProps) {
+  const displayContent =
+    msg.role === "user" || msg.isJsx ? msg.content : formatAgentChatErrorText(msg.content);
+
   // Handle special message types with existing components
   if (msg.role === "thinking") {
     return (
@@ -232,10 +236,10 @@ export function ChatMessageComponent({
           </span>
         ) : msg.isJsx ? (
           <JsxMessageRenderer jsx={msg.content} />
-        ) : msg.role === "assistant" && msg.content ? (
-          <AIResponse>{msg.content}</AIResponse>
+        ) : msg.role === "assistant" && displayContent ? (
+          <AIResponse>{displayContent}</AIResponse>
         ) : (
-          msg.content
+          displayContent
         )}
 
         {msg.screenshot_base64 && (
@@ -264,8 +268,8 @@ export function ChatMessageComponent({
 
         {/* Action buttons for assistant messages */}
         {msg.role === "assistant" &&
-          msg.content &&
-          msg.content.trim() !== "" &&
+          displayContent &&
+          displayContent.trim() !== "" &&
           !msg.isStreaming && (
             <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
               <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
@@ -278,7 +282,7 @@ export function ChatMessageComponent({
                       ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
                       : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
                   )}
-                  onClick={() => onCopyResponse(msg.content, index)}
+                  onClick={() => onCopyResponse(displayContent, index)}
                   disabled={copyingMessageId === `copy-${index}`}
                   title={
                     copyingMessageId === `copy-${index}`
@@ -301,7 +305,7 @@ export function ChatMessageComponent({
                       ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
                       : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
                   )}
-                  onClick={() => onSaveResponse(msg.content, "html", index)}
+                  onClick={() => onSaveResponse(displayContent, "html", index)}
                   disabled={savingMessageId === `save-html-${index}`}
                   title={
                     savingMessageId === `save-html-${index}`
@@ -324,7 +328,7 @@ export function ChatMessageComponent({
                       ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
                       : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
                   )}
-                  onClick={() => onSaveResponse(msg.content, "markdown", index)}
+                  onClick={() => onSaveResponse(displayContent, "markdown", index)}
                   disabled={savingMessageId === `save-markdown-${index}`}
                   title={
                     savingMessageId === `save-markdown-${index}`

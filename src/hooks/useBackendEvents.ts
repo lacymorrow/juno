@@ -6,6 +6,7 @@ import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/components/ChatMessage";
 import { EVENTS } from "@/lib/constants.generated";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { formatAgentChatErrorText } from "@/lib/error-handling";
 
 // Type definitions for backend events
 type SubmitQueryResult = {
@@ -494,7 +495,8 @@ export function useBackendEvents({
 			const { agent_state, error_message } = event.payload;
 
 			setIsProcessing(false);
-			addSystemMessage(`Agent ${agent_state.toLowerCase()}: ${error_message}`);
+			const formattedErrorMessage = formatAgentChatErrorText(error_message);
+			addSystemMessage(`Agent ${agent_state.toLowerCase()}: ${formattedErrorMessage}`);
 		});
 
 		return () => {
