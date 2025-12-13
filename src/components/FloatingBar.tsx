@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Mic,
   Sparkles,
@@ -31,6 +32,8 @@ import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
+import type { BarAppearance } from "@/components/bar/barAppearance";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -109,7 +112,7 @@ const COMPONENT_ID = "floating-bar";
 
 // === MAIN COMPONENT ===
 
-export function FloatingBar() {
+export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   // === STATE MANAGEMENT ===
 
   /**
@@ -132,9 +135,12 @@ export function FloatingBar() {
   });
 
   // === WINDOW CONFIGURATION ===
-
+  const windowLabel = getCurrentWindow().label;
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -209,7 +215,7 @@ export function FloatingBar() {
    * Compact states use small dimensions, expanded states use larger dimensions
    */
   // lastSizeRef not required; managed inside useWindowSize
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   useEffect(() => {
     const resizeWindow = async () => {
       try {

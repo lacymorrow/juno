@@ -102,6 +102,7 @@ pub struct FloatingBarConfig {
     pub auto_hide: bool,
     pub auto_hide_delay: u32,
     pub opacity: f32,
+    pub bar_appearance: String,
 }
 
 impl Default for FloatingBarConfig {
@@ -112,6 +113,7 @@ impl Default for FloatingBarConfig {
             auto_hide: false,
             auto_hide_delay: timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
+            bar_appearance: ui::bar_appearances::FLOATING.to_string(),
         }
     }
 }
@@ -192,6 +194,7 @@ impl UIManager {
             auto_hide: settings.auto_hide,
             auto_hide_delay: settings.auto_hide_delay,
             opacity: settings.opacity,
+            bar_appearance: settings.bar_appearance.clone(),
         }
     }
 
@@ -205,6 +208,7 @@ impl UIManager {
             auto_hide: self.bar_config.auto_hide,
             auto_hide_delay: self.bar_config.auto_hide_delay,
             opacity: self.bar_config.opacity,
+            bar_appearance: self.bar_config.bar_appearance.clone(),
         };
 
         settings_manager.set_floating_bar_settings(&settings).await

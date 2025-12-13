@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 import {
   Mic,
   Volume2,
@@ -115,6 +117,7 @@ const COMPONENT_ID = "voice-ai-bar";
 export function VoiceAIBar({
   className = "",
   sampleResponses: propSampleResponses,
+  barAppearance,
 }: VoiceAIBarProps) {
   // === STATE MANAGEMENT ===
 
@@ -161,8 +164,12 @@ export function VoiceAIBar({
 
   // === WINDOW CONFIGURATION ===
 
+  const windowLabel = getCurrentWindow().label;
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -227,7 +234,7 @@ export function VoiceAIBar({
    * Responsive window resizing based on UI state
    * Compact states use small dimensions, expanded states use larger dimensions
    */
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   useEffect(() => {
     const resizeWindow = async () => {
       try {

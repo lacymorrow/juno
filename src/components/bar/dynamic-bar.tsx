@@ -16,6 +16,9 @@ import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { BarAppearance } from "@/components/bar/barAppearance";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 
 // Debounce utility
 function debounce<T extends (...args: any[]) => any>(
@@ -265,8 +268,13 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
   );
 };
 
-const AIFloatingChatbot = () => {
+const AIFloatingChatbot = ({
+  barAppearance,
+}: {
+  barAppearance?: BarAppearance;
+}) => {
   const { setSize } = useDynamicIslandSize();
+  const windowLabel = getCurrentWindow().label;
 
   // === STATE MANAGEMENT ===
 
@@ -295,8 +303,11 @@ const AIFloatingChatbot = () => {
 
   // === WINDOW CONFIGURATION ===
 
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -526,7 +537,7 @@ const AIFloatingChatbot = () => {
   /**
    * Enhanced window resizing with smooth transitions and content awareness
    */
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
 
   const debouncedResizeWindow = useMemo(
     () =>
@@ -690,11 +701,11 @@ const AIFloatingChatbot = () => {
   );
 };
 
-export function DynamicBar() {
+export function DynamicBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   return (
     <DynamicIslandProvider initialSize={"default"}>
       <div className="h-full w-full bg-transparent">
-        <AIFloatingChatbot />
+        <AIFloatingChatbot barAppearance={barAppearance} />
       </div>
     </DynamicIslandProvider>
   );
