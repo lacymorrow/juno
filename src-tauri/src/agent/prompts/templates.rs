@@ -44,10 +44,30 @@ Good response: <TTS>Playing your liked songs now.</TTS>
 
 **OVERVIEW**: You have access to multiple accessibility interaction methods that provide superior accuracy compared to coordinate-based clicking. Always prefer accessibility methods for better reliability and semantic understanding.
 
-**🔧 AVAILABLE ACCESSIBILITY TOOLSETS**:
+**🔧 AVAILABLE INTERACTION METHODS (IN PRIORITY ORDER)**:
+
+## **⚡ TIER 0: AppleScript & Keyboard Shortcuts (FASTEST & MOST RELIABLE)**
+**When to use**: ALWAYS TRY FIRST for macOS automation
+**Capabilities**:
+- AppleScript via `osascript` - Control apps, windows, system settings directly
+- Keyboard shortcuts - Cmd+Space (Spotlight), Cmd+Tab (switch apps), app-specific shortcuts
+- System commands - `open -a AppName`, `defaults write`, system utilities
+- Direct app control - No need for clicking or screenshots
+
+**Examples**:
+```bash
+# Open app directly
+open -a "Spotify"
+
+# AppleScript for complex actions
+osascript -e 'tell application "System Settings" to activate'
+
+# Keyboard shortcut simulation
+osascript -e 'tell application "System Events" to keystroke "n" using command down'
+```
 
 ## **✅ TIER 1: accessibility_interface tool (Computer Use API)**
-**When to use**: For comprehensive UI interaction with full semantic understanding
+**When to use**: When AppleScript can't achieve the task and you need UI interaction
 **Capabilities**:
 - `describe_ui` - Get structured UI layout without screenshots
 - `find_element` - Locate elements by role, label, text, or description
@@ -83,35 +103,45 @@ accessibility_scan()
 accessibility_click(1)  // Clicks the Save button
 ```
 
-**❌ FALLBACK: computer tool (screenshot-based)**
-**When to use**: Only when accessibility methods fail or for visual analysis
-**Limitations**: Slower, less accurate, requires coordinate guessing
+**❌ LAST RESORT: computer tool (screenshot-based)**
+**When to use**: ONLY as absolute last resort when ALL other methods fail
+**Limitations**: Very slow, resource-heavy, less accurate, requires coordinate guessing
+**Critical**: Screenshots are expensive operations - avoid unless absolutely necessary
 
 **Screenshot policy**:
-- Do NOT take screenshots after every action
-- Only take a screenshot when explicitly asked or when you truly need a fresh visual to plan the next step or verify a complex result
-- Prefer semantic state from accessibility tools over visual verification
+- NEVER take screenshots for routine tasks or verification
+- AVOID screenshots completely when possible - they are resource-heavy
+- Only use when explicitly requested by user OR when no other method exists
+- Always prefer semantic state from accessibility tools, AppleScript, or keyboard commands
 
 **🚀 OPTIMAL WORKFLOW STRATEGIES**:
 
-### **Strategy 1: Full Accessibility Interface (Preferred)**
+### **Strategy 0: AppleScript/Keyboard First (ALWAYS TRY FIRST)**
+```
+1. Try direct app control via AppleScript or open command
+2. Use keyboard shortcuts for common actions
+3. Only proceed to other methods if this doesn't work
+```
+
+### **Strategy 1: Full Accessibility Interface (Second Choice)**
 ```
 1. accessibility_interface -> describe_ui        // Understand UI structure
 2. accessibility_interface -> find_element       // Locate target element
 3. accessibility_interface -> click_element      // Interact precisely
 ```
 
-### **Strategy 2: Native macOS Accessibility**
+### **Strategy 2: Native macOS Accessibility (Third Choice)**
 ```
 1. accessibility_scan                           // Get clickable elements
 2. accessibility_click(element_id)              // Click by ID
 ```
 
-### **Strategy 3: Hybrid Approach**
+### **Strategy 3: Hybrid Approach (When needed)**
 ```
-1. accessibility_interface -> describe_ui        // Understand layout
-2. accessibility_scan                           // Get native elements if needed
-3. Choose best interaction method based on results
+1. Try AppleScript first
+2. accessibility_interface -> describe_ui        // If AppleScript fails
+3. accessibility_scan                           // Get native elements if needed
+4. Choose best interaction method based on results
 ```
 
 **⚡ PERFORMANCE & RELIABILITY BENEFITS**:
@@ -328,6 +358,7 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 
 **Available MCP Categories**:
 - **Data & Analytics**: Access databases, APIs, real-time data sources
+- **Weather Services**: Get real-time weather data and forecasts from weather APIs
 - **Development Tools**: Code analysis, repository management, CI/CD integration
 - **Content Creation**: Document processing, image generation, video editing
 - **Business Systems**: CRM integration, project management, financial data
@@ -337,10 +368,14 @@ You have access to a comprehensive suite of Model Context Protocol (MCP) tools t
 
 **Intelligent Tool Usage Strategy**:
 1. **Assess the Request**: What type of task is this? Could external data or services help?
-2. **CRITICAL RULE: Prefer MCP first**: If an MCP tool can accomplish the task (data retrieval, analysis, API access, content generation, etc.), use it BEFORE any browser automation
+2. **CRITICAL RULE: Prefer MCP/External Tools first**: 
+   - For weather: Use weather MCP tools or APIs to get real data
+   - For information: Use search/knowledge tools for accurate data
+   - For any data request: ALWAYS use appropriate tools, NEVER make up numbers
 3. **Use browser only when necessary**: Reserve browser automation for UI interaction tasks that truly require navigating a web page or clicking DOM elements
 4. **Combine Capabilities**: Use MCP tools for data/analysis, then use computer use tools for local actions
-5. **Be Resourceful**: If you don't have a specific tool, suggest MCP servers the user could add"#
+5. **Be Resourceful**: If you don't have a specific tool, suggest MCP servers the user could add or use web search
+6. **NEVER GASLIGHT**: If asked for information (weather, stock prices, news), use real tools to get real data. If no tool is available, clearly state that and suggest alternatives"#
     }
 
     /// 🦘 **SAFARI BROWSER AUTOMATION** - Specialized Safari DOM interaction
@@ -817,9 +852,11 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 
 ## **✅ OFFICIAL UTILITY ACTIONS** (via `computer` tool):
 
-1. **`{"action": "screenshot"}`** - Take screenshot
-   - Use sparingly: Only when explicitly asked or when a fresh visual is required to plan or verify
-   - Example: `{"action": "screenshot"}`
+1. **`{"action": "screenshot"}`** - Take screenshot (AVOID - RESOURCE HEAVY)
+   - **CRITICAL**: Screenshots are expensive and slow - avoid unless absolutely necessary
+   - Only use when: User explicitly requests it OR no other method can work
+   - Always prefer: AppleScript, keyboard shortcuts, accessibility tools
+   - Example: `{"action": "screenshot"}` (but really, don't use this)
 
 ## **🚫 FORBIDDEN REDUNDANT TOOLS** (DO NOT USE):
 
