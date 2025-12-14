@@ -61,7 +61,7 @@ impl ComposedAgent {
 impl ModelInterface for ComposedAgent {
     async fn generate(&self, prompt: String, images: Option<Vec<Vec<u8>>>) -> Result<String> {
         // Composed generation: first ground UI, then plan
-        if let Some(imgs) = images {
+        if let Some(imgs) = &images {
             if !imgs.is_empty() {
                 let ui_elements = self.ground_ui_elements(imgs[0].clone()).await?;
                 return self.plan_action(ui_elements, prompt).await;
