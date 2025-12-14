@@ -33,6 +33,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::{audio, events, errors::templates};
 use crate::utils::string_cache::format_error_cached;
 use crate::utils::rate_limiter::GlobalRateLimiters;
+use crate::commands::unrestricted_computer::UnrestrictedConfig;
 
 // Helper function for error formatting - uses cached templates for better performance
 fn format_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
@@ -302,6 +303,10 @@ pub struct AppState {
     pub mcp_manager: Arc<TokioMutex<MCPManager>>,
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
+    
+    // Unrestricted mode configuration
+    pub unrestricted_mode: Arc<StdMutex<bool>>,
+    pub unrestricted_config: Arc<StdMutex<UnrestrictedConfig>>,
 
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
@@ -375,6 +380,10 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            
+            // Initialize unrestricted mode (disabled by default for safety)
+            unrestricted_mode: Arc::new(StdMutex::new(false)),
+            unrestricted_config: Arc::new(StdMutex::new(UnrestrictedConfig::default())),
 
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
@@ -1724,6 +1733,39 @@ impl AppState {
     pub async fn clear_pending_tool_approvals(&self) {
         let mut pending_guard = self.pending_tool_approvals.lock().await;
         pending_guard.clear();
+    }
+    
+    // Unrestricted mode control methods
+    pub fn enable_unrestricted_mode(&self) {
+        if let Ok(mut mode) = self.unrestricted_mode.lock() {
+            *mode = true;
+            info!("Unrestricted mode ENABLED - Full system access granted");
+        }
+    }
+    
+    pub fn disable_unrestricted_mode(&self) {
+        if let Ok(mut mode) = self.unrestricted_mode.lock() {
+            *mode = false;
+            info!("Unrestricted mode DISABLED - Normal security enforced");
+        }
+    }
+    
+    pub fn is_unrestricted_mode(&self) -> bool {
+        self.unrestricted_mode.lock()
+            .map(|mode| *mode)
+            .unwrap_or(false)
+    }
+    
+    pub fn set_unrestricted_config(&self, config: UnrestrictedConfig) {
+        if let Ok(mut current_config) = self.unrestricted_config.lock() {
+            *current_config = config;
+        }
+    }
+    
+    pub fn get_unrestricted_config(&self) -> UnrestrictedConfig {
+        self.unrestricted_config.lock()
+            .map(|config| config.clone())
+            .unwrap_or_default()
     }
 }
 

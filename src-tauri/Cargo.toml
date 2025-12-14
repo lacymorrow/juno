@@ -91,6 +91,9 @@ ring = "0.17"
 rustls = "0.23"
 hmac = "0.12"
 sha2 = "0.10"
+anyhow = "1.0"
+imageproc = "0.25"
+rusttype = "0.9"
 toml = "0.8"
 url = "2.4"
 gethostname = "0.4"
@@ -103,6 +106,8 @@ lru = "0.12"
 walkdir = "2.4"
 # System-level utilities for shell session management
 libc = "0.2"
+
+# Model provider dependencies (futures-util already included above)
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

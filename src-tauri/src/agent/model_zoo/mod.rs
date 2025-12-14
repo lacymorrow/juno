@@ -1,7 +1,6 @@
 // Model Zoo - Comprehensive AI model support system
 // Similar to CUA's liteLLM integration but native to Juno
 
-use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -39,8 +38,8 @@ pub enum ModelProvider {
 
 #[async_trait]
 pub trait ModelInterface: Send + Sync {
-    async fn generate(&self, prompt: String, images: Option<Vec<Vec<u8>>>) -> Result<String>;
-    async fn stream_generate(&self, prompt: String) -> Result<tokio::sync::mpsc::Receiver<String>>;
+    async fn generate(&self, prompt: String, images: Option<Vec<Vec<u8>>>) -> Result<String, String>;
+    async fn stream_generate(&self, prompt: String) -> Result<tokio::sync::mpsc::Receiver<String>, String>;
     fn supports_vision(&self) -> bool;
     fn supports_tools(&self) -> bool;
     fn get_context_window(&self) -> usize;
@@ -139,10 +138,10 @@ impl ModelZoo {
         }
     }
 
-    pub async fn get_model(&self, model_string: &str) -> Result<&Box<dyn ModelInterface>> {
+    pub async fn get_model(&self, model_string: &str) -> Result<&Box<dyn ModelInterface>, String> {
         self.models
             .get(model_string)
-            .ok_or_else(|| anyhow::anyhow!("Model {} not found", model_string))
+            .ok_or_else(|| format!("Model {} not found", model_string))
     }
 
     pub fn parse_model_string(model_string: &str) -> ModelConfig {
@@ -204,7 +203,7 @@ impl ModelZoo {
 pub struct ModelFactory;
 
 impl ModelFactory {
-    pub async fn create(config: ModelConfig) -> Result<Box<dyn ModelInterface>> {
+    pub async fn create(config: ModelConfig) -> Result<Box<dyn ModelInterface>, String> {
         match config.provider {
             ModelProvider::Anthropic => {
                 Ok(Box::new(providers::anthropic::AnthropicModel::new(config).await?))
@@ -228,7 +227,7 @@ impl ModelFactory {
                     config
                 ).await?))
             },
-            _ => Err(anyhow::anyhow!("Provider not yet implemented")),
+            _ => Err("Provider not yet implemented".to_string()),
         }
     }
 }

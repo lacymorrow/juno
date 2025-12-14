@@ -53,6 +53,7 @@ pub mod stop_operations;
 pub mod testing;
 pub mod text_editor;
 pub mod tool_choice;
+pub mod unrestricted;
 pub mod tools;
 pub mod tray_commands;
 pub mod ui_commands; // Consolidated UI API for all floating elements
@@ -111,6 +112,7 @@ pub use self::sound::*;
 pub use self::stop_operations::*;
 pub use self::tool_choice::*;
 pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
+pub use self::unrestricted::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

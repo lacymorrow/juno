@@ -1,3 +1,8 @@
+// Local Model Providers
+
 pub mod ollama;
 pub mod huggingface;
-pub mod llama_cpp;
+
+// Re-export for easy access
+pub use ollama::OllamaModel;
+pub use huggingface::HuggingFaceModel;

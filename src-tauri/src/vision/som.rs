@@ -1,7 +1,5 @@
 // Set-of-Mark (SOM) Visual Grounding System
 // Similar to CUA's YOLO + EasyOCR implementation
-
-use anyhow::Result;
 use image::{DynamicImage, GenericImageView};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -104,7 +102,7 @@ pub struct SOMProcessor {
 }
 
 impl SOMProcessor {
-    pub async fn new(use_gpu: bool) -> Result<Self> {
+    pub async fn new(use_gpu: bool) -> Result<Self, String> {
         let yolo_model = YOLOModel::load(use_gpu).await.ok();
         let ocr_engine = OCREngine::new(use_gpu).await.ok();
         let icon_detector = IconDetector::new().await.ok();
@@ -117,7 +115,7 @@ impl SOMProcessor {
         })
     }
     
-    pub async fn process_screenshot(&self, image: &DynamicImage) -> Result<SOMResult> {
+    pub async fn process_screenshot(&self, image: &DynamicImage) -> Result<SOMResult, String> {
         let start_time = std::time::Instant::now();
         let (width, height) = image.dimensions();
         
@@ -149,7 +147,7 @@ impl SOMProcessor {
         })
     }
     
-    async fn detect_ui_elements(&self, image: &DynamicImage) -> Result<Vec<UIElement>> {
+    async fn detect_ui_elements(&self, image: &DynamicImage) -> Result<Vec<UIElement>, String> {
         let mut elements = Vec::new();
         
         // Use YOLO for general UI element detection
@@ -174,7 +172,7 @@ impl SOMProcessor {
         Ok(elements)
     }
     
-    async fn extract_text(&self, image: &DynamicImage) -> Result<Vec<TextRegion>> {
+    async fn extract_text(&self, image: &DynamicImage) -> Result<Vec<TextRegion>, String> {
         if let Some(ocr) = &self.ocr_engine {
             ocr.extract_text(image).await
         } else {
@@ -240,7 +238,7 @@ impl SOMProcessor {
         image: &DynamicImage,
         elements: &[UIElement],
         text_regions: &[TextRegion]
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Vec<u8>, String> {
         use image::{Rgba, RgbaImage};
         use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
         use imageproc::rect::Rect;
@@ -288,13 +286,13 @@ impl SOMProcessor {
                 annotated.width(),
                 annotated.height(),
                 image::ColorType::Rgba8
-            )?;
+            ).map_err(|e| e.to_string())?;
         
         Ok(buffer)
     }
     
     #[cfg(target_os = "macos")]
-    async fn detect_with_accessibility_api(&self) -> Result<Vec<UIElement>> {
+    async fn detect_with_accessibility_api(&self) -> Result<Vec<UIElement>, String> {
         // Use macOS Accessibility API to detect UI elements
         // This provides more accurate detection for native apps
         Ok(Vec::new()) // Placeholder
@@ -339,12 +337,12 @@ struct YOLOModel {
 }
 
 impl YOLOModel {
-    async fn load(use_gpu: bool) -> Result<Self> {
+    async fn load(use_gpu: bool) -> Result<Self, String> {
         // Load YOLO model weights
         Ok(Self { use_gpu })
     }
     
-    async fn detect(&self, image: &DynamicImage) -> Result<Vec<UIElement>> {
+    async fn detect(&self, image: &DynamicImage) -> Result<Vec<UIElement>, String> {
         // Run YOLO inference
         // This is a placeholder - real implementation would use actual YOLO
         Ok(Vec::new())
@@ -357,11 +355,11 @@ struct OCREngine {
 }
 
 impl OCREngine {
-    async fn new(use_gpu: bool) -> Result<Self> {
+    async fn new(use_gpu: bool) -> Result<Self, String> {
         Ok(Self { use_gpu })
     }
     
-    async fn extract_text(&self, image: &DynamicImage) -> Result<Vec<TextRegion>> {
+    async fn extract_text(&self, image: &DynamicImage) -> Result<Vec<TextRegion>, String> {
         // Run OCR
         // This is a placeholder - real implementation would use EasyOCR or similar
         Ok(Vec::new())
@@ -372,11 +370,11 @@ impl OCREngine {
 struct IconDetector;
 
 impl IconDetector {
-    async fn new() -> Result<Self> {
+    async fn new() -> Result<Self, String> {
         Ok(Self)
     }
     
-    async fn detect(&self, image: &DynamicImage) -> Result<Vec<UIElement>> {
+    async fn detect(&self, image: &DynamicImage) -> Result<Vec<UIElement>, String> {
         // Detect specific icons
         Ok(Vec::new())
     }

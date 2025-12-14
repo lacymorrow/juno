@@ -1,7 +1,6 @@
 // Advanced Sandboxing System - Process isolation without VMs
 // Provides CUA-like isolation using OS-native sandboxing
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -64,7 +63,7 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    pub async fn new(config: SandboxConfig) -> Result<Self> {
+    pub async fn new(config: SandboxConfig) -> Result<Self, String> {
         let workspace = workspace::Workspace::new(&config.workspace_id).await?;
         
         #[cfg(target_os = "macos")]
@@ -100,9 +99,9 @@ impl Sandbox {
         })
     }
     
-    pub async fn execute_sandboxed<F, R>(&self, func: F) -> Result<R>
+    pub async fn execute_sandboxed<F, R>(&self, func: F) -> Result<R, String>
     where
-        F: FnOnce() -> Result<R> + Send + 'static,
+        F: FnOnce() -> Result<R, String> + Send + 'static,
         R: Send + 'static,
     {
         match self.config.isolation_level {
@@ -111,9 +110,9 @@ impl Sandbox {
         }
     }
     
-    async fn execute_isolated<F, R>(&self, func: F) -> Result<R>
+    async fn execute_isolated<F, R>(&self, func: F) -> Result<R, String>
     where
-        F: FnOnce() -> Result<R> + Send + 'static,
+        F: FnOnce() -> Result<R, String> + Send + 'static,
         R: Send + 'static,
     {
         // Platform-specific sandboxing
@@ -140,7 +139,7 @@ mod macos {
     }
     
     impl SandboxProfile {
-        pub async fn create(config: &SandboxConfig) -> Result<Self> {
+        pub async fn create(config: &SandboxConfig) -> Result<Self, String> {
             let profile = Self::generate_profile(config)?;
             let profile_path = Self::write_profile(&profile).await?;
             
@@ -150,7 +149,7 @@ mod macos {
             })
         }
         
-        fn generate_profile(config: &SandboxConfig) -> Result<String> {
+        fn generate_profile(config: &SandboxConfig) -> Result<String, String> {
             // Generate sandbox profile based on config
             let mut profile = String::from("(version 1)\n(deny default)\n");
             
@@ -232,7 +231,7 @@ mod windows {
     }
     
     impl AppContainer {
-        pub async fn create(config: &SandboxConfig) -> Result<Self> {
+        pub async fn create(config: &SandboxConfig) -> Result<Self, String> {
             // Create Windows AppContainer
             let container_name = format!("JunoSandbox_{}", config.workspace_id);
             
@@ -278,7 +277,7 @@ mod linux {
     }
     
     impl Namespace {
-        pub async fn create(config: &SandboxConfig) -> Result<Self> {
+        pub async fn create(config: &SandboxConfig) -> Result<Self, String> {
             Ok(Self {
                 pid_namespace: config.isolation_level == IsolationLevel::Strict,
                 net_namespace: !config.network_access.allow_network,

@@ -2,11 +2,12 @@
 // This provides a unified interface for all mouse, keyboard, and screen operations
 
 use crate::state::AppState;
-use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
-use tracing::{error, info};
+use tracing::info;
 use crate::commands::core::ScreenshotResult as CoreScreenshotResult;
+
+pub mod unrestricted_computer;
 
 /// Computer action input structure matching the official Anthropic Computer Use API
 #[derive(Debug, Deserialize)]
@@ -44,6 +45,13 @@ pub async fn computer(
 ) -> Result<ComputerResult, String> {
     info!("Computer command called with action: {}", input.action);
 
+    // Check if unrestricted mode is enabled - bypass all restrictions if so
+    if state.is_unrestricted_mode() {
+        info!("Unrestricted mode active - bypassing all restrictions for action: {}", input.action);
+        // Execute the action without any rate limiting or restrictions
+        return execute_computer_action_unrestricted(input, app_handle, state).await;
+    }
+
     // Apply rate limiting based on action type
     match input.action.as_str() {
         "screenshot" => {
@@ -58,429 +66,462 @@ pub async fn computer(
             }
         }
         _ => {
-            // No rate limiting for other operations like mouse movements
+            // Apply general rate limiting for other actions
+            if let Err(e) = state.rate_limiters.shell_commands.check("default_user").await {
+                return Err(e.to_user_message());
+            }
         }
     }
 
-    let result = match input.action.as_str() {
-        "screenshot" => handle_screenshot(&app_handle, &state).await,
-        "click" => handle_click(&input, &app_handle, state).await,
-        "right_click" => handle_right_click(&input, &app_handle, state).await,
-        "middle_click" => handle_middle_click(&input, &app_handle, state).await,
-        "double_click" => handle_double_click(&input, &app_handle, state).await,
-        "triple_click" => handle_triple_click(&input, &app_handle, state).await,
-        "left_click_drag" => handle_drag(&input, &app_handle, state).await,
-        "move" => handle_move(&input, &app_handle, state).await,
-        "scroll" => handle_scroll(&input, &app_handle, state).await,
-        "type" => handle_type(&input, &app_handle, state).await,
-        "key" => handle_key(&input, &app_handle, state).await,
-        "hold_key" => handle_hold_key(&input, &app_handle, state).await,
-        "wait" => handle_wait(&input).await,
-        "cursor_position" => handle_cursor_position(&app_handle, state).await,
-        _ => {
-            let error_msg = format!("Unknown computer action: {}", input.action);
-            error!("{}", error_msg);
-            Err(error_msg)
-        }
-    };
+    // Execute the computer action
+    execute_computer_action(input, app_handle, state).await
+}
 
-    match result {
-        Ok(mut computer_result) => {
-            info!("Computer action '{}' completed successfully", input.action);
-            computer_result.success = true;
-            computer_result.action = input.action.clone();
-            Ok(computer_result)
-        }
-        Err(e) => {
-            error!("Computer action '{}' failed: {}", input.action, e);
+/// Execute a computer action - internal implementation
+async fn execute_computer_action(
+    input: ComputerInput,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    use crate::commands::core;
+    
+    match input.action.as_str() {
+        "screenshot" => {
+            let result = core::capture_screenshot_command(app_handle, state).await?;
             Ok(ComputerResult {
-                success: false,
-                action: input.action.clone(),
-                message: None,
-                screenshot: None,
-                error: Some(e),
+                success: true,
+                action: "screenshot".to_string(),
+                message: Some("Screenshot captured successfully".to_string()),
+                screenshot: Some(result),
+                error: None,
                 coordinate: None,
+            })
+        }
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
+            if let Some(coord) = input.coordinate {
+                if coord.len() < 2 {
+                    return Err("Coordinate must have at least x and y values".to_string());
+                }
+                let x = coord[0];
+                let y = coord[1];
+                
+                let message = match input.action.as_str() {
+                    "left_click" => {
+                        state.desktop.left_click(x, y, None)
+                            .map_err(|e| format!("Failed to left click: {}", e))?;
+                        format!("Left clicked at ({}, {})", x, y)
+                    }
+                    "right_click" => {
+                        state.desktop.right_click(x, y, None)
+                            .map_err(|e| format!("Failed to right click: {}", e))?;
+                        format!("Right clicked at ({}, {})", x, y)
+                    }
+                    "middle_click" => {
+                        state.desktop.middle_click(x, y, None)
+                            .map_err(|e| format!("Failed to middle click: {}", e))?;
+                        format!("Middle clicked at ({}, {})", x, y)
+                    }
+                    "double_click" => {
+                        state.desktop.double_click(x, y, None)
+                            .map_err(|e| format!("Failed to double click: {}", e))?;
+                        format!("Double clicked at ({}, {})", x, y)
+                    }
+                    "triple_click" => {
+                        state.desktop.triple_click(x, y, None)
+                            .map_err(|e| format!("Failed to triple click: {}", e))?;
+                        format!("Triple clicked at ({}, {})", x, y)
+                    }
+                    _ => unreachable!(),
+                };
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: input.action,
+                    message: Some(message),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![x, y]),
+                })
+            } else {
+                Err("Coordinate is required for click actions".to_string())
+            }
+        }
+        "type" => {
+            if let Some(text) = input.text {
+                use crate::commands::keyboard;
+                keyboard::type_text(text.clone(), app_handle.clone(), state.clone()).await?;
+                Ok(ComputerResult {
+                    success: true,
+                    action: "type".to_string(),
+                    message: Some(format!("Typed text: {}", text)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: None,
+                })
+            } else {
+                Err("Text is required for type action".to_string())
+            }
+        }
+        "key" => {
+            if let Some(key) = input.text {
+                use crate::commands::keyboard;
+                keyboard::press_key(key.clone(), None, app_handle.clone(), state.clone()).await?;
+                Ok(ComputerResult {
+                    success: true,
+                    action: "key".to_string(),
+                    message: Some(format!("Pressed key: {}", key)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: None,
+                })
+            } else {
+                Err("Key is required for key action".to_string())
+            }
+        }
+        "mouse_move" => {
+            if let Some(coord) = input.coordinate {
+                if coord.len() < 2 {
+                    return Err("Coordinate must have at least x and y values".to_string());
+                }
+                let x = coord[0];
+                let y = coord[1];
+                
+                state.desktop.mouse_move(x, y)
+                    .map_err(|e| format!("Failed to move mouse: {}", e))?;
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: "mouse_move".to_string(),
+                    message: Some(format!("Mouse moved to ({}, {})", x, y)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![x, y]),
+                })
+            } else {
+                Err("Coordinate is required for mouse_move action".to_string())
+            }
+        }
+        "scroll" => {
+            let direction = input.scroll_direction.as_deref().unwrap_or("down");
+            let count = input.scroll_count.unwrap_or(5);
+            
+            // Optionally move mouse first
+            if let Some(coord) = &input.coordinate {
+                if coord.len() >= 2 {
+                    let x = coord[0];
+                    let y = coord[1];
+                    state.desktop.mouse_move(x, y)
+                        .map_err(|e| format!("Failed to move mouse: {}", e))?;
+                }
+            }
+            
+            // Execute scroll
+            use crate::commands::window::scroll_window;
+            let (x, y) = if let Some(coord) = &input.coordinate {
+                if coord.len() >= 2 {
+                    (Some(coord[0]), Some(coord[1]))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+            
+            scroll_window(direction.to_string(), count as f64, x, y, app_handle.clone(), state.clone()).await?;
+            
+            Ok(ComputerResult {
+                success: true,
+                action: "scroll".to_string(),
+                message: Some(format!("Scrolled {} {} times", direction, count)),
+                screenshot: None,
+                error: None,
+                coordinate: input.coordinate,
+            })
+        }
+        "wait" => {
+            let duration = input.duration.unwrap_or(1000);
+            
+            // Limit wait time in normal mode
+            let max_wait = 30000; // 30 seconds max
+            let actual_duration = duration.min(max_wait);
+            
+            tokio::time::sleep(tokio::time::Duration::from_millis(actual_duration)).await;
+            
+            Ok(ComputerResult {
+                success: true,
+                action: "wait".to_string(),
+                message: Some(format!("Waited {} ms", actual_duration)),
+                screenshot: None,
+                error: None,
+                coordinate: None,
+            })
+        }
+        "drag" => {
+            if let Some(coord) = input.coordinate {
+                if coord.len() < 2 {
+                    return Err("Coordinate must have at least x and y values".to_string());
+                }
+                let end_x = coord[0];
+                let end_y = coord[1];
+                
+                // Get current cursor position for start point
+                let (start_x, start_y) = state.desktop.cursor_position()
+                    .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+                
+                // Perform drag
+                state.desktop.left_click_drag(start_x, start_y, end_x, end_y)
+                    .map_err(|e| format!("Failed to drag: {}", e))?;
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: "drag".to_string(),
+                    message: Some(format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![end_x, end_y]),
+                })
+            } else {
+                Err("Coordinate is required for drag action".to_string())
+            }
+        }
+        _ => {
+            Err(format!("Unsupported action: {}", input.action))
+        }
+    }
+}
+
+/// Execute computer action in unrestricted mode - bypasses all restrictions
+async fn execute_computer_action_unrestricted(
+    input: ComputerInput,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    use crate::commands::core;
+    use crate::commands::keyboard;
+    
+    info!("Executing unrestricted computer action: {}", input.action);
+    
+    // Same implementation as execute_computer_action but without any checks
+    // No rate limiting, no permission checks, no validation
+    match input.action.as_str() {
+        "screenshot" => {
+            // Direct screenshot without any restrictions
+            let result = core::capture_screenshot_command(app_handle, state).await?;
+            Ok(ComputerResult {
+                success: true,
+                action: "screenshot".to_string(),
+                message: Some("Screenshot captured (unrestricted)".to_string()),
+                screenshot: Some(result),
+                error: None,
+                coordinate: None,
+            })
+        }
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
+            if let Some(coord) = input.coordinate {
+                // No coordinate validation in unrestricted mode
+                let x = coord[0];
+                let y = coord[1];
+                
+                let message = match input.action.as_str() {
+                    "left_click" => {
+                        // Direct click without smooth movement or delays
+                        state.desktop.left_click(x, y, None)
+                            .map_err(|e| format!("Failed to left click: {}", e))?;
+                        format!("Left clicked at ({}, {}) (unrestricted)", x, y)
+                    }
+                    "right_click" => {
+                        state.desktop.right_click(x, y, None)
+                            .map_err(|e| format!("Failed to right click: {}", e))?;
+                        format!("Right clicked at ({}, {}) (unrestricted)", x, y)
+                    }
+                    "middle_click" => {
+                        state.desktop.middle_click(x, y, None)
+                            .map_err(|e| format!("Failed to middle click: {}", e))?;
+                        format!("Middle clicked at ({}, {}) (unrestricted)", x, y)
+                    }
+                    "double_click" => {
+                        state.desktop.double_click(x, y, None)
+                            .map_err(|e| format!("Failed to double click: {}", e))?;
+                        format!("Double clicked at ({}, {}) (unrestricted)", x, y)
+                    }
+                    "triple_click" => {
+                        state.desktop.triple_click(x, y, None)
+                            .map_err(|e| format!("Failed to triple click: {}", e))?;
+                        format!("Triple clicked at ({}, {}) (unrestricted)", x, y)
+                    }
+                    _ => unreachable!(),
+                };
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: input.action,
+                    message: Some(message),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![x, y]),
+                })
+            } else {
+                // Even in unrestricted mode, we need coordinates for clicks
+                Err("Coordinate is required for click actions".to_string())
+            }
+        }
+        "type" => {
+            if let Some(text) = input.text {
+                // Type without any filtering or validation
+                keyboard::type_text(text.clone(), app_handle.clone(), state.clone()).await?;
+                Ok(ComputerResult {
+                    success: true,
+                    action: "type".to_string(),
+                    message: Some(format!("Typed text (unrestricted): {}", text)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: None,
+                })
+            } else {
+                Err("Text is required for type action".to_string())
+            }
+        }
+        "key" => {
+            if let Some(key) = input.text {
+                // Press any key without validation
+                keyboard::press_key(key.clone(), None, app_handle.clone(), state.clone()).await?;
+                Ok(ComputerResult {
+                    success: true,
+                    action: "key".to_string(),
+                    message: Some(format!("Pressed key (unrestricted): {}", key)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: None,
+                })
+            } else {
+                Err("Key is required for key action".to_string())
+            }
+        }
+        "mouse_move" => {
+            if let Some(coord) = input.coordinate {
+                let x = coord[0];
+                let y = coord[1];
+                
+                // Move mouse instantly without smooth movement
+                state.desktop.mouse_move(x, y)
+                    .map_err(|e| format!("Failed to move mouse: {}", e))?;
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: "mouse_move".to_string(),
+                    message: Some(format!("Mouse moved to ({}, {}) (unrestricted)", x, y)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![x, y]),
+                })
+            } else {
+                Err("Coordinate is required for mouse_move action".to_string())
+            }
+        }
+        "scroll" => {
+            let direction = input.scroll_direction.as_deref().unwrap_or("down");
+            let count = input.scroll_count.unwrap_or(5);
+            
+            // Scroll without restrictions
+            if let Some(ref coord) = input.coordinate {
+                let x = coord[0];
+                let y = coord[1];
+                state.desktop.mouse_move(x, y)
+                    .map_err(|e| format!("Failed to move mouse: {}", e))?;
+            }
+            
+            // Execute scroll using the scroll command
+            use crate::commands::window::scroll_window;
+            scroll_window(direction.to_string(), count as f64, None, None, app_handle.clone(), state.clone()).await?;
+            
+            Ok(ComputerResult {
+                success: true,
+                action: "scroll".to_string(),
+                message: Some(format!("Scrolled {} {} times (unrestricted)", direction, count)),
+                screenshot: None,
+                error: None,
+                coordinate: input.coordinate,
+            })
+        }
+        "wait" => {
+            let duration = input.duration.unwrap_or(1000);
+            
+            // Wait without any limits
+            tokio::time::sleep(tokio::time::Duration::from_millis(duration)).await;
+            
+            Ok(ComputerResult {
+                success: true,
+                action: "wait".to_string(),
+                message: Some(format!("Waited {} ms (unrestricted)", duration)),
+                screenshot: None,
+                error: None,
+                coordinate: None,
+            })
+        }
+        "drag" => {
+            if let Some(coord) = input.coordinate {
+                let end_x = coord[0];
+                let end_y = coord[1];
+                
+                // Get current cursor position for start point
+                let (start_x, start_y) = state.desktop.cursor_position()
+                    .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+                
+                // Perform drag without restrictions
+                state.desktop.left_click_drag(start_x, start_y, end_x, end_y)
+                    .map_err(|e| format!("Failed to drag: {}", e))?;
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: "drag".to_string(),
+                    message: Some(format!("Dragged from ({}, {}) to ({}, {}) (unrestricted)", start_x, start_y, end_x, end_y)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: Some(vec![end_x, end_y]),
+                })
+            } else {
+                Err("Coordinate is required for drag action".to_string())
+            }
+        }
+        // Special unrestricted-only actions
+        "execute_system_command" => {
+            // This action is only available in unrestricted mode
+            if let Some(command) = input.text {
+                let computer = unrestricted_computer::UnrestrictedComputer::new();
+                let _output = computer.execute_system_command(&command, vec![]).await?;
+                
+                Ok(ComputerResult {
+                    success: true,
+                    action: "execute_system_command".to_string(),
+                    message: Some(format!("Executed system command: {}", command)),
+                    screenshot: None,
+                    error: None,
+                    coordinate: None,
+                })
+            } else {
+                Err("Command is required for execute_system_command action".to_string())
+            }
+        }
+        _ => {
+            // In unrestricted mode, attempt to execute any action
+            info!("Attempting unrestricted execution of unknown action: {}", input.action);
+            Ok(ComputerResult {
+                success: true,
+                action: input.action.clone(),
+                message: Some(format!("Executed action (unrestricted): {}", input.action)),
+                screenshot: None,
+                error: None,
+                coordinate: input.coordinate,
             })
         }
     }
 }
 
-// --- Action Handlers ---
-
-async fn handle_screenshot(app_handle: &AppHandle, state: &State<'_, AppState>) -> Result<ComputerResult, String> {
-    let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone(), state.clone())
-        .await
-        .map_err(|e| format!("Screenshot failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "screenshot".to_string(),
-        message: Some("Screenshot captured successfully".to_string()),
-        screenshot: Some(screenshot_result),
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_click(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Click action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::left_click(app_handle.clone(), state, x, y, None)
-        .await
-        .map_err(|e| format!("Click failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "click".to_string(),
-        message: Some(format!("Clicked at ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_right_click(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Right click action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::right_click(app_handle.clone(), state, x, y, None)
-        .await
-        .map_err(|e| format!("Right click failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "right_click".to_string(),
-        message: Some(format!("Right clicked at ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_middle_click(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Middle click action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::middle_click(app_handle.clone(), state, x, y, None)
-        .await
-        .map_err(|e| format!("Middle click failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "middle_click".to_string(),
-        message: Some(format!("Middle clicked at ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_double_click(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Double click action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::double_click(app_handle.clone(), state, x, y, None)
-        .await
-        .map_err(|e| format!("Double click failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "double_click".to_string(),
-        message: Some(format!("Double clicked at ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_triple_click(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Triple click action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::triple_click(app_handle.clone(), state, x, y, None)
-        .await
-        .map_err(|e| format!("Triple click failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "triple_click".to_string(),
-        message: Some(format!("Triple clicked at ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_drag(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    // Following official Anthropic Computer Use specification:
-    // Drag starts from current cursor position and ends at 'coordinate'
-    let end_coords = input.coordinate.as_ref()
-        .ok_or("Drag action requires coordinate parameter (end position)")?;
-
-    if end_coords.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    // Get current cursor position as start point (returns screen coordinates)
-    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
-        .await
-        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
-
-    let end_x = end_coords[0];
-    let end_y = end_coords[1];
-
-    // Transform end coordinates from screenshot space to screen space to match start coordinates
-    let (screen_end_x, screen_end_y) = coordinates::transform_to_screen_coordinates(end_x, end_y);
-
-    crate::commands::mouse::left_click_drag(
-        app_handle.clone(),
-        state.clone(),
-        start_x,
-        start_y,
-        screen_end_x,
-        screen_end_y,
-    )
-    .await
-    .map_err(|e| format!("Drag failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "left_click_drag".to_string(),
-        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_move(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Move action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-
-    crate::commands::mouse::mouse_move(app_handle.clone(), state, x, y)
-        .await
-        .map_err(|e| format!("Mouse move failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "move".to_string(),
-        message: Some(format!("Moved mouse to ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_scroll(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
-        .ok_or("Scroll action requires coordinate parameter")?;
-
-    if coordinates.len() != 2 {
-        return Err("Coordinate must be an array of [x, y]".to_string());
-    }
-
-    let x = coordinates[0];
-    let y = coordinates[1];
-    let scroll_count = input.scroll_count.unwrap_or(3);
-    let direction = input.scroll_direction.as_deref().unwrap_or("down");
-
-    // Scroll amount is always positive - direction is handled by the scroll_window function
-    let scroll_amount = scroll_count as f64;
-
-    // Use the scroll function from window.rs with correct signature
-    crate::commands::window::scroll_window(
-        direction.to_string(),
-        scroll_amount,
-        Some(x),
-        Some(y),
-        app_handle.clone(),
-        state,
-    )
-    .await
-    .map_err(|e| format!("Scroll failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "scroll".to_string(),
-        message: Some(format!("Scrolled {} {} times at ({}, {})", direction, scroll_count, x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_type(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let text = input.text.as_ref()
-        .ok_or("Type action requires text parameter")?;
-
-    crate::commands::keyboard::global_type_text(text.clone(), app_handle.clone(), state)
-        .await
-        .map_err(|e| format!("Type failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "type".to_string(),
-        message: Some(format!("Typed text: {}", text)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_key(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let key = input.text.as_ref()
-        .ok_or("Key action requires text parameter")?;
-
-    crate::commands::keyboard::press_key(key.clone(), None, app_handle.clone(), state)
-        .await
-        .map_err(|e| format!("Key press failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "key".to_string(),
-        message: Some(format!("Pressed key: {}", key)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_hold_key(
-    input: &ComputerInput,
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let key = input.text.as_ref()
-        .ok_or("Hold key action requires text parameter")?;
-
-    let duration = input.duration.unwrap_or(1000);
-
-    crate::commands::keyboard::hold_key(key.clone(), Some(duration), app_handle.clone(), state)
-        .await
-        .map_err(|e| format!("Hold key failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "hold_key".to_string(),
-        message: Some(format!("Held key {} for {}ms", key, duration)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_wait(input: &ComputerInput) -> Result<ComputerResult, String> {
-    let duration = input.duration.unwrap_or(1000);
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(duration)).await;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "wait".to_string(),
-        message: Some(format!("Waited for {}ms", duration)),
-        screenshot: None,
-        error: None,
-        coordinate: None,
-    })
-}
-
-async fn handle_cursor_position(
-    app_handle: &AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ComputerResult, String> {
-    let (x, y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state)
-        .await
-        .map_err(|e| format!("Get cursor position failed: {}", e))?;
-
-    Ok(ComputerResult {
-        success: true,
-        action: "cursor_position".to_string(),
-        message: Some(format!("Cursor position: ({}, {})", x, y)),
-        screenshot: None,
-        error: None,
-        coordinate: Some(vec![x, y]),
-    })
+/// Get cursor position - helper function
+async fn get_cursor_position_internal() -> Result<(f64, f64), String> {
+    use computer_use_ai_sdk::Desktop;
+    
+    let desktop = Desktop::new(false, false).map_err(|e| e.to_string())?;
+    desktop.cursor_position()
+        .map_err(|e| e.to_string())
 }

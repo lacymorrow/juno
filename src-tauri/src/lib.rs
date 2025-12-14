@@ -712,6 +712,13 @@ pub fn run() {
             generate_device_id,
             execute_remote_command,
             get_cloud_connection_diagnostics,
+            // Unrestricted Mode Commands
+            commands::unrestricted::enable_unrestricted_mode,
+            commands::unrestricted::disable_unrestricted_mode,
+            commands::unrestricted::get_unrestricted_status,
+            commands::unrestricted::update_unrestricted_config,
+            commands::unrestricted::execute_unrestricted,
+            commands::unrestricted::emergency_shutdown,
             // Cloud Test Commands (new)
             commands::cloud_test::test_cloud_backend_connection,
             commands::cloud_test::get_cloud_config_status,

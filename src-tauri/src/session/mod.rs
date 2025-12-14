@@ -1,7 +1,6 @@
 // Multi-User Session Management
 // Provides CUA-like multi-tenancy without VMs
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -116,18 +115,18 @@ impl SessionManager {
         user_id: &str,
         workspace_id: &str,
         permissions: Option<SessionPermissions>,
-    ) -> Result<String> {
+    ) -> Result<String, String> {
         // Check if user exists
         let users = self.users.read().await;
         if !users.contains_key(user_id) {
-            return Err(anyhow::anyhow!("User {} not found", user_id));
+            return Err(format!("User {} not found", user_id));
         }
         drop(users);
         
         // Check session limit
         let user_sessions = self.get_user_sessions(user_id).await?;
         if user_sessions.len() >= self.max_sessions_per_user {
-            return Err(anyhow::anyhow!("User has reached maximum session limit"));
+            return Err("User has reached maximum session limit".to_string());
         }
         
         let session_id = Uuid::new_v4().to_string();
@@ -148,30 +147,30 @@ impl SessionManager {
         Ok(session_id)
     }
     
-    pub async fn get_session(&self, session_id: &str) -> Result<Session> {
+    pub async fn get_session(&self, session_id: &str) -> Result<Session, String> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Session {} not found", session_id))
+            .ok_or_else(|| format!("Session {} not found", session_id))
     }
     
-    pub async fn update_session_activity(&self, session_id: &str) -> Result<()> {
+    pub async fn update_session_activity(&self, session_id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
         if let Some(session) = sessions.get_mut(session_id) {
             session.last_activity = std::time::SystemTime::now();
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Session {} not found", session_id))
+            Err(format!("Session {} not found", session_id))
         }
     }
     
-    pub async fn switch_session(&self, user_id: &str, session_id: &str) -> Result<()> {
+    pub async fn switch_session(&self, user_id: &str, session_id: &str) -> Result<(), String> {
         let sessions = self.sessions.read().await;
         let session = sessions.get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("Session {} not found", session_id))?;
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
         
         if session.user_id != user_id {
-            return Err(anyhow::anyhow!("Session does not belong to user"));
+            return Err("Session does not belong to user".to_string());
         }
         drop(sessions);
         
@@ -181,7 +180,7 @@ impl SessionManager {
         Ok(())
     }
     
-    pub async fn get_user_sessions(&self, user_id: &str) -> Result<Vec<Session>> {
+    pub async fn get_user_sessions(&self, user_id: &str) -> Result<Vec<Session>, String> {
         let sessions = self.sessions.read().await;
         Ok(sessions.values()
             .filter(|s| s.user_id == user_id)
@@ -189,10 +188,10 @@ impl SessionManager {
             .collect())
     }
     
-    pub async fn terminate_session(&self, session_id: &str) -> Result<()> {
+    pub async fn terminate_session(&self, session_id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions.remove(session_id)
-            .ok_or_else(|| anyhow::anyhow!("Session {} not found", session_id))?;
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
         
         // Clean up active sessions
         let mut active_sessions = self.active_sessions.write().await;
@@ -203,7 +202,7 @@ impl SessionManager {
         Ok(())
     }
     
-    pub async fn create_user(&self, username: &str, permissions: user::UserPermissions) -> Result<String> {
+    pub async fn create_user(&self, username: &str, permissions: user::UserPermissions) -> Result<String, String> {
         let user_id = Uuid::new_v4().to_string();
         let user = user::User {
             id: user_id.clone(),
@@ -219,7 +218,7 @@ impl SessionManager {
         Ok(user_id)
     }
     
-    pub async fn enforce_isolation(&self, session_id: &str) -> Result<IsolationGuard> {
+    pub async fn enforce_isolation(&self, session_id: &str) -> Result<IsolationGuard, String> {
         let session = self.get_session(session_id).await?;
         IsolationGuard::new(session.isolation).await
     }
@@ -237,7 +236,7 @@ struct SystemState {
 }
 
 impl IsolationGuard {
-    async fn new(config: IsolationConfig) -> Result<Self> {
+    async fn new(config: IsolationConfig) -> Result<Self, String> {
         let original_state = if config.isolate_clipboard || config.isolate_filesystem {
             Some(Self::capture_system_state().await?)
         } else {
@@ -253,7 +252,7 @@ impl IsolationGuard {
         Ok(guard)
     }
     
-    async fn capture_system_state() -> Result<SystemState> {
+    async fn capture_system_state() -> Result<SystemState, String> {
         // Capture current system state before isolation
         Ok(SystemState {
             clipboard_content: None, // TODO: Implement clipboard capture
@@ -261,7 +260,7 @@ impl IsolationGuard {
         })
     }
     
-    async fn apply_isolation(&self) -> Result<()> {
+    async fn apply_isolation(&self) -> Result<(), String> {
         if self.config.isolate_clipboard {
             // Clear clipboard or set to isolated clipboard
             // Platform-specific implementation needed
@@ -285,7 +284,7 @@ impl IsolationGuard {
         Ok(())
     }
     
-    async fn restore_state(&self) -> Result<()> {
+    async fn restore_state(&self) -> Result<(), String> {
         if let Some(state) = &self.original_state {
             // Restore original system state
             // Platform-specific implementation needed
@@ -354,31 +353,31 @@ pub struct SessionContext {
 }
 
 impl SessionContext {
-    pub fn check_permission(&self, action: &str) -> Result<()> {
+    pub fn check_permission(&self, action: &str) -> Result<(), String> {
         match action {
             "screenshot" => {
                 if !self.permissions.can_read_screen {
-                    return Err(anyhow::anyhow!("Permission denied: cannot read screen"));
+                    return Err("Permission denied: cannot read screen".to_string());
                 }
             },
             "mouse_control" => {
                 if !self.permissions.can_control_mouse {
-                    return Err(anyhow::anyhow!("Permission denied: cannot control mouse"));
+                    return Err("Permission denied: cannot control mouse".to_string());
                 }
             },
             "keyboard_control" => {
                 if !self.permissions.can_control_keyboard {
-                    return Err(anyhow::anyhow!("Permission denied: cannot control keyboard"));
+                    return Err("Permission denied: cannot control keyboard".to_string());
                 }
             },
             "clipboard_access" => {
                 if !self.permissions.can_access_clipboard {
-                    return Err(anyhow::anyhow!("Permission denied: cannot access clipboard"));
+                    return Err("Permission denied: cannot access clipboard".to_string());
                 }
             },
             "execute_command" => {
                 if !self.permissions.can_execute_commands {
-                    return Err(anyhow::anyhow!("Permission denied: cannot execute commands"));
+                    return Err("Permission denied: cannot execute commands".to_string());
                 }
             },
             _ => {}
