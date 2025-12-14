@@ -103,14 +103,6 @@ accessibility_scan()
 accessibility_click(1)  // Clicks the Save button
 ```
 
-**⚡ PREFERRED: AppleScript and Keyboard Commands**
-**When to use**: ALWAYS try these first for macOS automation
-**Advantages**: Fastest, most reliable, native macOS integration
-**Examples**: 
-- AppleScript for app control, window management, system settings
-- Keyboard shortcuts (Cmd+Space for Spotlight, Cmd+Tab for app switching)
-- Native commands like `open`, `osascript`, system utilities
-
 **❌ LAST RESORT: computer tool (screenshot-based)**
 **When to use**: ONLY as absolute last resort when ALL other methods fail
 **Limitations**: Very slow, resource-heavy, less accurate, requires coordinate guessing
