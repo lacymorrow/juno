@@ -36,7 +36,7 @@ export function formatAgentChatErrorText(raw: string): string {
         }
       } catch {
         // Fall through to regex extraction.
-        const messageMatch = jsonCandidate.match(/"message"\s*:\s*"([^"]+)"/);
+        const messageMatch = jsonCandidate.match(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/);
         if (messageMatch?.[1]) {
           return messageMatch[1].trim();
         }
