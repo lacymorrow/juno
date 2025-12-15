@@ -393,18 +393,18 @@ const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase
 // Keyboard shortcuts with platform-specific defaults
 export const KEYBOARD_SHORTCUTS = {
 ${Object.entries(constants.settings || {})
-    .filter(([key]) => key.startsWith('DEFAULTS_') && typeof constants.settings[key] === 'object' && 'macos' in constants.settings[key])
+    .filter(([key]) => key.startsWith('DEFAULTS_'))
     .map(([key, value]) => {
         const shortcutName = key.replace('DEFAULTS_', '');
-        return `  ${shortcutName}: isMac ? '${value.macos}' : '${value.other}',`;
+        if (typeof value === 'object' && value !== null && 'macos' in value) {
+            return `  ${shortcutName}: isMac ? '${value.macos}' : '${value.other}',`;
+        }
+        if (typeof value === 'string') {
+            return `  ${shortcutName}: '${value}',`;
+        }
+        return null;
     })
-    .join('\n')}
-${Object.entries(constants.settings || {})
-    .filter(([key]) => key.startsWith('DEFAULTS_') && typeof constants.settings[key] === 'string')
-    .map(([key, value]) => {
-        const shortcutName = key.replace('DEFAULTS_', '');
-        return `  ${shortcutName}: '${value}',`;
-    })
+    .filter(Boolean)
     .join('\n')}
 } as const;
 
