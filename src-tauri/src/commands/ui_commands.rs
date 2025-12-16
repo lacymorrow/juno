@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, Listener};
+use tauri::{AppHandle, Emitter, Manager, Listener, LogicalSize, Window};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
@@ -11,6 +11,9 @@ use crate::constants::{timeouts, events, ui};
 
 use crate::settings::{manager::SettingsManager, FloatingBarSettings};
 use crate::utils::async_runtime::safe_spawn_async_task;
+
+mod bar_dimensions;
+pub use bar_dimensions::{BarDimensions, BarDimensionConfig, WindowSize};
 
 // === CORE UI TYPES ===
 
@@ -140,6 +143,7 @@ pub struct UIManager {
     pub agent_state: Option<String>,
     pub current_transition_id: Option<String>,
     pub bar_config: FloatingBarConfig,
+    pub dimension_config: BarDimensionConfig,
     
     // Deduplication fields
     pub last_submission_time: Option<Instant>,
@@ -167,6 +171,7 @@ impl UIManager {
             agent_state: None,
             current_transition_id: None,
             bar_config,
+            dimension_config: BarDimensionConfig::default(),
             last_submission_time: None,
             last_submission_query: None,
         })
@@ -244,6 +249,43 @@ impl UIManager {
         debug!("UI Manager: Bar state changing from {:?} to {:?}", self.bar_state, new_state);
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
+        
+        // Resize window based on new state and bar appearance
+        if let Err(e) = self.resize_bar_window().await {
+            warn!("Failed to resize bar window: {}", e);
+        }
+    }
+    
+    /// Resize the bar window based on current state and appearance
+    async fn resize_bar_window(&self) -> Result<(), String> {
+        // Get the appropriate window label based on bar appearance
+        let window_label = match self.bar_config.bar_appearance.as_str() {
+            ui::bar_appearances::APP => ui::window_labels::APP_BAR,
+            ui::bar_appearances::VOICE_AI => ui::window_labels::VOICE_BAR,
+            ui::bar_appearances::DYNAMIC => ui::window_labels::DYNAMIC_BAR,
+            _ => ui::window_labels::FLOATING_BAR,
+        };
+        
+        // Get dimensions for current state and appearance
+        let dimensions = self.dimension_config.get_dimensions(
+            &self.bar_config.bar_appearance,
+            self.bar_state.as_str()
+        );
+        
+        // Try to get the window and resize it
+        if let Some(window) = self.app_handle.get_webview_window(window_label) {
+            window.set_size(LogicalSize::new(dimensions.width, dimensions.height))
+                .map_err(|e| format!("Failed to set window size: {}", e))?;
+            
+            debug!(
+                "Resized {} to {}x{} for state: {}",
+                window_label, dimensions.width, dimensions.height, self.bar_state.as_str()
+            );
+        } else {
+            debug!("Window {} not found for resizing", window_label);
+        }
+        
+        Ok(())
     }
 
     pub async fn handle_bar_click(&mut self) -> Result<(), String> {
@@ -1068,6 +1110,33 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
         }
 
         Ok(())
+    } else {
+        Err("UI Manager not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn ui_get_bar_dimensions(appearance: String, state: String) -> Result<WindowSize, String> {
+    debug!("Getting bar dimensions for appearance: {}, state: {}", appearance, state);
+    
+    if let Some(manager) = get_ui_manager().await {
+        let manager = manager.lock().await;
+        Ok(manager.dimension_config.get_dimensions(&appearance, &state))
+    } else {
+        Err("UI Manager not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn ui_get_current_bar_dimensions() -> Result<WindowSize, String> {
+    debug!("Getting current bar dimensions");
+    
+    if let Some(manager) = get_ui_manager().await {
+        let manager = manager.lock().await;
+        Ok(manager.dimension_config.get_dimensions(
+            &manager.bar_config.bar_appearance,
+            manager.bar_state.as_str()
+        ))
     } else {
         Err("UI Manager not initialized".to_string())
     }

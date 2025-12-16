@@ -21,6 +21,7 @@ import { SettingsSectionProps } from "../types";
 import { RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
+import type { FloatingBarConfig } from "@/types/bar-config";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -117,7 +118,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     if (barAppearanceLoading) return;
     setBarAppearanceLoading(true);
     try {
-      const currentConfig = await invoke<any>("ui_get_bar_config");
+      const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
       const updatedConfig = {
         ...currentConfig,
         bar_appearance: newAppearance,

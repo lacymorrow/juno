@@ -14,23 +14,10 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
-import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
-
-// Debounce utility
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  };
-}
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -470,126 +457,10 @@ const AIFloatingChatbot = ({
     setSize(newWidget.size);
   }, [barState.barState, setSize]);
 
-  // === DYNAMIC WINDOW RESIZING LOGIC ===
-
-  /**
-   * Smart window sizing based on state and content
-   */
-  const getWindowDimensions = (
-    uiState: UIState,
-    _widget?: WidgetData,
-    stateSnapshot?: BarStateData
-  ) => {
-    const state = stateSnapshot || barState;
-    // Base dimensions from config
-    const base = { width: defaultWidth, height: defaultHeight };
-
-    // State-specific sizing with multiple tiers
-    switch (uiState) {
-      case UI.BAR_STATES_DEFAULT:
-      case UI.BAR_STATES_DICTATION_READY:
-        return { width: 80, height: 30 }; // Extra compact for default state
-
-      case UI.BAR_STATES_LISTENING:
-      case UI.BAR_STATES_TRANSCRIBING:
-        return { width: 160, height: 40 }; // Medium for voice states
-
-      case UI.BAR_STATES_SPEAKING:
-        // Size based on content length
-        const textLength = state.spokenText?.length || 0;
-        const dynamicWidth = Math.min(320, Math.max(180, 180 + textLength * 2));
-        return { width: dynamicWidth, height: 45 };
-
-      case UI.BAR_STATES_LOADING:
-      case UI.BAR_STATES_SUBMITTING:
-        return { width: 200, height: 50 }; // Medium for processing states
-
-      case UI.BAR_STATES_INPUT:
-      case UI.BAR_STATES_EXPANDING:
-        // Large for input state
-        return { width: 400, height: 60 };
-
-      case UI.BAR_STATES_ERROR:
-        // Size based on error message length
-        const errorLength = state.currentError?.length || 0;
-        const errorWidth = Math.min(
-          350,
-          Math.max(200, 200 + errorLength * 1.5)
-        );
-        return { width: errorWidth, height: 55 };
-
-      case UI.BAR_STATES_SUCCESS:
-        return { width: 180, height: 45 }; // Compact for success
-
-      case UI.BAR_STATES_AGENT_RESPONDING:
-        // Dynamic size based on agent state
-        return { width: 280, height: 65 }; // Larger for agent work
-
-      case UI.BAR_STATES_ALWAYS_LISTENING:
-        // Large persistent state
-        return { width: 250, height: 80 };
-
-      default:
-        return base;
-    }
-  };
-
-  /**
-   * Enhanced window resizing with smooth transitions and content awareness
-   */
-  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
-
-  const debouncedResizeWindow = useMemo(
-    () =>
-      debounce(
-        async (
-          currentBarState: string,
-          currentWidget: any,
-          stateSnapshot: BarStateData
-        ) => {
-          try {
-            const dimensions = getWindowDimensions(
-              currentBarState as UIState,
-              currentWidget,
-              stateSnapshot
-            );
-
-            console.log(
-              `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
-            );
-            // Clamp to config bounds if present (only min constraints available in typing)
-            const minW = floatingBarConfig?.minWidth as number | undefined;
-            const minH = floatingBarConfig?.minHeight as number | undefined;
-            const targetWidth = Math.max(
-              minW ?? dimensions.width,
-              dimensions.width
-            );
-            const targetHeight = Math.max(
-              minH ?? dimensions.height,
-              dimensions.height
-            );
-
-            await resizeWindowIfChanged({
-              width: targetWidth,
-              height: targetHeight,
-            });
-          } catch (error) {
-            console.error("❌ DynamicBar: Failed to resize window:", error);
-          }
-        },
-        100
-      ),
-    [resizeWindowIfChanged, floatingBarConfig?.minWidth, floatingBarConfig?.minHeight]
-  );
-
-  useEffect(() => {
-    debouncedResizeWindow(barState.barState, currentWidgetData, barState);
-  }, [
-    barState.barState,
-    currentWidgetData,
-    debouncedResizeWindow,
-    barState,
-  ]);
+  // === WINDOW RESIZING HANDLED BY BACKEND ===
+  // The Rust backend UIManager now automatically handles window resizing
+  // based on bar state changes and bar appearance type.
+  // Frontend no longer needs to manage window dimensions.
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 

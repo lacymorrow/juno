@@ -3,20 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { UI, EVENTS, TIMEOUTS } from "@/lib/constants.generated";
 import type { BarAppearance } from "@/components/bar/barAppearance";
+import type { FloatingBarConfig } from "@/types/bar-config";
 
 import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
-
-interface FloatingBarConfig {
-  show_voice_indicator: boolean;
-  enable_animations: boolean;
-  auto_hide: boolean;
-  auto_hide_delay: number;
-  opacity: number;
-  bar_appearance: BarAppearance;
-}
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
