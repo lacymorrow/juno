@@ -683,8 +683,6 @@ pub fn run() {
             ui_handle_interaction,
             ui_get_bar_config,
             ui_set_bar_config,
-            ui_get_bar_dimensions,
-            ui_get_current_bar_dimensions,
             ui_set_panel_click_through,
             ui_set_panel_level,
             notify_query_submitted,

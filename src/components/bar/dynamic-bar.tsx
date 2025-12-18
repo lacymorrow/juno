@@ -14,10 +14,23 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
+import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
+
+// Debounce utility
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), delay);
+  };
+}
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -457,10 +470,69 @@ const AIFloatingChatbot = ({
     setSize(newWidget.size);
   }, [barState.barState, setSize]);
 
-  // === WINDOW RESIZING HANDLED BY BACKEND ===
-  // The Rust backend UIManager now automatically handles window resizing
-  // based on bar state changes and bar appearance type.
-  // Frontend no longer needs to manage window dimensions.
+  // === DYNAMIC WINDOW RESIZING ===
+  // Each bar component manages its own sizing based on content
+  // This allows for precise, content-aware sizing that the backend cannot predict
+
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar"); // Always use floating-bar window
+
+  /**
+   * Calculate optimal window dimensions based on state and content
+   */
+  const calculateDimensions = useCallback((state: BarStateData) => {
+    switch (state.barState) {
+      case UI.BAR_STATES_DEFAULT:
+        return { width: 80, height: 30 };
+      
+      case UI.BAR_STATES_LISTENING:
+      case UI.BAR_STATES_TRANSCRIBING:
+        return { width: 160, height: 40 };
+      
+      case UI.BAR_STATES_SPEAKING:
+        // Dynamic width based on text length
+        const textLen = state.spokenText?.length || 0;
+        const width = Math.min(320, Math.max(180, 180 + textLen * 2));
+        return { width, height: 45 };
+      
+      case UI.BAR_STATES_LOADING:
+      case UI.BAR_STATES_SUBMITTING:
+        return { width: 200, height: 50 };
+      
+      case UI.BAR_STATES_INPUT:
+        return { width: 400, height: 60 };
+      
+      case UI.BAR_STATES_ERROR:
+        const errorLen = state.currentError?.length || 0;
+        const errorWidth = Math.min(350, Math.max(200, 200 + errorLen * 1.5));
+        return { width: errorWidth, height: 55 };
+      
+      case UI.BAR_STATES_SUCCESS:
+        return { width: 180, height: 45 };
+      
+      case UI.BAR_STATES_AGENT_RESPONDING:
+        return { width: 280, height: 65 };
+      
+      case UI.BAR_STATES_ALWAYS_LISTENING:
+        return { width: 250, height: 80 };
+      
+      default:
+        return { width: defaultWidth, height: defaultHeight };
+    }
+  }, [defaultWidth, defaultHeight]);
+
+  // Debounced resize to avoid flickering
+  const debouncedResize = useMemo(
+    () => debounce((state: BarStateData) => {
+      const dimensions = calculateDimensions(state);
+      resizeWindowIfChanged(dimensions);
+    }, 100),
+    [calculateDimensions, resizeWindowIfChanged]
+  );
+
+  // Resize window when state changes
+  useEffect(() => {
+    debouncedResize(barState);
+  }, [barState, debouncedResize]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
