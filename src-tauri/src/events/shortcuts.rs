@@ -49,6 +49,8 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
     let dictation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.dictation_input);
+    let settings_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.open_settings);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if *shortcut == escape_shortcut {
@@ -59,11 +61,34 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     }
 
+    // Check settings shortcut
+    if let Some(settings_shortcut_obj) = settings_shortcut {
+        if *shortcut == settings_shortcut_obj {
+            handle_settings_shortcut(app, event);
+        }
+    }
+
     // Check dictation shortcut separately (not as else-if to avoid exclusion)
     if let Some(dictation_shortcut_obj) = dictation_shortcut {
         if *shortcut == dictation_shortcut_obj {
             handle_dictation_input_shortcut(app, event);
         }
+    }
+}
+
+/// Handle settings shortcut (Cmd+, by default)
+fn handle_settings_shortcut(app: &AppHandle, event: &ShortcutEvent) {
+    if event.state() == ShortcutState::Pressed {
+        info!("[Settings Shortcut] Pressed - opening settings window");
+        let app_handle_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
+                error!(
+                    "[Settings Shortcut] Failed to open settings window: {}",
+                    e
+                );
+            }
+        });
     }
 }
 

@@ -20,6 +20,8 @@ import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { UI } from "@/lib/constants.generated";
+import type { FloatingBarConfig } from "@/types/bar-config";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -27,6 +29,10 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [restartOnboardingLoading, setRestartOnboardingLoading] =
     useState(false);
   const [onboardingInfo, setOnboardingInfo] = useState<any>(null);
+  const [barAppearance, setBarAppearance] = useState<string>(
+    UI.BAR_APPEARANCES_FLOATING
+  );
+  const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -39,6 +45,14 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         // Load onboarding info
         const info = await invoke("get_onboarding_info");
         setOnboardingInfo(info);
+
+        // Load current bar appearance
+        const barConfig = await invoke<{
+          bar_appearance?: string;
+        }>("ui_get_bar_config");
+        if (barConfig?.bar_appearance) {
+          setBarAppearance(barConfig.bar_appearance);
+        }
       } catch (error) {
         console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
@@ -97,6 +111,28 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       });
     } finally {
       setRestartOnboardingLoading(false);
+    }
+  };
+
+  const handleBarAppearanceChange = async (newAppearance: string) => {
+    if (barAppearanceLoading) return;
+    setBarAppearanceLoading(true);
+    try {
+      const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
+      const updatedConfig = {
+        ...currentConfig,
+        bar_appearance: newAppearance,
+      };
+      await invoke("ui_set_bar_config", { config: updatedConfig });
+      setBarAppearance(newAppearance);
+      toast.success("Bar appearance updated");
+    } catch (error) {
+      console.error("Failed to update bar appearance:", error);
+      toast.error("Failed to update bar appearance", {
+        description: error as string,
+      });
+    } finally {
+      setBarAppearanceLoading(false);
     }
   };
 
@@ -178,6 +214,44 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 </>
               )}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bar Appearance</CardTitle>
+          <CardDescription>
+            Choose which bar UI style to use in bar windows
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="bar-appearance">Appearance</Label>
+            <Select
+              value={barAppearance}
+              onValueChange={handleBarAppearanceChange}
+              disabled={barAppearanceLoading}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select bar appearance" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UI.BAR_APPEARANCES_FLOATING}>
+                  Floating (Standard)
+                </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_APP}>App Bar</SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>
+                  Voice AI
+                </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
+                  Dynamic
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-500">
+              Bar windows will switch styles immediately when changed.
+            </p>
           </div>
         </CardContent>
       </Card>

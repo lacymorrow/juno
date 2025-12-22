@@ -10,8 +10,6 @@ src-tauri/src/agent/tool_logger.rs
 
 invoke("test_cloud_backend_connection"); // hard coded
 
-✅ COMPLETED: Redundant timestamp functions eliminated
-
 If an agent is asked to do multiple things in quick succession, we need to handle that.
 
 TTS called late

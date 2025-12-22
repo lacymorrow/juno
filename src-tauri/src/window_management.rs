@@ -106,9 +106,9 @@ impl WindowManager {
                     // Window is valid, show and focus it
                     existing_window.show().map_err(|e| e.to_string())?;
                     existing_window.set_focus().map_err(|e| e.to_string())?;
-                    if config.label == window_labels::MAIN {
-                        existing_window.unminimize().map_err(|e| e.to_string())?;
-                    }
+                    // Always unminimize to ensure it's visible even if previously minimized
+                    existing_window.unminimize().map_err(|e| e.to_string())?;
+                    
                     info!("Showed existing {} window", config.label);
                     return Ok(());
                 }

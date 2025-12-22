@@ -248,6 +248,47 @@ impl AnthropicBrain {
         Self::new(api_key, model, max_tokens, None)
     }
 
+    fn format_anthropic_http_error_for_user(
+        status: reqwest::StatusCode,
+        error_body: &str,
+    ) -> String {
+        let trimmed = error_body.trim();
+
+        // Prefer extracting a clean, user-facing message from Anthropic's structured error JSON.
+        // Example shape:
+        // {"type":"error","error":{"type":"invalid_request_error","message":"..."},"request_id":"..."}
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            let error_type = value
+                .pointer("/error/type")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let message = value.pointer("/error/message").and_then(|v| v.as_str());
+            let request_id = value.get("request_id").and_then(|v| v.as_str());
+
+            if let Some(message) = message {
+                let mut formatted = match error_type {
+                    Some(error_type) => {
+                        format!("Anthropic API error {} ({}): {}", status, error_type, message)
+                    }
+                    None => format!("Anthropic API error {}: {}", status, message),
+                };
+
+                if let Some(request_id) = request_id {
+                    formatted.push_str(&format!(" (request_id: {})", request_id));
+                }
+
+                return formatted;
+            }
+        }
+
+        // Never surface raw JSON blobs to the user; keep details in logs instead.
+        if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
+            format!("Anthropic API returned error {}.", status)
+        } else {
+            format!("Anthropic API returned error {}: {}", status, trimmed)
+        }
+    }
+
     /// Enable or disable streaming for this brain
     pub fn set_streaming(&mut self, enabled: bool) {
         self.streaming_enabled = enabled;
@@ -1059,9 +1100,9 @@ impl AgentBrain for AnthropicBrain {
                 status,
                 error_body
             );
-            return Err(AgentError::LlmError(format!(
-                "Anthropic API returned error {}: {}",
-                status, error_body
+            return Err(AgentError::LlmError(Self::format_anthropic_http_error_for_user(
+                status,
+                &error_body,
             )));
         }
 

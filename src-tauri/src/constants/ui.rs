@@ -8,6 +8,9 @@ pub mod window_labels {
     pub const FLOATING_PANEL: &str = "floating-panel";
     pub const ONBOARDING: &str = "onboarding";
     pub const SETTINGS: &str = "settings";
+    pub const APP_BAR: &str = "app-bar";
+    pub const VOICE_BAR: &str = "voice-bar";
+    pub const DYNAMIC_BAR: &str = "dynamic-bar";
 }
 
 /// UI element IDs used for element targeting and interactions
@@ -17,6 +20,15 @@ pub mod element_ids {
     pub const VOICE_AI_BAR: &str = "voice-ai-bar";
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
     pub const FLOATING_PANEL: &str = "floating-panel";
+}
+
+/// Bar appearance/style identifiers
+/// These values are persisted in settings and selected by the user in Settings → General.
+pub mod bar_appearances {
+    pub const FLOATING: &str = "floating";
+    pub const APP: &str = "app";
+    pub const VOICE_AI: &str = "voice_ai";
+    pub const DYNAMIC: &str = "dynamic";
 }
 
 /// UI state constants for bar state management

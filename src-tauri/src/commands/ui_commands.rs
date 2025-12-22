@@ -102,6 +102,7 @@ pub struct FloatingBarConfig {
     pub auto_hide: bool,
     pub auto_hide_delay: u32,
     pub opacity: f32,
+    pub bar_appearance: String,
 }
 
 impl Default for FloatingBarConfig {
@@ -112,6 +113,7 @@ impl Default for FloatingBarConfig {
             auto_hide: false,
             auto_hide_delay: timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
+            bar_appearance: ui::bar_appearances::FLOATING.to_string(),
         }
     }
 }
@@ -192,6 +194,7 @@ impl UIManager {
             auto_hide: settings.auto_hide,
             auto_hide_delay: settings.auto_hide_delay,
             opacity: settings.opacity,
+            bar_appearance: settings.bar_appearance.clone(),
         }
     }
 
@@ -205,6 +208,7 @@ impl UIManager {
             auto_hide: self.bar_config.auto_hide,
             auto_hide_delay: self.bar_config.auto_hide_delay,
             opacity: self.bar_config.opacity,
+            bar_appearance: self.bar_config.bar_appearance.clone(),
         };
 
         settings_manager.set_floating_bar_settings(&settings).await
@@ -240,6 +244,42 @@ impl UIManager {
         debug!("UI Manager: Bar state changing from {:?} to {:?}", self.bar_state, new_state);
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
+    }
+    
+    /// Navigate the bar window to the appropriate route based on bar appearance
+    async fn navigate_bar_window(&self) -> Result<(), String> {
+        // Always use the floating-bar window (the only one that exists)
+        let window_label = ui::window_labels::FLOATING_BAR;
+        
+        // Determine the route based on bar appearance
+        let route = match self.bar_config.bar_appearance.as_str() {
+            ui::bar_appearances::APP => "/app-bar",
+            ui::bar_appearances::VOICE_AI => "/voice-bar", 
+            ui::bar_appearances::DYNAMIC => "/dynamic-bar",
+            _ => "/floating-bar",
+        };
+        
+        // Navigate the window to the appropriate route
+        if let Some(window) = self.app_handle.get_webview_window(window_label) {
+            let current_url = window.url().map_err(|e| format!("Failed to get current URL: {}", e))?;
+            
+            // Build the new URL by taking the base and appending the route
+            let base_url = current_url.as_str().split('#').next().unwrap_or(current_url.as_str());
+            let base_url = base_url.split('/').take(3).collect::<Vec<_>>().join("/");
+            let new_url = format!("{}{}", base_url, route);
+            
+            // Only navigate if we're not already on the right route
+            if !current_url.as_str().ends_with(route) {
+                window.navigate(new_url.parse().map_err(|e| format!("Failed to parse URL: {}", e))?)
+                    .map_err(|e| format!("Failed to navigate window: {}", e))?;
+                
+                debug!("Navigated bar window to route: {}", route);
+            }
+        } else {
+            debug!("Bar window not found for navigation");
+        }
+        
+        Ok(())
     }
 
     pub async fn handle_bar_click(&mut self) -> Result<(), String> {
@@ -1055,8 +1095,17 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
 
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
+        let appearance_changed = manager.bar_config.bar_appearance != config.bar_appearance;
+        
         manager.bar_config = config.clone();
         manager.save_bar_config().await?;
+
+        // Navigate to the appropriate route if appearance changed
+        if appearance_changed {
+            if let Err(e) = manager.navigate_bar_window().await {
+                warn!("Failed to navigate bar window: {}", e);
+            }
+        }
 
         // Emit event to notify frontend
         if let Err(e) = manager.app_handle.emit(events::bar::CONFIG_CHANGED, &config) {

@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Mic,
   Volume2,
@@ -122,8 +123,9 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
 
   // === WINDOW CONFIGURATION ===
 
+  const windowLabel = getCurrentWindow().label;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === windowLabel
   );
 
   const defaultWidth =
@@ -175,7 +177,7 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
 
   // === WINDOW RESIZING ===
 
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   const debouncedResizeWindow = useMemo(
     () => debounce(async (currentUiState: string) => {
       try {

@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 import {
   Mic,
   Volume2,
@@ -105,6 +107,7 @@ const FLOATING_BAR_DIMENSIONS = {
   DEFAULT_HEIGHT: 40,
   EXPANDED_WIDTH: 320,
   EXPANDED_HEIGHT: 50,
+  SHADOW_PADDING: 48, // 24px per side to accommodate box-shadow
 };
 
 /**
@@ -115,6 +118,7 @@ const COMPONENT_ID = "voice-ai-bar";
 export function VoiceAIBar({
   className = "",
   sampleResponses: propSampleResponses,
+  barAppearance,
 }: VoiceAIBarProps) {
   // === STATE MANAGEMENT ===
 
@@ -161,8 +165,12 @@ export function VoiceAIBar({
 
   // === WINDOW CONFIGURATION ===
 
+  const windowLabel = getCurrentWindow().label;
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -227,7 +235,7 @@ export function VoiceAIBar({
    * Responsive window resizing based on UI state
    * Compact states use small dimensions, expanded states use larger dimensions
    */
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   useEffect(() => {
     const resizeWindow = async () => {
       try {
@@ -238,8 +246,8 @@ export function VoiceAIBar({
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
         ].includes(currentUiState as any);
-        const targetWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const targetHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+        const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
+        const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
 
         await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
@@ -1094,6 +1102,12 @@ const styles = \`
       <style>{`
         .voice-ai-bar-container {
           position: relative;
+          padding: 24px; /* Half of SHADOW_PADDING to center content */
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
         }
 
         .idle-container {
