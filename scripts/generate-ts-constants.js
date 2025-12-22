@@ -231,19 +231,38 @@ function parsePlatformSpecificConstants(rustCode) {
     // Now handle platform-specific constants
     // Pattern to match: #[cfg(target_os = "macos")] pub const NAME: type = value;
     // or: #[cfg(not(target_os = "macos"))] pub const NAME: type = value;
-    const platformConstRegex = /#\[cfg\((not\()?(target_os = "macos"\)?)\)\]\s*pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool) = "([^"]+)"/g;
+    // Updated regex to handle different data types (strings, numbers, booleans, arrays) like parseSimpleConstants
+    const platformConstRegex = /#\[cfg\((not\()?(target_os = "macos"\)?)\)\]\s*pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
     
     let match;
     const platformSpecific = {};
     
     while ((match = platformConstRegex.exec(rustCode)) !== null) {
-        const [, isNot, _, constName, constValue] = match;
+        const [, isNot, _, constName, stringValue, numericValue, boolValue, arrayValue] = match;
         const platform = isNot ? 'other' : 'macos';
+        
+        let parsedValue;
+        if (arrayValue !== undefined) {
+            // Parse array of strings: &["hey juno", "computer"]
+            const arrayElements = arrayValue.match(/"([^"]+)"/g);
+            if (arrayElements) {
+                parsedValue = arrayElements.map(el => el.slice(1, -1)); // Remove quotes
+            }
+        } else if (numericValue !== undefined) {
+            // Remove underscores from numeric literals before parsing
+            const cleanNumeric = numericValue.replace(/_/g, '');
+            parsedValue = parseFloat(cleanNumeric);
+        } else if (stringValue !== undefined) {
+            // Handle escaped quotes in string values
+            parsedValue = stringValue.replace(/\\"/g, '"');
+        } else if (boolValue !== undefined) {
+            parsedValue = boolValue === 'true';
+        }
         
         if (!platformSpecific[constName]) {
             platformSpecific[constName] = {};
         }
-        platformSpecific[constName][platform] = constValue;
+        platformSpecific[constName][platform] = parsedValue;
     }
     
     // Store platform-specific constants with both values
