@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Mic,
   Sparkles,
@@ -31,6 +32,8 @@ import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
+import type { BarAppearance } from "@/components/bar/barAppearance";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -100,6 +103,7 @@ const FLOATING_BAR_DIMENSIONS = {
   DEFAULT_HEIGHT: 20,
   EXPANDED_WIDTH: 280,
   EXPANDED_HEIGHT: 50,
+  SHADOW_PADDING: 48, // 24px per side
 };
 
 /**
@@ -109,7 +113,7 @@ const COMPONENT_ID = "floating-bar";
 
 // === MAIN COMPONENT ===
 
-export function FloatingBar() {
+export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   // === STATE MANAGEMENT ===
 
   /**
@@ -132,9 +136,12 @@ export function FloatingBar() {
   });
 
   // === WINDOW CONFIGURATION ===
-
+  const windowLabel = getCurrentWindow().label;
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -209,7 +216,7 @@ export function FloatingBar() {
    * Compact states use small dimensions, expanded states use larger dimensions
    */
   // lastSizeRef not required; managed inside useWindowSize
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   useEffect(() => {
     const resizeWindow = async () => {
       try {
@@ -220,8 +227,8 @@ export function FloatingBar() {
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
         ].includes(currentUiState as any);
-        const targetWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const targetHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+        const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
+        const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
 
         await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
@@ -450,7 +457,7 @@ export function FloatingBar() {
   // === RENDER LOGIC ===
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden cursor-move">
+    <div className="w-screen h-screen relative overflow-hidden cursor-move flex items-center justify-center p-6">
       <div
         className={getContainerStyles()}
         style={{

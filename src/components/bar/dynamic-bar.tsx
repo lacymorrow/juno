@@ -16,6 +16,9 @@ import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { BarAppearance } from "@/components/bar/barAppearance";
+import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 
 // Debounce utility
 function debounce<T extends (...args: any[]) => any>(
@@ -110,6 +113,7 @@ const FLOATING_BAR_DIMENSIONS = {
   DEFAULT_HEIGHT: 20,
   EXPANDED_WIDTH: 280,
   EXPANDED_HEIGHT: 50,
+  SHADOW_PADDING: 48,
 };
 
 /**
@@ -265,8 +269,13 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
   );
 };
 
-const AIFloatingChatbot = () => {
+const AIFloatingChatbot = ({
+  barAppearance,
+}: {
+  barAppearance?: BarAppearance;
+}) => {
   const { setSize } = useDynamicIslandSize();
+  const windowLabel = getCurrentWindow().label;
 
   // === STATE MANAGEMENT ===
 
@@ -295,8 +304,11 @@ const AIFloatingChatbot = () => {
 
   // === WINDOW CONFIGURATION ===
 
+  const layoutWindowLabel = barAppearance
+    ? getBarLayoutWindowLabel(barAppearance)
+    : windowLabel;
   const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === "floating-bar"
+    (w) => w.label === layoutWindowLabel
   );
 
   const defaultWidth =
@@ -459,126 +471,85 @@ const AIFloatingChatbot = () => {
     setSize(newWidget.size);
   }, [barState.barState, setSize]);
 
-  // === DYNAMIC WINDOW RESIZING LOGIC ===
+  // === DYNAMIC WINDOW RESIZING ===
+  // Each bar component manages its own sizing based on content
+  // This allows for precise, content-aware sizing that the backend cannot predict
+
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar"); // Always use floating-bar window
 
   /**
-   * Smart window sizing based on state and content
+   * Calculate optimal window dimensions based on state and content
    */
-  const getWindowDimensions = (
-    uiState: UIState,
-    _widget?: WidgetData,
-    stateSnapshot?: BarStateData
-  ) => {
-    const state = stateSnapshot || barState;
-    // Base dimensions from config
-    const base = { width: defaultWidth, height: defaultHeight };
-
-    // State-specific sizing with multiple tiers
-    switch (uiState) {
+  const calculateDimensions = useCallback((state: BarStateData) => {
+    let dimensions = { width: defaultWidth, height: defaultHeight };
+    
+    switch (state.barState) {
       case UI.BAR_STATES_DEFAULT:
-      case UI.BAR_STATES_DICTATION_READY:
-        return { width: 80, height: 30 }; // Extra compact for default state
-
+        dimensions = { width: 80, height: 30 };
+        break;
+      
       case UI.BAR_STATES_LISTENING:
       case UI.BAR_STATES_TRANSCRIBING:
-        return { width: 160, height: 40 }; // Medium for voice states
-
+        dimensions = { width: 160, height: 40 };
+        break;
+      
       case UI.BAR_STATES_SPEAKING:
-        // Size based on content length
-        const textLength = state.spokenText?.length || 0;
-        const dynamicWidth = Math.min(320, Math.max(180, 180 + textLength * 2));
-        return { width: dynamicWidth, height: 45 };
-
+        // Dynamic width based on text length
+        const textLen = state.spokenText?.length || 0;
+        const width = Math.min(320, Math.max(180, 180 + textLen * 2));
+        dimensions = { width, height: 45 };
+        break;
+      
       case UI.BAR_STATES_LOADING:
       case UI.BAR_STATES_SUBMITTING:
-        return { width: 200, height: 50 }; // Medium for processing states
-
+        dimensions = { width: 200, height: 50 };
+        break;
+      
       case UI.BAR_STATES_INPUT:
-      case UI.BAR_STATES_EXPANDING:
-        // Large for input state
-        return { width: 400, height: 60 };
-
+        dimensions = { width: 400, height: 60 };
+        break;
+      
       case UI.BAR_STATES_ERROR:
-        // Size based on error message length
-        const errorLength = state.currentError?.length || 0;
-        const errorWidth = Math.min(
-          350,
-          Math.max(200, 200 + errorLength * 1.5)
-        );
-        return { width: errorWidth, height: 55 };
-
+        const errorLen = state.currentError?.length || 0;
+        const errorWidth = Math.min(350, Math.max(200, 200 + errorLen * 1.5));
+        dimensions = { width: errorWidth, height: 55 };
+        break;
+      
       case UI.BAR_STATES_SUCCESS:
-        return { width: 180, height: 45 }; // Compact for success
-
+        dimensions = { width: 180, height: 45 };
+        break;
+      
       case UI.BAR_STATES_AGENT_RESPONDING:
-        // Dynamic size based on agent state
-        return { width: 280, height: 65 }; // Larger for agent work
-
+        dimensions = { width: 280, height: 65 };
+        break;
+      
       case UI.BAR_STATES_ALWAYS_LISTENING:
-        // Large persistent state
-        return { width: 250, height: 80 };
-
+        dimensions = { width: 250, height: 80 };
+        break;
+      
       default:
-        return base;
+        dimensions = { width: defaultWidth, height: defaultHeight };
     }
-  };
+    
+    return {
+      width: dimensions.width + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
+      height: dimensions.height + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING
+    };
+  }, [defaultWidth, defaultHeight]);
 
-  /**
-   * Enhanced window resizing with smooth transitions and content awareness
-   */
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
-
-  const debouncedResizeWindow = useMemo(
-    () =>
-      debounce(
-        async (
-          currentBarState: string,
-          currentWidget: any,
-          stateSnapshot: BarStateData
-        ) => {
-          try {
-            const dimensions = getWindowDimensions(
-              currentBarState as UIState,
-              currentWidget,
-              stateSnapshot
-            );
-
-            console.log(
-              `🔧 DynamicBar: Smart resizing to ${dimensions.width}x${dimensions.height} for state: ${currentBarState}`
-            );
-            // Clamp to config bounds if present (only min constraints available in typing)
-            const minW = floatingBarConfig?.minWidth as number | undefined;
-            const minH = floatingBarConfig?.minHeight as number | undefined;
-            const targetWidth = Math.max(
-              minW ?? dimensions.width,
-              dimensions.width
-            );
-            const targetHeight = Math.max(
-              minH ?? dimensions.height,
-              dimensions.height
-            );
-
-            await resizeWindowIfChanged({
-              width: targetWidth,
-              height: targetHeight,
-            });
-          } catch (error) {
-            console.error("❌ DynamicBar: Failed to resize window:", error);
-          }
-        },
-        100
-      ),
-    [resizeWindowIfChanged, floatingBarConfig?.minWidth, floatingBarConfig?.minHeight]
+  // Debounced resize to avoid flickering
+  const debouncedResize = useMemo(
+    () => debounce((state: BarStateData) => {
+      const dimensions = calculateDimensions(state);
+      resizeWindowIfChanged(dimensions);
+    }, 100),
+    [calculateDimensions, resizeWindowIfChanged]
   );
 
+  // Resize window when state changes
   useEffect(() => {
-    debouncedResizeWindow(barState.barState, currentWidgetData, barState);
-  }, [
-    barState.barState,
-    currentWidgetData,
-    debouncedResizeWindow,
-    barState,
-  ]);
+    debouncedResize(barState);
+  }, [barState, debouncedResize]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
@@ -665,7 +636,7 @@ const AIFloatingChatbot = () => {
   }, [currentWidgetData.id]);
 
   return (
-    <div className="h-full w-full relative">
+    <div className="h-full w-full relative p-6">
       <div className="flex items-center justify-center h-full">
         <button
           type="button"
@@ -690,11 +661,11 @@ const AIFloatingChatbot = () => {
   );
 };
 
-export function DynamicBar() {
+export function DynamicBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   return (
     <DynamicIslandProvider initialSize={"default"}>
       <div className="h-full w-full bg-transparent">
-        <AIFloatingChatbot />
+        <AIFloatingChatbot barAppearance={barAppearance} />
       </div>
     </DynamicIslandProvider>
   );

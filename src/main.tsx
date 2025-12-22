@@ -9,10 +9,7 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
-import { AppBar } from "./components/bar/app-bar";
-import { FloatingBar } from "./components/FloatingBar";
-import { VoiceAIBar } from "./components/bar/voice-ai-bar";
-import { DynamicBar } from "./components/bar/dynamic-bar";
+import { BarHost } from "./components/bar/BarHost";
 
 import "./styles/globals.css";
 
@@ -23,10 +20,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/settings" element={<ModularSettingsWindow />} />
-          <Route path="/app-bar" element={<AppBar />} />
-          <Route path="/floating-bar" element={<FloatingBar />} />
-          <Route path="/voice-bar" element={<VoiceAIBar />} />
-          <Route path="/dynamic-bar" element={<DynamicBar />} />
+          <Route path="/app-bar" element={<BarHost />} />
+          <Route path="/floating-bar" element={<BarHost />} />
+          <Route path="/voice-bar" element={<BarHost />} />
+          <Route path="/dynamic-bar" element={<BarHost />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />
           <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
