@@ -19,6 +19,8 @@ use crate::state::AppState;
 // Model ID Constants - Single source of truth
 pub mod model_ids {
     // Anthropic Claude Models
+    pub const CLAUDE_4_5_OPUS: &str = "claude-4-5-opus-20251124";
+    pub const CLAUDE_4_5_HAIKU: &str = "claude-4-5-haiku-20251015";
     pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
     pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";
     pub const CLAUDE_3_7_SONNET: &str = "claude-3-7-sonnet-20250219";
@@ -28,12 +30,14 @@ pub mod model_ids {
 
     // OpenAI Models
     pub const OPENAI_CUA: &str = "computer-use-preview";
+    pub const GPT_5_2: &str = "gpt-5.2";
     pub const GPT_4O: &str = "gpt-4o";
     pub const GPT_4O_MINI: &str = "gpt-4o-mini";
     pub const GPT_4_TURBO: &str = "gpt-4-turbo";
     pub const GPT_3_5_TURBO: &str = "gpt-3.5-turbo";
 
     // Google Gemini Models
+    pub const GEMINI_3_FLASH: &str = "gemini-3-flash";
     pub const GEMINI_1_5_PRO: &str = "gemini-1.5-pro";
     pub const GEMINI_1_5_FLASH: &str = "gemini-1.5-flash";
     pub const GEMINI_PRO: &str = "gemini-pro";
@@ -157,11 +161,25 @@ impl Provider {
                 if cfg!(debug_assertions) {
                     &[
                         ModelDefinition {
+                            id: model_ids::CLAUDE_4_5_OPUS,
+                            name: "Claude 4.5 Opus",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_5_HAIKU,
+                            name: "Claude 4.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
                             id: model_ids::CLAUDE_4_SONNET,
                             name: "Claude 4 Sonnet",
                             category: ModelCategory::ComputerUse,
                             supports_computer_use: true,
-                            is_recommended: true,
+                            is_recommended: false,
                         },
                         ModelDefinition {
                             id: model_ids::CLAUDE_4_OPUS,
@@ -200,14 +218,29 @@ impl Provider {
                         },
                     ]
                 } else {
-                    // In production mode, hide Opus models
+                    // In production mode, hide Opus models (except 4.5 Opus if it's production ready, but maybe keep consistent with Dev for now or expose it)
+                    // Let's expose 4.5 Opus in production as it is the latest flagship
                     &[
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_5_OPUS,
+                            name: "Claude 4.5 Opus",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_5_HAIKU,
+                            name: "Claude 4.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
                         ModelDefinition {
                             id: model_ids::CLAUDE_4_SONNET,
                             name: "Claude 4 Sonnet",
                             category: ModelCategory::ComputerUse,
                             supports_computer_use: true,
-                            is_recommended: true,
+                            is_recommended: false,
                         },
                         ModelDefinition {
                             id: model_ids::CLAUDE_3_7_SONNET,
@@ -234,6 +267,13 @@ impl Provider {
                 }
             }
             Provider::OpenAI => &[
+                ModelDefinition {
+                    id: model_ids::GPT_5_2,
+                    name: "GPT-5.2",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
                 ModelDefinition {
                     id: model_ids::OPENAI_CUA,
                     name: "Computer-Using Agent (CUA)",
@@ -294,6 +334,13 @@ impl Provider {
                 },
             ],
             Provider::Gemini => &[
+                ModelDefinition {
+                    id: model_ids::GEMINI_3_FLASH,
+                    name: "Gemini 3 Flash",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
                 ModelDefinition {
                     id: model_ids::GEMINI_1_5_PRO,
                     name: "Gemini 1.5 Pro",
