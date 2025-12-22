@@ -20,6 +20,7 @@ pub mod element_ids {
     pub const VOICE_AI_BAR: &str = "voice-ai-bar";
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
     pub const FLOATING_PANEL: &str = "floating-panel";
+    pub const VOICE_CONTROL_BAR: &str = "voice-control-bar";
 }
 
 /// Bar appearance/style identifiers
@@ -29,6 +30,7 @@ pub mod bar_appearances {
     pub const APP: &str = "app";
     pub const VOICE_AI: &str = "voice_ai";
     pub const DYNAMIC: &str = "dynamic";
+    pub const VOICE_CONTROL: &str = "voice_control";
 }
 
 /// UI state constants for bar state management

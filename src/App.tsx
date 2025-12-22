@@ -25,7 +25,6 @@ import { useConversation } from "@/hooks/useConversation";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
-import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
@@ -40,15 +39,8 @@ function App() {
   // Use voice sounds hook
   useVoiceSounds();
 
-  // Scrolling management
-  const scrolling = useChatScrolling({
-    conversation: conversation.conversation,
-    userHasScrolledUp: appState.userHasScrolledUp,
-    lastScrollTime: appState.lastScrollTime,
-    setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    setLastScrollTime: appState.setLastScrollTime,
-  });
-
+  // Scrolling management handled by ChatContainer component internally
+  
   // Enhanced submit handler
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -156,7 +148,7 @@ function App() {
     setIsProcessing: appState.setIsProcessing,
     setServerStatus: appState.setServerStatus,
     setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    throttledAutoScroll: scrolling.throttledAutoScroll,
+    throttledAutoScroll: () => {}, // Handled internally by ChatContainer
   });
 
   // Menu events integration
@@ -331,8 +323,7 @@ function App() {
 
       // Set the query briefly for UI feedback, then submit
       conversation.setQuery(trimmedPrompt);
-      scrolling.autoScrollToBottom(true);
-
+      
       // Auto-submit after a brief delay to show the query in the input
       setTimeout(async () => {
         // IMMEDIATE FEEDBACK: Notify floating bar immediately
@@ -366,7 +357,6 @@ function App() {
       conversation.setQuery,
       conversation.addUserMessage,
       conversation.addSystemMessage,
-      scrolling.autoScrollToBottom,
       playError,
     ]
   );

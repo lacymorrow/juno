@@ -1,12 +1,16 @@
 import React from "react";
 import { DogIcon } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ui/conversation";
 import {
   ChatMessageComponent,
   type ChatMessage,
 } from "@/components/ChatMessage";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
-import { useChatScrolling } from "@/hooks/useChatScrolling";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
 function shouldShowTimestamp(
@@ -74,22 +78,11 @@ export const ChatContainer = React.memo(function ChatContainer({
   conversation,
   copyingMessageId,
   savingMessageId,
-  userHasScrolledUp,
-  lastScrollTime,
-  setUserHasScrolledUp,
-  setLastScrollTime,
+  // Props below are maintained for interface compatibility but handled internally by Conversation component
   onCopyResponse,
   onSaveResponse,
   onExamplePromptSelect,
 }: ChatContainerProps) {
-  const { conversationEndRef, scrollAreaRef } = useChatScrolling({
-    conversation,
-    userHasScrolledUp,
-    lastScrollTime,
-    setUserHasScrolledUp,
-    setLastScrollTime,
-  });
-
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
     () =>
@@ -132,27 +125,29 @@ export const ChatContainer = React.memo(function ChatContainer({
   );
 
   return (
-    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4" ref={scrollAreaRef}>
-      {conversation.length === 0 ? (
-        /* Compact welcome message when conversation is empty */
-        <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
-          <div className="space-y-1">
-            <DogIcon size={16} className="text-blue-500 mx-auto" />
-            <div>
-              <h2 className="text-sm font-semibold">Juno AI</h2>
-              <p className="text-xs text-muted-foreground">
-                AI desktop assistant
-              </p>
+    <Conversation className="flex-1 min-h-0 mb-2">
+      <ConversationContent>
+        {conversation.length === 0 ? (
+          /* Compact welcome message when conversation is empty */
+          <ConversationEmptyState>
+            <div className="space-y-1">
+              <DogIcon size={16} className="text-blue-500 mx-auto" />
+              <div>
+                <h2 className="text-sm font-semibold">Juno AI</h2>
+                <p className="text-xs text-muted-foreground">
+                  AI desktop assistant
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Compact Example Prompts */}
-          <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
-        </div>
-      ) : (
-        messageList
-      )}
-      <div ref={conversationEndRef} />
-    </ScrollArea>
+            {/* Compact Example Prompts */}
+            <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+          </ConversationEmptyState>
+        ) : (
+          messageList
+        )}
+      </ConversationContent>
+      <ConversationScrollButton />
+    </Conversation>
   );
 });
