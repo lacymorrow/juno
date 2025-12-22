@@ -458,10 +458,11 @@ const FloatingBarContent = () => {
     <>
       {/* Compact States - Default and Dictation Ready */}
       {isCompact && (
-        <DynamicContainer className="flex items-center justify-center h-full w-full">
+        <DynamicContainer className="relative flex items-center justify-center h-full w-full">
+          <div className="absolute inset-0" data-tauri-drag-region />
           <button
             type="button"
-            className="flex items-center gap-2 cursor-pointer bg-transparent p-0 m-0 border-0"
+            className="relative flex items-center gap-2 cursor-pointer bg-transparent p-0 m-0 border-0"
             onClick={handleClick}
             aria-label="Activate assistant"
           >
@@ -484,17 +485,20 @@ const FloatingBarContent = () => {
         ];
         return activeStates.includes(currentUiState as any);
       })() && (
-        <DynamicContainer className="flex items-center justify-between w-full h-full px-4">
-          <DynamicDiv className="flex items-center gap-3">
+        <DynamicContainer className="relative flex items-center justify-between w-full h-full px-4">
+          <div className="absolute inset-0" data-tauri-drag-region />
+          <DynamicDiv className="relative flex items-center gap-3 pointer-events-none">
             {getMainIcon()}
             <DynamicDescription className="text-sm font-medium text-white">
               {getStateText()}
             </DynamicDescription>
           </DynamicDiv>
-          <AudioLevelIndicator
-            audioLevel={barState.audioLevel}
-            currentUiState={currentUiState}
-          />
+          <div className="relative pointer-events-none">
+            <AudioLevelIndicator
+              audioLevel={barState.audioLevel}
+              currentUiState={currentUiState}
+            />
+          </div>
         </DynamicContainer>
       )}
 
@@ -502,38 +506,40 @@ const FloatingBarContent = () => {
       {(currentUiState === UI.BAR_STATES_EXPANDING ||
         currentUiState === UI.BAR_STATES_INPUT) && (
         <DynamicContainer className="w-full h-full">
-          <form
-            onSubmit={handleSubmit}
-            className={cn(
-              "flex items-center justify-between w-full h-full gap-3 px-4",
-              "transition-opacity duration-300 ease-in-out",
-              currentUiState === UI.BAR_STATES_INPUT
-                ? "opacity-100"
-                : "opacity-0"
-            )}
-          >
-            <DynamicDiv className="flex items-center gap-3 flex-1">
-              {getMainIcon()}
-              <input
-                type="text"
-                value={localInputValue}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
-                placeholder="Ask me anything..."
-                className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-                disabled={currentUiState !== UI.BAR_STATES_INPUT}
-                autoFocus={currentUiState === UI.BAR_STATES_INPUT}
-              />
-            </DynamicDiv>
-            <button
-              type="submit"
-              className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-              disabled={currentUiState !== UI.BAR_STATES_INPUT}
+          <div className="w-full h-full" data-tauri-drag-region>
+            <form
+              onSubmit={handleSubmit}
+              className={cn(
+                "flex items-center justify-between w-full h-full gap-3 px-4",
+                "transition-opacity duration-300 ease-in-out",
+                currentUiState === UI.BAR_STATES_INPUT
+                  ? "opacity-100"
+                  : "opacity-0"
+              )}
             >
-              <Send size={14} />
-            </button>
-          </form>
+              <DynamicDiv className="flex items-center gap-3 flex-1">
+                {getMainIcon()}
+                <input
+                  type="text"
+                  value={localInputValue}
+                  onChange={(e) => handleInputChange(e.target.value)}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                  placeholder="Ask me anything..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
+                  disabled={currentUiState !== UI.BAR_STATES_INPUT}
+                  autoFocus={currentUiState === UI.BAR_STATES_INPUT}
+                />
+              </DynamicDiv>
+              <button
+                type="submit"
+                className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
+                disabled={currentUiState !== UI.BAR_STATES_INPUT}
+              >
+                <Send size={14} />
+              </button>
+            </form>
+          </div>
         </DynamicContainer>
       )}
 
@@ -549,8 +555,9 @@ const FloatingBarContent = () => {
         ];
         return statusStates.includes(currentUiState as any);
       })() && (
-        <DynamicContainer className="flex items-center justify-center w-full h-full">
-          <DynamicDiv className="flex items-center gap-3">
+        <DynamicContainer className="relative flex items-center justify-center w-full h-full">
+          <div className="absolute inset-0" data-tauri-drag-region />
+          <DynamicDiv className="relative flex items-center gap-3 pointer-events-none">
             {getMainIcon()}
             <DynamicDescription className="text-sm font-medium text-white">
               {getStateText()}
@@ -561,20 +568,23 @@ const FloatingBarContent = () => {
 
       {/* Complex States - Medium/Large layouts */}
       {currentUiState === UI.BAR_STATES_ALWAYS_LISTENING && (
-        <DynamicContainer className="flex flex-col justify-center items-center w-full h-full p-4 text-center">
-          <DynamicDiv className="flex items-center gap-3 mb-2">
+        <DynamicContainer className="relative flex flex-col justify-center items-center w-full h-full p-4 text-center">
+          <div className="absolute inset-0" data-tauri-drag-region />
+          <DynamicDiv className="relative flex items-center gap-3 mb-2 pointer-events-none">
             {getMainIcon()}
             <DynamicTitle className="text-lg font-bold text-white">
               Always Listening
             </DynamicTitle>
           </DynamicDiv>
-          <DynamicDescription className="text-sm text-white/70">
+          <DynamicDescription className="relative text-sm text-white/70 pointer-events-none">
             Voice commands are active
           </DynamicDescription>
-          <AudioLevelIndicator
-            audioLevel={barState.audioLevel}
-            currentUiState={currentUiState}
-          />
+          <div className="relative pointer-events-none">
+            <AudioLevelIndicator
+              audioLevel={barState.audioLevel}
+              currentUiState={currentUiState}
+            />
+          </div>
         </DynamicContainer>
       )}
     </>
@@ -584,8 +594,8 @@ const FloatingBarContent = () => {
 export function FloatingBar() {
   return (
     <DynamicIslandProvider initialSize="default">
-      <div className="flex min-h-screen items-center justify-center bg-gray-900">
-        <DynamicIsland id="floating-bar-refactored">
+      <div className="flex min-h-screen items-center justify-center bg-gray-900" data-tauri-drag-region>
+        <DynamicIsland id="floating-bar-refactored" data-tauri-drag-region>
           <FloatingBarContent />
         </DynamicIsland>
       </div>

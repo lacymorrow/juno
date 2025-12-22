@@ -55,7 +55,9 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if *shortcut == escape_shortcut {
         handle_escape_key_shortcut(app, event);
-    } else if let Some(agent_shortcut_obj) = agent_shortcut {
+    } 
+    
+    if let Some(agent_shortcut_obj) = agent_shortcut {
         if *shortcut == agent_shortcut_obj {
             handle_agent_mode_shortcut(app, event);
         }

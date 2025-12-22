@@ -395,9 +395,10 @@ const DynamicIslandContent = ({
 type DynamicContainerProps = {
   className?: string
   children?: React.ReactNode
+  [key: string]: any // Allow additional props
 }
 
-const DynamicContainer = ({ className, children }: DynamicContainerProps) => {
+const DynamicContainer = ({ className, children, ...props }: DynamicContainerProps) => {
   const willChange = useWillChange()
   const { state } = useDynamicIslandSize()
   const { size, previousSize } = state
@@ -439,6 +440,7 @@ const DynamicContainer = ({ className, children }: DynamicContainerProps) => {
       }}
       style={{ willChange }}
       className={className}
+      {...props}
     >
       {children}
     </motion.div>

@@ -76,7 +76,7 @@ function TTSContentDisplay({
   }
 
   return (
-    <div className="mb-2 pb-2 border-b border-border/30">
+    <div className="mb-2 pb-2 border-b border-border/10">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group"
@@ -101,7 +101,7 @@ function TTSContentDisplay({
           {ttsMetadata.tts_parts.map((ttsText, index) => (
             <div
               key={index}
-              className="pl-4 border-l-2 border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10 rounded-r-md p-2"
+              className="pl-4 border-l-2 border-blue-200/50 dark:border-blue-800/50 bg-blue-50/10 dark:bg-blue-900/10 rounded-r-md p-2"
             >
               <div className="flex items-center gap-2 mb-1">
                 <Volume2 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
@@ -116,7 +116,7 @@ function TTSContentDisplay({
           ))}
 
           {ttsMetadata.tts_parts.length > 1 && (
-            <div className="pl-4 border-l-2 border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-900/10 rounded-r-md p-2">
+            <div className="pl-4 border-l-2 border-green-200/50 dark:border-green-800/50 bg-green-50/10 dark:bg-green-900/10 rounded-r-md p-2">
               <div className="flex items-center gap-2 mb-1">
                 <Volume2 className="h-3 w-3 text-green-600 dark:text-green-400" />
                 <span className="text-xs font-medium text-green-700 dark:text-green-300">
@@ -195,154 +195,170 @@ export function ChatMessageComponent({
 
   return (
     <AIMessage key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
-      <AIMessageContent>
-        {/* TTS Content Display - Show decoratively */}
-        {msg.role === "assistant" && !msg.isStreaming && (
-          <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
+      <AIMessageContent
+        className={cn(
+          "relative overflow-hidden transition-all duration-300",
+          msg.role === "user"
+            ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-md"
+            : "bg-background/40 backdrop-blur-md border border-white/10 dark:border-white/5 shadow-sm hover:border-white/20 dark:hover:border-white/10",
+          msg.role === "assistant" && "bg-zinc-50/50 dark:bg-zinc-900/50"
         )}
-        {msg.role === "assistant" &&
-        (!msg.content || msg.content.trim() === "") ? (
-          <span className="text-muted-foreground italic flex items-center gap-2">
-            {msg.agent_state === UI.AGENT_STATUS_FINISHED ? (
-              <div className="flex items-center gap-1.5 text-green-600">
-                <CheckCircle className="h-3 w-3" />
-                <span className="text-xs">Complete</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_FAILED ? (
-              <div className="flex items-center gap-1.5 text-red-600">
-                <XCircle className="h-3 w-3" />
-                <span className="text-xs">Failed</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_CANCELLED ? (
-              <div className="flex items-center gap-1.5 text-gray-600">
-                <XCircle className="h-3 w-3" />
-                <span className="text-xs">Cancelled</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_OFFLINE ? (
-              <div className="flex items-center gap-1.5 text-gray-600">
-                <WifiOff className="h-3 w-3" />
-                <span className="text-xs">Offline</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 text-green-600">
-                <CheckCircle className="h-3 w-3" />
-                <span className="text-xs">Complete</span>
-              </div>
-            )}
-          </span>
-        ) : msg.isJsx ? (
-          <JsxMessageRenderer jsx={msg.content} />
-        ) : msg.role === "assistant" && msg.content ? (
-          <AIResponse>{msg.content}</AIResponse>
-        ) : (
-          msg.content
+      >
+        {/* Subtle gradient overlay for AI messages */}
+        {msg.role === "assistant" && (
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-transparent dark:from-white/5 pointer-events-none opacity-50" />
         )}
+        
+        <div className="relative z-10">
+          {/* TTS Content Display - Show decoratively */}
+          {msg.role === "assistant" && !msg.isStreaming && (
+            <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
+          )}
+          {msg.role === "assistant" &&
+          (!msg.content || msg.content.trim() === "") ? (
+            <span className="text-muted-foreground italic flex items-center gap-2">
+              {msg.agent_state === UI.AGENT_STATUS_FINISHED ? (
+                <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                  <CheckCircle className="h-3 w-3" />
+                  <span className="text-xs font-medium">Complete</span>
+                </div>
+              ) : msg.agent_state === UI.AGENT_STATUS_FAILED ? (
+                <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
+                  <XCircle className="h-3 w-3" />
+                  <span className="text-xs font-medium">Failed</span>
+                </div>
+              ) : msg.agent_state === UI.AGENT_STATUS_CANCELLED ? (
+                <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+                  <XCircle className="h-3 w-3" />
+                  <span className="text-xs font-medium">Cancelled</span>
+                </div>
+              ) : msg.agent_state === UI.AGENT_STATUS_OFFLINE ? (
+                <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+                  <WifiOff className="h-3 w-3" />
+                  <span className="text-xs font-medium">Offline</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                  <CheckCircle className="h-3 w-3" />
+                  <span className="text-xs font-medium">Complete</span>
+                </div>
+              )}
+            </span>
+          ) : msg.isJsx ? (
+            <JsxMessageRenderer jsx={msg.content} />
+          ) : msg.role === "assistant" && msg.content ? (
+            <AIResponse>{msg.content}</AIResponse>
+          ) : (
+            msg.content
+          )}
 
-        {msg.screenshot_base64 && (
-          <div className="mt-2 border-t pt-2">
-            <div className="text-xs text-muted-foreground mb-1">
-              {msg.role === "system"
-                ? "Screenshot captured by AI:"
-                : "Screenshot:"}
-            </div>
-            <div className="relative">
-              <img
-                src={`data:image/png;base64,${msg.screenshot_base64}`}
-                alt="Screenshot"
-                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-            </div>
-          </div>
-        )}
-
-        {msg.isStreaming && (
-          <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-            |
-          </span>
-        )}
-
-        {/* Action buttons for assistant messages */}
-        {msg.role === "assistant" &&
-          msg.content &&
-          msg.content.trim() !== "" &&
-          !msg.isStreaming && (
-            <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
-              <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    copyingMessageId === `copy-${index}`
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
-                      : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
-                  )}
-                  onClick={() => onCopyResponse(msg.content, index)}
-                  disabled={copyingMessageId === `copy-${index}`}
-                  title={
-                    copyingMessageId === `copy-${index}`
-                      ? "Copying..."
-                      : "Copy response to clipboard"
-                  }
-                >
-                  {copyingMessageId === `copy-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Copy size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-html-${index}`
-                      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
-                      : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
-                  )}
-                  onClick={() => onSaveResponse(msg.content, "html", index)}
-                  disabled={savingMessageId === `save-html-${index}`}
-                  title={
-                    savingMessageId === `save-html-${index}`
-                      ? "Saving HTML..."
-                      : "Save as HTML file with professional styling"
-                  }
-                >
-                  {savingMessageId === `save-html-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Code size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-markdown-${index}`
-                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
-                      : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
-                  )}
-                  onClick={() => onSaveResponse(msg.content, "markdown", index)}
-                  disabled={savingMessageId === `save-markdown-${index}`}
-                  title={
-                    savingMessageId === `save-markdown-${index}`
-                      ? "Saving Markdown..."
-                      : "Save as Markdown file for documentation"
-                  }
-                >
-                  {savingMessageId === `save-markdown-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <FileText size={14} />
-                  )}
-                </Button>
+          {msg.screenshot_base64 && (
+            <div className="mt-3 border-t border-border/20 pt-3">
+              <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/50" />
+                {msg.role === "system"
+                  ? "Screenshot captured by AI"
+                  : "Attached Screenshot"}
+              </div>
+              <div className="relative group overflow-hidden rounded-md border border-border/20 shadow-sm transition-all hover:shadow-md">
+                <img
+                  src={`data:image/png;base64,${msg.screenshot_base64}`}
+                  alt="Screenshot"
+                  className="w-full object-contain max-h-[300px] bg-black/5 dark:bg-white/5 transition-transform duration-500 group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
               </div>
             </div>
           )}
+
+          {msg.isStreaming && (
+            <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse rounded-sm opacity-70">
+              |
+            </span>
+          )}
+
+          {/* Action buttons for assistant messages */}
+          {msg.role === "assistant" &&
+            msg.content &&
+            msg.content.trim() !== "" &&
+            !msg.isStreaming && (
+              <div className="mt-2 pt-2 border-t border-border/10 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-1">
+                <div className="flex gap-1 bg-background/50 backdrop-blur-sm rounded-lg p-0.5 shadow-sm border border-border/10">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-7 w-7 p-0 transition-all duration-200 relative rounded-md",
+                      copyingMessageId === `copy-${index}`
+                        ? "bg-blue-100/20 text-blue-600 dark:text-blue-400 scale-95"
+                        : "hover:bg-blue-50/20 hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 text-muted-foreground"
+                    )}
+                    onClick={() => onCopyResponse(msg.content, index)}
+                    disabled={copyingMessageId === `copy-${index}`}
+                    title={
+                      copyingMessageId === `copy-${index}`
+                        ? "Copying..."
+                        : "Copy response to clipboard"
+                    }
+                  >
+                    {copyingMessageId === `copy-${index}` ? (
+                      <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Copy size={13} strokeWidth={2} />
+                    )}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-7 w-7 p-0 transition-all duration-200 relative rounded-md",
+                      savingMessageId === `save-html-${index}`
+                        ? "bg-green-100/20 text-green-600 dark:text-green-400 scale-95"
+                        : "hover:bg-green-50/20 hover:text-green-600 dark:hover:text-green-400 hover:scale-105 text-muted-foreground"
+                    )}
+                    onClick={() => onSaveResponse(msg.content, "html", index)}
+                    disabled={savingMessageId === `save-html-${index}`}
+                    title={
+                      savingMessageId === `save-html-${index}`
+                        ? "Saving HTML..."
+                        : "Save as HTML file with professional styling"
+                    }
+                  >
+                    {savingMessageId === `save-html-${index}` ? (
+                      <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Code size={13} strokeWidth={2} />
+                    )}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-7 w-7 p-0 transition-all duration-200 relative rounded-md",
+                      savingMessageId === `save-markdown-${index}`
+                        ? "bg-purple-100/20 text-purple-600 dark:text-purple-400 scale-95"
+                        : "hover:bg-purple-50/20 hover:text-purple-600 dark:hover:text-purple-400 hover:scale-105 text-muted-foreground"
+                    )}
+                    onClick={() => onSaveResponse(msg.content, "markdown", index)}
+                    disabled={savingMessageId === `save-markdown-${index}`}
+                    title={
+                      savingMessageId === `save-markdown-${index}`
+                        ? "Saving Markdown..."
+                        : "Save as Markdown file for documentation"
+                    }
+                  >
+                    {savingMessageId === `save-markdown-${index}` ? (
+                      <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <FileText size={13} strokeWidth={2} />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+        </div>
       </AIMessageContent>
-      <AIMessageAvatar src={avatarSrc} name={avatarName} />
+      <AIMessageAvatar src={avatarSrc} name={avatarName} className="ring-2 ring-background shadow-md" />
     </AIMessage>
   );
 }
