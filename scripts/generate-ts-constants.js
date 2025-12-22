@@ -237,7 +237,7 @@ function parsePlatformSpecificConstants(rustCode) {
     const platformSpecific = {};
     
     while ((match = platformConstRegex.exec(rustCode)) !== null) {
-        const [, isNot, , constName, constValue] = match;
+        const [, isNot, _, constName, constValue] = match;
         const platform = isNot ? 'other' : 'macos';
         
         if (!platformSpecific[constName]) {
