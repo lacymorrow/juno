@@ -244,6 +244,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>
                   Voice AI
                 </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_VOICE_CONTROL}>
+                  ElevenLabs Voice Button
+                </SelectItem>
                 <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
                   Dynamic
                 </SelectItem>

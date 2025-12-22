@@ -8,6 +8,7 @@ import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
+import { VoiceControlBar } from "@/components/bar/voice-control-bar";
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
@@ -55,6 +56,8 @@ export function BarHost() {
         return () => <VoiceAIBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_DYNAMIC:
         return () => <DynamicBar barAppearance={appearance} />;
+      case UI.BAR_APPEARANCES_VOICE_CONTROL:
+        return () => <VoiceControlBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_FLOATING:
       default:
         return () => <FloatingBar barAppearance={appearance} />;

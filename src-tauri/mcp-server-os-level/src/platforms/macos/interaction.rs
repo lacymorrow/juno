@@ -4,7 +4,7 @@ use super::constants::*;
 use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
-use super::memory_safety::{get_pooled_event_source, release_event_source};
+use super::memory_safety::get_pooled_event_source;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
 use core_foundation::base::{TCFType, CFTypeRef};
@@ -12,7 +12,6 @@ use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
 };
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use std::collections::HashMap;
 use tracing::{debug, warn};
@@ -46,7 +45,7 @@ struct NativeClipboard {
 
 impl NativeClipboard {
     fn new() -> Result<Self, AutomationError> {
-        let clipboard = Clipboard::new().map_err(|e| {
+        let clipboard = Clipboard::new().map_err(|_| {
             AutomationError::PlatformError("Failed to initialize clipboard".to_string())
         })?;
         Ok(NativeClipboard { clipboard })
@@ -54,17 +53,17 @@ impl NativeClipboard {
 
     fn read(&self) -> Result<String, AutomationError> {
         // Create a new clipboard instance for reading since arboard methods take &mut self
-        let mut clipboard = Clipboard::new().map_err(|e| {
+        let mut clipboard = Clipboard::new().map_err(|_| {
             AutomationError::PlatformError("Failed to access clipboard for reading".to_string())
         })?;
 
-        clipboard.get_text().map_err(|e| {
+        clipboard.get_text().map_err(|_| {
             AutomationError::PlatformError("Failed to read from clipboard".to_string())
         })
     }
 
     fn write(&mut self, content: String) -> Result<(), AutomationError> {
-        self.clipboard.set_text(content).map_err(|e| {
+        self.clipboard.set_text(content).map_err(|_| {
             AutomationError::PlatformError("Failed to write to clipboard".to_string())
         })
     }

@@ -2,7 +2,6 @@
 /// Provides autorelease pool management and safe resource handling
 
 use objc::{class, msg_send, sel, sel_impl};
-use std::ffi::c_void;
 
 /// Wrapper for NSAutoreleasePool to ensure proper memory management
 pub struct NSAutoreleasePool {
