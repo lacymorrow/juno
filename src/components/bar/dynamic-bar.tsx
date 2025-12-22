@@ -113,6 +113,7 @@ const FLOATING_BAR_DIMENSIONS = {
   DEFAULT_HEIGHT: 20,
   EXPANDED_WIDTH: 280,
   EXPANDED_HEIGHT: 50,
+  SHADOW_PADDING: 48,
 };
 
 /**
@@ -480,44 +481,60 @@ const AIFloatingChatbot = ({
    * Calculate optimal window dimensions based on state and content
    */
   const calculateDimensions = useCallback((state: BarStateData) => {
+    let dimensions = { width: defaultWidth, height: defaultHeight };
+    
     switch (state.barState) {
       case UI.BAR_STATES_DEFAULT:
-        return { width: 80, height: 30 };
+        dimensions = { width: 80, height: 30 };
+        break;
       
       case UI.BAR_STATES_LISTENING:
       case UI.BAR_STATES_TRANSCRIBING:
-        return { width: 160, height: 40 };
+        dimensions = { width: 160, height: 40 };
+        break;
       
       case UI.BAR_STATES_SPEAKING:
         // Dynamic width based on text length
         const textLen = state.spokenText?.length || 0;
         const width = Math.min(320, Math.max(180, 180 + textLen * 2));
-        return { width, height: 45 };
+        dimensions = { width, height: 45 };
+        break;
       
       case UI.BAR_STATES_LOADING:
       case UI.BAR_STATES_SUBMITTING:
-        return { width: 200, height: 50 };
+        dimensions = { width: 200, height: 50 };
+        break;
       
       case UI.BAR_STATES_INPUT:
-        return { width: 400, height: 60 };
+        dimensions = { width: 400, height: 60 };
+        break;
       
       case UI.BAR_STATES_ERROR:
         const errorLen = state.currentError?.length || 0;
         const errorWidth = Math.min(350, Math.max(200, 200 + errorLen * 1.5));
-        return { width: errorWidth, height: 55 };
+        dimensions = { width: errorWidth, height: 55 };
+        break;
       
       case UI.BAR_STATES_SUCCESS:
-        return { width: 180, height: 45 };
+        dimensions = { width: 180, height: 45 };
+        break;
       
       case UI.BAR_STATES_AGENT_RESPONDING:
-        return { width: 280, height: 65 };
+        dimensions = { width: 280, height: 65 };
+        break;
       
       case UI.BAR_STATES_ALWAYS_LISTENING:
-        return { width: 250, height: 80 };
+        dimensions = { width: 250, height: 80 };
+        break;
       
       default:
-        return { width: defaultWidth, height: defaultHeight };
+        dimensions = { width: defaultWidth, height: defaultHeight };
     }
+    
+    return {
+      width: dimensions.width + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
+      height: dimensions.height + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING
+    };
   }, [defaultWidth, defaultHeight]);
 
   // Debounced resize to avoid flickering
@@ -619,7 +636,7 @@ const AIFloatingChatbot = ({
   }, [currentWidgetData.id]);
 
   return (
-    <div className="h-full w-full relative">
+    <div className="h-full w-full relative p-6">
       <div className="flex items-center justify-center h-full">
         <button
           type="button"

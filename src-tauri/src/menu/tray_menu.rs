@@ -601,9 +601,13 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         tray_menu_ids::SETTINGS => {
             info!("[TrayMenu] Settings menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
-                error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "settings", e));
-            }
+            // Call open_settings_window directly instead of emitting event
+            let app_handle_clone = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
+                    error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_PROCESS, "settings window open", e));
+                }
+            });
         }
         tray_menu_ids::QUIT => {
             info!("[TrayMenu] Quit menu item clicked");

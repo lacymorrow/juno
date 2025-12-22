@@ -318,7 +318,17 @@ export function useBackendEvents({
 			// Handle toast notifications
 			switch (type) {
 				case "tool_call_request": {
-					// Silent - no toast for requests to reduce noise
+					const notificationLevel = payload.notification_level || "standard";
+
+					if (notificationLevel !== "silent") {
+						const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
+						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
+
+						toast.info(message, {
+							duration,
+							className: getNotificationClassName(payload.tool_category, "request"),
+						});
+					}
 					break;
 				}
 
@@ -327,18 +337,15 @@ export function useBackendEvents({
 					const success = payload.success ?? true;
 
 					if (notificationLevel !== "silent") {
-						// Only show error toasts, suppress success toasts to reduce noise
-						if (!success) {
-							const message = payload.content || `❌ Tool failed`;
-							const duration = getNotificationDuration(notificationLevel);
+						const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
+						const duration = getNotificationDuration(notificationLevel);
+						const toastType = success ? "success" : "error";
 
-							toast.error(message, {
-								duration,
-								className: getNotificationClassName(payload.tool_category, "result", false),
-							});
-						}
+						toast[toastType](message, {
+							duration,
+							className: getNotificationClassName(payload.tool_category, "result", success),
+						});
 
-						// Always show screenshot notifications as they are visual milestones
 						if (payload.screenshot_base64 && success) {
 							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
 							toast.success("📸 Screenshot captured", {
@@ -351,7 +358,12 @@ export function useBackendEvents({
 				}
 
 				case "thinking": {
-					// Silent - thinking is shown in chat
+					if (payload.content) {
+						toast.info(`💭 ${payload.content}`, {
+							duration: 2000,
+							className: "thinking-notification",
+						});
+					}
 					break;
 				}
 
@@ -364,7 +376,12 @@ export function useBackendEvents({
 				}
 
 				case "generic_content": {
-					// Silent - content is shown in chat
+					if (payload.content) {
+						toast.info(payload.content, {
+							duration: 4000,
+							className: "generic-content-notification",
+						});
+					}
 					break;
 				}
 

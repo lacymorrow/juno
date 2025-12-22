@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { UI, EVENTS, TIMEOUTS } from "@/lib/constants.generated";
-import type { BarAppearance } from "@/components/bar/barAppearance";
 import type { FloatingBarConfig } from "@/types/bar-config";
 
 import { FloatingBar } from "@/components/FloatingBar";

@@ -103,6 +103,7 @@ const FLOATING_BAR_DIMENSIONS = {
   DEFAULT_HEIGHT: 20,
   EXPANDED_WIDTH: 280,
   EXPANDED_HEIGHT: 50,
+  SHADOW_PADDING: 48, // 24px per side
 };
 
 /**
@@ -226,8 +227,8 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
         ].includes(currentUiState as any);
-        const targetWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
-        const targetHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
+        const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
+        const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
 
         await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
@@ -456,7 +457,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
   // === RENDER LOGIC ===
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden cursor-move">
+    <div className="w-screen h-screen relative overflow-hidden cursor-move flex items-center justify-center p-6">
       <div
         className={getContainerStyles()}
         style={{

@@ -343,6 +343,7 @@ export const UI = {
   BAR_APPEARANCES_FLOATING: 'floating',
   BAR_APPEARANCES_APP: 'app',
   BAR_APPEARANCES_VOICE_AI: 'voice_ai',
+  BAR_APPEARANCES_VOICE_AI_DARK: 'voice_ai_dark',
   BAR_APPEARANCES_DYNAMIC: 'dynamic',
   BAR_STATES_DEFAULT: 'default',
   BAR_STATES_EXPANDING: 'expanding',
