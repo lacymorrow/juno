@@ -318,17 +318,7 @@ export function useBackendEvents({
 			// Handle toast notifications
 			switch (type) {
 				case "tool_call_request": {
-					const notificationLevel = payload.notification_level || "standard";
-
-					if (notificationLevel !== "silent") {
-						const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
-						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
-
-						toast.info(message, {
-							duration,
-							className: getNotificationClassName(payload.tool_category, "request"),
-						});
-					}
+					// Silent - no toast for requests to reduce noise
 					break;
 				}
 
@@ -337,15 +327,18 @@ export function useBackendEvents({
 					const success = payload.success ?? true;
 
 					if (notificationLevel !== "silent") {
-						const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
-						const duration = getNotificationDuration(notificationLevel);
-						const toastType = success ? "success" : "error";
+						// Only show error toasts, suppress success toasts to reduce noise
+						if (!success) {
+							const message = payload.content || `❌ Tool failed`;
+							const duration = getNotificationDuration(notificationLevel);
 
-						toast[toastType](message, {
-							duration,
-							className: getNotificationClassName(payload.tool_category, "result", success),
-						});
+							toast.error(message, {
+								duration,
+								className: getNotificationClassName(payload.tool_category, "result", false),
+							});
+						}
 
+						// Always show screenshot notifications as they are visual milestones
 						if (payload.screenshot_base64 && success) {
 							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
 							toast.success("📸 Screenshot captured", {
@@ -358,12 +351,7 @@ export function useBackendEvents({
 				}
 
 				case "thinking": {
-					if (payload.content) {
-						toast.info(`💭 ${payload.content}`, {
-							duration: 2000,
-							className: "thinking-notification",
-						});
-					}
+					// Silent - thinking is shown in chat
 					break;
 				}
 
@@ -376,12 +364,7 @@ export function useBackendEvents({
 				}
 
 				case "generic_content": {
-					if (payload.content) {
-						toast.info(payload.content, {
-							duration: 4000,
-							className: "generic-content-notification",
-						});
-					}
+					// Silent - content is shown in chat
 					break;
 				}
 
