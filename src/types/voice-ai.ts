@@ -28,6 +28,10 @@ export interface ResponseContent {
 export interface VoiceAIBarProps {
 	className?: string
 	sampleResponses?: Record<string, ResponseContent>
+	barAppearance?: typeof UI.BAR_APPEARANCES_FLOATING
+		| typeof UI.BAR_APPEARANCES_APP
+		| typeof UI.BAR_APPEARANCES_VOICE_AI
+		| typeof UI.BAR_APPEARANCES_DYNAMIC
 }
 
 export interface DevPanelProps {

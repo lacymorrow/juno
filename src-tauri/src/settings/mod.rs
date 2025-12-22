@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::constants::settings::defaults;
 use crate::agent::providers::factory::model_ids;
+use crate::constants::ui;
 
 pub mod manager;
 
@@ -59,6 +60,7 @@ pub struct FloatingBarSettings {
     pub auto_hide: bool,
     pub auto_hide_delay: u32,
     pub opacity: f32,
+    pub bar_appearance: String,
 }
 
 /// Agent behavior and execution settings
@@ -272,6 +274,7 @@ impl Default for FloatingBarSettings {
             auto_hide: false,
             auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
+            bar_appearance: ui::bar_appearances::FLOATING.to_string(),
         }
     }
 }
