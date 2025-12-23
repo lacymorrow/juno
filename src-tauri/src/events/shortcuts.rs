@@ -51,6 +51,13 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.open_settings);
+    
+    // Debug logging
+    println!("[DEBUG] Current shortcuts from state:");
+    println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode_toggle, agent_shortcut);
+    println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
+    println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
+    println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if *shortcut == escape_shortcut {
@@ -70,9 +77,14 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 
     // Check dictation shortcut separately (not as else-if to avoid exclusion)
     if let Some(dictation_shortcut_obj) = dictation_shortcut {
+        println!("[DEBUG] Checking dictation shortcut: incoming {:?} == expected {:?} -> {}", 
+                 shortcut, dictation_shortcut_obj, *shortcut == dictation_shortcut_obj);
         if *shortcut == dictation_shortcut_obj {
+            println!("[DEBUG] Dictation shortcut matched! Calling handler...");
             handle_dictation_input_shortcut(app, event);
         }
+    } else {
+        println!("[DEBUG] No dictation shortcut configured or failed to parse");
     }
 }
 

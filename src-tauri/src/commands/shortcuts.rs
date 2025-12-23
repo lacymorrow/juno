@@ -442,9 +442,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 
     // Register the dictation input shortcut with error handling
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
-        match app.global_shortcut().register(shortcut) {
+        println!("[DEBUG] Attempting to register dictation shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);
+        match app.global_shortcut().register(shortcut.clone()) {
             Ok(()) => {
-                info!("✅ Successfully registered dictation input shortcut: {}", shortcuts.dictation_input);
+                info!("✅ Successfully registered dictation input shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);
             },
             Err(e) => {
                 error!("❌ Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);

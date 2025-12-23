@@ -50,6 +50,15 @@ pub struct UIStateUpdate {
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DictationStateChangeEvent {
+    pub previous_state: String,
+    pub new_state: String,
+    pub timestamp: u64,
+    pub reason: String,
+    pub component: String,
+}
+
 // === FLOATING BAR SPECIFIC TYPES ===
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -485,6 +494,8 @@ impl UIManager {
 
     pub async fn handle_dictation_mode_change(&mut self, is_active: bool) -> Result<(), String> {
         debug!("UI Manager: Handling dictation mode change: {}", is_active);
+        
+        let previous_state = self.voice_mode.clone();
         self.is_dictation_mode = is_active;
 
         if is_active {
@@ -495,6 +506,22 @@ impl UIManager {
             if !self.is_agent_working {
                 self.set_bar_state(BarState::Default).await;
             }
+        }
+
+        // Emit state changed event for frontend synchronization
+        let event = DictationStateChangeEvent {
+            previous_state,
+            new_state: self.voice_mode.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                .as_millis() as u64,
+            reason: if is_active { "shortcut_triggered".to_string() } else { "stopped".to_string() },
+            component: "backend".to_string(),
+        };
+
+        if let Err(e) = self.app_handle.emit(events::dictation::STATE_CHANGED, &event) {
+            error!("Failed to emit dictation-state-changed event: {}", e);
         }
 
         Ok(())
