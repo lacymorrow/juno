@@ -315,7 +315,8 @@ export function useBackendEvents({
 				return prev;
 			});
 
-			// Handle toast notifications
+			// Handle toast notifications with deduplication
+			// Use unique IDs to prevent duplicate toasts for rapid events
 			switch (type) {
 				case "tool_call_request": {
 					const notificationLevel = payload.notification_level || "standard";
@@ -323,8 +324,12 @@ export function useBackendEvents({
 					if (notificationLevel !== "silent") {
 						const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
 						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
+						const toastId = `tool-request-${payload.tool_name}`;
 
+						// Dismiss any previous request toast for the same tool
+						toast.dismiss(toastId);
 						toast.info(message, {
+							id: toastId,
 							duration,
 							className: getNotificationClassName(payload.tool_category, "request"),
 						});
@@ -340,15 +345,23 @@ export function useBackendEvents({
 						const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
 						const duration = getNotificationDuration(notificationLevel);
 						const toastType = success ? "success" : "error";
+						const toastId = `tool-result-${payload.tool_name}`;
 
+						// Dismiss previous result and request toasts for this tool
+						toast.dismiss(toastId);
+						toast.dismiss(`tool-request-${payload.tool_name}`);
 						toast[toastType](message, {
+							id: toastId,
 							duration,
 							className: getNotificationClassName(payload.tool_category, "result", success),
 						});
 
 						if (payload.screenshot_base64 && success) {
 							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
+							// Use consistent ID for screenshot toasts
+							toast.dismiss("screenshot-captured");
 							toast.success("📸 Screenshot captured", {
+								id: "screenshot-captured",
 								duration: 3000,
 								className: "screenshot-notification",
 							});
@@ -359,7 +372,10 @@ export function useBackendEvents({
 
 				case "thinking": {
 					if (payload.content) {
+						// Use a single ID for thinking toasts - only show the latest
+						toast.dismiss("thinking");
 						toast.info(`💭 ${payload.content}`, {
+							id: "thinking",
 							duration: 2000,
 							className: "thinking-notification",
 						});
@@ -368,7 +384,10 @@ export function useBackendEvents({
 				}
 
 				case "screenshot": {
+					// Use consistent ID for screenshot toasts
+					toast.dismiss("screenshot-captured");
 					toast.success("📸 Screenshot captured", {
+						id: "screenshot-captured",
 						duration: 3000,
 						className: "screenshot-notification",
 					});
@@ -377,7 +396,12 @@ export function useBackendEvents({
 
 				case "generic_content": {
 					if (payload.content) {
+						// Use content-based ID for deduplication of generic content
+						const contentHash = payload.content.slice(0, 50).replace(/\s+/g, '-');
+						const toastId = `generic-${contentHash}`;
+						toast.dismiss(toastId);
 						toast.info(payload.content, {
+							id: toastId,
 							duration: 4000,
 							className: "generic-content-notification",
 						});
