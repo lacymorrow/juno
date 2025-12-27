@@ -40,7 +40,7 @@ impl DictationInputMonitorState {
     pub fn start_hold(&mut self) -> bool {
         // Check if we're already in a transcription state
         if self.transcription_started {
-            debug!(
+            warn!(
                 "[DictationMonitor] Ignoring dictation input press - transcription already active"
             );
             return false;
@@ -50,9 +50,11 @@ impl DictationInputMonitorState {
         if let Some(last_cancel) = self.last_cancellation_time {
             let time_since_cancel = last_cancel.elapsed().as_millis();
             if time_since_cancel < monitor_sessions::COOLDOWN_AFTER_CANCEL_MS as u128 {
-                debug!("[DictationMonitor] Ignoring dictation input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
+                warn!("[DictationMonitor] Ignoring dictation input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
                 return false; // Don't start tracking during cooldown
             }
+            // Cooldown expired, clear it
+            info!("[DictationMonitor] Cooldown expired ({}ms since last cancellation), allowing new dictation", time_since_cancel);
         }
 
         self.hold_start_time = Some(Instant::now());
@@ -61,7 +63,7 @@ impl DictationInputMonitorState {
         self.passthrough_scheduled = false;
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
-        debug!("[DictationMonitor] Started tracking dictation input hold");
+        info!("[DictationMonitor] Started tracking dictation input hold");
         true // Successfully started tracking
     }
 
@@ -170,6 +172,7 @@ impl DictationInputMonitorState {
         self.passthrough_scheduled = false;
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
+        self.last_cancellation_time = None; // Clear cooldown tracking on reset
     }
 }
 
@@ -292,12 +295,16 @@ async fn force_stop_voice_controller(app_handle: &AppHandle) {
 
 // Called when dictation input key is pressed down
 pub async fn on_dictation_input_pressed() {
+    info!("[DictationMonitor] on_dictation_input_pressed called");
     let mut state = DICTATION_INPUT_STATE.lock().await;
+    info!("[DictationMonitor] Acquired lock, calling start_hold");
     let started = state.start_hold();
     if started {
-        debug!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
+        info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
     } else {
-        debug!("[DictationMonitor] Dictation input pressed down - ignored (transcription active or cooldown period)");
+        warn!("[DictationMonitor] Dictation input pressed down - ignored (transcription_started={}, last_cancel={:?})",
+              state.transcription_started,
+              state.last_cancellation_time.map(|t| t.elapsed().as_millis()));
     }
 }
 

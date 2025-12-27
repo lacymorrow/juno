@@ -192,21 +192,26 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         .get_dictation_trigger_mode()
         .unwrap_or(state::DictationTriggerMode::Hold);
 
+    info!("[Dictation Input Shortcut] Trigger mode: {:?}, event state: {:?}", trigger_mode, event.state());
     match trigger_mode {
         state::DictationTriggerMode::Tap => {
             // Tap mode: Only handle key release (press+release = tap)
             if event.state() == ShortcutState::Released {
+                info!("[Dictation Input Shortcut] Tap mode - calling handle_dictation_tap_mode");
                 handle_dictation_tap_mode(app);
             }
         }
         state::DictationTriggerMode::Hold => {
             // Hold mode: Handle both press and release, route to dictation_monitor
+            info!("[Dictation Shortcut] Hold mode - spawning async handler for {:?}", event_state);
             tauri::async_runtime::spawn(async move {
+                info!("[Dictation Shortcut] Async task started for {:?}", event_state);
                 if event_state == ShortcutState::Pressed {
                     crate::dictation_monitor::on_dictation_input_pressed().await;
                 } else if event_state == ShortcutState::Released {
                     crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
                 }
+                info!("[Dictation Shortcut] Async task completed for {:?}", event_state);
             });
         }
     }
@@ -214,16 +219,14 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 
 /// Handle dictation tap mode (new functionality)
 fn handle_dictation_tap_mode(app: &AppHandle) {
-    // Check if dictation is currently active by checking the VoiceController directly
-    let is_dictation_active =
-        if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-            voice_controller_state
-                .lock()
-                .map(|controller| controller.is_dictating())
-                .unwrap_or(false)
-        } else {
-            false
-        };
+    info!("[Dictation Tap Mode] Entered handle_dictation_tap_mode");
+
+    // Check if dictation is currently active using AppState (no locking required)
+    // This avoids the VoiceController mutex which can be held during audio processing
+    let app_state = app.state::<state::AppState>();
+    let is_dictation_active = app_state.is_dictation_active();
+
+    info!("[Dictation Tap Mode] is_dictation_active (from AppState): {}", is_dictation_active);
 
     if is_dictation_active {
         info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");

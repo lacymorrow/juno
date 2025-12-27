@@ -16,6 +16,31 @@ use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 
+/// Clean up common Whisper artifacts from transcription text
+fn clean_whisper_artifacts(text: &str) -> String {
+    // Common Whisper artifacts to remove
+    const ARTIFACTS: &[&str] = &[
+        "[BLANK_AUDIO]",
+        "[MUSIC]",
+        "[NOISE]",
+        "[APPLAUSE]",
+        "[LAUGHTER]",
+        "(BLANK_AUDIO)",
+        "(MUSIC)",
+        "(NOISE)",
+        "*BLANK_AUDIO*",
+    ];
+
+    let mut cleaned = text.to_string();
+    for artifact in ARTIFACTS {
+        cleaned = cleaned.replace(artifact, "");
+    }
+
+    // Clean up extra whitespace that may result from removal
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    cleaned.trim().to_string()
+}
+
 enum AudioThreadMessage {
     Stop,
 }
@@ -680,18 +705,14 @@ impl VoiceController {
                         }
                     }
 
+                    // Clean up Whisper artifacts from transcription
+                    let transcription_text = clean_whisper_artifacts(&transcription_text);
+
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
                     let _ = app_handle.emit(constants::voice_transcription::FINAL_RESULT,
                         serde_json::json!({ "text": transcription_text }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                    
-                    // Clear the is_dictating flag in VoiceController
-                    if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                        if let Ok(mut controller) = voice_controller_state.lock() {
-                            controller.is_dictating = false;
-                            info!("[AudioThread] Cleared is_dictating flag after successful transcription");
-                        }
-                    }
+                    // Note: is_dictating flag is cleared by stop_dictation() before thread join
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {:?}", e);
@@ -701,27 +722,13 @@ impl VoiceController {
                         "message": format!("Final transcription failed: {:?}", e)
                     }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                    
-                    // Clear the is_dictating flag in VoiceController
-                    if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                        if let Ok(mut controller) = voice_controller_state.lock() {
-                            controller.is_dictating = false;
-                            info!("[AudioThread] Cleared is_dictating flag after transcription error");
-                        }
-                    }
+                    // Note: is_dictating flag is cleared by stop_dictation() before thread join
                 }
             }
         } else {
             info!("[AudioThread] No audio to transcribe (empty buffer)");
             let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-            
-            // Clear the is_dictating flag in VoiceController
-            if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                if let Ok(mut controller) = voice_controller_state.lock() {
-                    controller.is_dictating = false;
-                    info!("[AudioThread] Cleared is_dictating flag for empty buffer");
-                }
-            }
+            // Note: is_dictating flag is cleared by stop_dictation() before thread join
         }
     }
 
