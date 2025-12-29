@@ -22,7 +22,7 @@ impl RigBrain {
         let openai_api_key = env::var("OPENAI_API_KEY")
             .map_err(|_| AgentError::ConfigurationError("OPENAI_API_KEY not found in environment".to_string()))?;
 
-        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| model_ids::GPT_4O.to_string());
+        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| model_ids::OPENAI_CUA.to_string());
         let system_prompt = env::var("RIG_SYSTEM_PROMPT").ok();
 
         Ok(Self {
