@@ -41,6 +41,14 @@ type StreamEndEvent = {
 	agent_state?: string; // "Finished", "Failed", "Cancelled", "Offline"
 };
 
+type DictationStateChangeEvent = {
+	previous_state: string;
+	new_state: string;
+	timestamp: number;
+	reason: string;
+	component: string;
+};
+
 interface AgentEventTauri {
 	type: string;
 	payload: {
@@ -315,7 +323,8 @@ export function useBackendEvents({
 				return prev;
 			});
 
-			// Handle toast notifications
+			// Handle toast notifications with deduplication
+			// Use unique IDs to prevent duplicate toasts for rapid events
 			switch (type) {
 				case "tool_call_request": {
 					const notificationLevel = payload.notification_level || "standard";
@@ -323,8 +332,12 @@ export function useBackendEvents({
 					if (notificationLevel !== "silent") {
 						const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
 						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
+						const toastId = `tool-request-${payload.tool_name}`;
 
+						// Dismiss any previous request toast for the same tool
+						toast.dismiss(toastId);
 						toast.info(message, {
+							id: toastId,
 							duration,
 							className: getNotificationClassName(payload.tool_category, "request"),
 						});
@@ -340,15 +353,23 @@ export function useBackendEvents({
 						const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
 						const duration = getNotificationDuration(notificationLevel);
 						const toastType = success ? "success" : "error";
+						const toastId = `tool-result-${payload.tool_name}`;
 
+						// Dismiss previous result and request toasts for this tool
+						toast.dismiss(toastId);
+						toast.dismiss(`tool-request-${payload.tool_name}`);
 						toast[toastType](message, {
+							id: toastId,
 							duration,
 							className: getNotificationClassName(payload.tool_category, "result", success),
 						});
 
 						if (payload.screenshot_base64 && success) {
 							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
+							// Use consistent ID for screenshot toasts
+							toast.dismiss("screenshot-captured");
 							toast.success("📸 Screenshot captured", {
+								id: "screenshot-captured",
 								duration: 3000,
 								className: "screenshot-notification",
 							});
@@ -359,7 +380,10 @@ export function useBackendEvents({
 
 				case "thinking": {
 					if (payload.content) {
+						// Use a single ID for thinking toasts - only show the latest
+						toast.dismiss("thinking");
 						toast.info(`💭 ${payload.content}`, {
+							id: "thinking",
 							duration: 2000,
 							className: "thinking-notification",
 						});
@@ -368,7 +392,10 @@ export function useBackendEvents({
 				}
 
 				case "screenshot": {
+					// Use consistent ID for screenshot toasts
+					toast.dismiss("screenshot-captured");
 					toast.success("📸 Screenshot captured", {
+						id: "screenshot-captured",
 						duration: 3000,
 						className: "screenshot-notification",
 					});
@@ -377,7 +404,12 @@ export function useBackendEvents({
 
 				case "generic_content": {
 					if (payload.content) {
+						// Use content-based ID for deduplication of generic content
+						const contentHash = payload.content.slice(0, 50).replace(/\s+/g, '-');
+						const toastId = `generic-${contentHash}`;
+						toast.dismiss(toastId);
 						toast.info(payload.content, {
+							id: toastId,
 							duration: 4000,
 							className: "generic-content-notification",
 						});
@@ -482,6 +514,78 @@ export function useBackendEvents({
 			streamEndListener.then((unlistenFn) => unlistenFn());
 		};
 	}, [setConversationWithPruning, throttledAutoScroll, setIsProcessing]);
+
+	// Listen for thinking streaming events (streamed thinking content)
+	useEffect(() => {
+		// Thinking stream start - create a new streaming thinking message
+		const thinkingStartListener = listen<{ message_id: string }>(
+			EVENTS.STREAMING_THINKING_START,
+			(event) => {
+				console.log("Thinking stream started:", event.payload);
+				const { message_id } = event.payload;
+
+				const thinkingMessage: ChatMessage = {
+					role: "thinking",
+					content: "",
+					messageId: message_id,
+					isStreaming: true,
+					timestamp: Date.now(),
+				};
+
+				setConversationWithPruning((prev) => [...prev, thinkingMessage]);
+			}
+		);
+
+		// Thinking stream chunk - append to the streaming thinking message
+		const thinkingStreamListener = listen<{ chunk: string; message_id: string | null }>(
+			EVENTS.STREAMING_THINKING_STREAM,
+			(event) => {
+				const { chunk, message_id } = event.payload;
+
+				setConversationWithPruning((prev) =>
+					prev.map((msg) => {
+						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+							return {
+								...msg,
+								content: msg.content + chunk,
+							};
+						}
+						return msg;
+					})
+				);
+
+				throttledAutoScroll();
+			}
+		);
+
+		// Thinking stream end - finalize the streaming thinking message
+		const thinkingEndListener = listen<{ message_id: string; complete_text: string }>(
+			EVENTS.STREAMING_THINKING_END,
+			(event) => {
+				console.log("Thinking stream ended:", event.payload);
+				const { message_id, complete_text } = event.payload;
+
+				setConversationWithPruning((prev) =>
+					prev.map((msg) => {
+						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+							return {
+								...msg,
+								content: complete_text,
+								isStreaming: false,
+							};
+						}
+						return msg;
+					})
+				);
+			}
+		);
+
+		return () => {
+			thinkingStartListener.then((unlistenFn) => unlistenFn());
+			thinkingStreamListener.then((unlistenFn) => unlistenFn());
+			thinkingEndListener.then((unlistenFn) => unlistenFn());
+		};
+	}, [setConversationWithPruning, throttledAutoScroll]);
 
 	// Listen for agent error events
 	useEffect(() => {
@@ -633,6 +737,23 @@ export function useBackendEvents({
 			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [setIsProcessing, stopCurrentAudio]);
+
+	// Listen for dictation state changes (for synchronization/debugging)
+	useEffect(() => {
+		const unlisten = listen<DictationStateChangeEvent>(
+			EVENTS.DICTATION_STATE_CHANGED,
+			(event) => {
+				console.log("Dictation state changed:", event.payload);
+				// Note: Primary UI state is driven by useAppState/voice_mode, 
+				// but this event provides detailed transition info for debugging
+				// or future fine-grained UI updates.
+			}
+		);
+
+		return () => {
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
+		};
+	}, []);
 
 	// Listen for user message submitted events (from voice input)
 	useEffect(() => {

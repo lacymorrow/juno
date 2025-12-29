@@ -33,11 +33,11 @@ interface PermissionStatus {
 // Complete permissions state interface (from Onboarding)
 interface PermissionsState {
   accessibility: PermissionStatus;
-  screenRecording: PermissionStatus;
+  screen_recording: PermissionStatus;
   microphone: PermissionStatus;
-  inputMonitoring: PermissionStatus;
-  allGranted: boolean;
-  appName: string;
+  input_monitoring: PermissionStatus;
+  all_granted: boolean;
+  app_name: string;
 }
 
 const permissions = [
@@ -258,11 +258,19 @@ export default function SecuritySettings() {
         "check_permissions_status_native"
       );
       setPermissionsState(result);
+      // Clear any existing error when permissions check succeeds
       console.log("SecuritySettings: Updated permissions state:", result);
-      return result.allGranted;
+      console.log("All granted status:", result.all_granted);
+      console.log("Accessibility:", result.accessibility.granted);
+      console.log("Screen Recording:", result.screen_recording.granted);
+      console.log("Microphone:", result.microphone.granted);
+      console.log("Input Monitoring:", result.input_monitoring.granted);
+      return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
-      setPermissionsError(error as string);
+      // Convert error to string properly
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setPermissionsError(errorMessage);
       return false;
     } finally {
       setIsLoadingPermissions(false);
@@ -307,7 +315,9 @@ export default function SecuritySettings() {
       }
     } catch (error) {
       console.error(`Error requesting ${permissionType} permission:`, error);
-      setPermissionsError(error as string);
+      // Convert error to string properly
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setPermissionsError(errorMessage);
     } finally {
       setIsRequestingPermission(null);
     }
@@ -379,7 +389,7 @@ export default function SecuritySettings() {
               <div className="mt-6 p-4 bg-gray-50 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {permissionsState.allGranted ? (
+                    {permissionsState.all_granted ? (
                       <>
                         <CheckCircle className="w-5 h-5 text-green-600" />
                         <span className="font-medium text-green-800">
@@ -396,7 +406,9 @@ export default function SecuritySettings() {
                     )}
                   </div>
                   <Button
-                    onClick={checkPermissionsStatus}
+                    onClick={() => {
+                      checkPermissionsStatus();
+                    }}
                     variant="outline"
                     size="sm"
                     className="flex items-center gap-1"

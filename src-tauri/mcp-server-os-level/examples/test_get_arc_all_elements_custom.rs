@@ -1,6 +1,6 @@
 use computer_use_ai_sdk::platforms::macos::MacOSEngine;
 use computer_use_ai_sdk::platforms::AccessibilityEngine;
-use computer_use_ai_sdk::{Selector, UIElement};
+use computer_use_ai_sdk::UIElement;
 use std::collections::VecDeque;
 use std::time::Instant;
 

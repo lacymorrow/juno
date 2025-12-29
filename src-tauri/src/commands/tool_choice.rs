@@ -135,7 +135,7 @@ pub async fn get_tool_choice_config(
 #[tauri::command]
 pub async fn set_tool_choice_config(
     config: ToolChoiceConfig,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     info!("Updating tool choice configuration: {:?}", config);
@@ -292,7 +292,7 @@ pub async fn get_tool_choice_stats() -> Result<serde_json::Value, String> {
 /// Reset tool choice configuration to defaults
 #[tauri::command]
 pub async fn reset_tool_choice_config(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ToolChoiceConfig, String> {
     info!("Resetting tool choice configuration to defaults");
@@ -315,7 +315,7 @@ pub async fn reset_tool_choice_config(
 #[tauri::command]
 pub async fn set_tool_choice_enabled(
     enabled: bool,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     info!("Setting tool choice intelligence enabled: {}", enabled);
@@ -332,7 +332,7 @@ pub async fn set_tool_choice_enabled(
 
 /// Get tool choice intelligence enabled state
 #[tauri::command]
-pub async fn get_tool_choice_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn get_tool_choice_enabled(_state: State<'_, AppState>) -> Result<bool, String> {
     // TODO: Get actual enabled state from app state
     // For now, return true as default
     Ok(true)

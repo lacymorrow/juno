@@ -7,7 +7,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
-use tracing::{info, error};
+use tracing::error;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 

@@ -232,7 +232,7 @@ pub async fn respond_to_agent_continuation(
     approved: bool,
     additional_steps: Option<u32>,
     app_handle: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!(
         "Received continuation response: request_id={}, approved={}, additional_steps={:?}",
@@ -267,7 +267,7 @@ pub async fn respond_to_agent_continuation(
 /// Tauri command: Get pending continuation requests
 #[tauri::command]
 pub async fn get_pending_continuation_requests(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<Vec<ContinuationRequest>, String> {
     let manager = get_continuation_manager();
     let requests = manager.get_pending_requests().await;
@@ -278,7 +278,7 @@ pub async fn get_pending_continuation_requests(
 
 /// Tauri command: Check if there are any pending continuation requests
 #[tauri::command]
-pub async fn has_pending_continuation_requests(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn has_pending_continuation_requests(_state: State<'_, AppState>) -> Result<bool, String> {
     let manager = get_continuation_manager();
     let requests = manager.get_pending_requests().await;
     Ok(!requests.is_empty())

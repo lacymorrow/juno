@@ -322,29 +322,35 @@ use commands::config_file::{
 async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
     match app.path().resource_dir() {
         Ok(resource_dir) => {
-            // In production, the .env file is bundled in the _up_ directory
-            let bundled_env_path = resource_dir.join("_up_").join(".env");
+            // In production, `.env` is bundled as an app resource (see `src-tauri/tauri.conf.json`).
+            // It lives at the root of the resource directory, NOT inside `_up_` (which contains frontend assets).
+            let bundled_env_path = resource_dir.join(".env");
 
-            if bundled_env_path.exists() {
-                match dotenvy::from_path(&bundled_env_path) {
-                    Ok(_) => {
-                        info!("Successfully loaded environment variables from bundled .env file: {:?}", bundled_env_path);
-                        startup::validate_environment_variables();
-                        Ok(format!(
-                            "Environment variables loaded from: {:?}",
-                            bundled_env_path
-                        ))
-                    }
-                    Err(e) => {
-                        let error_msg = format_error(templates::FAILED_TO_LOAD, "bundled .env file", e);
-                        error!("{}", error_msg);
-                        Err(error_msg)
-                    }
+            if !bundled_env_path.exists() {
+                // Bundled env is optional; most production deployments should prefer system-provided env vars.
+                // We intentionally do not attempt to load `_up_/.env` (frontend assets).
+                info!("No bundled .env file found at: {:?} (skipping)", bundled_env_path);
+                return Ok("No bundled .env resource found; using system environment".to_string());
+            }
+
+            match dotenvy::from_path(&bundled_env_path) {
+                Ok(_) => {
+                    info!(
+                        "Successfully loaded environment variables from bundled .env file: {:?}",
+                        bundled_env_path
+                    );
+                    startup::validate_environment_variables();
+                    Ok(format!(
+                        "Environment variables loaded from: {:?}",
+                        bundled_env_path
+                    ))
                 }
-            } else {
-                let error_msg = format!("Bundled .env file not found at: {:?}", bundled_env_path);
-                warn!("{}", error_msg);
-                Err(error_msg)
+                Err(e) => {
+                    let error_msg =
+                        format_error(templates::FAILED_TO_LOAD, "bundled .env file", e);
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
             }
         }
         Err(e) => {

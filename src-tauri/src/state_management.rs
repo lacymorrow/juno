@@ -94,12 +94,16 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
 async fn initialize_environment_state(app_handle: AppHandle) -> Result<(), String> {
     info!("[State] Initializing environment state...");
 
-    // Load environment variables from bundled resources
-    if let Err(e) = crate::load_bundled_environment(app_handle.clone()).await {
-        warn!("Failed to load bundled environment: {}", e);
-        info!("Using environment variables from system environment or development .env file");
-    } else {
-        info!("Successfully loaded environment variables from bundled resources");
+    // In dev, `startup::init_environment()` already loads from local `.env`.
+    // The bundled `.env` resource is primarily for packaged builds.
+    if !cfg!(debug_assertions) {
+        // Load environment variables from bundled resources (packaged builds)
+        if let Err(e) = crate::load_bundled_environment(app_handle.clone()).await {
+            warn!("Failed to load bundled environment: {}", e);
+            info!("Using environment variables from system environment or development .env file");
+        } else {
+            info!("Successfully loaded environment variables from bundled resources");
+        }
     }
 
     Ok(())

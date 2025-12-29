@@ -33,6 +33,7 @@ pub enum OperationSecurity {
 /// Cloud security handler - maximally permissive
 #[derive(Debug, Clone)]
 pub struct CloudSecurity {
+    #[allow(dead_code)]
     config: CloudConfig,
     auth: DeviceAuth,
     // Minimal blacklist for truly destructive commands
@@ -211,6 +212,7 @@ impl CloudSecurity {
     }
 
     /// Get security level for command type - now all are safe or minimally restricted
+    #[allow(dead_code)]
     fn get_command_security_level(&self, command_type: &CloudCommandType) -> OperationSecurity {
         match command_type {
             CloudCommandType::VoiceQuery => OperationSecurity::Safe,

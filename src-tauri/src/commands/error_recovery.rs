@@ -87,7 +87,7 @@ async fn get_recovery_manager() -> Arc<Mutex<ErrorRecoveryManager>> {
 
 /// Initialize the enhanced error recovery system
 #[command]
-pub async fn initialize_error_recovery(app_state: State<'_, AppState>) -> Result<String, String> {
+pub async fn initialize_error_recovery(_app_state: State<'_, AppState>) -> Result<String, String> {
     info!("Initializing Enhanced Error Recovery System");
 
     let manager = get_recovery_manager().await;
@@ -106,7 +106,7 @@ pub async fn initialize_error_recovery(app_state: State<'_, AppState>) -> Result
 /// Create a new execution checkpoint
 #[command]
 pub async fn create_checkpoint(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     description: String,
 ) -> Result<CheckpointResult, String> {
     info!("Creating execution checkpoint: {}", description);
@@ -139,7 +139,7 @@ pub async fn create_checkpoint(
 /// Rollback to a specific checkpoint
 #[command]
 pub async fn rollback_to_checkpoint(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     checkpoint_id: String,
 ) -> Result<RollbackResult, String> {
     info!("Rolling back to checkpoint: {}", checkpoint_id);
@@ -180,7 +180,7 @@ pub async fn rollback_to_checkpoint(
 /// Rollback to the last known good state
 #[command]
 pub async fn rollback_to_last_known_good(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<RollbackResult, String> {
     info!("Rolling back to last known good state");
 
@@ -214,7 +214,7 @@ pub async fn rollback_to_last_known_good(
 /// Get enhanced recovery statistics
 #[command]
 pub async fn get_recovery_statistics(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     info!("Retrieving enhanced error recovery statistics");
 
@@ -227,7 +227,7 @@ pub async fn get_recovery_statistics(
 /// Update error recovery configuration
 #[command]
 pub async fn update_recovery_config(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     config: ErrorRecoveryConfigDTO,
 ) -> Result<String, String> {
     info!("Updating error recovery configuration");
@@ -245,7 +245,7 @@ pub async fn update_recovery_config(
 /// Get current recovery configuration
 #[command]
 pub async fn get_recovery_config(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<ErrorRecoveryConfigDTO, String> {
     info!("Retrieving current error recovery configuration");
 
@@ -277,7 +277,7 @@ pub async fn get_recovery_config(
 /// List all available checkpoints
 #[command]
 pub async fn list_checkpoints(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, String> {
     info!("Listing all available checkpoints");
 
@@ -305,7 +305,7 @@ pub async fn list_checkpoints(
 
 /// Clear all checkpoints and reset state
 #[command]
-pub async fn reset_recovery_state(app_state: State<'_, AppState>) -> Result<String, String> {
+pub async fn reset_recovery_state(_app_state: State<'_, AppState>) -> Result<String, String> {
     info!("Resetting error recovery state");
 
     let manager = get_recovery_manager().await;
@@ -321,7 +321,7 @@ pub async fn reset_recovery_state(app_state: State<'_, AppState>) -> Result<Stri
 /// Test the error recovery system with a simulated failure
 #[command]
 pub async fn test_error_recovery(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     error_type: String,
 ) -> Result<serde_json::Value, String> {
     info!(
@@ -365,7 +365,7 @@ pub async fn test_error_recovery(
 /// Update agent state for checkpoint context
 #[command]
 pub async fn update_agent_state(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     key: String,
     value: serde_json::Value,
 ) -> Result<String, String> {
@@ -382,7 +382,7 @@ pub async fn update_agent_state(
 /// Get execution history summary
 #[command]
 pub async fn get_execution_history(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     info!("Retrieving execution history (limit: {:?})", limit);

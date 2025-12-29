@@ -155,7 +155,7 @@ async fn get_tray_icon_manager() -> Arc<TokioMutex<TrayIconManager>> {
 }
 
 /// Load tray icon from embedded data
-fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage, Box<dyn std::error::Error>> {
+fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage<'static>, Box<dyn std::error::Error>> {
     let loaded_image = image::load_from_memory(icon_data)?;
     let width = loaded_image.width();
     let height = loaded_image.height();
@@ -310,6 +310,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
+            let event = event.clone();
             tauri::async_runtime::spawn(async move {
                 if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
                     let new_state = if is_active {
@@ -328,6 +329,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
+            let event = event.clone();
             tauri::async_runtime::spawn(async move {
                 if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
                     let new_state = if is_active {
@@ -361,9 +363,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
 
     // Listen for immediate agent mode starts (when user presses agent shortcut)
     let _ = app_handle.listen(crate::constants::events::dictation::STARTED, {
-        let app_handle = app_handle_clone.clone();
         move |_event| {
-            let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 // Set to Processing state initially, will change to AgentActive once agent actually starts
                 update_tray_icon_state(TrayIconState::Processing).await;
@@ -376,6 +376,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
+            let event = event.clone();
             tauri::async_runtime::spawn(async move {
                 // When dictation finishes, check if it's transitioning to agent mode
                 // If there's a query payload, it means agent mode is starting
@@ -399,9 +400,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
 
     // Listen for agent-query-ready events (when agent mode voice transcription finishes)
     let _ = app_handle.listen(crate::constants::events::agent::QUERY_READY, {
-        let app_handle = app_handle_clone.clone();
-        move |event| {
-            let app_handle = app_handle.clone();
+        move |_event| {
             tauri::async_runtime::spawn(async move {
                 // When agent voice transcription finishes, agent processing is about to start
                 update_tray_icon_state(TrayIconState::Processing).await;
@@ -413,6 +412,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         let app_handle = app_handle_clone.clone();
         move |event| {
             let app_handle = app_handle.clone();
+            let event = event.clone();
             tauri::async_runtime::spawn(async move {
                 if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
                     if is_active {
@@ -430,6 +430,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     let _ = app_handle.listen(crate::constants::events::ui::BAR_STATE_CHANGED, {
         move |event| {
             tauri::async_runtime::spawn(async move {
+                let event = event.clone();
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
                     if let Some(state) = payload.get("barState").and_then(|s| s.as_str()) {
                         let icon_state = match state {

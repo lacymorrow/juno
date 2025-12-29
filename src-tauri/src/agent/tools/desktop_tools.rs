@@ -80,8 +80,8 @@ use std::time::Duration;
 // Agents should use the unified 'computer' tool for ALL screen interactions.
 
 async fn register_additional_computer_use_tools(
-    provider: &mut LocalToolProvider,
-    app_handle: tauri::AppHandle,
+    _provider: &mut LocalToolProvider,
+    _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     info!("Additional computer use tools: All redundant tools removed for clean API compliance");
 
@@ -368,20 +368,7 @@ pub async fn register_desktop_tools(
         // Depending on requirements, might want to panic or return an error here
     }
 
-    // Define common input structs from tools2
-    #[derive(serde::Deserialize)]
-    struct MousePositionInput {
-        x: f64,
-        y: f64,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct DragInput {
-        start_x: f64,
-        start_y: f64,
-        end_x: f64,
-        end_y: f64,
-    }
+// MousePositionInput and DragInput removed as they were unused and causing warnings.
 
     // Note: scroll tool is already registered in register_additional_computer_use_tools
 

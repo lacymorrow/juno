@@ -4,7 +4,7 @@ use super::constants::*;
 use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
-use super::memory_safety::{get_pooled_event_source, release_event_source};
+use super::memory_safety::get_pooled_event_source;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
 use core_foundation::base::{TCFType, CFTypeRef};
@@ -12,7 +12,6 @@ use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
 };
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use std::collections::HashMap;
 use tracing::{debug, warn};
@@ -46,7 +45,7 @@ struct NativeClipboard {
 
 impl NativeClipboard {
     fn new() -> Result<Self, AutomationError> {
-        let clipboard = Clipboard::new().map_err(|e| {
+        let clipboard = Clipboard::new().map_err(|_e| {
             AutomationError::PlatformError("Failed to initialize clipboard".to_string())
         })?;
         Ok(NativeClipboard { clipboard })
@@ -54,17 +53,17 @@ impl NativeClipboard {
 
     fn read(&self) -> Result<String, AutomationError> {
         // Create a new clipboard instance for reading since arboard methods take &mut self
-        let mut clipboard = Clipboard::new().map_err(|e| {
+        let mut clipboard = Clipboard::new().map_err(|_e| {
             AutomationError::PlatformError("Failed to access clipboard for reading".to_string())
         })?;
 
-        clipboard.get_text().map_err(|e| {
+        clipboard.get_text().map_err(|_e| {
             AutomationError::PlatformError("Failed to read from clipboard".to_string())
         })
     }
 
     fn write(&mut self, content: String) -> Result<(), AutomationError> {
-        self.clipboard.set_text(content).map_err(|e| {
+        self.clipboard.set_text(content).map_err(|_e| {
             AutomationError::PlatformError("Failed to write to clipboard".to_string())
         })
     }
@@ -459,6 +458,7 @@ pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Simulate a double click at the specified coordinates.
+#[allow(dead_code)]
 pub(crate) fn double_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
     debug!("Performing double click at ({}, {}) [adjusted]", point.x, point.y);
@@ -499,6 +499,7 @@ pub(crate) fn double_click(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Simulate a triple click at the specified coordinates.
+#[allow(dead_code)]
 pub(crate) fn triple_click(x: f64, y: f64) -> Result<(), AutomationError> {
     debug!("Performing triple click at ({}, {})", x, y);
 
@@ -556,6 +557,7 @@ pub(crate) fn triple_click(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Simulate dragging with the left mouse button from a start point to an end point.
+#[allow(dead_code)]
 pub(crate) fn left_click_drag(
     start_x: f64,
     start_y: f64,
@@ -1193,6 +1195,7 @@ pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags, duration_ms: Op
 }
 
 /// Releases a specified modifier key.
+#[allow(dead_code)]
 pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), AutomationError> {
     debug!("Releasing key: code={}, flags={:?}", key_code, flags);
     let source = get_pooled_event_source().map_err(|_|
@@ -1235,6 +1238,7 @@ pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEve
 }
 
 // --- Old/Internal key sequence logic (if needed for reference, keep private) ---
+#[allow(dead_code)]
 fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), AutomationError> {
     // Placeholder implementation or keep the original logic if needed internally
     debug!("Internal press_key_sequence called (currently placeholder)");
@@ -1491,6 +1495,7 @@ pub(crate) fn scroll_with_modifiers(
 }
 
 // Add a new function for post_mouse_event that allows holding modifiers during mouse operations
+#[allow(dead_code)]
 pub(crate) fn post_mouse_event(
     event_type: CGEventType,
     location: CGPoint,

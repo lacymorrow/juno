@@ -458,17 +458,20 @@ struct GenericContentPayload {
 
 // NEW: Streaming event payloads
 #[derive(Clone, Debug, Serialize)]
+#[allow(dead_code)]
 struct StreamingTextPayload {
     chunk: String,
     message_id: Option<String>, // Optional message ID to track which response this belongs to
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[allow(dead_code)]
 struct StreamStartPayload {
     message_id: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[allow(dead_code)]
 struct StreamEndPayload {
     message_id: String,
     complete_text: String,
@@ -589,7 +592,7 @@ fn sanitize_value_for_logging(value: &Value) -> Value {
     }
 }
 
-// Example usage for emitting a thinking event:
+// Example usage for emitting a thinking event (non-streaming, batch):
 pub fn log_thinking(app_handle: &AppHandle, thought: &str) {
     let event = AgentEvent {
         event_type: "thinking".to_string(),
@@ -598,6 +601,41 @@ pub fn log_thinking(app_handle: &AppHandle, thought: &str) {
         }),
     };
     emit_agent_event(app_handle, event);
+}
+
+/// Emit thinking stream start event - creates a new streaming thinking message
+pub fn emit_thinking_start(app_handle: &AppHandle, message_id: String) {
+    let event_data = serde_json::json!({
+        "message_id": message_id
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_START, event_data) {
+        warn!("Failed to emit thinking-start event: {}", e);
+    }
+}
+
+/// Emit thinking stream chunk - appends to the current streaming thinking message
+pub fn emit_thinking_chunk(app_handle: &AppHandle, chunk: String, message_id: Option<String>) {
+    let event_data = serde_json::json!({
+        "chunk": chunk,
+        "message_id": message_id
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_STREAM, event_data) {
+        warn!("Failed to emit thinking-stream event: {}", e);
+    }
+}
+
+/// Emit thinking stream end event - finalizes the streaming thinking message
+pub fn emit_thinking_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
+    let event_data = serde_json::json!({
+        "message_id": message_id,
+        "complete_text": complete_text
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_END, event_data) {
+        warn!("Failed to emit thinking-end event: {}", e);
+    }
 }
 
 // Example usage for emitting a tool call request:
@@ -754,6 +792,27 @@ struct ToolMetadata {
 }
 
 impl ToolMetadata {
+    fn normalized_category_from_action(action_verb: &str) -> &'static str {
+        let lower_action = action_verb.to_ascii_lowercase();
+        if lower_action.contains("typing") || lower_action.contains("pressing key") || lower_action.contains("pressing keys") {
+            "Keyboard"
+        } else if lower_action.contains("running command") {
+            "Command"
+        } else if lower_action.contains("file") {
+            "File"
+        } else if lower_action.contains("browser") {
+            "Browser"
+        } else if lower_action.contains("timer") {
+            "Timer"
+        } else if lower_action.contains("desktop") {
+            "Desktop"
+        } else if lower_action.contains("screen") || lower_action.contains("screenshot") || lower_action.contains("click") || lower_action.contains("scroll") || lower_action.contains("drag") || lower_action.contains("cursor") {
+            "Computer Use"
+        } else {
+            "General"
+        }
+    }
+
     /// Determine tool metadata dynamically based on tool name and configuration
     async fn determine_for_tool(
         tool_name: &str,
@@ -820,8 +879,10 @@ impl ToolMetadata {
             ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
         };
 
+        let normalized_category = Self::normalized_category_from_action(action_verb);
+
         Self {
-            category: format!("{:?}", config.category),
+            category: normalized_category.to_string(),
             description: config.description.clone(),
             notification_level: notification_level.to_string(),
             estimated_duration: estimated_duration.map(|s| s.to_string()),
@@ -1147,19 +1208,22 @@ impl ToolMetadata {
                 // Include specific details for standard level
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
-                // Add specific details based on tool type
-                if self.category == "Keyboard" {
-                    if let Some(key_details) = self.extract_key_details() {
-                        message = format!("{} {}", message, key_details);
-                    }
-                } else if self.category == "Keyboard" && self.action_verb.contains("Typing") {
+                // Add specific details based on available inputs (no brittle category matching)
+                if self.action_verb.to_ascii_lowercase().contains("typing") {
                     if let Some(text_details) = self.extract_text_details() {
                         message = format!("{} {}", message, text_details);
                     }
-                } else if self.category == "File" {
-                    if let Some(file_details) = self.extract_file_details() {
-                        message = format!("{} {}", message, file_details);
+                }
+                if let Some(key_details) = self.extract_key_details() {
+                    message = format!("{} {}", message, key_details);
+                }
+                if self.action_verb.to_ascii_lowercase().contains("running command") {
+                    if let Some(command_details) = self.extract_command_details() {
+                        message = format!("{}: {}", message, command_details);
                     }
+                }
+                if let Some(file_details) = self.extract_file_details() {
+                    message = format!("{} {}", message, file_details);
                 }
 
                 Some(format!("{}...", message))
@@ -1168,21 +1232,21 @@ impl ToolMetadata {
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
                 // Add comprehensive details for detailed level
-                if self.category == "Command" {
+                if self.action_verb.to_ascii_lowercase().contains("running command") {
                     if let Some(command_details) = self.extract_command_details() {
                         message = format!("{}: {}", message, command_details);
                     }
-                } else if self.category == "Keyboard" {
-                    if let Some(key_details) = self.extract_key_details() {
-                        message = format!("{} {}", message, key_details);
-                    }
+                }
+                if let Some(key_details) = self.extract_key_details() {
+                    message = format!("{} {}", message, key_details);
+                }
+                if self.action_verb.to_ascii_lowercase().contains("typing") {
                     if let Some(text_details) = self.extract_text_details() {
                         message = format!("{} {}", message, text_details);
                     }
-                } else if self.category == "File" {
-                    if let Some(file_details) = self.extract_file_details() {
-                        message = format!("{} {}", message, file_details);
-                    }
+                }
+                if let Some(file_details) = self.extract_file_details() {
+                    message = format!("{} {}", message, file_details);
                 }
 
                 Some(format!(
@@ -1215,17 +1279,16 @@ impl ToolMetadata {
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
                 // Add specific details for context
-                if self.category == "Keyboard" {
-                    if let Some(key_details) = self.extract_key_details() {
-                        message = format!("{} {}", message, key_details);
-                    }
+                if let Some(key_details) = self.extract_key_details() {
+                    message = format!("{} {}", message, key_details);
+                }
+                if self.action_verb.to_ascii_lowercase().contains("typing") {
                     if let Some(text_details) = self.extract_text_details() {
                         message = format!("{} {}", message, text_details);
                     }
-                } else if self.category == "File" {
-                    if let Some(file_details) = self.extract_file_details() {
-                        message = format!("{} {}", message, file_details);
-                    }
+                }
+                if let Some(file_details) = self.extract_file_details() {
+                    message = format!("{} {}", message, file_details);
                 }
 
                 Some(format!("{} {}", message, status))
@@ -1239,21 +1302,21 @@ impl ToolMetadata {
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
                 // Add comprehensive details
-                if self.category == "Command" {
+                if self.action_verb.to_ascii_lowercase().contains("running command") {
                     if let Some(command_details) = self.extract_command_details() {
                         message = format!("{}: {}", message, command_details);
                     }
-                } else if self.category == "Keyboard" {
-                    if let Some(key_details) = self.extract_key_details() {
-                        message = format!("{} {}", message, key_details);
-                    }
+                }
+                if let Some(key_details) = self.extract_key_details() {
+                    message = format!("{} {}", message, key_details);
+                }
+                if self.action_verb.to_ascii_lowercase().contains("typing") {
                     if let Some(text_details) = self.extract_text_details() {
                         message = format!("{} {}", message, text_details);
                     }
-                } else if self.category == "File" {
-                    if let Some(file_details) = self.extract_file_details() {
-                        message = format!("{} {}", message, file_details);
-                    }
+                }
+                if let Some(file_details) = self.extract_file_details() {
+                    message = format!("{} {}", message, file_details);
                 }
 
                 Some(format!("{} {}{}", message, status, timing))

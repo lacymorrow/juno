@@ -1,8 +1,8 @@
-use computer_use_ai_sdk::{Selector, UIElement};
+use computer_use_ai_sdk::Selector;
 use computer_use_ai_sdk::platforms::AccessibilityEngine;
-use computer_use_ai_sdk::platforms::macos::{MacOSEngine, ClickMethodSelection};
+use computer_use_ai_sdk::platforms::macos::MacOSEngine;
 use anyhow::Result;
-use tracing::{debug, info};
+use tracing::info;
 
 fn main() -> Result<()> {
     // Add direct console output
@@ -76,10 +76,10 @@ fn main() -> Result<()> {
         
         info!("attempting to click element with text 'whatsapp2llm' using mouse simulation...");
         
-        // Use mouse simulation specifically
-        match element.click_with_method(ClickMethodSelection::MouseSimulation) {
+        // Use standard click (which automatically selects best method, including mouse simulation for browsers)
+        match element.click() {
             Ok(result) => {
-                info!("mouse simulation click successful");
+                info!("click successful");
                 info!("click details: {}", result.details);
                 
                 if let Some((x, y)) = result.coordinates {
@@ -90,10 +90,10 @@ fn main() -> Result<()> {
                 info!("waiting 500ms before second click...");
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 
-                // Second click also with mouse simulation
-                match element.click_with_method(ClickMethodSelection::MouseSimulation) {
+                // Second click
+                match element.click() {
                     Ok(result2) => {
-                        info!("second mouse simulation click successful");
+                        info!("second click successful");
                         info!("click details: {}", result2.details);
                         
                         if let Some((x, y)) = result2.coordinates {
