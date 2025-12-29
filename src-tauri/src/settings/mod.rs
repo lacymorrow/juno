@@ -292,17 +292,7 @@ impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
             active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
-            providers: default_provider_entries()
-                .into_iter()
-                .map(|p| ProviderConfig {
-                    id: p.id,
-                    api_key: p.api_key,
-                    model: p.model,
-                    max_tokens: p.max_tokens,
-                    temperature: p.temperature,
-                    system_prompt: p.system_prompt,
-                })
-                .collect(),
+            providers: default_provider_entries(),
         }
     }
 }
