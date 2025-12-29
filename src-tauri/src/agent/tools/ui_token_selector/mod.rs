@@ -14,7 +14,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 
 pub mod config;
 pub mod rgb_analyzer;

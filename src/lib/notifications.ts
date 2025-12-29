@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { NotificationData, NotificationSettings } from "@/types/notifications";
+import { EVENTS } from "@/lib/constants.generated";
 import { 
   CheckCircle, 
   AlertCircle, 
@@ -31,7 +32,7 @@ export class NotificationService {
 
     try {
       // Listen for toast notification events from the backend
-      await listen<any>("show-toast-notification", (event) => {
+      await listen<any>(EVENTS.NOTIFICATIONS_TOAST, (event) => {
         this.showToastNotification(event.payload);
       });
 
@@ -55,15 +56,22 @@ export class NotificationService {
 
     // Determine the toast function based on level
     const toastFunction = this.getToastFunction(level);
-    
+
     // Get icon if icons are enabled
     const icon = show_icons ? this.getIconForLevel(level) : undefined;
-    
+
     // Determine duration
     const duration = important && persist_important ? Infinity : (timeout || 5000);
 
-    // Show the toast
+    // Create a unique ID based on title and message to prevent duplicates
+    const toastId = `backend-${level}-${(title || '').slice(0, 30)}-${(message || '').slice(0, 30)}`.replace(/\s+/g, '-');
+
+    // Dismiss any existing toast with the same ID before showing new one
+    toast.dismiss(toastId);
+
+    // Show the toast with deduplication ID
     toastFunction(title, {
+      id: toastId,
       description: message,
       duration: duration,
       action: important ? {

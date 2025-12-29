@@ -294,7 +294,9 @@ pub struct ExplorationEngine {
 
 /// Function-aware task goal generator
 pub struct FunctionAwareTaskGoalGenerator {
+    #[allow(dead_code)]
     goal_templates: Vec<ExplorationGoal>,
+    #[allow(dead_code)]
     function_mapping: HashMap<String, Vec<String>>,
 }
 
@@ -323,17 +325,21 @@ pub struct ExplorationMemory {
 pub struct TransitionAwareKnowledgeExtractor {
     pattern_recognizer: PatternRecognizer,
     layout_analyzer: LayoutAnalyzer,
+    #[allow(dead_code)]
     workflow_detector: WorkflowDetector,
 }
 
 /// Pattern recognizer for GUI interactions
 pub struct PatternRecognizer {
+    #[allow(dead_code)]
     known_patterns: Vec<InteractionPattern>,
+    #[allow(dead_code)]
     confidence_threshold: f32,
 }
 
 /// Layout analyzer for GUI structure
 pub struct LayoutAnalyzer {
+    #[allow(dead_code)]
     layout_templates: Vec<LayoutTemplate>,
 }
 
@@ -362,6 +368,7 @@ pub struct ExpectedArea {
 
 /// Workflow detector for application workflows
 pub struct WorkflowDetector {
+    #[allow(dead_code)]
     workflow_templates: Vec<WorkflowTemplate>,
 }
 
@@ -879,7 +886,7 @@ impl LayoutAnalyzer {
         let mut structure = AppStructureMapping::new();
 
         // Simple structure detection
-        for (state_id, state) in &graph.states {
+        for (_state_id, state) in &graph.states {
             for element in &state.interactive_elements {
                 match element.element_type.as_str() {
                     "button" => {

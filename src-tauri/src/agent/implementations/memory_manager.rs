@@ -1155,7 +1155,7 @@ impl AdvancedMemoryManager {
 
     /// Compress a screenshot to text summary with enhanced analysis
     async fn compress_screenshot_to_text(&self, base64_content: &str) -> Result<VisualContextSummary, AgentError> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         let original_tokens = base64_content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
 
         // RE-ENABLED: Enhanced screenshot analysis
@@ -1429,7 +1429,7 @@ impl MemoryManager for AdvancedMemoryManager {
     }
 
     async fn clear_memory(&mut self) -> Result<(), AgentError> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
 
         let mut messages = self.messages.write().await;
         let mut pending = self.pending_tool_calls.write().await;

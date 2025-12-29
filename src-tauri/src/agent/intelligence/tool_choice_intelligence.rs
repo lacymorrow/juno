@@ -89,6 +89,7 @@ enum ForceMode {
 #[derive(Debug, Clone)]
 struct ContextRule {
     /// Rule name for debugging
+    #[allow(dead_code)]
     name: String,
     /// Function to evaluate context and return tool choice
     evaluator: ContextEvaluator,

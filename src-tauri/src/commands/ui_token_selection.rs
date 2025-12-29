@@ -50,7 +50,7 @@ pub struct BenchmarkSummary {
 /// Initializes the UI token selection system with default configuration
 #[command]
 pub async fn initialize_ui_token_selection(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!("Initializing UI-Guided Visual Token Selection system");
 
@@ -71,7 +71,7 @@ pub async fn initialize_ui_token_selection(
 /// Tests UI token selection with a sample screenshot
 #[command]
 pub async fn test_ui_token_selection(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     image_data: Vec<u8>,
     display_resolution: (u32, u32),
 ) -> Result<UITokenSelectionResult, String> {
@@ -126,7 +126,7 @@ pub async fn test_ui_token_selection(
 /// Runs comprehensive performance benchmark for 33% cost reduction validation
 #[command]
 pub async fn run_performance_benchmark(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<BenchmarkSummary, String> {
     info!("Starting comprehensive UI token selection performance benchmark");
 
@@ -176,7 +176,7 @@ pub async fn run_performance_benchmark(
 /// Gets current performance metrics from the UI token selection system
 #[command]
 pub async fn get_performance_metrics(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<PerformanceMetrics, String> {
     info!("Retrieving UI token selection performance metrics");
 
@@ -189,7 +189,7 @@ pub async fn get_performance_metrics(
 /// Validates that the 33% computational cost reduction target is achieved
 #[command]
 pub async fn validate_cost_reduction_target(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<bool, String> {
     info!("Validating 33% computational cost reduction target");
 
@@ -202,7 +202,7 @@ pub async fn validate_cost_reduction_target(
 /// Gets cost reduction tracking data
 #[command]
 pub async fn get_cost_reduction_data(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<CostReductionTracker, String> {
     info!("Retrieving cost reduction tracking data");
 
@@ -215,7 +215,7 @@ pub async fn get_cost_reduction_data(
 /// Tests multi-monitor token selection optimization
 #[command]
 pub async fn test_multi_monitor_optimization(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     display_configs: Vec<(u32, u32, bool)>, // (width, height, is_main)
 ) -> Result<Vec<UITokenSelectionResult>, String> {
     info!("Testing multi-monitor optimization with {} displays", display_configs.len());
@@ -313,7 +313,7 @@ pub async fn set_ui_token_config(
 /// Updates UI token selection configuration
 #[command]
 pub async fn update_ui_token_config(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
     config: UITokenSelectionConfig,
 ) -> Result<String, String> {
     info!("Updating UI token selection configuration: {:?}", config);
@@ -330,7 +330,7 @@ pub async fn update_ui_token_config(
 /// Gets current UI token selection configuration
 #[command]
 pub async fn get_ui_token_config(
-    app_state: State<'_, AppState>,
+    _app_state: State<'_, AppState>,
 ) -> Result<UITokenSelectionConfig, String> {
     info!("Retrieving UI token selection configuration");
 

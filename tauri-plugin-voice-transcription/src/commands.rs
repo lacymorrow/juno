@@ -10,31 +10,44 @@ use serde_json::json;
 use crate::constants;
 
 /// Enhanced helper function to check VoiceController status and provide comprehensive error messages
+/// Uses try_lock to avoid blocking if the mutex is held by another thread
 fn check_voice_controller_availability<R: tauri::Runtime>(
     app: &AppHandle<R>
 ) -> Result<(), Error> {
     match app.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
-            // State is managed, but check if controller is actually initialized
-            let controller = controller_state.lock()
-                .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
-
-            if !controller.is_initialized() {
-                let error_msg = if let Some(init_error) = controller.get_initialization_error() {
-                    format!("Voice transcription is not available. Initialization failed: {}\n\
-                             This usually happens when:\n\
-                             1. The Whisper model file is missing or corrupted\n\
-                             2. The model path cannot be resolved\n\
-                             3. WhisperContext creation failed\n\
-                             Check the app logs for detailed initialization errors.", init_error)
-                } else {
-                    "Voice transcription is not available. VoiceController failed to initialize.\n\
-                     Check the app logs for initialization errors.".to_string()
-                };
-                error!("[Plugin] VoiceController not initialized: {}", error_msg);
-                return Err(Error::InitializationError(error_msg));
+            // State is managed, try to check if controller is actually initialized
+            // Use try_lock to avoid blocking - if lock is held, assume controller is busy but available
+            match controller_state.try_lock() {
+                Ok(controller) => {
+                    if !controller.is_initialized() {
+                        let error_msg = if let Some(init_error) = controller.get_initialization_error() {
+                            format!("Voice transcription is not available. Initialization failed: {}\n\
+                                     This usually happens when:\n\
+                                     1. The Whisper model file is missing or corrupted\n\
+                                     2. The model path cannot be resolved\n\
+                                     3. WhisperContext creation failed\n\
+                                     Check the app logs for detailed initialization errors.", init_error)
+                        } else {
+                            "Voice transcription is not available. VoiceController failed to initialize.\n\
+                             Check the app logs for initialization errors.".to_string()
+                        };
+                        error!("[Plugin] VoiceController not initialized: {}", error_msg);
+                        return Err(Error::InitializationError(error_msg));
+                    }
+                    info!("[Plugin] VoiceController availability check passed");
+                    Ok(())
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    // Lock is held - controller exists and is busy, which is fine for availability check
+                    info!("[Plugin] VoiceController lock is busy - assuming controller is available (in use)");
+                    Ok(())
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+                    Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)))
+                }
             }
-            Ok(())
         }
         None => {
             let error_msg = "Voice transcription is not available. The VoiceController state is not managed by Tauri.\n\
@@ -88,8 +101,18 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     // Check initialization status before proceeding
     check_voice_controller_availability(&app)?;
 
-    let mut voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    // Use try_lock to avoid blocking if another operation is in progress
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] VoiceController is busy - dictation may already be starting or stopping");
+            return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     voice_controller.start_dictation(&app)?;
 
@@ -108,8 +131,19 @@ pub async fn stop_dictation<R: tauri::Runtime>(
 ) -> Result<bool, Error> {
     info!("[Plugin] stop_dictation command called");
 
-    let mut voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    // Use try_lock to avoid blocking if another operation is in progress
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] VoiceController is busy - stop will be handled when lock is available");
+            // Return false to indicate dictation wasn't stopped (it might be already stopping)
+            return Ok(false);
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     let result = voice_controller.stop_dictation()?;
 

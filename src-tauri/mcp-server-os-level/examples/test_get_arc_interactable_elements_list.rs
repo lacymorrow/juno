@@ -52,8 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Variable to store element index to click
     let mut click_element_index: Option<usize> = None;
 
-    // Variable to store click method if specified
-    let mut click_method = ClickMethodSelection::Auto;
+    // Variable to store click method if specified (not used with standard click() but kept for arg parsing)
+    let mut _click_method_str: Option<String> = None;
 
     // Process all arguments after the program name
     if args.len() > 1 {
@@ -70,16 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else if arg.starts_with("method:") {
                 if let Some(method_str) = arg.split(':').nth(1) {
-                    click_method = match method_str.to_lowercase().as_str() {
-                        "axpress" => ClickMethodSelection::AXPress,
-                        "axclick" => ClickMethodSelection::AXClick,
-                        "mouse" => ClickMethodSelection::MouseSimulation,
-                        _ => {
-                            info!("unknown click method: {}, using auto", method_str);
-                            ClickMethodSelection::Auto
-                        }
-                    };
-                    info!("using click method: {:?}", click_method);
+                    _click_method_str = Some(method_str.to_string());
+                    info!("click method selection is deprecated, using auto-selection");
                 }
             } else {
                 match arg.as_str() {
@@ -377,7 +369,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Now attempt to click the element
             info!("attempting to click element #{}", index);
 
-            match element.click_with_method(click_method) {
+            match element.click() {
                 Ok(result) => {
                     info!("successfully clicked element: {}", result.details);
                     if let Some(coords) = result.coordinates {

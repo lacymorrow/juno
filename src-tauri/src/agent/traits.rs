@@ -91,8 +91,8 @@ pub trait AgentBrain: Send + Sync {
         &self,
         messages: &[Message],
         available_tools: &[ToolDefinition],
-        app_handle: Option<AppHandle>,
-        message_id: Option<String>,
+        _app_handle: Option<AppHandle>,
+        _message_id: Option<String>,
     ) -> Result<AgentAction, AgentError> {
         // Default implementation ignores streaming parameters and calls regular method
         self.decide_next_action(messages, available_tools).await

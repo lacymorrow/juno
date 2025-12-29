@@ -1,5 +1,5 @@
 use tauri::{AppHandle, Manager};
-use tracing::{error, info};
+use tracing::info;
 
 /// Open the configuration directory in the system file manager
 #[tauri::command]

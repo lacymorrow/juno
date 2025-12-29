@@ -50,6 +50,7 @@ tokio = { version = "1", features = ["full"] }
 [features]
 default = []
 download-models = []
+cargo-clippy = []
 
 [[example]]
 name = "example"

@@ -116,8 +116,7 @@
     "resources": [
       "../tauri-plugin-voice-transcription/models/*",
       "Info.plist",
-      "../public/sounds/**/*",
-      "../.env"
+      "../public/sounds/**/*"
     ],
     "macOS": {
       "entitlements": "juno.entitlements",

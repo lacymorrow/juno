@@ -255,6 +255,7 @@ pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<S
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(dead_code)]
 pub(crate) async fn capture_window_screenshot_command(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -293,6 +294,7 @@ pub(crate) async fn capture_window_screenshot_command(
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
+#[allow(dead_code)]
 pub(crate) async fn capture_window_screenshot_command(
     _app: DummyAppHandle,
     _state: State<'_, AppState>,
@@ -303,6 +305,7 @@ pub(crate) async fn capture_window_screenshot_command(
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
+#[allow(dead_code)]
 pub(crate) async fn capture_focused_window_screenshot_command(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -364,6 +367,7 @@ pub(crate) async fn capture_focused_window_screenshot_command(
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
+#[allow(dead_code)]
 pub(crate) async fn capture_focused_window_screenshot_command(
     _app: DummyAppHandle,
     _state: State<'_, AppState>,

@@ -76,7 +76,7 @@ impl LogGroupTracker {
     }
 }
 
-/// Global log formatter instance
+// Global log formatter instance
 lazy_static::lazy_static! {
     static ref LOG_TRACKERS: Arc<Mutex<HashMap<String, LogGroupTracker>>> =
         Arc::new(Mutex::new(HashMap::new()));

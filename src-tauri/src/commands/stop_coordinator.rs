@@ -253,7 +253,7 @@ impl StopCoordinator {
             ("always-listening-mode-changed", false),
         ];
 
-        for (event_name, value) in events.iter() {
+        for (event_name, _value) in events.iter() {
             self.emit_event(app_handle, event_name);
         }
     }

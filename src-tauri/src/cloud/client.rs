@@ -32,10 +32,13 @@ pub struct CloudClient {
     app_handle: AppHandle,
     connection_state: Arc<TokioMutex<ConnectionState>>,
     auth: CloudAuth,
+    #[allow(dead_code)]
     security: CloudSecurity,
     command_processor: CommandProcessor,
     // Communication channels
+    #[allow(dead_code)]
     command_tx: mpsc::UnboundedSender<CloudCommand>,
+    #[allow(dead_code)]
     command_rx: Arc<TokioMutex<mpsc::UnboundedReceiver<CloudCommand>>>,
 }
 

@@ -1,14 +1,31 @@
 import { cn } from "@/lib/utils";
 import { ChevronDownIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface ThinkingMessageProps {
   content: string;
   timestamp?: number;
+  isStreaming?: boolean;
 }
 
-export function ThinkingMessage({ content }: ThinkingMessageProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+export function ThinkingMessage({ content, isStreaming = false }: ThinkingMessageProps) {
+  // Start expanded if streaming, collapsed otherwise
+  const [isExpanded, setIsExpanded] = useState(isStreaming);
+  const wasStreamingRef = useRef(isStreaming);
+
+  // Auto-expand when streaming starts (but allow user to collapse while streaming),
+  // and auto-collapse when streaming ends.
+  useEffect(() => {
+    if (!wasStreamingRef.current && isStreaming) {
+      // Streaming just started - expand by default
+      setIsExpanded(true);
+    }
+    if (wasStreamingRef.current && !isStreaming) {
+      // Streaming just ended - collapse the accordion
+      setIsExpanded(false);
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   // Split content into lines and get the first line as preview
   const lines = content.split("\n").filter((line) => line.trim() !== "");

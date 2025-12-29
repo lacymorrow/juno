@@ -354,7 +354,7 @@ mod timer_tools_impl {
         let timer_manager = state.get::<TimerManager>()
             .unwrap_or_else(|| {
                 let manager = Arc::new(TimerManager::new());
-                state.insert(manager.clone());
+                let _ = state.insert(manager.clone());
                 manager
             });
 
@@ -724,11 +724,11 @@ mod timer_tools_impl {
         let timer_manager = state.get::<TimerManager>()
             .unwrap_or_else(|| {
                 let manager = Arc::new(TimerManager::new());
-                state.insert(manager.clone());
+                let _ = state.insert(manager.clone());
                 manager
             });
 
-        timer_manager.add_timer(timer_task.clone()).await;
+        let _ = timer_manager.add_timer(timer_task.clone()).await;
 
         // Start the monitoring task
         let app_handle_clone = app_handle.clone();
@@ -1026,7 +1026,7 @@ mod timer_tools_impl {
 
         // Remove expired timers from active list
         for timer in &expired_timers {
-            timer_manager.remove_timer(&timer.id).await;
+            let _ = timer_manager.remove_timer(&timer.id).await;
         }
 
         let expired_info: Vec<Value> = expired_timers

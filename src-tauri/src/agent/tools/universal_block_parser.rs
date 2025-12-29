@@ -320,6 +320,7 @@ impl UniversalBlockParser {
     }
 
     /// Calculate optimal grid dimensions based on image size and configuration
+    #[allow(dead_code)]
     fn calculate_grid_dimensions(&self, width: u32, height: u32) -> (u32, u32) {
         let (blocks_x, blocks_y, _) = self.calculate_grid_dimensions_with_size(width, height);
         (blocks_x, blocks_y)
@@ -349,6 +350,7 @@ impl UniversalBlockParser {
     }
 
     /// Creates a single block with position embedding and element detection
+    #[allow(dead_code)]
     async fn create_block(
         &self,
         block_id: u32,

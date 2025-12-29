@@ -1,8 +1,7 @@
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Emitter, Manager, State};
 
@@ -10,9 +9,8 @@ use crate::agent::core::AgentError;
 use crate::agent::implementations::{
     agent_runner::DefaultAgentRunner, tool_provider::LocalToolProvider,
 };
-use crate::agent::intelligence::{AnalysisContext, OperationalMode, ToolChoiceIntelligence};
 use crate::agent::prompts::PromptManager;
-use crate::agent::providers::anthropic::ToolChoice;
+// use crate::agent::providers::anthropic::ToolChoice;
 use crate::agent::providers::config::AgentMode;
 use crate::agent::providers::factory::BrainFactory;
 use crate::agent::tools::{
@@ -40,7 +38,7 @@ struct AgentExecutionQueue {
 struct QueuedQuery {
     id: String,
     query: String,
-    queued_at: std::time::Instant,
+    _queued_at: std::time::Instant,
     app_handle: tauri::AppHandle,
 }
 
@@ -63,7 +61,7 @@ impl AgentExecutionQueue {
         let queued_query = QueuedQuery {
             id: query_id.clone(),
             query,
-            queued_at: std::time::Instant::now(),
+            _queued_at: std::time::Instant::now(),
             app_handle,
         };
 
@@ -133,10 +131,6 @@ impl AgentExecutionQueue {
         Some(query)
     }
 
-    /// Check if execution is currently in progress
-    async fn is_executing(&self) -> bool {
-        self.coordinator.is_executing().await
-    }
 }
 
 /// Global agent execution queue instance
@@ -147,21 +141,8 @@ fn get_agent_execution_queue() -> &'static AgentExecutionQueue {
     AGENT_EXECUTION_QUEUE.get_or_init(|| AgentExecutionQueue::new())
 }
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
-pub(crate) struct AnthropicContentBlock {
-    #[serde(rename = "type")]
-    pub(crate) type_: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) text: Option<String>,
-    // Fields related to tool_use
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) input: Option<Value>,
-    // Fields related to tool_result (we create these, don't expect from API)
-}
+// Remove unused structs AnthropicContentBlock, AnthropicUsage, AnthropicResponse
+// They are now handled in agent/providers/anthropic.rs
 
 // Keep this for payload structure, ensure Clone is derived
 pub struct SubmitQueryResult {
@@ -170,31 +151,6 @@ pub struct SubmitQueryResult {
     pub audio_base64: Option<String>,
     pub agent_state: String,               // Send final state to frontend
     pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
-}
-
-// Note: BackendResponsePayload removed as we now use streaming events only
-
-// Removed AnthropicThinkingBudget as it was commented out
-
-#[derive(Deserialize, Debug)]
-struct AnthropicUsage {
-    #[allow(dead_code)] // Allow dead code for potentially unused fields
-    input_tokens: u32,
-    #[allow(dead_code)] // Allow dead code for potentially unused fields
-    output_tokens: u32,
-}
-
-#[derive(Deserialize, Debug)]
-struct AnthropicResponse {
-    _id: Option<String>,
-    #[serde(rename = "type")]
-    _type_: Option<String>,
-    _role: Option<String>,
-    _model: Option<String>,
-    _content: Option<Vec<AnthropicContentBlock>>,
-    _stop_reason: Option<String>,
-    _stop_sequence: Option<String>,
-    _usage: Option<AnthropicUsage>,
 }
 
 // --- Helper Functions ---
@@ -338,51 +294,6 @@ pub async fn submit_query(
     queue.execute_next_query(state.clone()).await;
     
     Ok(())
-}
-
-/// Analyze user input and determine appropriate tool choice using intelligence system
-async fn analyze_tool_choice(
-    query: &str,
-    state: &tauri::State<'_, AppState>,
-    _app_handle: &tauri::AppHandle,
-) -> Option<ToolChoice> {
-    // Determine operational mode based on current state
-    let mode = match state.get_dictation_active() {
-        Ok(true) => OperationalMode::Dictation,
-        _ => match state.get_always_listening_active() {
-            Ok(true) => OperationalMode::AlwaysListening,
-            _ => OperationalMode::Agent, // Default fallback
-        },
-    };
-
-    // Create tool choice intelligence system
-    let intelligence = ToolChoiceIntelligence::new(mode);
-
-    // Build analysis context from current state
-    let context = AnalysisContext {
-        previous_was_tool_call: false, // Could be enhanced by checking conversation history
-        last_tool_name: None,          // Could be enhanced by tracking last tool
-        last_tool_error: false,
-        conversation_length: 0,      // Could get from memory manager
-        available_tools: Vec::new(), // Could list from tool provider
-    };
-
-    // Analyze input and get decision
-    let decision = intelligence.analyze_input(query, &context);
-
-    if decision.confidence > 0.6 {
-        info!(
-            "Tool choice intelligence decision: {:?} (confidence: {:.2}, reasoning: {})",
-            decision.tool_choice, decision.confidence, decision.reasoning
-        );
-        decision.tool_choice
-    } else {
-        debug!(
-            "Tool choice intelligence below threshold: confidence {:.2}, using default behavior",
-            decision.confidence
-        );
-        None
-    }
 }
 
 /// Internal agent execution function - handles the actual agent logic
@@ -620,7 +531,7 @@ async fn execute_agent_internal(
                 available_tool_names.extend(mcp_tools.clone());
 
                 // Build prompt context
-                let mut prompt_manager = if let Some(ref sm) = settings_manager {
+                let prompt_manager = if let Some(ref sm) = settings_manager {
                     PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
                 } else {
                     PromptManager::new()
@@ -806,7 +717,7 @@ async fn execute_agent_internal(
                     }
                 };
 
-                let mut prompt_manager = if let Some(ref sm) = settings_manager {
+                let prompt_manager = if let Some(ref sm) = settings_manager {
                     PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
                 } else {
                     PromptManager::new()
@@ -1158,24 +1069,9 @@ async fn execute_agent_internal(
         });
     }
 
-    // --- Emit final stream end event with agent state ---
-    // This ensures the frontend knows the actual outcome of the agent execution
-    let final_stream_handle = app_handle.clone();
-    let final_agent_state = final_response.agent_state.clone();
-    let final_text = final_response.text.clone();
-    tauri::async_runtime::spawn(async move {
-        // Generate a unique message ID for the final stream end event
-        let final_message_id = uuid::Uuid::new_v4().to_string();
-        crate::agent::tool_logger::emit_stream_end_with_state(
-            &final_stream_handle,
-            final_message_id,
-            final_text,
-            final_agent_state,
-        );
-    });
-
-    // Final response is now fully handled by streaming events
-    // The frontend will reconstruct the complete response from stream events
+    // NOTE: stream_end event is already emitted during streaming by the Anthropic provider
+    // Emitting a second stream_end with a new message_id would cause duplicate messages
+    // The frontend reconstructs the complete response from the streaming events
     info!("Final response text: \"{}\"", final_response.text);
 
     Ok(())
@@ -1200,27 +1096,6 @@ pub async fn handle_tts_completion(
     }
 
     Ok(())
-}
-
-/// Get the personality-focused system prompt for the orchestrator
-async fn get_orchestrator_personality_prompt(app_handle: &tauri::AppHandle) -> String {
-    // Create settings manager from app handle
-    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone())
-    {
-        Ok(manager) => manager,
-        Err(e) => {
-            warn!("Failed to create settings manager: {}. Using defaults.", e);
-            return crate::agent::prompts::PromptManager::new()
-                .get_orchestrator_personality_prompt();
-        }
-    };
-
-    // FIXED: Use prompt manager with proper centralized settings loading
-    let prompt_manager = PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
-        warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
-        PromptManager::new()
-    });
-    prompt_manager.get_orchestrator_personality_prompt()
 }
 
 /// Register delegation tools that allow the orchestrator to communicate with specialized agents

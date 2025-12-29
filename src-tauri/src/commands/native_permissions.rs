@@ -318,34 +318,76 @@ impl NativePermissionChecker {
     pub fn check_input_monitoring_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            // Test if we can detect global key events without admin privileges
-            // This is a simplified test that doesn't require actual event monitoring
-            match Command::new("ioreg")
-                .args(&["-r", "-k", "IOHIDInterface"])
+            // The most reliable way to check input monitoring permission is to try
+            // using the tauri-plugin-global-shortcut which requires these permissions.
+            // If we can successfully test registering a global shortcut, we have permission.
+            
+            // Alternative approach: Try to check if IOHIDRequestTypeListenEvent is accessible
+            // This uses IOKit to check the actual permission state
+            
+            use std::process::Command;
+            
+            // First, try using sqlite3 to check TCC database (works without admin on user's own TCC)
+            match Command::new("sqlite3")
+                .args(&[
+                    &format!("{}/Library/Application Support/com.apple.TCC/TCC.db", std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string())),
+                    "SELECT allowed FROM access WHERE service='kTCCServiceListenEvent' AND client='com.juno.app' OR client LIKE '%juno%';"
+                ])
                 .output()
             {
                 Ok(output) => {
                     if output.status.success() {
                         let result = String::from_utf8_lossy(&output.stdout);
-                        let has_hid_interface = result.contains("IOHIDInterface") ||
-                                              result.contains("HID") ||
-                                              result.contains("Input");
-                        debug!("HID interfaces detected: {}", has_hid_interface);
-                        // For now, assume permission is available if we can query HID interfaces
-                        // Real input monitoring permission is hard to test without actually trying to monitor
-                        Ok(has_hid_interface)
-                    } else {
-                        warn!("ioreg failed: {}", String::from_utf8_lossy(&output.stderr));
-                        // Fallback: assume input monitoring is optional and available
-                        Ok(true)
+                        if result.trim() == "1" {
+                            debug!("Input monitoring permission granted (TCC check)");
+                            return Ok(true);
+                        } else if result.trim() == "0" {
+                            debug!("Input monitoring permission denied (TCC check)");
+                            return Ok(false);
+                        }
                     }
+                    // If sqlite3 failed or returned nothing, fall through to next method
                 }
-                Err(e) => {
-                    warn!("Failed to run ioreg: {}", e);
-                    // Fallback: assume input monitoring is available
-                    Ok(true)
+                Err(_) => {
+                    // sqlite3 not available or failed, try alternative method
                 }
             }
+            
+            // Alternative: Try to test with a simple AppleScript that checks for Listen Event permission
+            // This is less reliable but doesn't require special APIs
+            match Command::new("osascript")
+                .args(&[
+                    "-e",
+                    "use framework \"Foundation\"
+                     use framework \"AppKit\"
+                     try
+                         tell application \"System Events\"
+                             key code 0
+                         end tell
+                         return \"true\"
+                     on error
+                         return \"false\"
+                     end try"
+                ])
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        let result = String::from_utf8_lossy(&output.stdout);
+                        let has_permission = result.trim() == "true";
+                        debug!("Input monitoring permission status (AppleScript test): {}", has_permission);
+                        return Ok(has_permission);
+                    }
+                }
+                Err(_) => {
+                    // AppleScript test failed
+                }
+            }
+            
+            // If all tests fail or are inconclusive, we assume permission is not granted
+            // but we don't fail - we just report false to avoid blocking the app
+            debug!("Unable to definitively check input monitoring permission, assuming not granted");
+            Ok(false)
         }
 
         #[cfg(not(target_os = "macos"))]

@@ -283,6 +283,7 @@ async fn show_config_from_centralized_settings() -> Result<(), String> {
 }
 
 /// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
+#[allow(dead_code)]
 async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
     info!("Testing accessibility permissions...");
 
@@ -421,7 +422,7 @@ pub async fn save_voice_transcription_settings_to_centralized_settings(
 /// Used by application startup for voice transcription configuration
 pub async fn initialize_voice_transcription_settings(app: AppHandle) -> Result<(), String> {
     match load_voice_transcription_settings_from_centralized_settings(app.clone()).await {
-        Ok(voice_settings) => {
+        Ok(_voice_settings) => {
             info!("Loaded voice transcription settings from centralized settings");
             Ok(())
         }

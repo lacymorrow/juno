@@ -134,20 +134,23 @@ pub struct SafariTools {
     /// Cache for DOM elements with generated IDs
     element_cache: Arc<Mutex<HashMap<u32, SafariElement>>>,
     /// Counter for generating unique element IDs
-    element_id_counter: Arc<Mutex<u32>>,
+    _element_id_counter: Arc<Mutex<u32>>,
 }
 
 /// Represents a Safari DOM element with automation properties
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SafariElement {
     id: u32,
     tag: String,
+    #[allow(dead_code)]
     element_id: Option<String>,
     class: Option<String>,
     role: Option<String>,
     text: Option<String>,
     clickable: bool,
     selector: String,
+    #[allow(dead_code)]
     timestamp: u64,
 }
 
@@ -156,7 +159,7 @@ impl SafariTools {
     pub fn new() -> Self {
         Self {
             element_cache: Arc::new(Mutex::new(HashMap::new())),
-            element_id_counter: Arc::new(Mutex::new(1)),
+            _element_id_counter: Arc::new(Mutex::new(1)),
         }
     }
 

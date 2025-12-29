@@ -149,7 +149,7 @@ export function ChatMessageComponent({
         key={`msg-${index}-${msg.timestamp || Date.now()}`}
         className="flex justify-start"
       >
-        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} />
+        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} isStreaming={msg.isStreaming} />
       </div>
     );
   }

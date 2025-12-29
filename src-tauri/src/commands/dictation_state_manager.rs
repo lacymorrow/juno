@@ -43,6 +43,7 @@ pub struct DictationStateManager {
     current_state: Arc<RwLock<DictationState>>,
     component_states: Arc<RwLock<ComponentStates>>,
     state_history: Arc<Mutex<Vec<StateChangeEvent>>>,
+    #[allow(dead_code)]
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(StateChangeEvent) + Send + Sync>>>>,
     inconsistency_threshold: u32,
     force_reset_in_progress: Arc<Mutex<bool>>,
@@ -629,7 +630,7 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
 
 /// Synchronize dictation state (for internal use)
 pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
-    let manager = get_state_manager();
+    let _manager = get_state_manager();
 
     let target_state = if active {
         DictationState::Active {

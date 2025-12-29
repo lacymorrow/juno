@@ -33,6 +33,10 @@ pub mod streaming {
     pub const TEXT_STREAM: &str = "agent-text-stream";
     pub const STREAM_START: &str = "agent-stream-start";
     pub const STREAM_END: &str = "agent-stream-end";
+    // Thinking streaming events
+    pub const THINKING_START: &str = "agent-thinking-start";
+    pub const THINKING_STREAM: &str = "agent-thinking-stream";
+    pub const THINKING_END: &str = "agent-thinking-end";
 }
 
 /// Dictation and voice events

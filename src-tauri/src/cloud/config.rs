@@ -263,6 +263,7 @@ impl CloudConfig {
     }
 
     /// Check if a command is considered safe - now almost everything is safe
+    #[allow(dead_code)]
     fn is_safe_command(&self, command: &str) -> bool {
         // Check against denied list - if not denied, it's safe
         // Use static slice for faster iteration

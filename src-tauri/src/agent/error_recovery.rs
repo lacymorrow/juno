@@ -161,6 +161,7 @@ pub struct RecoveryAttempt {
 /// Enhanced error recovery manager with checkpoint and rollback capabilities
 pub struct ErrorRecoveryManager {
     config: RecoveryConfig,
+    #[allow(dead_code)]
     error_patterns: HashMap<String, ErrorPattern>,
     strategy_mappings: HashMap<ErrorPattern, Vec<RecoveryStrategy>>,
     recovery_history: Vec<RecoveryAttempt>,
@@ -607,7 +608,7 @@ impl ErrorRecoveryManager {
         strategy: RecoveryStrategy,
         tool_call: &ToolCall,
         error: &AgentError,
-        pre_execution_checkpoint: &Option<String>,
+        _pre_execution_checkpoint: &Option<String>,
     ) -> Result<Option<ToolCall>, AgentError> {
         match strategy {
             RecoveryStrategy::SaveStateAndRetry => {
@@ -1052,7 +1053,7 @@ impl ErrorRecoveryManager {
     fn adjust_tool_parameters(
         &self,
         tool_call: &ToolCall,
-        error: &AgentError,
+        _error: &AgentError,
     ) -> Result<Option<ToolCall>, AgentError> {
         let mut modified_call = tool_call.clone();
         let mut input = modified_call.input.clone();

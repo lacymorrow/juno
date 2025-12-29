@@ -11,7 +11,7 @@ use crate::agent::core::{
     Message,
     Role, // Removed ToolCall, ToolResult
 };
-use crate::agent::tool_logger; // Added for logging
+// use crate::agent::tool_logger; // Added for logging
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 use crate::constants::events;
@@ -221,7 +221,7 @@ where
     /// This ensures conversation memory remains consistent even when execution is interrupted
     async fn handle_batch_cancellation(
         &mut self,
-        tool_calls: &[crate::agent::core::ToolCall],
+        _tool_calls: &[crate::agent::core::ToolCall],
         tool_results_cache: &[(
             crate::agent::core::ToolCall,
             Option<Result<crate::agent::core::ToolResult, AgentError>>,
@@ -599,209 +599,6 @@ where
         }
     }
 
-    /// Execute a single tool with approval and cancellation handling
-    async fn execute_single_tool_with_approval(
-        &mut self,
-        tool_call: &crate::agent::core::ToolCall,
-        cancel_rx: &crate::state::CancelReceiver,
-        tool_index: usize,
-        tool_results_cache: &mut Vec<(
-            crate::agent::core::ToolCall,
-            Option<Result<crate::agent::core::ToolResult, AgentError>>,
-        )>,
-    ) -> Result<bool, AgentError> {
-        // Check cancellation
-        if *cancel_rx.borrow() {
-            log::info!(
-                "Cancellation detected before tool execution: {}",
-                tool_call.name
-            );
-            return Ok(false);
-        }
-
-        // Tool approval check (existing logic)
-        if !self.check_tool_approval(tool_call, cancel_rx).await? {
-            return Ok(true); // Tool denied, but continue with other tools
-        }
-
-        // Execute tool
-        log::info!(
-            "Executing tool: {} with ID: {}",
-            tool_call.name,
-            tool_call.id
-        );
-
-        // Emit tool call request event
-        crate::agent::tool_logger::log_tool_call_request(
-            &self.app_handle,
-            &tool_call.name,
-            tool_call.input.clone(),
-            Some(format!("Executing tool: {}", tool_call.name)),
-        );
-
-        let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
-
-        // FIXED: Emit tool result event to frontend for chat display
-        match &tool_result {
-            Ok(result) => {
-                // Check if this is actually an error response (Anthropic Computer Use API format)
-                let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
-                let success = !is_error;
-
-                // Extract screenshot if this is a screenshot tool AND the operation was successful
-                let screenshot_base64 = if success &&
-                    (tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot") {
-                    // For screenshot tools, the result output should contain base64 data
-                    // Check multiple possible field names for screenshot data
-                    if let Some(screenshot_data) = result.output.get("base64_image") {
-                        screenshot_data.as_str().map(|s| s.to_string())
-                    } else if let Some(screenshot_data) = result.output.get("base64") {
-                        screenshot_data.as_str().map(|s| s.to_string())
-                    } else if let Some(screenshot_data) = result.output.get("data") {
-                        screenshot_data.as_str().map(|s| s.to_string())
-                    } else if let Some(screenshot_str) = result.output.as_str() {
-                        Some(screenshot_str.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let status_message = if success {
-                    format!("Tool {} executed successfully", tool_call.name)
-                } else {
-                    let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&result.output)
-                        .unwrap_or_else(|| "Unknown error".to_string());
-                    format!("Tool {} failed: {}", tool_call.name, error_msg)
-                };
-
-                crate::agent::tool_logger::log_tool_call_result(
-                    &self.app_handle,
-                    &tool_call.name,
-                    result.output.clone(),
-                    success,
-                    Some(status_message),
-                    screenshot_base64,
-                );
-            }
-            Err(error) => {
-                crate::agent::tool_logger::log_tool_call_result(
-                    &self.app_handle,
-                    &tool_call.name,
-                    serde_json::json!({"error": error.to_string()}),
-                    false,
-                    Some(format!("Tool {} failed: {}", tool_call.name, error)),
-                    None,
-                );
-            }
-        }
-
-        // Cache result and add to memory
-        tool_results_cache[tool_index].1 = Some(tool_result.clone());
-        self.add_tool_result_to_memory(tool_call, tool_result)
-            .await?;
-
-        Ok(true)
-    }
-
-    /// Check individual tool approval (used by legacy sequential execution)
-    async fn check_tool_approval(
-        &self,
-        tool_call: &crate::agent::core::ToolCall,
-        cancel_rx: &crate::state::CancelReceiver,
-    ) -> Result<bool, AgentError> {
-        let app_state = self.app_handle.state::<crate::state::AppState>();
-
-        if !app_state.is_tool_approval_required() {
-            return Ok(true);
-        }
-
-        log::info!("Tool approval required for: {}", tool_call.name);
-
-        let approval_request = crate::state::ToolApprovalRequest::new(
-            tool_call.id.clone(),
-            tool_call.name.clone(),
-            tool_call.input.clone(),
-            format!("Agent wants to execute tool: {}", tool_call.name),
-        );
-
-        app_state
-            .add_pending_tool_approval(approval_request.clone())
-            .await;
-
-        let approval_event = serde_json::json!({
-            "tool_name": approval_request.tool_name,
-            "tool_id": approval_request.tool_id,
-            "tool_input": approval_request.tool_input,
-            "description": approval_request.description,
-            "timestamp": approval_request.timestamp
-        });
-
-        if let Err(e) = self
-            .app_handle
-            .emit(events::tools::APPROVAL_REQUEST, approval_event)
-        {
-            log::error!("Failed to emit tool approval request: {}", e);
-        }
-
-        // Wait for approval
-        log::info!("Waiting for user approval for tool: {}", tool_call.name);
-
-        // PERFORMANCE OPTIMIZATION: Faster polling with adjusted timeout counter
-        // 60 seconds * 20 polls per second = 1200 iterations
-        let mut approval_timeout = 1200; // 60 seconds at 50ms intervals
-        let mut approved = false;
-
-        while approval_timeout > 0 && !approved {
-            if *cancel_rx.borrow() {
-                log::info!("Cancellation detected during tool approval wait");
-                app_state.remove_tool_approval(&tool_call.id).await;
-                return Err(AgentError::Terminated);
-            }
-
-            match app_state.get_tool_approval_status(&tool_call.id).await {
-                Some(true) => {
-                    approved = true;
-                    log::info!("Tool approved: {}", tool_call.name);
-                    break;
-                }
-                Some(false) => {
-                    log::info!("Tool denied: {}", tool_call.name);
-                    break;
-                }
-                None => {} // Still pending
-            }
-
-            // PERFORMANCE OPTIMIZATION: Reduce polling interval from 1000ms to 50ms
-            // for 20x more responsive approval handling
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            approval_timeout -= 1;
-        }
-
-        app_state.remove_tool_approval(&tool_call.id).await;
-
-        if !approved {
-            let reason = if approval_timeout <= 0 {
-                "timeout"
-            } else {
-                "user denied"
-            };
-            log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
-
-            let mut mem = self.memory.lock().await;
-            mem.add_message(crate::agent::core::Message {
-                role: crate::agent::core::Role::Tool,
-                content: format!("Tool execution was denied - {}", reason),
-                tool_calls: None,
-                tool_call_id: Some(tool_call.id.clone()),
-                name: Some(tool_call.name.clone()),
-            })
-            .await?;
-        }
-
-        Ok(approved)
-    }
 }
 
 #[async_trait]
@@ -1028,12 +825,6 @@ where
 
         // Filter tools based on brain type to prevent orchestrator from seeing specialist tools
         let tools = self.filter_tools_for_brain(&all_tools);
-
-        // --- Log Thinking Step ---
-        tool_logger::log_thinking(
-            &self.app_handle,
-            "Deciding next action based on current messages and available tools...",
-        );
 
         // --- Cancellation Check (Before Brain Action) ---
         if *cancel_rx.borrow() {

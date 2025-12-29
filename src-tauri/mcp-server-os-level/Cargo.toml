@@ -64,3 +64,5 @@ windows = { version = "0.52", features = [
 
 # [features]
 # cargo-clippy feature is no longer needed in modern Rust
+[features]
+cargo-clippy = []

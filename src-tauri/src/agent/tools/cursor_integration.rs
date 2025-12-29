@@ -10,6 +10,7 @@ use crate::state::AppState;
 
 /// Cursor IDE integration using computer use automation
 pub struct CursorIntegration {
+    #[allow(dead_code)]
     app_state: AppState,
 }
 
