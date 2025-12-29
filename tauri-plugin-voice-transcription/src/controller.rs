@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound;
-use tauri::{AppHandle, Emitter, Runtime, Manager};
+use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 use crate::constants;
 

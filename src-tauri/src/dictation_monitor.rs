@@ -55,6 +55,7 @@ impl DictationInputMonitorState {
             }
             // Cooldown expired, clear it
             info!("[DictationMonitor] Cooldown expired ({}ms since last cancellation), allowing new dictation", time_since_cancel);
+            self.last_cancellation_time = None;
         }
 
         self.hold_start_time = Some(Instant::now());

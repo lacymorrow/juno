@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, Semaphore, OwnedSemaphorePermit};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tracing::{debug, info, warn};
 
 /// Atomic state manager for preventing race conditions
@@ -55,6 +55,7 @@ impl AtomicStateManager {
 /// Thread-safe queue with atomic operations
 pub struct AtomicQueue<T> {
     items: Arc<Mutex<Vec<T>>>,
+    #[allow(dead_code)]
     semaphore: Arc<Semaphore>,
     max_size: usize,
 }
@@ -122,6 +123,7 @@ impl<T> AtomicQueue<T> {
 pub struct AtomicExecutionCoordinator {
     current_execution_id: Arc<RwLock<Option<String>>>,
     execution_semaphore: Arc<Semaphore>,
+    #[allow(dead_code)]
     state_manager: Arc<AtomicStateManager>,
 }
 
@@ -177,6 +179,7 @@ impl AtomicExecutionCoordinator {
 /// RAII guard for execution cleanup
 pub struct ExecutionGuard {
     execution_id: String,
+    #[allow(dead_code)]
     permit: Option<tokio::sync::OwnedSemaphorePermit>,
     current_execution_id: Arc<RwLock<Option<String>>>,
 }

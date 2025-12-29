@@ -41,6 +41,14 @@ type StreamEndEvent = {
 	agent_state?: string; // "Finished", "Failed", "Cancelled", "Offline"
 };
 
+type DictationStateChangeEvent = {
+	previous_state: string;
+	new_state: string;
+	timestamp: number;
+	reason: string;
+	component: string;
+};
+
 interface AgentEventTauri {
 	type: string;
 	payload: {
@@ -507,6 +515,78 @@ export function useBackendEvents({
 		};
 	}, [setConversationWithPruning, throttledAutoScroll, setIsProcessing]);
 
+	// Listen for thinking streaming events (streamed thinking content)
+	useEffect(() => {
+		// Thinking stream start - create a new streaming thinking message
+		const thinkingStartListener = listen<{ message_id: string }>(
+			EVENTS.STREAMING_THINKING_START,
+			(event) => {
+				console.log("Thinking stream started:", event.payload);
+				const { message_id } = event.payload;
+
+				const thinkingMessage: ChatMessage = {
+					role: "thinking",
+					content: "",
+					messageId: message_id,
+					isStreaming: true,
+					timestamp: Date.now(),
+				};
+
+				setConversationWithPruning((prev) => [...prev, thinkingMessage]);
+			}
+		);
+
+		// Thinking stream chunk - append to the streaming thinking message
+		const thinkingStreamListener = listen<{ chunk: string; message_id: string | null }>(
+			EVENTS.STREAMING_THINKING_STREAM,
+			(event) => {
+				const { chunk, message_id } = event.payload;
+
+				setConversationWithPruning((prev) =>
+					prev.map((msg) => {
+						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+							return {
+								...msg,
+								content: msg.content + chunk,
+							};
+						}
+						return msg;
+					})
+				);
+
+				throttledAutoScroll();
+			}
+		);
+
+		// Thinking stream end - finalize the streaming thinking message
+		const thinkingEndListener = listen<{ message_id: string; complete_text: string }>(
+			EVENTS.STREAMING_THINKING_END,
+			(event) => {
+				console.log("Thinking stream ended:", event.payload);
+				const { message_id, complete_text } = event.payload;
+
+				setConversationWithPruning((prev) =>
+					prev.map((msg) => {
+						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+							return {
+								...msg,
+								content: complete_text,
+								isStreaming: false,
+							};
+						}
+						return msg;
+					})
+				);
+			}
+		);
+
+		return () => {
+			thinkingStartListener.then((unlistenFn) => unlistenFn());
+			thinkingStreamListener.then((unlistenFn) => unlistenFn());
+			thinkingEndListener.then((unlistenFn) => unlistenFn());
+		};
+	}, [setConversationWithPruning, throttledAutoScroll]);
+
 	// Listen for agent error events
 	useEffect(() => {
 		const unlisten = listen<{
@@ -657,6 +737,23 @@ export function useBackendEvents({
 			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
 		};
 	}, [setIsProcessing, stopCurrentAudio]);
+
+	// Listen for dictation state changes (for synchronization/debugging)
+	useEffect(() => {
+		const unlisten = listen<DictationStateChangeEvent>(
+			EVENTS.DICTATION_STATE_CHANGED,
+			(event) => {
+				console.log("Dictation state changed:", event.payload);
+				// Note: Primary UI state is driven by useAppState/voice_mode, 
+				// but this event provides detailed transition info for debugging
+				// or future fine-grained UI updates.
+			}
+		);
+
+		return () => {
+			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
+		};
+	}, []);
 
 	// Listen for user message submitted events (from voice input)
 	useEffect(() => {

@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { NotificationData, NotificationSettings } from "@/types/notifications";
+import { EVENTS } from "@/lib/constants.generated";
 import { 
   CheckCircle, 
   AlertCircle, 
@@ -31,7 +32,7 @@ export class NotificationService {
 
     try {
       // Listen for toast notification events from the backend
-      await listen<any>("show-toast-notification", (event) => {
+      await listen<any>(EVENTS.NOTIFICATIONS_TOAST, (event) => {
         this.showToastNotification(event.payload);
       });
 

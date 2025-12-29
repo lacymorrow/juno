@@ -448,7 +448,7 @@ pub async fn run_test_suite(
 
 async fn execute_test_scenario(
     app: &AppHandle,
-    state: &AppState,
+    _state: &AppState,
     scenario: &TestScenario,
     config: &AgentConfig,
 ) -> Result<ScenarioResult, String> {
@@ -456,8 +456,7 @@ async fn execute_test_scenario(
     let mut tool_calls = Vec::new();
     let mut errors = Vec::new();
     let mut steps_taken = 0;
-    let mut safety_violations = 0;
-
+    
     // Execute scenario setup
     for setup_command in &scenario.setup_commands {
         match execute_setup_command(app, setup_command).await {
@@ -471,7 +470,7 @@ async fn execute_test_scenario(
         simulate_agent_execution(scenario, config, &mut tool_calls, &mut steps_taken).await;
 
     // Check for safety violations
-    safety_violations = detect_safety_violations(&tool_calls);
+    let safety_violations = detect_safety_violations(&tool_calls);
 
     // Calculate accuracy score based on expected outcomes
     let accuracy_score = calculate_accuracy_score(scenario, &tool_calls);
@@ -488,7 +487,7 @@ async fn execute_test_scenario(
     })
 }
 
-async fn execute_setup_command(app: &AppHandle, command: &str) -> Result<(), String> {
+async fn execute_setup_command(_app: &AppHandle, command: &str) -> Result<(), String> {
     // Implement setup command execution
     // This would integrate with your existing command system
     match command {
@@ -506,7 +505,7 @@ async fn execute_setup_command(app: &AppHandle, command: &str) -> Result<(), Str
 
 async fn simulate_agent_execution(
     scenario: &TestScenario,
-    config: &AgentConfig,
+    _config: &AgentConfig,
     tool_calls: &mut Vec<ToolCallResult>,
     steps_taken: &mut u32,
 ) -> bool {
@@ -538,7 +537,7 @@ async fn simulate_agent_execution(
     }
 }
 
-fn detect_safety_violations(tool_calls: &[ToolCallResult]) -> u32 {
+fn detect_safety_violations(_tool_calls: &[ToolCallResult]) -> u32 {
     // Implement safety violation detection
     // Check for dangerous commands, data exfiltration attempts, etc.
     0
@@ -546,6 +545,8 @@ fn detect_safety_violations(tool_calls: &[ToolCallResult]) -> u32 {
 
 fn calculate_accuracy_score(scenario: &TestScenario, tool_calls: &[ToolCallResult]) -> f64 {
     if tool_calls.is_empty() {
+        // Use scenario parameter to avoid unused variable warning until implemented
+        let _ = scenario;
         return 0.0;
     }
 
@@ -603,9 +604,9 @@ fn calculate_safety_assessment(results: &[ScenarioResult]) -> SafetyAssessment {
 /// Compare agent performance against human baselines
 #[tauri::command]
 pub async fn run_human_comparison_benchmark(
-    app: AppHandle,
-    state: tauri::State<'_, AppState>,
-    scenario_ids: Vec<String>,
+    _app: AppHandle,
+    _state: tauri::State<'_, AppState>,
+    _scenario_ids: Vec<String>,
 ) -> Result<HumanComparison, String> {
     // This would compare against pre-collected human performance data
     // Based on research like RE-Bench which compares AI vs human experts

@@ -258,7 +258,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
 
 async fn handle_agent_mode_result(
     app_handle: AppHandle,
-    extracted_text: Option<String>,
+    _extracted_text: Option<String>,
     payload_str: String,
 ) {
     info!("[Event] Processing final result for AI Agent Mode");
@@ -301,7 +301,7 @@ async fn handle_agent_mode_result(
     }
 }
 
-async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, payload: String) {
+async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _payload: String) {
     // Unregister escape key as dictation is complete
     if let Err(e) =
         crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await

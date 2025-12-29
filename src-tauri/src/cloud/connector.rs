@@ -76,10 +76,14 @@ pub enum ConnectorState {
 /// Internal messages for the connector
 #[derive(Debug)]
 enum ConnectorMessage {
+    #[allow(dead_code)]
     Connect,
     Disconnect,
+    #[allow(dead_code)]
     SendCommand(CloudCommand),
+    #[allow(dead_code)]
     ProcessResponse(DeviceResponse),
+    #[allow(dead_code)]
     HandleError(String),
     UpdateStatus,
 }
@@ -716,7 +720,7 @@ impl ProductionCloudConnector {
     async fn process_websocket_message(
         text: String,
         app_handle: &AppHandle,
-        connection_state: &Arc<TokioMutex<ConnectorState>>,
+        _connection_state: &Arc<TokioMutex<ConnectorState>>,
     ) {
         debug!("📨 Received cloud message: {}", text);
 
@@ -759,7 +763,7 @@ impl ProductionCloudConnector {
                 tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
             >,
         >,
-        auth: &DeviceAuth,
+        _auth: &DeviceAuth,
         _app_handle: &AppHandle,
         _connection_state: &Arc<TokioMutex<ConnectorState>>,
     ) -> Result<(bool, Vec<String>), (CloudError, Vec<String>)> {

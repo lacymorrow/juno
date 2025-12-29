@@ -331,7 +331,7 @@ impl CollaborativeAIDesigner {
     fn estimate_success_rate(
         &self,
         workflow: &WorkflowDesign,
-        requirements: &SystemRequirements,
+        _requirements: &SystemRequirements,
     ) -> f32 {
         // Simplified success rate estimation based on complexity and requirements alignment
         let complexity_penalty = (workflow.execution_plan.steps.len() as f32 * 0.02).min(0.3);
@@ -501,7 +501,9 @@ pub struct ResourceUsage {
 // Memory system for workflows
 pub struct WorkflowMemory {
     designs: HashMap<String, WorkflowDesignResult>,
+    #[allow(dead_code)]
     execution_history: HashMap<String, WorkflowExecutionResult>,
+    #[allow(dead_code)]
     knowledge_cache: HashMap<String, KnowledgeEntry>,
 }
 

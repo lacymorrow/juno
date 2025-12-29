@@ -84,7 +84,8 @@ impl MacOSEngine {
     }
 
     // #[allow(clippy::unexpected_cfg_condition)] // Removed: deprecated cfg condition
-    pub(crate) fn refresh_accessibility_tree(
+    /// Refresh the accessibility tree for a specific application
+    pub fn refresh_accessibility_tree(
         &self,
         app_name: Option<&str>,
     ) -> Result<(), AutomationError> {

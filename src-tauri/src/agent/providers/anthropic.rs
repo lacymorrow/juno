@@ -88,14 +88,14 @@ struct ApiContentBlock {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AnthropicMessageResponse {
-    id: String,
+    _id: String,
     #[serde(rename = "type")]
-    response_type: String,
-    role: String, // Should be "assistant"
+    _response_type: String,
+    _role: String, // Should be "assistant"
     content: Vec<ApiContentBlock>,
-    model: String,
+    _model: String,
     stop_reason: String, // e.g., "end_turn", "tool_use", "max_tokens"
-    stop_sequence: Option<String>,
+    _stop_sequence: Option<String>,
     // usage: ApiUsageInfo,
 }
 
@@ -106,84 +106,9 @@ struct ApiTool {
     input_schema: Value,
 }
 
-// Streaming event structures for parsing SSE events
-#[derive(Deserialize, Debug)]
-struct StreamEvent {
-    #[serde(rename = "type")]
-    event_type: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct MessageStartEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "message_start"
-    message: StreamMessage,
-}
-
-#[derive(Deserialize, Debug)]
-struct StreamMessage {
-    id: String,
-    #[serde(rename = "type")]
-    message_type: String,
-    role: String,
-    content: Vec<ApiContentBlock>,
-    model: String,
-    stop_reason: Option<String>,
-    stop_sequence: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ContentBlockStartEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "content_block_start"
-    index: u32,
-    content_block: ApiContentBlock,
-}
-
-#[derive(Deserialize, Debug)]
-struct ContentBlockDeltaEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "content_block_delta"
-    index: u32,
-    delta: ContentDelta,
-}
-
-#[derive(Deserialize, Debug)]
-struct ContentDelta {
-    #[serde(rename = "type")]
-    delta_type: String, // "text_delta", "input_json_delta", etc.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>, // For text_delta
-    #[serde(skip_serializing_if = "Option::is_none")]
-    partial_json: Option<String>, // For input_json_delta
-}
-
-#[derive(Deserialize, Debug)]
-struct ContentBlockStopEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "content_block_stop"
-    index: u32,
-}
-
-#[derive(Deserialize, Debug)]
-struct MessageDeltaEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "message_delta"
-    delta: MessageDelta,
-    usage: Option<serde_json::Value>, // Usage info
-}
-
-#[derive(Deserialize, Debug)]
-struct MessageDelta {
-    stop_reason: Option<String>,
-    stop_sequence: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct MessageStopEvent {
-    #[serde(rename = "type")]
-    event_type: String, // "message_stop"
-}
+// Streaming event structures for parsing SSE events - removed unused structs
+// StreamEvent, MessageStartEvent, etc. are not used for JSON deserialization in handle_streaming_response
+// We use manual serde_json::Value parsing instead.
 
 // --- AnthropicBrain Implementation --- //
 
@@ -197,6 +122,7 @@ pub struct AnthropicBrain {
     max_tokens: u32,
     system_prompt: Option<String>, // Optional system prompt
     streaming_enabled: bool,       // New field for streaming support
+    #[allow(dead_code)]
     default_tool_choice: Option<ToolChoice>, // Default tool choice behavior
 }
 
@@ -345,11 +271,14 @@ impl AnthropicBrain {
     }
 
     /// Handle streaming response from Anthropic API with XML-based TTS extraction
+    /// Returns: (accumulated_text, tool_calls, stop_reason, stream_was_started)
     async fn handle_streaming_response<F>(
         &self,
         response: reqwest::Response,
+        app_handle: Option<&tauri::AppHandle>,
+        message_id: Option<String>,
         mut on_text_chunk: F,
-    ) -> Result<(String, Vec<ToolCall>, String), AgentError>
+    ) -> Result<(String, Vec<ToolCall>, String, bool), AgentError>
     where
         F: FnMut(String, Vec<String>) + Send, // Updated to accept multiple TTS extractions
     {
@@ -362,8 +291,22 @@ impl AnthropicBrain {
         let mut in_tts_tag = false;
         let mut tts_content = String::new();
 
+        // Thinking XML parsing state (for <thinking> tags in text output)
+        let mut thinking_buffer = String::new();
+        let mut in_thinking_tag = false;
+        let mut thinking_content = String::new();
+        let mut thinking_message_id: Option<String> = None; // Track current thinking stream
+
+        // Track whether we've started the main response stream
+        // We delay stream_start until we have actual non-thinking text to display
+        let mut response_stream_started = false;
+
         // Track content blocks and partial data
         let mut current_tool_call: Option<(String, String, String)> = None; // (id, name, partial_json)
+
+        // Track thinking content blocks (for extended thinking models via API)
+        let mut current_thinking_content: Option<String> = None;
+        let mut api_thinking_message_id: Option<String> = None; // For extended thinking API
 
         // Get the response body as a stream
         let stream = response.bytes_stream();
@@ -422,20 +365,30 @@ impl AnthropicBrain {
                                 if let Some(block_type) =
                                     content_block.get("type").and_then(|t| t.as_str())
                                 {
-                                    if block_type == "tool_use" {
-                                        // Start tracking a new tool call
-                                        let id = content_block
-                                            .get("id")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        let name = content_block
-                                            .get("name")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        log::debug!("Stream: started tool call {} ({})", name, id);
-                                        current_tool_call = Some((id, name, String::new()));
+                                    match block_type {
+                                        "tool_use" => {
+                                            // Start tracking a new tool call
+                                            let id = content_block
+                                                .get("id")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let name = content_block
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            log::debug!("Stream: started tool call {} ({})", name, id);
+                                            current_tool_call = Some((id, name, String::new()));
+                                        }
+                                        "thinking" => {
+                                            // Start tracking a thinking block (extended thinking models)
+                                            log::debug!("Stream: started thinking block");
+                                            current_thinking_content = Some(String::new());
+                                        }
+                                        _ => {
+                                            log::debug!("Stream: started content block type: {}", block_type);
+                                        }
                                     }
                                 }
                             }
@@ -449,20 +402,103 @@ impl AnthropicBrain {
                                             if let Some(text) =
                                                 delta.get("text").and_then(|t| t.as_str())
                                             {
-                                                // Process text for TTS XML tags
+                                                // Process thinking XML tags with streaming support
+                                                let (text_without_thinking, thinking_started, thinking_ended, thinking_chunk) = self
+                                                    .process_text_with_thinking_extraction_streaming(
+                                                        text,
+                                                        &mut thinking_buffer,
+                                                        &mut in_thinking_tag,
+                                                        &mut thinking_content,
+                                                    );
+
+                                                // Handle thinking streaming events
+                                                if let Some(handle) = app_handle {
+                                                    // Emit thinking_start if we just entered a thinking block
+                                                    if thinking_started {
+                                                        let new_thinking_id = uuid::Uuid::new_v4().to_string();
+                                                        thinking_message_id = Some(new_thinking_id.clone());
+                                                        crate::agent::tool_logger::emit_thinking_start(handle, new_thinking_id);
+                                                    }
+
+                                                    // Emit thinking_chunk if we have thinking content
+                                                    if !thinking_chunk.is_empty() {
+                                                        crate::agent::tool_logger::emit_thinking_chunk(
+                                                            handle,
+                                                            thinking_chunk,
+                                                            thinking_message_id.clone(),
+                                                        );
+                                                    }
+
+                                                    // Emit thinking_end if we just exited a thinking block
+                                                    if thinking_ended {
+                                                        if let Some(ref msg_id) = thinking_message_id {
+                                                            crate::agent::tool_logger::emit_thinking_end(
+                                                                handle,
+                                                                msg_id.clone(),
+                                                                thinking_content.clone(),
+                                                            );
+                                                        }
+                                                        // Clear thinking content for next potential block
+                                                        thinking_content.clear();
+                                                        thinking_message_id = None;
+                                                    }
+                                                }
+
+                                                // Then process TTS XML tags from the remaining text
                                                 let (display_text, extracted_tts_list) = self
                                                     .process_text_with_tts_extraction(
-                                                        text,
+                                                        &text_without_thinking,
                                                         &mut tts_buffer,
                                                         &mut in_tts_tag,
                                                         &mut tts_content,
                                                     );
 
-                                                // Accumulate only display text (without TTS tags) for final response
-                                                accumulated_text.push_str(&display_text);
+                                                // Only emit stream_start and text chunks if we have actual display text
+                                                // This ensures thinking messages appear BEFORE the response message
+                                                if !display_text.is_empty() {
+                                                    // Emit stream_start on first actual text chunk
+                                                    if !response_stream_started {
+                                                        if let (Some(handle), Some(ref msg_id)) = (app_handle, &message_id) {
+                                                            crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
+                                                            response_stream_started = true;
+                                                        }
+                                                    }
 
-                                                // Emit chunk with separated TTS content
-                                                on_text_chunk(display_text, extracted_tts_list);
+                                                    // Accumulate only display text (without TTS or thinking tags) for final response
+                                                    accumulated_text.push_str(&display_text);
+
+                                                    // Emit chunk with separated TTS content
+                                                    on_text_chunk(display_text, extracted_tts_list);
+                                                }
+                                            }
+                                        }
+                                        "thinking_delta" => {
+                                            // Stream thinking content from extended thinking API
+                                            if let Some(thinking_text) =
+                                                delta.get("thinking").and_then(|t| t.as_str())
+                                            {
+                                                if let Some(handle) = app_handle {
+                                                    // Emit thinking_start if this is the first chunk
+                                                    if api_thinking_message_id.is_none() {
+                                                        let new_thinking_id = uuid::Uuid::new_v4().to_string();
+                                                        api_thinking_message_id = Some(new_thinking_id.clone());
+                                                        crate::agent::tool_logger::emit_thinking_start(handle, new_thinking_id);
+                                                    }
+
+                                                    // Stream thinking chunk
+                                                    crate::agent::tool_logger::emit_thinking_chunk(
+                                                        handle,
+                                                        thinking_text.to_string(),
+                                                        api_thinking_message_id.clone(),
+                                                    );
+                                                }
+
+                                                // Also accumulate for final thinking_end
+                                                if let Some(ref mut thinking_accumulator) =
+                                                    current_thinking_content
+                                                {
+                                                    thinking_accumulator.push_str(thinking_text);
+                                                }
                                             }
                                         }
                                         "input_json_delta" => {
@@ -521,6 +557,23 @@ impl AnthropicBrain {
                                     }
                                 }
                             }
+
+                            // Emit thinking_end for API thinking blocks
+                            if let Some(thinking_text) = current_thinking_content.take() {
+                                if !thinking_text.trim().is_empty() {
+                                    log::debug!("Stream: completed API thinking block with {} chars", thinking_text.len());
+                                    if let Some(handle) = app_handle {
+                                        if let Some(ref msg_id) = api_thinking_message_id {
+                                            crate::agent::tool_logger::emit_thinking_end(
+                                                handle,
+                                                msg_id.clone(),
+                                                thinking_text,
+                                            );
+                                        }
+                                    }
+                                }
+                                api_thinking_message_id = None;
+                            }
                         }
                         "message_delta" => {
                             if let Some(delta) = event_data.get("delta") {
@@ -544,6 +597,37 @@ impl AnthropicBrain {
                     }
                 }
             }
+        }
+
+        // Handle any remaining thinking state at end of stream
+        if in_thinking_tag || !thinking_buffer.is_empty() {
+            log::debug!(
+                "Stream ended with remaining thinking state: in_thinking_tag={}, buffer='{}'",
+                in_thinking_tag,
+                thinking_buffer
+            );
+
+            // If we're in the middle of a thinking tag, emit thinking_end with what we have
+            if in_thinking_tag && !thinking_content.trim().is_empty() {
+                log::debug!("Emitting incomplete thinking content at stream end: {} chars", thinking_content.len());
+                if let Some(handle) = app_handle {
+                    if let Some(ref msg_id) = thinking_message_id {
+                        crate::agent::tool_logger::emit_thinking_end(
+                            handle,
+                            msg_id.clone(),
+                            thinking_content.clone(),
+                        );
+                    }
+                }
+            }
+
+            // If there's remaining buffer content outside thinking tags, it needs to be processed
+            if !in_thinking_tag && !thinking_buffer.trim().is_empty() {
+                log::debug!("Adding remaining thinking buffer content to accumulated text: '{}'", thinking_buffer);
+                accumulated_text.push_str(&thinking_buffer);
+            }
+
+            thinking_buffer.clear();
         }
 
         // CRITICAL FIX: Handle any remaining TTS state at end of stream
@@ -577,7 +661,119 @@ impl AnthropicBrain {
             tts_buffer.clear();
         }
 
-        Ok((accumulated_text, tool_calls, stop_reason))
+        Ok((accumulated_text, tool_calls, stop_reason, response_stream_started))
+    }
+
+    /// Process text chunk to extract thinking XML tags with streaming support
+    ///
+    /// This function handles:
+    /// - Proper buffer management to avoid character duplication/loss
+    /// - Partial XML tags split across streaming chunks
+    /// - Streaming thinking content as it arrives
+    /// - Complete tag removal to prevent leakage
+    ///
+    /// Returns: (output_text, thinking_started, thinking_ended, thinking_chunk)
+    /// - output_text: Text without thinking tags (for regular streaming)
+    /// - thinking_started: True if we just entered a <thinking> tag
+    /// - thinking_ended: True if we just exited a </thinking> tag
+    /// - thinking_chunk: Content to stream for thinking (may be empty)
+    fn process_text_with_thinking_extraction_streaming(
+        &self,
+        text_chunk: &str,
+        thinking_buffer: &mut String,
+        in_thinking_tag: &mut bool,
+        thinking_content: &mut String,
+    ) -> (String, bool, bool, String) {
+        let mut output_text = String::new();
+        let mut thinking_chunk = String::new();
+        let mut thinking_started = false;
+        let mut thinking_ended = false;
+
+        // Add new text to buffer for processing
+        thinking_buffer.push_str(text_chunk);
+
+        let mut chars_to_consume = 0;
+        let buffer_chars: Vec<char> = thinking_buffer.chars().collect();
+        let mut i = 0;
+
+        while i < buffer_chars.len() {
+            let remaining_len = buffer_chars.len() - i;
+            let remaining_str: String = buffer_chars[i..].iter().collect();
+
+            if !*in_thinking_tag {
+                // Outside thinking tag - look for opening tag
+                if remaining_str.starts_with("<thinking>") {
+                    // Found complete opening tag
+                    *in_thinking_tag = true;
+                    thinking_started = true;
+                    i += 10; // Skip "<thinking>"
+                    chars_to_consume = i;
+                    continue;
+                } else if remaining_len < 10 && self.could_be_partial_thinking_opening_tag(&remaining_str) {
+                    // Potential partial opening tag at end of buffer - stop processing here
+                    break;
+                } else {
+                    // Regular character outside thinking - add to output
+                    output_text.push(buffer_chars[i]);
+                    i += 1;
+                    chars_to_consume = i;
+                }
+            } else {
+                // Inside thinking tag - look for closing tag
+                if remaining_str.starts_with("</thinking>") {
+                    // Found complete closing tag
+                    thinking_ended = true;
+                    log::debug!("Thinking block ended, total content: {} chars", thinking_content.len());
+
+                    // Reset thinking state for next potential block
+                    *in_thinking_tag = false;
+                    i += 11; // Skip "</thinking>"
+                    chars_to_consume = i;
+                    continue;
+                } else if remaining_len < 11 && self.could_be_partial_thinking_closing_tag(&remaining_str) {
+                    // Potential partial closing tag at end of buffer - stop processing
+                    break;
+                } else {
+                    // Content inside thinking tag - stream it
+                    let char_to_stream = buffer_chars[i];
+                    thinking_chunk.push(char_to_stream);
+                    thinking_content.push(char_to_stream);
+                    i += 1;
+                    chars_to_consume = i;
+                }
+            }
+        }
+
+        // Remove processed characters from buffer
+        if chars_to_consume > 0 && chars_to_consume <= buffer_chars.len() {
+            *thinking_buffer = buffer_chars[chars_to_consume..].iter().collect();
+        }
+
+        // Validate no thinking tags remain in output
+        if output_text.contains("<thinking>") || output_text.contains("</thinking>") {
+            log::error!("CRITICAL BUG: thinking tags found in output_text during streaming processing!");
+            output_text = output_text.replace("<thinking>", "").replace("</thinking>", "");
+        }
+
+        (output_text, thinking_started, thinking_ended, thinking_chunk)
+    }
+
+    /// Check if a string could be the beginning of a partial "<thinking>" tag
+    fn could_be_partial_thinking_opening_tag(&self, s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        let partial_tags = ["<", "<t", "<th", "<thi", "<thin", "<think", "<thinki", "<thinkin", "<thinking"];
+        partial_tags.iter().any(|&tag| s.eq_ignore_ascii_case(tag))
+    }
+
+    /// Check if a string could be the beginning of a partial "</thinking>" tag
+    fn could_be_partial_thinking_closing_tag(&self, s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        let partial_tags = ["<", "</", "</t", "</th", "</thi", "</thin", "</think", "</thinki", "</thinkin", "</thinking"];
+        partial_tags.iter().any(|&tag| s.eq_ignore_ascii_case(tag))
     }
 
     /// Process text chunk to extract TTS XML tags and return display text + extracted TTS content
@@ -724,6 +920,21 @@ impl AnthropicBrain {
                 .to_string(),
             Err(e) => {
                 tracing::warn!("Failed to compile TTS regex: {}", e);
+                text.to_string()
+            }
+        }
+    }
+
+    /// Strip thinking XML tags from text, removing them completely (content was already emitted as thinking events)
+    fn strip_thinking_tags(&self, text: &str) -> String {
+        match Regex::new(r"(?i)<thinking>[\s\S]*?</thinking>") {
+            Ok(thinking_regex) => thinking_regex
+                .replace_all(text, "")
+                .to_string()
+                .trim()
+                .to_string(),
+            Err(e) => {
+                tracing::warn!("Failed to compile thinking regex: {}", e);
                 text.to_string()
             }
         }
@@ -1112,11 +1323,12 @@ impl AgentBrain for AnthropicBrain {
             let app_handle = app_handle.ok_or("AppHandle required for streaming")?;
             let message_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-            // Emit stream start event
-            crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
+            // Note: stream_start is now emitted inside handle_streaming_response
+            // when we have actual non-thinking text to display. This ensures thinking
+            // messages appear BEFORE the response message in the chat.
 
-            let (accumulated_text, tool_calls, stop_reason) = self
-                .handle_streaming_response(response, |chunk, tts_list| {
+            let (accumulated_text, tool_calls, stop_reason, stream_was_started) = self
+                .handle_streaming_response(response, Some(&app_handle), Some(message_id.clone()), |chunk, tts_list| {
                     // Emit text chunk event - pass first TTS item if available for backward compatibility
                     crate::agent::tool_logger::emit_streaming_text_chunk(
                         &app_handle,
@@ -1126,7 +1338,7 @@ impl AgentBrain for AnthropicBrain {
                     );
 
                     // Emit additional TTS items if there are multiple in this chunk
-                    for (i, tts_content) in tts_list.iter().enumerate().skip(1) {
+                    for tts_content in tts_list.iter().skip(1) {
                         crate::agent::tool_logger::emit_streaming_text_chunk(
                             &app_handle,
                             String::new(), // Empty display text for additional TTS-only chunks
@@ -1137,6 +1349,13 @@ impl AgentBrain for AnthropicBrain {
                 })
                 .await?;
 
+            // Clean up any remaining thinking tags from the accumulated text
+            let mut accumulated_text = accumulated_text;
+            if accumulated_text.contains("<thinking>") || accumulated_text.contains("</thinking>") {
+                log::warn!("Thinking tags found in final accumulated text - cleaning up");
+                accumulated_text = self.strip_thinking_tags(&accumulated_text);
+            }
+
             // TTS tags should now be completely removed during streaming processing
             // If any remain, it indicates a bug in our improved processing logic
             if accumulated_text.contains("<TTS>") || accumulated_text.contains("</TTS>") {
@@ -1145,27 +1364,20 @@ impl AgentBrain for AnthropicBrain {
                 log::error!("Accumulated text: '{}'", accumulated_text);
 
                 // Emergency fallback - but this indicates a serious bug
-                let final_clean_text = self.strip_tts_tags(&accumulated_text);
-                log::error!(
-                    "Emergency cleanup applied: '{}' -> '{}'",
-                    accumulated_text,
-                    final_clean_text
-                );
-
-                return Err(AgentError::LlmError(
-                    "TTS tag processing failed - this is a critical bug in the streaming logic"
-                        .to_string(),
-                ));
+                accumulated_text = self.strip_tts_tags(&accumulated_text);
+                log::error!("Emergency TTS cleanup applied");
             }
 
             let final_display_text = accumulated_text;
 
-            // Emit stream end event with final display text
-            crate::agent::tool_logger::emit_stream_end(
-                &app_handle,
-                message_id,
-                final_display_text.clone(),
-            );
+            // Only emit stream_end if stream_start was emitted (i.e., we had actual display text)
+            if stream_was_started {
+                crate::agent::tool_logger::emit_stream_end(
+                    &app_handle,
+                    message_id,
+                    final_display_text.clone(),
+                );
+            }
 
             // Process stop reason and return appropriate action
             match stop_reason.as_str() {

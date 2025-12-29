@@ -4,7 +4,7 @@ use crate::state::{AppState, KeyboardShortcuts};
 use crate::settings::manager::SettingsManager;
 use tauri::{State, AppHandle};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use tracing::{info, error, warn};
+use tracing::{debug, info, error, warn};
 use serde_json;
 
 // Global escape key management
@@ -442,7 +442,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 
     // Register the dictation input shortcut with error handling
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
-        println!("[DEBUG] Attempting to register dictation shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);
+        debug!(
+            "Attempting to register dictation input shortcut: {} -> {:?}",
+            shortcuts.dictation_input, shortcut
+        );
         match app.global_shortcut().register(shortcut.clone()) {
             Ok(()) => {
                 info!("✅ Successfully registered dictation input shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);

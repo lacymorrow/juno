@@ -543,7 +543,7 @@ impl HeadlessRuntime {
             .app_handle
             .try_state::<AppState>()
             .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
-        let submit_result = crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
+        let _submit_result = crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
@@ -589,7 +589,7 @@ impl HeadlessRuntime {
 
         // Set up result capture
         let (result_tx, result_rx) = oneshot::channel::<String>();
-        let result_tx = Arc::new(Mutex::new(Some(result_tx)));
+        let _result_tx = Arc::new(Mutex::new(Some(result_tx)));
 
         // Listen for dictation completion
         // NOTE: In headless mode we don't currently hook plugin events; this is a placeholder for future wiring
@@ -638,6 +638,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute agent mode (voice input + agent processing)
+    #[allow(dead_code)]
     async fn execute_agent_mode(&self, voice_timeout: u64) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= 2 {
             info!("Starting agent mode with voice input timeout: {}s", voice_timeout);
@@ -657,6 +658,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute voice query (same as agent mode for now)
+    #[allow(dead_code)]
     async fn execute_voice_query(&self, voice_timeout: u64) -> Result<HeadlessResult, JunoError> {
         self.execute_agent_mode(voice_timeout).await
     }
@@ -735,6 +737,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute agent iterations
+    #[allow(dead_code)]
     async fn execute_iterations(&self, iterations: u32, context: Option<String>, max_depth: u32) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= 2 {
             info!("Starting {} iterations with max depth {}", iterations, max_depth);
@@ -777,6 +780,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute self-call (agent calling itself with new queries)
+    #[allow(dead_code)]
     async fn execute_self_call(&self, context: Option<String>, max_depth: u32) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= cli::verbosity::VERBOSE {
             info!("Starting self-call with max depth {}", max_depth);
@@ -799,6 +803,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute recursive agent calls
+    #[allow(dead_code)]
     fn execute_recursive_call(&self, query: String, current_depth: u32, max_depth: u32) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, JunoError>> + Send + '_>> {
         Box::pin(async move {
         if current_depth >= max_depth {
@@ -833,7 +838,7 @@ impl HeadlessRuntime {
     }
 
     /// Execute daemon mode (continuous operation)
-    pub async fn execute_daemon_mode(&self, cli: &Cli) -> Result<HeadlessResult, JunoError> {
+    pub async fn execute_daemon_mode(&self, _cli: &Cli) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= cli::verbosity::NORMAL {
             println!("🔄 Starting daemon mode - listening for commands...");
             println!("Press Ctrl+C to stop");
@@ -850,7 +855,7 @@ impl HeadlessRuntime {
             }
 
             // Check for tasks or commands
-            let status_result = self.execute_status().await?;
+            let _status_result = self.execute_status().await?;
 
             // Simple daemon logic - could be enhanced with task queue, file watching, etc.
             if iteration_count % 10 == 0 { // Every 5 minutes, perform a system check
@@ -1217,7 +1222,7 @@ pub async fn init_headless_mode(app_handle: AppHandle) -> Result<(), JunoError> 
     info!("Initializing headless mode");
 
     // Disable UI-specific features
-    let state = app_handle.state::<AppState>();
+    let _state = app_handle.state::<AppState>();
 
     // Set headless flag in state if needed
     // Note: You might want to add a headless flag to AppState

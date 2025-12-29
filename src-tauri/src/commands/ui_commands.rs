@@ -300,7 +300,6 @@ impl UIManager {
 
         self.set_bar_state(BarState::Expanding).await;
 
-        let app_handle = self.app_handle.clone();
         safe_spawn_async_task(move || async move {
             sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_ui_manager().await {
@@ -328,7 +327,6 @@ impl UIManager {
                 let transition_id = Uuid::new_v4().to_string();
                 self.current_transition_id = Some(transition_id.clone());
 
-                let app_handle = self.app_handle.clone();
                 safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_ui_manager().await {
@@ -358,7 +356,6 @@ impl UIManager {
             let transition_id = Uuid::new_v4().to_string();
             self.current_transition_id = Some(transition_id.clone());
 
-            let app_handle = self.app_handle.clone();
             safe_spawn_async_task(move || async move {
                 sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_ui_manager().await {
@@ -647,7 +644,7 @@ impl UIManager {
 
         #[cfg(target_os = "macos")]
         {
-            use cocoa::{appkit::NSWindow, base::{id as cocoa_id, BOOL, YES, NO}};
+            use cocoa::{base::{id as cocoa_id, BOOL, YES, NO}};
             use objc::{msg_send, sel, sel_impl};
             use dispatch::Queue;
 
@@ -1173,7 +1170,7 @@ pub async fn ui_set_panel_level(level: i32) -> Result<(), String> {
 
 // === EXTERNAL EVENT HANDLERS (for integration with other systems) ===
 
-pub async fn handle_agent_started(app_handle: &AppHandle) {
+pub async fn handle_agent_started(_app_handle: &AppHandle) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_agent_started().await {
@@ -1182,7 +1179,7 @@ pub async fn handle_agent_started(app_handle: &AppHandle) {
     }
 }
 
-pub async fn handle_agent_stopped(app_handle: &AppHandle) {
+pub async fn handle_agent_stopped(_app_handle: &AppHandle) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_agent_stopped().await {
@@ -1191,7 +1188,7 @@ pub async fn handle_agent_stopped(app_handle: &AppHandle) {
     }
 }
 
-pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
+pub async fn handle_agent_cancelled(_app_handle: &AppHandle) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_agent_cancelled().await {
@@ -1200,7 +1197,7 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
     }
 }
 
-pub async fn handle_backend_response(app_handle: &AppHandle, response_text: Option<String>, agent_state: String) {
+pub async fn handle_backend_response(_app_handle: &AppHandle, response_text: Option<String>, agent_state: String) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_backend_response(response_text, agent_state).await {
@@ -1209,7 +1206,7 @@ pub async fn handle_backend_response(app_handle: &AppHandle, response_text: Opti
     }
 }
 
-pub async fn handle_dictation_mode_change(app_handle: &AppHandle, is_active: bool) {
+pub async fn handle_dictation_mode_change(_app_handle: &AppHandle, is_active: bool) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_dictation_mode_change(is_active).await {
@@ -1218,7 +1215,7 @@ pub async fn handle_dictation_mode_change(app_handle: &AppHandle, is_active: boo
     }
 }
 
-pub async fn handle_always_listening_change(app_handle: &AppHandle, is_active: bool) {
+pub async fn handle_always_listening_change(_app_handle: &AppHandle, is_active: bool) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_always_listening_change(is_active).await {
@@ -1227,7 +1224,7 @@ pub async fn handle_always_listening_change(app_handle: &AppHandle, is_active: b
     }
 }
 
-pub async fn handle_query_submitted(app_handle: &AppHandle, query: String) {
+pub async fn handle_query_submitted(_app_handle: &AppHandle, query: String) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_bar_submit(query).await {
@@ -1236,7 +1233,7 @@ pub async fn handle_query_submitted(app_handle: &AppHandle, query: String) {
     }
 }
 
-pub async fn handle_tts_started(app_handle: &AppHandle, text: String) {
+pub async fn handle_tts_started(_app_handle: &AppHandle, text: String) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_tts_started(text).await {
@@ -1245,7 +1242,7 @@ pub async fn handle_tts_started(app_handle: &AppHandle, text: String) {
     }
 }
 
-pub async fn handle_tts_finished(app_handle: &AppHandle) {
+pub async fn handle_tts_finished(_app_handle: &AppHandle) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_tts_finished().await {
@@ -1257,7 +1254,7 @@ pub async fn handle_tts_finished(app_handle: &AppHandle) {
 #[tauri::command]
 pub async fn notify_query_submitted(
     query: String,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
@@ -1267,7 +1264,7 @@ pub async fn notify_query_submitted(
     }
 }
 
-pub async fn handle_dictation_started(app_handle: &AppHandle) {
+pub async fn handle_dictation_started(_app_handle: &AppHandle) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_dictation_started().await {
@@ -1276,7 +1273,7 @@ pub async fn handle_dictation_started(app_handle: &AppHandle) {
     }
 }
 
-pub async fn handle_dictation_partial(app_handle: &AppHandle, partial_text: String) {
+pub async fn handle_dictation_partial(_app_handle: &AppHandle, partial_text: String) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_dictation_partial(partial_text).await {
@@ -1285,7 +1282,7 @@ pub async fn handle_dictation_partial(app_handle: &AppHandle, partial_text: Stri
     }
 }
 
-pub async fn handle_dictation_finished(app_handle: &AppHandle, query: Option<String>) {
+pub async fn handle_dictation_finished(_app_handle: &AppHandle, query: Option<String>) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_dictation_finished(query).await {

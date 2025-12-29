@@ -38,7 +38,7 @@ pub use browser::*;
 pub use cli::*;
 pub use error_messages::*;
 pub use files::*;
-pub use memory::*;
+// pub use memory::*; // Removed to avoid ambiguous glob re-exports (limits, defaults, patterns, visual)
 pub use menus::*;
 pub use mouse::*;
 pub use performance::*;
