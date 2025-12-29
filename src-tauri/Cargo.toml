@@ -112,6 +112,7 @@ default = ["custom-protocol", "macos-proxy"]
 # mobile = ["tauri/mobile"] # Temporarily comment out if causing issues
 macos-proxy = ["tauri/macos-proxy", "cocoa", "objc", "dispatch"]
 custom-protocol = ["tauri/custom-protocol"]
+cargo-clippy = []
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -7,7 +7,7 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::{Arc, Mutex, LazyLock};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
@@ -320,7 +320,7 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
     let app_state = init_app_state(desktop_arc);
 
     // Build a minimal Tauri app on the current (main) thread to satisfy macOS EventLoop requirements
-    let mut app = tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Make `AppState` available to plugins that may access it during initialization
         .manage(app_state)
         .plugin(tauri_plugin_store::Builder::default().build())

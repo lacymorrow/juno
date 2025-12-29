@@ -237,6 +237,22 @@ The recent tool configuration migration from direct file I/O to Tauri store resu
 
 **MANDATORY**: All new configuration files MUST use this pattern. All existing files using direct file I/O must be migrated.
 
+### ☁️ Cloud/WebSocket Patterns (CRITICAL) ☁️
+
+**Strict Architecture Rule**:
+- **Allowed**: Native Rust WebSocket in backend (`tokio-tungstenite`)
+- **FORBIDDEN**: Importing `@tauri-apps/plugin-websocket` in frontend code (Causes build failure)
+
+**Correct Data Flow**:
+1. **Backend**: Rust maintains `tokio-tungstenite` connection to `wss://juno-cloud-backend.fly.dev/ws`
+2. **Events**: Backend emits `cloud-command-received` to Frontend via `app_handle.emit_all`
+3. **Frontend**: Listens for events; NEVER connects directly
+
+**Authentication**:
+- Use HMAC signatures for all messages
+- Default `server_url` must be production URL, not localhost
+- Stored config in `~/Library/Application Support/com.juno.app/cloud-config.toml` takes precedence
+
 ## Enhanced Security Framework 🔒 NEW
 
 ### Production-Grade Security System
@@ -306,6 +322,16 @@ SecurityConfig::development_mode() {
 - Command execution tracked with performance metrics
 - Security violations logged with detailed context
 - Production vs development mode operations distinguished
+
+### Rate Limiting Protection 🛡️
+**Location**: `src-tauri/src/utils/rate_limiter.rs`
+
+**Strict Enforcement**:
+- **AI Operations**: 20/minute (Cost control)
+- **Shell Commands**: 10/second (Security)
+- **Filesystem Ops**: 100/second (Stability)
+- **Screenshots**: 1/second (Resource usage)
+- **Browser Ops**: 30/minute (Anti-scraping)
 
 ## Real-Time Hardware Monitoring 📊 NEW
 
@@ -624,6 +650,29 @@ Extensive Lucide React icon set: `CheckCircle`, `XCircle`, `AlertCircle`, `Alert
 **Streaming Support**: Incomplete JSX tags automatically completed during streaming responses
 **Component Safety**: Type-safe component library with proper TypeScript integration
 **Error Handling**: Graceful fallback to text rendering if JSX parsing fails
+
+## High-Performance Safari Tools 🚀 NEW
+
+### Specialized Architecture (Phase 2 Complete)
+**Location**: `src-tauri/src/agent/tools/safari_tools.rs`
+
+**Performance**: **3-5x Faster** than generic browser automation via direct AppleScript/JS injection.
+
+**Available Tools**:
+- `safari_get_url`: Instant URL retrieval
+- `safari_navigate`: Direct navigation
+- `safari_click_element`: JS-injected click (bypasses WebDriver)
+- `safari_get_text`: Direct DOM text extraction
+- `safari_fill_form`: Native form interaction
+- `safari_execute_script`: Custom JS execution
+
+**Implementation**:
+1. **AppleScript Layer**: Direct application communication
+2. **JavaScript Layer**: DOM manipulation/injection
+3. **Element Caching**: Optimized re-access
+4. **Error Recovery**: Fallback to standard automation
+
+**Usage**: Prefer these tools (`safari_*`) for all Safari-specific tasks.
 
 ## AI Response Streaming 🌊
 
@@ -1199,3 +1248,20 @@ bun tauri build                   # Production mode (strict security)
 - "Conditional operations based on screen content"
 
 **For AI Agents**: Juno represents the cutting edge of AI-computer interaction, with sophisticated batching algorithms that optimize performance while maintaining the flexibility and safety required for autonomous computer use. The MCP request batching system exemplifies how AI agents can be enhanced through intelligent operation grouping without sacrificing the reasoning capabilities that make them effective.
+
+## Active Research & Future Roadmap 🔬
+
+### UI-Guided Visual Token Selection (Priority 2 Planning)
+**Goal**: 33% computational cost reduction using "ShowUI" paper methodology (arXiv:2411.17465).
+
+**Core Concept**:
+- **RGB Connected Graphs**: Analyze UI density to identify sparse regions
+- **Token Reduction**: Reduce tokens in sparse areas by 77% (1296 -> 291)
+- **Multi-Monitor**: Display-aware processing for complex setups
+
+**Status**: In ACTIVE PLANNING phase. Agent should be aware of:
+- `UIGuidedTokenSelector` architecture
+- `RGBConnectedGraphAnalyzer` logic
+- Multi-monitor coordinate translation requirements
+
+**Target**: Efficiency optimization without accuracy loss for screenshot analysis.

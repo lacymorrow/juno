@@ -19,6 +19,7 @@ use crate::state::AppState;
 /// Offers project analysis, multi-file refactoring, IDE integration, and code review.
 /// Used by: Main agent orchestrator for all coding-related tasks.
 pub struct EnhancedCodingToolProvider {
+    #[allow(dead_code)]
     app_state: AppState,
 }
 

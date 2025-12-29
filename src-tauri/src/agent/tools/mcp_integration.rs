@@ -158,7 +158,7 @@ impl MCPServerConnection {
 
     /// Calculate backoff delay based on consecutive failures
     fn calculate_backoff_delay(&self) -> Duration {
-        let base_delay = Duration::from_millis(500); // Start with 500ms
+        let _base_delay = Duration::from_millis(500); // Start with 500ms
         let max_delay = Duration::from_secs(30); // Cap at 30s
 
         if self.consecutive_failures == 0 {
