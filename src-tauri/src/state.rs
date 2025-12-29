@@ -80,12 +80,8 @@ impl Default for KeyboardShortcuts {
         Self {
             agent_mode_toggle: defaults::AGENT_MODE_TOGGLE.to_string(),
             dictation_input: defaults::DICTATION_INPUT.to_string(),
-            stop_current_task: "Escape".to_string(),
-            open_settings: if cfg!(target_os = "macos") {
-                "Cmd+,".to_string()
-            } else {
-                "Ctrl+,".to_string()
-            },
+            stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
+            open_settings: defaults::OPEN_SETTINGS.to_string(),
         }
     }
 }
@@ -1760,17 +1756,17 @@ mod tests {
         {
             assert_eq!(shortcuts.agent_mode_toggle, defaults::AGENT_MODE_TOGGLE);
             assert_eq!(shortcuts.dictation_input, defaults::DICTATION_INPUT);
-            assert_eq!(shortcuts.open_settings, "Cmd+,");
+            assert_eq!(shortcuts.open_settings, defaults::OPEN_SETTINGS);
         }
 
         #[cfg(not(target_os = "macos"))]
         {
             assert_eq!(shortcuts.agent_mode_toggle, defaults::AGENT_MODE_TOGGLE);
             assert_eq!(shortcuts.dictation_input, defaults::DICTATION_INPUT);
-            assert_eq!(shortcuts.open_settings, "Ctrl+,");
+            assert_eq!(shortcuts.open_settings, defaults::OPEN_SETTINGS);
         }
 
-        assert_eq!(shortcuts.stop_current_task, "Escape");
+        assert_eq!(shortcuts.stop_current_task, defaults::STOP_CURRENT_TASK);
     }
 
     #[test]

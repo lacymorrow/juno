@@ -190,8 +190,8 @@ pub fn create_state_aware_tray_menu(
             crate::state::KeyboardShortcuts {
                 agent_mode_toggle: defaults::AGENT_MODE_TOGGLE.to_string(),
                 dictation_input: defaults::DICTATION_INPUT.to_string(),
-                stop_current_task: "Escape".to_string(),
-                open_settings: "Cmd+,".to_string(),
+                stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
+                open_settings: defaults::OPEN_SETTINGS.to_string(),
             }
         }
     };

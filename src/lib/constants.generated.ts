@@ -792,9 +792,6 @@ const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase
 
 // Keyboard shortcuts with platform-specific defaults
 export const KEYBOARD_SHORTCUTS = {
-  AGENT_MODE_TOGGLE: isMac ? 'Shift+Option+Space' : 'Shift+Alt+Space',
-  DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
-  OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
   TTS_PROVIDER: 'system',
   SOUND_ENABLED: 'true',
   DICTATION_CLIPBOARD_ENABLED: 'true',
@@ -806,7 +803,10 @@ export const KEYBOARD_SHORTCUTS = {
   AUTO_CONNECT: 'false',
   AUTOSTART_ENABLED: 'false',
   ONBOARDING_COMPLETED: 'false',
+  AGENT_MODE_TOGGLE: isMac ? 'Shift+Option+Space' : 'Shift+Alt+Space',
+  DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
   STOP_CURRENT_TASK: 'Escape',
+  OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
 } as const;
 
 export const SETTINGS = {
