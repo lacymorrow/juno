@@ -1,4 +1,8 @@
-use crate::platforms::macos::ffi::AXIsProcessTrustedWithOptions; // Import from ffi module
+use crate::platforms::macos::ffi::{
+    AXIsProcessTrustedWithOptions,
+    CGPreflightScreenCaptureAccess,
+    CGRequestScreenCaptureAccess,
+}; // Import from ffi module
 use crate::AutomationError;
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
@@ -189,4 +193,36 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
     } else {
         Err(format!("Failed to open System Settings for {}: {}", permission_type, String::from_utf8_lossy(&fallback_output.stderr)))
     }
+}
+
+/// Check screen recording permission using native CGPreflightScreenCaptureAccess API
+/// This is a lightweight check that doesn't require creating a Desktop instance
+pub fn check_screen_recording_permission() -> bool {
+    debug!("checking screen recording permission using native API");
+
+    let has_permission = unsafe { CGPreflightScreenCaptureAccess() };
+
+    if has_permission {
+        debug!("screen recording permission is granted");
+    } else {
+        debug!("screen recording permission is not granted");
+    }
+
+    has_permission
+}
+
+/// Request screen recording permission using native CGRequestScreenCaptureAccess API
+/// This may trigger a system dialog prompting the user to grant permission
+pub fn request_screen_recording_permission() -> bool {
+    debug!("requesting screen recording permission using native API");
+
+    let granted = unsafe { CGRequestScreenCaptureAccess() };
+
+    if granted {
+        info!("screen recording permission was granted");
+    } else {
+        debug!("screen recording permission was denied or user needs to grant in System Settings");
+    }
+
+    granted
 }

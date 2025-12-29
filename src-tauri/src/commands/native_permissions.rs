@@ -227,52 +227,17 @@ impl NativePermissionChecker {
         }
     }
 
-    /// Check screen recording permission using Desktop API - NO admin privileges required
+    /// Check screen recording permission using native CGPreflightScreenCaptureAccess API
+    /// This is a lightweight check that doesn't require creating a Desktop instance
     pub async fn check_screen_recording_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            use computer_use_ai_sdk::Desktop;
-            use std::time::Duration;
+            use computer_use_ai_sdk::platforms::macos::permissions::check_screen_recording_permission;
 
-            // Use the same approach as test_screen_recording_access() - proper native API
-            // No need to create a new runtime since we're already in an async context
-            let result = tokio::time::timeout(Duration::from_millis(3000), async {
-                // Try creating a minimal Desktop instance just for screenshot test
-                match Desktop::new(false, false) {
-                    Ok(desktop) => {
-                        // Try to take a screenshot using the native API
-                        match desktop.capture_screenshot_base64() {
-                            Ok(_) => {
-                                debug!("Screenshot test successful - screen recording permission granted");
-                                Ok::<bool, String>(true)
-                            },
-                            Err(e) => {
-                                debug!("Screenshot test failed: {} - screen recording permission not granted", e);
-                                Ok::<bool, String>(false)
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        warn!("Could not create Desktop instance for screenshot test: {}", e);
-                        Ok::<bool, String>(false)
-                    }
-                }
-            }).await;
-
-            match result {
-                Ok(Ok(granted)) => {
-                    debug!("Screen recording permission status: {}", granted);
-                    Ok(granted)
-                },
-                Ok(Err(e)) => {
-                    warn!("Error during screen recording permission test: {}", e);
-                    Ok(false)
-                },
-                Err(_) => {
-                    warn!("Screen recording permission test timed out");
-                    Ok(false)
-                }
-            }
+            // Use native API - no Desktop instance needed, instant check
+            let granted = check_screen_recording_permission();
+            debug!("Screen recording permission status (native API): {}", granted);
+            Ok(granted)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -282,19 +247,31 @@ impl NativePermissionChecker {
     }
 
     /// Request screen recording permission - NO admin privileges required
+    /// Uses native CGRequestScreenCaptureAccess API first, then falls back to opening System Settings
     pub fn request_screen_recording_permission() -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
-            info!("Opening screen recording privacy settings");
+            use computer_use_ai_sdk::platforms::macos::permissions::request_screen_recording_permission;
 
-            // Open screen recording settings to let user grant permission manually
+            info!("Requesting screen recording permission using native API");
+
+            // First try the native API which may show a system prompt
+            let granted = request_screen_recording_permission();
+
+            if granted {
+                info!("Screen recording permission granted via native API");
+                return Ok(());
+            }
+
+            // If not granted, open System Settings for manual grant
+            info!("Opening screen recording privacy settings for manual grant");
             match Command::new("open")
                 .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
                 .status()
             {
                 Ok(status) => {
                     if status.success() {
-                        info!("Screen recording permission request triggered");
+                        info!("Screen recording settings opened for manual permission grant");
                         Ok(())
                     } else {
                         warn!("Failed to open screen recording settings");

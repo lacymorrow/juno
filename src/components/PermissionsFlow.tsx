@@ -15,6 +15,12 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  getPermissionsStatus,
+  invalidatePermissionsCache,
+  type PermissionsState,
+  type AppPermissionStatus,
+} from "@/lib/permissions-service";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -26,23 +32,6 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Separator } from "./ui/separator";
-
-interface PermissionStatus {
-  permissionType: string;
-  granted: boolean;
-  required: boolean;
-  description: string;
-  instructions: string;
-}
-
-interface PermissionsState {
-  accessibility: PermissionStatus;
-  screenRecording: PermissionStatus;
-  microphone: PermissionStatus;
-  inputMonitoring: PermissionStatus;
-  allGranted: boolean;
-  appName: string;
-}
 
 interface PermissionsFlowProps {
   onComplete?: () => void;
@@ -67,20 +56,18 @@ export function PermissionsFlow({
   const [error, setError] = useState<string | null>(null);
 
   // Check permissions status with optional auto-redirect
-  const checkPermissions = async (_useAutoRedirect = false) => {
+  const checkPermissions = async (forceRefresh = false) => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // Use native permission checking - eliminates all password prompts
-      const result = await invoke<PermissionsState>(
-        "check_permissions_status_native"
-      );
+      // Use centralized permission service - prevents duplicate calls
+      const result = await getPermissionsStatus(forceRefresh);
 
       setPermissions(result);
 
       // Auto-complete if all permissions are granted
-      if (result.allGranted && onComplete) {
+      if (result.all_granted && onComplete) {
         setTimeout(() => onComplete(), 1000);
       }
     } catch (err) {
@@ -99,14 +86,17 @@ export function PermissionsFlow({
         "request_accessibility_permission_native"
       );
 
+      // Invalidate cache and force refresh after permission request
+      invalidatePermissionsCache();
+
       if (granted) {
         // Permission was already granted
-        await checkPermissions();
+        await checkPermissions(true);
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissions();
+          await checkPermissions(true);
         }, 2000);
       }
     } catch (err) {
@@ -125,14 +115,17 @@ export function PermissionsFlow({
         "request_screen_recording_permission_native"
       );
 
+      // Invalidate cache and force refresh after permission request
+      invalidatePermissionsCache();
+
       if (granted) {
         // Permission was already granted
-        await checkPermissions();
+        await checkPermissions(true);
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissions();
+          await checkPermissions(true);
         }, 2000);
       }
     } catch (err) {
@@ -151,14 +144,17 @@ export function PermissionsFlow({
         "request_microphone_permission_native"
       );
 
+      // Invalidate cache and force refresh after permission request
+      invalidatePermissionsCache();
+
       if (granted) {
         // Permission was already granted
-        await checkPermissions();
+        await checkPermissions(true);
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissions();
+          await checkPermissions(true);
         }, 2000);
       }
     } catch (err) {
@@ -177,14 +173,17 @@ export function PermissionsFlow({
         "request_input_monitoring_permission_native"
       );
 
+      // Invalidate cache and force refresh after permission request
+      invalidatePermissionsCache();
+
       if (granted) {
         // Permission was already granted
-        await checkPermissions();
+        await checkPermissions(true);
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissions();
+          await checkPermissions(true);
         }, 2000);
       }
     } catch (err) {
@@ -257,7 +256,7 @@ export function PermissionsFlow({
           setPermissions(event.payload);
 
           // Auto-complete if all permissions are granted
-          if (event.payload.allGranted && onComplete) {
+          if (event.payload.all_granted && onComplete) {
             setTimeout(() => onComplete(), 1000);
           }
         }
@@ -285,7 +284,7 @@ export function PermissionsFlow({
     };
   }, [onComplete, autoRedirectEnabled]);
 
-  const getPermissionIcon = (permission: PermissionStatus) => {
+  const getPermissionIcon = (permission: AppPermissionStatus) => {
     if (permission.granted) {
       return <CheckCircle className="h-5 w-5 text-green-500" />;
     } else if (permission.required) {
@@ -295,7 +294,7 @@ export function PermissionsFlow({
     }
   };
 
-  const getPermissionBadge = (permission: PermissionStatus) => {
+  const getPermissionBadge = (permission: AppPermissionStatus) => {
     if (permission.granted) {
       return (
         <Badge
@@ -326,7 +325,7 @@ export function PermissionsFlow({
     }
   };
 
-  const getPermissionPriorityIcon = (permission: PermissionStatus) => {
+  const getPermissionPriorityIcon = (permission: AppPermissionStatus) => {
     switch (permission.permissionType) {
       case "accessibility":
         return <Lock className="h-5 w-5 text-blue-600" />;
@@ -342,7 +341,7 @@ export function PermissionsFlow({
   };
 
   const renderPermissionCard = (
-    permission: PermissionStatus,
+    permission: AppPermissionStatus,
     onRequest?: () => void,
     onRequestEnhanced?: () => void
   ) => {
@@ -578,22 +577,22 @@ export function PermissionsFlow({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
-            {permissions.allGranted ? (
+            {permissions.all_granted ? (
               <CheckCircle className="h-5 w-5 text-green-500" />
             ) : (
               <Shield className="h-5 w-5 text-blue-500" />
             )}
-            <span>macOS Permissions Setup for {permissions.appName}</span>
+            <span>macOS Permissions Setup for {permissions.app_name}</span>
           </CardTitle>
           <CardDescription>
-            {permissions.allGranted
+            {permissions.all_granted
               ? "✅ All permissions configured! Juno is ready for full functionality."
               : autoRedirectEnabled
               ? "Configure the permissions below to enable Juno's AI computer use capabilities. Required permissions are marked with ⚠️."
               : "Configure the permissions below to enable Juno's AI computer use capabilities. Some permissions are required for core functionality."}
           </CardDescription>
         </CardHeader>
-        {!permissions.allGranted && (
+        {!permissions.all_granted && (
           <CardContent>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -645,9 +644,9 @@ export function PermissionsFlow({
             )}
 
           {/* Screen Recording Permission */}
-          {permissions.screenRecording.required &&
+          {permissions.screen_recording.required &&
             renderPermissionCard(
-              permissions.screenRecording,
+              permissions.screen_recording,
               requestScreenRecordingPermission
             )}
         </div>
@@ -680,16 +679,16 @@ export function PermissionsFlow({
             )}
 
           {/* Input Monitoring Permission */}
-          {!permissions.inputMonitoring.required &&
+          {!permissions.input_monitoring.required &&
             renderPermissionCard(
-              permissions.inputMonitoring,
+              permissions.input_monitoring,
               requestInputMonitoringPermission
             )}
         </div>
       </div>
 
       {/* Success Footer */}
-      {permissions.allGranted && (
+      {permissions.all_granted && (
         <Card className="border-green-200 bg-green-50">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -719,7 +718,7 @@ export function PermissionsFlow({
       )}
 
       {/* Skip Option */}
-      {showSkipOption && !permissions.allGranted && onSkip && (
+      {showSkipOption && !permissions.all_granted && onSkip && (
         <div className="text-center">
           <Button variant="ghost" onClick={handleSkip} size="sm">
             Skip setup for now (limited functionality)

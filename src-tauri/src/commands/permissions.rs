@@ -20,6 +20,7 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 
 /// Permission status information for frontend consumption
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionStatus {
     pub permission_type: String,
     pub granted: bool,
