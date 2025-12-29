@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { KEYBOARD_SHORTCUTS } from "@/lib/constants.generated";
 
 interface ShortcutInputProps {
   label: string;
@@ -289,12 +290,11 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
 
   // Get platform-appropriate example
   const getExampleShortcut = () => {
-    const isMac = navigator.platform.toLowerCase().includes('mac');
-    if (shortcutName === 'agent_mode_toggle') {
-      return isMac ? "Option+D" : "Alt+D";
-    } else if (shortcutName === 'dictation_input') {
-      return isMac ? "Option+Space" : "Alt+Space";
+    const shortcutKey = shortcutName.toUpperCase() as keyof typeof KEYBOARD_SHORTCUTS;
+    if (shortcutKey in KEYBOARD_SHORTCUTS) {
+      return KEYBOARD_SHORTCUTS[shortcutKey];
     }
+    const isMac = navigator.platform.toLowerCase().includes('mac');
     return isMac ? "Cmd+K" : "Ctrl+K";
   };
 

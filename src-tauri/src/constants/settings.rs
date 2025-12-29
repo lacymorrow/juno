@@ -136,9 +136,9 @@ pub mod defaults {
 
     // Default keyboard shortcuts (cross-platform)
     #[cfg(target_os = "macos")]
-    pub const AGENT_MODE_TOGGLE: &str = "Option+D";
+    pub const AGENT_MODE_TOGGLE: &str = "Shift+Option+Space";
     #[cfg(not(target_os = "macos"))]
-    pub const AGENT_MODE_TOGGLE: &str = "Alt+D";
+    pub const AGENT_MODE_TOGGLE: &str = "Shift+Alt+Space";
 
     #[cfg(target_os = "macos")]
     pub const DICTATION_INPUT: &str = "Option+Space";

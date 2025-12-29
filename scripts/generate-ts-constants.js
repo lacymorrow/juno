@@ -30,6 +30,7 @@ function parseRustConstants() {
         commands: {},
         memory: {},
         agent: {},
+        settings: {},
     };
 
     // Parse each constants module
@@ -85,6 +86,10 @@ function parseRustConstants() {
         // Parse agent module (contains computer actions and tool names)
         const agentFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'agent.rs'), 'utf8');
         constants.agent = parseModuleConstants(agentFile);
+
+        // Parse settings module (contains keyboard shortcuts and other settings)
+        const settingsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'settings.rs'), 'utf8');
+        constants.settings = parseSettingsConstants(settingsFile);
 
     } catch (error) {
         console.warn(`Warning: Could not parse some constants files: ${error.message}`);
@@ -175,6 +180,97 @@ function parseModuleConstants(rustCode) {
     Object.assign(allConstants, topLevelConstants);
 
     return allConstants;
+}
+
+/**
+ * Parse settings constants with platform-specific handling
+ */
+function parseSettingsConstants(rustCode) {
+    const allConstants = {};
+
+    // First, parse nested modules like we do for other files
+    const moduleMatches = parseModulesWithBraceMatching(rustCode);
+    
+    moduleMatches.forEach(({ fullMatch, moduleName, moduleContent }) => {
+        // Special handling for the 'defaults' module which has platform-specific constants
+        if (moduleName === 'defaults') {
+            const platformConstants = parsePlatformSpecificConstants(moduleContent);
+            Object.entries(platformConstants).forEach(([key, value]) => {
+                allConstants[`DEFAULTS_${key}`] = value;
+            });
+        } else {
+            const moduleConstants = parseSimpleConstants(moduleContent);
+            Object.entries(moduleConstants).forEach(([key, value]) => {
+                allConstants[`${moduleName.toUpperCase()}_${key}`] = value;
+            });
+        }
+    });
+
+    // Parse top-level constants
+    let codeWithoutModules = rustCode;
+    moduleMatches.forEach(({ fullMatch }) => {
+        codeWithoutModules = codeWithoutModules.replace(fullMatch, '');
+    });
+
+    const topLevelConstants = parseSimpleConstants(codeWithoutModules);
+    Object.assign(allConstants, topLevelConstants);
+
+    return allConstants;
+}
+
+/**
+ * Parse constants with #[cfg] platform-specific attributes
+ */
+function parsePlatformSpecificConstants(rustCode) {
+    const constants = {};
+    
+    // First, get all non-platform-specific constants
+    const simpleConstants = parseSimpleConstants(rustCode);
+    Object.assign(constants, simpleConstants);
+    
+    // Now handle platform-specific constants
+    // Pattern to match: #[cfg(target_os = "macos")] pub const NAME: type = value;
+    // or: #[cfg(not(target_os = "macos"))] pub const NAME: type = value;
+    // Updated regex to handle different data types (strings, numbers, booleans, arrays) like parseSimpleConstants
+    const platformConstRegex = /#\[cfg\((not\()?(target_os = "macos"\)?)\)\]\s*pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
+    
+    let match;
+    const platformSpecific = {};
+    
+    while ((match = platformConstRegex.exec(rustCode)) !== null) {
+        const [, isNot, _, constName, stringValue, numericValue, boolValue, arrayValue] = match;
+        const platform = isNot ? 'other' : 'macos';
+        
+        let parsedValue;
+        if (arrayValue !== undefined) {
+            // Parse array of strings: &["hey juno", "computer"]
+            const arrayElements = arrayValue.match(/"([^"]+)"/g);
+            if (arrayElements) {
+                parsedValue = arrayElements.map(el => el.slice(1, -1)); // Remove quotes
+            }
+        } else if (numericValue !== undefined) {
+            // Remove underscores from numeric literals before parsing
+            const cleanNumeric = numericValue.replace(/_/g, '');
+            parsedValue = parseFloat(cleanNumeric);
+        } else if (stringValue !== undefined) {
+            // Handle escaped quotes in string values
+            parsedValue = stringValue.replace(/\\"/g, '"');
+        } else if (boolValue !== undefined) {
+            parsedValue = boolValue === 'true';
+        }
+        
+        if (!platformSpecific[constName]) {
+            platformSpecific[constName] = {};
+        }
+        platformSpecific[constName][platform] = parsedValue;
+    }
+    
+    // Store platform-specific constants with both values
+    Object.entries(platformSpecific).forEach(([key, values]) => {
+        constants[key] = values;
+    });
+    
+    return constants;
 }
 
 /**
@@ -306,6 +402,34 @@ ${Object.entries(constants.memory)
 
 export const AGENT = {
 ${Object.entries(constants.agent)
+    .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
+    .join('\n')}
+} as const;
+
+// Platform detection for keyboard shortcuts
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+
+// Keyboard shortcuts with platform-specific defaults
+export const KEYBOARD_SHORTCUTS = {
+${Object.entries(constants.settings || {})
+    .filter(([key]) => key.startsWith('DEFAULTS_'))
+    .map(([key, value]) => {
+        const shortcutName = key.replace('DEFAULTS_', '');
+        if (typeof value === 'object' && value !== null && 'macos' in value) {
+            return `  ${shortcutName}: isMac ? '${value.macos}' : '${value.other}',`;
+        }
+        if (typeof value === 'string') {
+            return `  ${shortcutName}: '${value}',`;
+        }
+        return null;
+    })
+    .filter(Boolean)
+    .join('\n')}
+} as const;
+
+export const SETTINGS = {
+${Object.entries(constants.settings || {})
+    .filter(([key]) => !key.startsWith('DEFAULTS_'))
     .map(([key, value]) => `  ${key}: ${formatValue(value)},`)
     .join('\n')}
 } as const;
@@ -496,6 +620,7 @@ function main() {
         console.log(`   - Files: ${Object.keys(constants.files).length}`);
         console.log(`   - Permissions: ${Object.keys(constants.permissions).length}`);
         console.log(`   - Agent: ${Object.keys(constants.agent).length}`);
+        console.log(`   - Settings: ${Object.keys(constants.settings).length}`);
 
     } catch (error) {
         console.error('❌ Error generating constants:', error);

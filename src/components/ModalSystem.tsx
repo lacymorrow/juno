@@ -6,6 +6,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { KEYBOARD_SHORTCUTS } from "@/lib/constants.generated";
 
 // Types for the modal system
 export type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
@@ -285,7 +286,7 @@ export function ModalSystem({
                 <ul className="list-disc list-inside space-y-1">
                   <li>
                     <strong>
-                      {keyboardShortcuts?.agent_mode_toggle || "Option + D"}:
+                      {keyboardShortcuts?.agent_mode_toggle || KEYBOARD_SHORTCUTS.AGENT_MODE_TOGGLE}:
                     </strong>{" "}
                     Activate Agent Mode
                     <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
@@ -301,7 +302,7 @@ export function ModalSystem({
                   </li>
                   <li>
                     <strong>
-                      {keyboardShortcuts?.dictation_input || "Option + Space"}
+                      {keyboardShortcuts?.dictation_input || KEYBOARD_SHORTCUTS.DICTATION_INPUT}
                       :
                     </strong>{" "}
                     Toggle Dictation Mode (voice typing)
