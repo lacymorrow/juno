@@ -62,45 +62,53 @@ pub struct ProviderConfig {
     pub providers: Vec<CentralizedProviderConfig>,
 }
 
+/// Default active provider across the app
+pub const DEFAULT_ACTIVE_PROVIDER: &str = "anthropic";
+
+/// Centralized list of default providers and models (single source of truth)
+pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
+    vec![
+        CentralizedProviderConfig {
+            id: "anthropic".to_string(),
+            api_key: None,
+            model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+        },
+        CentralizedProviderConfig {
+            id: "openai".to_string(),
+            api_key: None,
+            model: Some(model_ids::OPENAI_CUA.to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+        },
+        CentralizedProviderConfig {
+            id: "rig".to_string(),
+            api_key: None, // Rig uses OpenAI's API key by default
+            model: Some(model_ids::OPENAI_CUA.to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+        },
+        CentralizedProviderConfig {
+            id: "gemini".to_string(),
+            api_key: None,
+            model: Some(model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW.to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+        },
+    ]
+}
+
 impl Default for ProviderConfig {
     fn default() -> Self {
         ProviderConfig {
-            active_provider: "anthropic".to_string(),
+            active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
             agent_mode: AgentMode::Multi,
-            providers: vec![
-                CentralizedProviderConfig {
-                    id: "anthropic".to_string(),
-                    api_key: None,
-                    model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-                CentralizedProviderConfig {
-                    id: "openai".to_string(),
-                    api_key: None,
-                    model: Some(model_ids::GPT_4O.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-                CentralizedProviderConfig {
-                    id: "rig".to_string(),
-                    api_key: None, // Rig uses OpenAI's API key by default
-                    model: Some(model_ids::GPT_4O.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-                CentralizedProviderConfig {
-                    id: "gemini".to_string(),
-                    api_key: None,
-                    model: Some(model_ids::GEMINI_1_5_PRO.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-            ],
+            providers: default_provider_entries(),
         }
     }
 }

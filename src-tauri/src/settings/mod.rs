@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::constants::settings::defaults;
-use crate::agent::providers::factory::model_ids;
+use crate::agent::providers::config::{default_provider_entries, DEFAULT_ACTIVE_PROVIDER};
 use crate::constants::ui;
 
 pub mod manager;
@@ -291,25 +291,8 @@ impl Default for AgentSettings {
 impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
-            active_provider: "anthropic".to_string(),
-            providers: vec![
-                ProviderConfig {
-                    id: "anthropic".to_string(),
-                    api_key: None,
-                    model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-                ProviderConfig {
-                    id: "openai".to_string(),
-                    api_key: None,
-                    model: Some(model_ids::GPT_4O.to_string()),
-                    max_tokens: Some(4096),
-                    temperature: Some(0.7),
-                    system_prompt: None,
-                },
-            ],
+            active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
+            providers: default_provider_entries(),
         }
     }
 }
