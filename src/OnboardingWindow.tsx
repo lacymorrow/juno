@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { WINDOW_LABELS } from "@/lib/constants.generated";
+import { getPermissionsStatus } from "@/lib/permissions-service";
 
 export default function OnboardingWindow() {
   console.log("OnboardingWindow: Component rendering/re-rendering");
@@ -26,15 +27,8 @@ export default function OnboardingWindow() {
       try {
         console.log("OnboardingWindow: Starting permission check...");
 
-        // Check permissions using native APIs - eliminates all password prompts
-        const permissionsResult = await invoke<{
-          accessibility: { granted: boolean; required: boolean };
-          screen_recording: { granted: boolean; required: boolean };
-          microphone: { granted: boolean; required: boolean };
-          input_monitoring: { granted: boolean; required: boolean };
-          all_granted: boolean;
-          app_name: string;
-        }>("check_permissions_status_native");
+        // Check permissions using centralized service - prevents duplicate calls
+        const permissionsResult = await getPermissionsStatus();
 
         console.log("OnboardingWindow: Permissions result:", permissionsResult);
         setPermissionsGranted(permissionsResult.all_granted);

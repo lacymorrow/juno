@@ -15,3 +15,7 @@ bun run tauri dev
 ```
 
 For deep docs, see `docs/CONSOLIDATED_DOCUMENTATION.md` (under verification). For AI agent guidance, read `LLMs.txt`. For rules, see `docs/rules/INDEX.md`.
+
+## Testing & Automation
+
+- Scenario matrix and automation guidance lives in [`docs/rules/ui_test_scenarios.mdc`](docs/rules/ui_test_scenarios.mdc). Follow it to script unit/integration checks, UI automation, and LLM-driven smoke runs.

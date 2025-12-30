@@ -54,7 +54,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
 
     // Use native APIs only - no osascript, no admin privileges
     let native_accessibility = NativePermissionChecker::get_accessibility_status().await?;
-    let native_screen_recording = NativePermissionChecker::get_screen_recording_status().await?;
+    let native_screen_recording = NativePermissionChecker::get_screen_recording_status()?;
     let native_microphone = NativePermissionChecker::get_microphone_status().await?;
     let native_input_monitoring = NativePermissionChecker::get_input_monitoring_status().await?;
 
@@ -209,7 +209,7 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
 
     #[cfg(target_os = "macos")]
     {
-        match NativePermissionChecker::check_screen_recording_permission().await {
+        match NativePermissionChecker::check_screen_recording_permission() {
             Ok(true) => {
                 info!("Screen recording permissions already granted");
                 Ok(true)
@@ -220,7 +220,7 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
                     Ok(()) => {
                         info!("Screen recording permission request triggered successfully");
                         tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
-                        match NativePermissionChecker::check_screen_recording_permission().await {
+                        match NativePermissionChecker::check_screen_recording_permission() {
                             Ok(granted) => {
                                 if granted {
                                     info!("Screen recording permissions now granted");

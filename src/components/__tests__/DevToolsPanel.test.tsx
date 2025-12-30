@@ -12,6 +12,18 @@ vi.mock('@tauri-apps/api/event', () => ({
   emit: vi.fn(),
 }));
 
+// Mock heavy sub-panels that trigger async effects to avoid act() warnings
+vi.mock('../devtools/CloudTestPanel', () => ({
+  CloudTestPanel: () => <div data-testid="cloud-test-panel" />,
+}));
+
+vi.mock('../devtools/WakeWordTesting', () => ({
+  __esModule: true,
+  default: ({ children }: { children?: any }) => (
+    <div data-testid="wake-word-testing">{children}</div>
+  ),
+}));
+
 // Mock the UI components with simple implementations
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, onClick, ...props }: any) => (
