@@ -1,4 +1,8 @@
-use crate::platforms::macos::ffi::AXIsProcessTrustedWithOptions; // Import from ffi module
+use crate::platforms::macos::ffi::{
+    AXIsProcessTrustedWithOptions,
+    CGPreflightScreenCaptureAccess,
+    CGRequestScreenCaptureAccess,
+}; // Import from ffi module
 use crate::AutomationError;
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
@@ -6,6 +10,19 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
 use tracing::{debug, info, warn};
 use std::process::Command;
+#[cfg(test)]
+use once_cell::sync::Lazy;
+#[cfg(test)]
+use std::sync::Mutex;
+
+#[cfg(test)]
+static SCREEN_RECORDING_CHECK_OVERRIDE: Lazy<
+    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(None));
+#[cfg(test)]
+static SCREEN_RECORDING_REQUEST_OVERRIDE: Lazy<
+    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(None));
 
 // Make the function public so it can be called from server.rs
 pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
@@ -188,5 +205,116 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
         Ok(())
     } else {
         Err(format!("Failed to open System Settings for {}: {}", permission_type, String::from_utf8_lossy(&fallback_output.stderr)))
+    }
+}
+
+/// Check screen recording permission using native CGPreflightScreenCaptureAccess API
+/// This is a lightweight check that doesn't require creating a Desktop instance
+pub fn check_screen_recording_permission() -> bool {
+    debug!("checking screen recording permission using native API");
+
+    let has_permission = preflight_screen_capture_access();
+
+    if has_permission {
+        debug!("screen recording permission is granted");
+    } else {
+        debug!("screen recording permission is not granted");
+    }
+
+    has_permission
+}
+
+/// Request screen recording permission using native CGRequestScreenCaptureAccess API
+/// This may trigger a system dialog prompting the user to grant permission
+pub fn request_screen_recording_permission() -> bool {
+    debug!("requesting screen recording permission using native API");
+
+    let granted = request_screen_capture_access();
+
+    if granted {
+        info!("screen recording permission was granted");
+    } else {
+        debug!("screen recording permission was denied or user needs to grant in System Settings");
+    }
+
+    granted
+}
+
+fn preflight_screen_capture_access() -> bool {
+    #[cfg(test)]
+    {
+        if let Ok(guard) = SCREEN_RECORDING_CHECK_OVERRIDE.lock() {
+            if let Some(callback) = guard.as_ref() {
+                return callback();
+            }
+        }
+    }
+
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+fn request_screen_capture_access() -> bool {
+    #[cfg(test)]
+    {
+        if let Ok(guard) = SCREEN_RECORDING_REQUEST_OVERRIDE.lock() {
+            if let Some(callback) = guard.as_ref() {
+                return callback();
+            }
+        }
+    }
+
+    unsafe { CGRequestScreenCaptureAccess() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set_check_override(value: bool) {
+        let mut guard = super::SCREEN_RECORDING_CHECK_OVERRIDE
+            .lock()
+            .expect("lock poisoned");
+        *guard = Some(Box::new(move || value));
+    }
+
+    fn clear_check_override() {
+        if let Ok(mut guard) = super::SCREEN_RECORDING_CHECK_OVERRIDE.lock() {
+            guard.take();
+        }
+    }
+
+    fn set_request_override(value: bool) {
+        let mut guard = super::SCREEN_RECORDING_REQUEST_OVERRIDE
+            .lock()
+            .expect("lock poisoned");
+        *guard = Some(Box::new(move || value));
+    }
+
+    fn clear_request_override() {
+        if let Ok(mut guard) = super::SCREEN_RECORDING_REQUEST_OVERRIDE.lock() {
+            guard.take();
+        }
+    }
+
+    #[test]
+    fn check_screen_recording_permission_respects_override() {
+        set_check_override(true);
+        assert!(check_screen_recording_permission());
+
+        set_check_override(false);
+        assert!(!check_screen_recording_permission());
+
+        clear_check_override();
+    }
+
+    #[test]
+    fn request_screen_recording_permission_respects_override() {
+        set_request_override(true);
+        assert!(request_screen_recording_permission());
+
+        set_request_override(false);
+        assert!(!request_screen_recording_permission());
+
+        clear_request_override();
     }
 }

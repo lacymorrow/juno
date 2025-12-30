@@ -20,25 +20,12 @@ import {
   Info,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-
-// Permission status interface matching backend (from Onboarding)
-interface PermissionStatus {
-  permissionType: string;
-  granted: boolean;
-  required: boolean;
-  description: string;
-  instructions: string;
-}
-
-// Complete permissions state interface (from Onboarding)
-interface PermissionsState {
-  accessibility: PermissionStatus;
-  screen_recording: PermissionStatus;
-  microphone: PermissionStatus;
-  input_monitoring: PermissionStatus;
-  all_granted: boolean;
-  app_name: string;
-}
+import {
+  getPermissionsStatus,
+  invalidatePermissionsCache,
+  type PermissionsState,
+  type AppPermissionStatus,
+} from "@/lib/permissions-service";
 
 const permissions = [
   {
@@ -80,7 +67,7 @@ function PermissionCard({
   isLoading,
 }: {
   permission: any;
-  permissionStatus: PermissionStatus | null;
+  permissionStatus: AppPermissionStatus | null;
   onRequest: () => void;
   isRequesting: boolean;
   isLoading: boolean;
@@ -249,22 +236,16 @@ export default function SecuritySettings() {
   const [isLoadingPermissions, setIsLoadingPermissions] =
     useState<boolean>(true);
 
-  // Function to check current permissions status (from Onboarding)
-  const checkPermissionsStatus = async () => {
+  // Function to check current permissions status using centralized service
+  const checkPermissionsStatus = async (forceRefresh = false) => {
     try {
       setPermissionsError(null);
       setIsLoadingPermissions(true);
-      const result = await invoke<PermissionsState>(
-        "check_permissions_status_native"
-      );
+      // Use centralized permission service - prevents duplicate calls
+      const result = await getPermissionsStatus(forceRefresh);
       setPermissionsState(result);
       // Clear any existing error when permissions check succeeds
       console.log("SecuritySettings: Updated permissions state:", result);
-      console.log("All granted status:", result.all_granted);
-      console.log("Accessibility:", result.accessibility.granted);
-      console.log("Screen Recording:", result.screen_recording.granted);
-      console.log("Microphone:", result.microphone.granted);
-      console.log("Input Monitoring:", result.input_monitoring.granted);
       return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
@@ -303,14 +284,17 @@ export default function SecuritySettings() {
 
       const granted = await invoke<boolean>(commandName);
 
+      // Invalidate cache after permission request
+      invalidatePermissionsCache();
+
       if (granted) {
         // Permission was already granted
-        await checkPermissionsStatus();
+        await checkPermissionsStatus(true);
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissionsStatus();
+          await checkPermissionsStatus(true);
         }, 2000);
       }
     } catch (error) {
@@ -354,7 +338,7 @@ export default function SecuritySettings() {
                 "_"
               ) as keyof PermissionsState;
               const permissionStatus =
-                (permissionsState?.[permissionKey] as PermissionStatus) || null;
+                (permissionsState?.[permissionKey] as AppPermissionStatus) || null;
 
               return (
                 <PermissionCard

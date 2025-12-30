@@ -1,0 +1,91 @@
+# UI Test Scenario Matrix
+
+Source of truth for automating Juno’s end-to-end verification across traditional tests and LLM-driven computer-use runs.
+
+## Legend
+- **Tier**: `U` (unit), `I` (integration/service), `E` (UI/macOS automation), `L` (LLM/computer-use agent).
+- **Signals**: events (`events::…`), commands, UI states, store keys, or metrics that assert success.
+- **Gaps**: instrumentation or harness needs before a scenario can be fully automated.
+
+## Onboarding & First-Run
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Cold launch shows onboarding | Launch empty profile (`bun run tauri dev`) | `AppState` lacks onboarding flag | E, L | Onboarding window visible, `app_state.onboarding_complete=false` | Need deterministic seed data helper to reset onboarding state in automation |
+| Resume onboarding after restart | Relaunch during onboarding | Cached `permissions_state` exists | I, E | `get_permissions_state` returns cached state, UI resumes correct step | Add test hook to seed cached state for CI |
+| Skip onboarding path | User clicks Skip | Permissions optional | E, L | `stop_permissions_monitoring` invoked, user lands on main UI | Need UI event log to assert skip path fired |
+
+## Permissions Management
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Native status check | `check_permissions_status_native` | macOS permissions available | U, I | `PermissionsState` payload, `events::permissions::CHANGED` | Mockable native checker for CI |
+| Accessibility request auto-redirect | Click request, auto redirect enabled | `autoRedirectEnabled=true` | E, L | `request_accessibility_permission_native`, System Settings open event | Need telemetry confirming settings URL open succeeded |
+| Screen recording prompt via CG API | Invoke request command | Prior permission denied | I, E | `request_screen_recording_permission_native` returns bool, `timeouts::PERMISSION_CHECK_DELAY_MS` respected | Expose CG API result in telemetry for assertions |
+| Microphone diagnostic workflow | User runs “Test microphone” | Voice plugin available | I, E | `test_microphone_functionality` JSON fields | Add fixture to simulate plugin unavailable path |
+
+## Floating Bar & Input
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Bar focus + text submit | User types + press Enter | Agent idle | E, L | `submit_query` fired, UI enters “processing” state | Need deterministic mock provider for predictable response |
+| Mode change (compact/expanded) | User toggles UI controls | Floating bar mounted | E | CSS state change, `UI.MAX_CONVERSATION_DISPLAY` adhered | Add DOM-test harness snapshot baseline |
+| Scrollback + virtualization | User scrolls conversation | >1000 messages | E | Virtualized list reuses nodes, no perf regressions | Synthetic log generator to create long sessions |
+
+## Voice Modes (Dictation & Agent)
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Dictation shortcut | Option+Space (macOS) | Accessibility + microphone granted | E, L | Dictation mode indicator, output to focused app | Need virtual keyboard hook to assert keystroke injection |
+| Agent mode shortcut | Option+D | Agent idle, network reachable | E, L | Agent HUD shows “listening”, `submit_query` run | Provide mock speech transcripts for deterministic tests |
+| Escape-all-stop | Escape key while dictating | Active voice session | U, E | Voice controllers stop, cancellation tokens cleared | Add telemetry event when escape handler fires |
+
+## Agent Execution & Workflow Orchestration
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Single-task orchestration | Submit query via orchestrator | Provider available | U, I, L | `orchestrator::start_workflow` logs, task result event | Expand unit tests covering workflow templates |
+| Multi-agent delegation | Complex query requiring desktop + browser agent | Tools registered | I, L | Delegation logs, tool invocations recorded | Need structured logs exposed to tests (JSONL) |
+| Escape cancellation | User presses escape during workflow | Workflow running | I, E | `AgentError::Terminated`, UI shows cancellation toast | Provide synthetic event emitter for escape in tests |
+
+## Computer Use Tooling (Desktop)
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Screenshot capture with token reduction | Tool call `screenshot` + token selection flag | Screen recording granted | I, L | Base64 screenshot, token stats in payload | Add visual diff harness comparing token maps |
+| Pointer interaction | `click`/`hover`/`drag` tools | Accessibility granted | L | Cursor position logs, Apple Accessibility confirmation | Provide macOS automation stub for CI |
+| Keyboard & text entry | `keyPress` or `type` tools | Input monitoring optional | L | Keycode log, success ack | Need state capture to ensure active app changed |
+
+## Browser & Safari Tools
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Safari DOM query | Safari tool `query_dom` | Safari open, permissions granted | I, L | DOM snapshot result, cached element IDs | Build mock Safari server for CI |
+| Safari interaction retry | Tool handles stale element | Prior element invalid | I, L | Retry logs, success confirmation | Add telemetry counter for retries |
+| Browser automation via MCP | Browser specialist invoked | MCP server online | I, L | MCP JSON-RPC logs, action trace | Need fixture MCP server for deterministic responses |
+
+## MCP & External Tooling
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| MCP request batching | Multiple tool calls | Tools marked batchable | U, I | Batch log entry, latency metrics | Unit tests simulating >3 tool batch |
+| External MCP failure handling | MCP server offline | Network disconnect | I | Error surfaced to orchestrator, UI toast | Provide chaos test toggling server availability |
+
+## System Tray & Window Controls
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Tray icon state updates | Agent starts/stops | Tray menu registered | I, E | Icon asset changes, menu items toggled | Need observable tray state for headless tests |
+| Tray-driven actions | User toggles dictation from tray | Tray permission | E | Tauri command invoked, voice mode changes | Introduce simulated tray click hook |
+| Window focus + auto-hide | Floating window loses focus | Auto-hide enabled | E | Window hidden event, resume on hover | Logging missing for hide/show transitions |
+
+## Alerts, Notifications & Restart
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Permission reminder toast | Permission denied after request | Monitoring enabled | I, E | Toast content referencing permission | Need event id for toast to assert in tests |
+| Restart prompt after permissions | `handle_restart_after_permissions` | Auto restart flag | I, E | Restart message, optional app restart | Provide dry-run restart mode for CI |
+| Error surfaces to UI | Commands fail (e.g., tool failure) | Error bubbled | E, L | `FAILED_TO_EMIT` log, UI alert | Need aggregator collecting UI error banners |
+
+## Settings, Stores & Persistence
+| Scenario | Trigger | Preconditions | Tier | Signals | Gaps |
+| --- | --- | --- | --- | --- | --- |
+| Store-backed settings load | App launch | Store populated | U, I | Settings hook returns persisted provider/model | Add fixture store loader for tests |
+| Model selector sync | User changes provider/model | Providers registered | E | `ModelSelector` state matches global settings | Need UI test verifying cross-component sync |
+| Feedback/help modals | User opens modals | App idle | E | Modal open event, content rendered | Provide stable test ids for modal content |
+
+## Harness & CI Guidance
+1. **Layered execution**: run traditional tests (`cargo test`, `bun test`, targeted scripts) before UI/E2E automation, then schedule nightly LLM smoke runs using orchestrator prompts derived from the tables above.
+2. **LLM harness**: feed scenario metadata (trigger, preconditions, expected signals) into the orchestrator prompt so agent-based tests can self-verify and emit structured pass/fail JSON back to CI.
+3. **Telemetry requirements**: expose structured logs/events for every “Signals” column; CI parsers can then assert outcomes without flaky visual checks.
+4. **Fixture strategy**: provide mock AI providers, MCP servers, Safari stubs, and permission shims to keep runs deterministic.
