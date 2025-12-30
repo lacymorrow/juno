@@ -7,6 +7,11 @@ use tracing::{info, warn, debug};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
+/// Permission status returned to the frontend.
+///
+/// Note: Fields use snake_case naming convention (e.g., `permission_type`, not `permissionType`).
+/// The frontend types in `src/types/settings.ts` must match this convention.
+/// Changed from camelCase in PR #383 to align with Rust conventions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativePermissionStatus {
     pub permission_type: String,

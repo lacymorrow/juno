@@ -56,6 +56,13 @@ export async function getPermissionsStatus(
   void initFocusListener();
 
   if (forceRefresh) {
+    // Wait for any pending request to complete first to avoid race conditions
+    // where multiple requests are in-flight and results could be inconsistent
+    if (pendingRequest) {
+      await pendingRequest.catch(() => {
+        // Ignore errors from pending request - we're about to make a fresh one
+      });
+    }
     invalidatePermissionsCache();
     return startPermissionsRequest();
   }

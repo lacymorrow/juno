@@ -58,7 +58,7 @@ describe("permissions-service", () => {
     expect(mockInvoke).toHaveBeenCalledTimes(2);
   });
 
-  it("forces refresh even if another request is pending", async () => {
+  it("forceRefresh waits for pending request then starts fresh", async () => {
     const deferred = createDeferred<PermissionsState>();
     mockInvoke.mockImplementationOnce(() => deferred.promise);
 
@@ -68,19 +68,39 @@ describe("permissions-service", () => {
     mockInvoke.mockResolvedValueOnce(fresh);
     const forcedCall = getPermissionsStatus(true);
 
-    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    // forceRefresh waits for pending request - only 1 call so far
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
 
     const stale = buildPermissionsState({ app_name: "Stale" });
     deferred.resolve(stale);
 
+    // Both calls complete
     const pendingResult = await pendingCall;
     const forcedResult = await forcedCall;
 
+    // Pending call gets its original result
     expect(pendingResult.app_name).toBe("Stale");
+    // forceRefresh gets fresh data after waiting
     expect(forcedResult.app_name).toBe("Fresh");
+    // Now 2 calls total (pending completed, then fresh request started)
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
 
     const cachedResult = await getPermissionsStatus();
     expect(cachedResult.app_name).toBe("Fresh");
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears pending request on error", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("Network error"));
+
+    await expect(getPermissionsStatus()).rejects.toThrow("Network error");
+
+    // Next call should start a fresh request
+    const fresh = buildPermissionsState({ app_name: "Fresh" });
+    mockInvoke.mockResolvedValueOnce(fresh);
+
+    const result = await getPermissionsStatus();
+    expect(result.app_name).toBe("Fresh");
     expect(mockInvoke).toHaveBeenCalledTimes(2);
   });
 });
