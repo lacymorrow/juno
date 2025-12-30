@@ -4,23 +4,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-
-export interface AppPermissionStatus {
-  permission_type: string;
-  granted: boolean;
-  required: boolean;
-  description: string;
-  instructions: string;
-}
-
-export interface PermissionsState {
-  accessibility: AppPermissionStatus;
-  screen_recording: AppPermissionStatus;
-  microphone: AppPermissionStatus;
-  input_monitoring: AppPermissionStatus;
-  all_granted: boolean;
-  app_name: string;
-}
+import type { PermissionsState } from "@/types/settings";
+export type { PermissionsState, AppPermissionStatus } from "@/types/settings";
 
 // Cache configuration
 const CACHE_TTL = 5000; // 5 seconds - shorter TTL for better responsiveness when user returns from System Settings
@@ -70,8 +55,13 @@ export async function getPermissionsStatus(
   // Initialize focus listener on first use (handles cache invalidation when returning from System Settings)
   void initFocusListener();
 
+  if (forceRefresh) {
+    invalidatePermissionsCache();
+    return startPermissionsRequest();
+  }
+
   // Return cached value if valid and not forcing refresh
-  if (!forceRefresh && isCacheValid() && cachedPermissions) {
+  if (isCacheValid() && cachedPermissions) {
     return cachedPermissions;
   }
 
@@ -81,19 +71,7 @@ export async function getPermissionsStatus(
   }
 
   // Start a new request
-  pendingRequest = invoke<PermissionsState>("check_permissions_status_native")
-    .then((result) => {
-      cachedPermissions = result;
-      cacheTimestamp = Date.now();
-      pendingRequest = null;
-      return result;
-    })
-    .catch((error) => {
-      pendingRequest = null;
-      throw error;
-    });
-
-  return pendingRequest;
+  return startPermissionsRequest();
 }
 
 /**
@@ -114,4 +92,35 @@ export function getCachedPermissions(): PermissionsState | null {
     return cachedPermissions;
   }
   return null;
+}
+
+/**
+ * Reset internal state (test-only).
+ */
+export function __resetPermissionsServiceCacheForTests(): void {
+  cachedPermissions = null;
+  cacheTimestamp = 0;
+  pendingRequest = null;
+  focusListenerInitialized = false;
+}
+
+function startPermissionsRequest(): Promise<PermissionsState> {
+  const request = invoke<PermissionsState>("check_permissions_status_native")
+    .then((result) => {
+      if (pendingRequest === request) {
+        cachedPermissions = result;
+        cacheTimestamp = Date.now();
+        pendingRequest = null;
+      }
+      return result;
+    })
+    .catch((error) => {
+      if (pendingRequest === request) {
+        pendingRequest = null;
+      }
+      throw error;
+    });
+
+  pendingRequest = request;
+  return request;
 }

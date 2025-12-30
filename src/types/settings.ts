@@ -73,10 +73,19 @@ export interface MCPToolInfo {
   enabled: boolean;
 }
 
+export interface AppPermissionStatus {
+  permission_type: string;
+  granted: boolean;
+  required: boolean;
+  description: string;
+  instructions: string;
+}
+
 export interface PermissionsState {
-  accessibility: { granted: boolean; required: boolean };
-  screenRecording: { granted: boolean; required: boolean };
-  microphone: { granted: boolean; required: boolean };
-  allGranted: boolean;
-  appName: string;
+  accessibility: AppPermissionStatus;
+  screen_recording: AppPermissionStatus;
+  microphone: AppPermissionStatus;
+  input_monitoring: AppPermissionStatus;
+  all_granted: boolean;
+  app_name: string;
 }

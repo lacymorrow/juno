@@ -10,6 +10,19 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
 use tracing::{debug, info, warn};
 use std::process::Command;
+#[cfg(test)]
+use once_cell::sync::Lazy;
+#[cfg(test)]
+use std::sync::Mutex;
+
+#[cfg(test)]
+static SCREEN_RECORDING_CHECK_OVERRIDE: Lazy<
+    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(None));
+#[cfg(test)]
+static SCREEN_RECORDING_REQUEST_OVERRIDE: Lazy<
+    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(None));
 
 // Make the function public so it can be called from server.rs
 pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
@@ -200,7 +213,7 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
 pub fn check_screen_recording_permission() -> bool {
     debug!("checking screen recording permission using native API");
 
-    let has_permission = unsafe { CGPreflightScreenCaptureAccess() };
+    let has_permission = preflight_screen_capture_access();
 
     if has_permission {
         debug!("screen recording permission is granted");
@@ -216,7 +229,7 @@ pub fn check_screen_recording_permission() -> bool {
 pub fn request_screen_recording_permission() -> bool {
     debug!("requesting screen recording permission using native API");
 
-    let granted = unsafe { CGRequestScreenCaptureAccess() };
+    let granted = request_screen_capture_access();
 
     if granted {
         info!("screen recording permission was granted");
@@ -225,4 +238,83 @@ pub fn request_screen_recording_permission() -> bool {
     }
 
     granted
+}
+
+fn preflight_screen_capture_access() -> bool {
+    #[cfg(test)]
+    {
+        if let Ok(guard) = SCREEN_RECORDING_CHECK_OVERRIDE.lock() {
+            if let Some(callback) = guard.as_ref() {
+                return callback();
+            }
+        }
+    }
+
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+fn request_screen_capture_access() -> bool {
+    #[cfg(test)]
+    {
+        if let Ok(guard) = SCREEN_RECORDING_REQUEST_OVERRIDE.lock() {
+            if let Some(callback) = guard.as_ref() {
+                return callback();
+            }
+        }
+    }
+
+    unsafe { CGRequestScreenCaptureAccess() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set_check_override(value: bool) {
+        let mut guard = super::SCREEN_RECORDING_CHECK_OVERRIDE
+            .lock()
+            .expect("lock poisoned");
+        *guard = Some(Box::new(move || value));
+    }
+
+    fn clear_check_override() {
+        if let Ok(mut guard) = super::SCREEN_RECORDING_CHECK_OVERRIDE.lock() {
+            guard.take();
+        }
+    }
+
+    fn set_request_override(value: bool) {
+        let mut guard = super::SCREEN_RECORDING_REQUEST_OVERRIDE
+            .lock()
+            .expect("lock poisoned");
+        *guard = Some(Box::new(move || value));
+    }
+
+    fn clear_request_override() {
+        if let Ok(mut guard) = super::SCREEN_RECORDING_REQUEST_OVERRIDE.lock() {
+            guard.take();
+        }
+    }
+
+    #[test]
+    fn check_screen_recording_permission_respects_override() {
+        set_check_override(true);
+        assert!(check_screen_recording_permission());
+
+        set_check_override(false);
+        assert!(!check_screen_recording_permission());
+
+        clear_check_override();
+    }
+
+    #[test]
+    fn request_screen_recording_permission_respects_override() {
+        set_request_override(true);
+        assert!(request_screen_recording_permission());
+
+        set_request_override(false);
+        assert!(!request_screen_recording_permission());
+
+        clear_request_override();
+    }
 }
