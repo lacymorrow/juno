@@ -9,6 +9,8 @@
 
 This document outlines the comprehensive implementation plan for **UI-Guided Visual Token Selection** in the Juno AI Computer Use Agent, with special focus on **multi-monitor support** and **adaptive display configurations**. The implementation will integrate with our existing multi-monitor screenshot system to provide intelligent visual token reduction while maintaining full functionality across diverse display setups.
 
+For test coverage of this feature inside the broader app automation matrix, see [`docs/rules/ui_test_scenarios.mdc`](./ui_test_scenarios.mdc).
+
 ## 🔬 Research Foundation
 
 ### Primary Research Source: ShowUI Paper (arXiv:2411.17465)
