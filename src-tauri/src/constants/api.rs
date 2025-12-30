@@ -54,6 +54,9 @@ pub mod beta_flags {
     /// Beta flag for computer use 2025-01-24
     pub const COMPUTER_USE_2025_01_24: &str = "computer-use-2025-01-24";
 
+    /// Beta flag for computer use 2025-11-24 (Opus 4.5)
+    pub const COMPUTER_USE_2025_11_24: &str = "computer-use-2025-11-24";
+
     /// Beta flag for prompt caching
     pub const PROMPT_CACHING: &str = "prompt-caching-2024-07-31";
 }

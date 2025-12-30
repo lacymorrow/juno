@@ -14,6 +14,7 @@ use chrono;
 
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::providers::factory::Provider;
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
@@ -218,6 +219,11 @@ impl AnthropicBrain {
     /// Enable or disable streaming for this brain
     pub fn set_streaming(&mut self, enabled: bool) {
         self.streaming_enabled = enabled;
+    }
+
+    /// Determine the correct computer-use beta header for the selected model
+    fn resolve_computer_use_beta_header(&self) -> &'static str {
+        Provider::Anthropic.computer_use_beta_flag(&self.model)
     }
 
     /// Sanitize log content by removing or truncating base64 data to prevent console spam
@@ -1291,8 +1297,8 @@ impl AgentBrain for AnthropicBrain {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01") // Current stable API version
-            // To do, this is only to be enabled for newer models. Older models use the older tag.
-			.header("anthropic-beta", "computer-use-2025-01-24") // Computer Use beta for Claude 4 and 3.7 models
+            // Automatically select the correct computer use beta header based on the active model
+            .header("anthropic-beta", self.resolve_computer_use_beta_header())
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()
