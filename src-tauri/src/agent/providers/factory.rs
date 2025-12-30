@@ -154,7 +154,7 @@ impl Provider {
                     beta_flags::COMPUTER_USE_2025_01_24
                 }
             }
-            _ => beta_flags::COMPUTER_USE_2025_01_24,
+            _ => "",
         }
     }
 
