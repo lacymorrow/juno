@@ -8,7 +8,6 @@ use tracing::{info, warn, debug};
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct NativePermissionStatus {
     pub permission_type: String,
     pub granted: bool,
@@ -467,8 +466,8 @@ impl NativePermissionChecker {
     }
 
     /// Get comprehensive screen recording permission status using native APIs
-    pub async fn get_screen_recording_status() -> Result<NativePermissionStatus, String> {
-        let granted = Self::check_screen_recording_permission().await?;
+    pub fn get_screen_recording_status() -> Result<NativePermissionStatus, String> {
+        let granted = Self::check_screen_recording_permission()?;
 
         Ok(Self::create_permission_status(
             "screen_recording",

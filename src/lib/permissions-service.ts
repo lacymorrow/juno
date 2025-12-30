@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export interface AppPermissionStatus {
-  permissionType: string;
+  permission_type: string;
   granted: boolean;
   required: boolean;
   description: string;

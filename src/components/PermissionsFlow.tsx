@@ -198,7 +198,7 @@ export function PermissionsFlow({
   const openSystemPreferencesEnhanced = async (preferencePane: string) => {
     try {
       await invoke("open_system_settings_enhanced", {
-        permissionType: preferencePane,
+        permission_type: preferencePane,
       });
     } catch (err) {
       setError(err as string);
@@ -326,7 +326,7 @@ export function PermissionsFlow({
   };
 
   const getPermissionPriorityIcon = (permission: AppPermissionStatus) => {
-    switch (permission.permissionType) {
+    switch (permission.permission_type) {
       case "accessibility":
         return <Lock className="h-5 w-5 text-blue-600" />;
       case "screen_recording":
@@ -353,7 +353,7 @@ export function PermissionsFlow({
       : "transition-colors border-yellow-200 bg-yellow-50/30";
 
     return (
-      <Card key={permission.permissionType} className={cardClassName}>
+      <Card key={permission.permission_type} className={cardClassName}>
         <CardHeader className="pb-4">
           <div className="flex items-start justify-between">
             <div className="flex items-start space-x-3">
@@ -364,7 +364,7 @@ export function PermissionsFlow({
               <div className="flex-1">
                 <div className="flex items-center space-x-2 mb-1">
                   <CardTitle className="text-lg">
-                    {permission.permissionType
+                    {permission.permission_type
                       .replace("_", " ")
                       .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
                     Access
@@ -419,16 +419,16 @@ export function PermissionsFlow({
                 {/* Enhanced auto-redirect button for accessibility */}
                 {onRequestEnhanced &&
                   autoRedirectEnabled &&
-                  permission.permissionType === "accessibility" && (
+                  permission.permission_type === "accessibility" && (
                     <Button
                       onClick={onRequestEnhanced}
                       disabled={
-                        isRequestingPermission === permission.permissionType
+                        isRequestingPermission === permission.permission_type
                       }
                       size="sm"
                       className="bg-blue-600 hover:bg-blue-700"
                     >
-                      {isRequestingPermission === permission.permissionType ? (
+                      {isRequestingPermission === permission.permission_type ? (
                         <>
                           <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                           Opening Settings...
@@ -447,19 +447,19 @@ export function PermissionsFlow({
                   <Button
                     onClick={onRequest}
                     disabled={
-                      isRequestingPermission === permission.permissionType
+                      isRequestingPermission === permission.permission_type
                     }
                     size="sm"
                     variant={
                       autoRedirectEnabled &&
-                      permission.permissionType === "accessibility"
+                      permission.permission_type === "accessibility"
                         ? "outline"
                         : isRequired
                         ? "default"
                         : "secondary"
                     }
                   >
-                    {isRequestingPermission === permission.permissionType ? (
+                    {isRequestingPermission === permission.permission_type ? (
                       <>
                         <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                         Requesting...
@@ -480,8 +480,8 @@ export function PermissionsFlow({
                   size="sm"
                   onClick={() =>
                     autoRedirectEnabled
-                      ? openSystemPreferencesEnhanced(permission.permissionType)
-                      : openSystemPreferences(permission.permissionType)
+                      ? openSystemPreferencesEnhanced(permission.permission_type)
+                      : openSystemPreferences(permission.permission_type)
                   }
                 >
                   <Settings className="h-4 w-4 mr-2" />
@@ -492,7 +492,7 @@ export function PermissionsFlow({
 
               {/* Auto-redirect feature notice */}
               {autoRedirectEnabled &&
-                permission.permissionType === "accessibility" && (
+                permission.permission_type === "accessibility" && (
                   <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
                     <p className="text-xs text-blue-700">
                       <Zap className="h-3 w-3 inline mr-1" />
@@ -508,7 +508,7 @@ export function PermissionsFlow({
               <CheckCircle className="h-4 w-4 text-green-600" />
               <p className="text-sm text-green-800 font-medium">
                 Permission granted -{" "}
-                {permission.permissionType.replace("_", " ")} access is working
+                {permission.permission_type.replace("_", " ")} access is working
                 properly
               </p>
             </div>
