@@ -229,7 +229,7 @@ impl NativePermissionChecker {
 
     /// Check screen recording permission using native CGPreflightScreenCaptureAccess API
     /// This is a lightweight check that doesn't require creating a Desktop instance
-    pub async fn check_screen_recording_permission() -> Result<bool, String> {
+    pub fn check_screen_recording_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
             use computer_use_ai_sdk::platforms::macos::permissions::check_screen_recording_permission;
