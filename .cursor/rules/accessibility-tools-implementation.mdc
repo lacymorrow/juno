@@ -26,10 +26,10 @@ The accessibility tools are now **fully documented** in the agent prompt system 
 ## Architecture
 
 ### Core Module
-- **[accessibility_tools.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/accessibility_tools.rs)**: Main implementation with `AccessibilityTools` struct
-- **[accessibility.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/commands/accessibility.rs)**: Tauri commands for frontend/agent integration
-- **Tool Registration**: Integrated in [factory.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/providers/factory.rs) via `register_accessibility_tools()`
-- **Agent Templates**: Full documentation in [templates.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/prompts/templates.rs)
+- **[accessibility_tools.rs](mdc:src-tauri/src/agent/tools/accessibility_tools.rs)**: Main implementation with `AccessibilityTools` struct
+- **[accessibility.rs](mdc:src-tauri/src/commands/accessibility.rs)**: Tauri commands for frontend/agent integration
+- **Tool Registration**: Integrated in [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs) via `register_accessibility_tools()`
+- **Agent Templates**: Full documentation in [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs)
 
 ### Key Components
 
@@ -51,12 +51,12 @@ pub struct AccessibilityTools {
 
 ### Tool Registration
 Tools are automatically registered with the AI agent via:
-- [factory.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/providers/factory.rs): `Self::register_accessibility_tools()`
-- [tool_mapping.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Desktop tools
-- [mod.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/agent/tools/mod.rs): Module exports
+- [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs): `Self::register_accessibility_tools()`
+- [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Desktop tools
+- [mod.rs](mdc:src-tauri/src/agent/tools/mod.rs): Module exports
 
 ### Tauri Commands
-Available commands in [lib.rs](mdc:dotdot/dotdot/dotdot/src-tauri/src/lib.rs):
+Available commands in [lib.rs](mdc:src-tauri/src/lib.rs):
 - `accessibility_scan`: Returns `Vec<AccessibilityElement>`
 - `accessibility_click`: Takes element ID, returns success boolean
 - `test_accessibility_permissions`: Checks accessibility permissions

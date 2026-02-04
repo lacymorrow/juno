@@ -11,10 +11,10 @@ The Juno AI Computer Use Agent now includes **specialized Safari DOM automation 
 ## Architecture
 
 ### Core Module
-- **[safari_tools.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/safari_tools.rs)**: Main implementation with `SafariTools` struct
-- **[safari_tools.rs](mdc:dotdot/dotdot/src-tauri/src/commands/safari_tools.rs)**: Tauri commands for agent integration
-- **Tool Registration**: Integrated in [factory.rs](mdc:dotdot/dotdot/src-tauri/src/agent/providers/factory.rs) via `register_safari_tools()`
-- **Agent Templates**: Full documentation in [templates.rs](mdc:dotdot/dotdot/src-tauri/src/agent/prompts/templates.rs)
+- **[safari_tools.rs](mdc:src-tauri/src/agent/tools/safari_tools.rs)**: Main implementation with `SafariTools` struct
+- **[safari_tools.rs](mdc:src-tauri/src/commands/safari_tools.rs)**: Tauri commands for agent integration
+- **Tool Registration**: Integrated in [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs) via `register_safari_tools()`
+- **Agent Templates**: Full documentation in [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs)
 
 ### Key Components
 
@@ -47,12 +47,12 @@ Safari tools are **fully documented** in the agent prompt system with:
 
 ### Tool Registration
 Tools are automatically registered with the AI agent via:
-- [factory.rs](mdc:dotdot/dotdot/src-tauri/src/agent/providers/factory.rs): `Self::register_safari_tools()`
-- [tool_mapping.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Browser tools
-- [mod.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/mod.rs): Module exports
+- [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs): `Self::register_safari_tools()`
+- [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs): Categorized as Browser tools
+- [mod.rs](mdc:src-tauri/src/agent/tools/mod.rs): Module exports
 
 ### Tauri Commands
-Available commands in [lib.rs](mdc:dotdot/dotdot/src-tauri/src/lib.rs):
+Available commands in [lib.rs](mdc:src-tauri/src/lib.rs):
 - `safari_get_url`: Returns current Safari URL
 - `safari_navigate`: Navigate to URL, returns success status
 - `safari_click_element`: Click by selector, returns interaction result
@@ -146,7 +146,7 @@ pub struct SafariElement {
 4. Update `get_tool_definitions()` with new tool schema
 5. Add case in `execute_tool()` method
 6. Create corresponding Tauri command
-7. Update tool mapping in [tool_mapping.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/tool_mapping.rs)
+7. Update tool mapping in [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs)
 
 ### Testing Considerations
 - Requires Safari application for full testing
@@ -162,11 +162,11 @@ pub struct SafariElement {
 - Integration with Safari's accessibility features
 
 ## Related Files
-- [safari_tools.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/safari_tools.rs): Core implementation
-- [safari_tools.rs](mdc:dotdot/dotdot/src-tauri/src/commands/safari_tools.rs): Tauri commands
-- [factory.rs](mdc:dotdot/dotdot/src-tauri/src/agent/providers/factory.rs): Tool registration
-- [tool_mapping.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/tool_mapping.rs): Tool categorization
-- [templates.rs](mdc:dotdot/dotdot/src-tauri/src/agent/prompts/templates.rs): Agent documentation
+- [safari_tools.rs](mdc:src-tauri/src/agent/tools/safari_tools.rs): Core implementation
+- [safari_tools.rs](mdc:src-tauri/src/commands/safari_tools.rs): Tauri commands
+- [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs): Tool registration
+- [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs): Tool categorization
+- [templates.rs](mdc:src-tauri/src/agent/prompts/templates.rs): Agent documentation
 
 ## Project Status
 

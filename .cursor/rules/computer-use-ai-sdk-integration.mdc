@@ -6,19 +6,19 @@ alwaysApply: false
 # Computer Use AI SDK Integration Guide
 
 ## Overview
-The Juno AI Computer Use Agent leverages the [computer-use-ai-sdk](mdc:dotdot/src-tauri/mcp-server-os-level) for native desktop automation capabilities. This guide covers proper integration patterns and API usage.
+The Juno AI Computer Use Agent leverages the [computer-use-ai-sdk](mdc:src-tauri/mcp-server-os-level) for native desktop automation capabilities. This guide covers proper integration patterns and API usage.
 
 ## SDK Architecture
 
 ### Core Components
-- **[Desktop](mdc:dotdot/src-tauri/mcp-server-os-level/src/lib.rs)**: Main entry point for desktop automation
-- **[UIElement](mdc:dotdot/src-tauri/mcp-server-os-level/src/element.rs)**: Represents UI elements with interaction capabilities
-- **[Locator](mdc:dotdot/src-tauri/mcp-server-os-level/src/locator.rs)**: High-level API for finding and interacting with elements
-- **[Selector](mdc:dotdot/src-tauri/mcp-server-os-level/src/selector.rs)**: Element selection patterns
-- **[AccessibilityEngine](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms)**: Platform-specific accessibility implementations
+- **[Desktop](mdc:src-tauri/mcp-server-os-level/src/lib.rs)**: Main entry point for desktop automation
+- **[UIElement](mdc:src-tauri/mcp-server-os-level/src/element.rs)**: Represents UI elements with interaction capabilities
+- **[Locator](mdc:src-tauri/mcp-server-os-level/src/locator.rs)**: High-level API for finding and interacting with elements
+- **[Selector](mdc:src-tauri/mcp-server-os-level/src/selector.rs)**: Element selection patterns
+- **[AccessibilityEngine](mdc:src-tauri/mcp-server-os-level/src/platforms)**: Platform-specific accessibility implementations
 
 ### Platform Support
-- **macOS**: Full native accessibility support via [macos/engine.rs](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs)
+- **macOS**: Full native accessibility support via [macos/engine.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs)
 - **Other Platforms**: Limited support, graceful degradation
 
 ## Basic Usage Patterns
@@ -373,6 +373,6 @@ where
 - Use timeouts for operations that might hang
 
 ## Related Files
-- [computer-use-ai-sdk](mdc:dotdot/src-tauri/mcp-server-os-level): Core SDK implementation
-- [accessibility_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/accessibility_tools.rs): Example integration
-- [desktop_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/desktop_tools.rs): Existing desktop automation tools
+- [computer-use-ai-sdk](mdc:src-tauri/mcp-server-os-level): Core SDK implementation
+- [accessibility_tools.rs](mdc:src-tauri/src/agent/tools/accessibility_tools.rs): Example integration
+- [desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs): Existing desktop automation tools

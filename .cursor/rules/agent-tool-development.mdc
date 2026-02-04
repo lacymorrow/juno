@@ -14,8 +14,8 @@ This rule defines the standard patterns for developing tools for the Juno AI Com
 Every agent tool should follow this modular structure:
 1. **Tool Implementation**: Core logic in `src-tauri/src/agent/tools/{tool_name}.rs`
 2. **Tauri Commands**: Frontend interface in `src-tauri/src/commands/{tool_name}.rs`
-3. **Registration**: Integration in [factory.rs](mdc:dotdot/src-tauri/src/agent/providers/factory.rs)
-4. **Mapping**: Categorization in [tool_mapping.rs](mdc:dotdot/src-tauri/src/agent/tools/tool_mapping.rs)
+3. **Registration**: Integration in [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)
+4. **Mapping**: Categorization in [tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs)
 
 ### Tool Implementation Template
 ```rust
@@ -122,7 +122,7 @@ pub async fn get_your_tool_definitions() -> Result<Vec<Value>, String> {
 
 ## Registration Pattern
 
-### Factory Registration ([factory.rs](mdc:dotdot/src-tauri/src/agent/providers/factory.rs))
+### Factory Registration ([factory.rs](mdc:src-tauri/src/agent/providers/factory.rs))
 ```rust
 /// Register your tools for element-level interaction
 pub async fn register_your_tools(
@@ -175,13 +175,13 @@ Self::register_your_tools(provider, app_handle.clone()).await?;
 
 ## Module Integration Pattern
 
-### Module Declaration ([mod.rs](mdc:dotdot/src-tauri/src/agent/tools/mod.rs))
+### Module Declaration ([mod.rs](mdc:src-tauri/src/agent/tools/mod.rs))
 ```rust
 pub mod your_tools; // Add your module
 pub use your_tools::{YourTools, YourDataType}; // Export types
 ```
 
-### Command Exports ([commands/mod.rs](mdc:dotdot/src-tauri/src/commands/mod.rs))
+### Command Exports ([commands/mod.rs](mdc:src-tauri/src/commands/mod.rs))
 ```rust
 pub mod your_tool_commands; // Declare module
 
@@ -191,7 +191,7 @@ pub use self::your_tool_commands::{
 };
 ```
 
-### Command Registration ([lib.rs](mdc:dotdot/src-tauri/src/lib.rs))
+### Command Registration ([lib.rs](mdc:src-tauri/src/lib.rs))
 Add to imports:
 ```rust
 use commands::{
@@ -207,7 +207,7 @@ execute_your_tool,
 get_your_tool_definitions,
 ```
 
-### Tool Mapping ([tool_mapping.rs](mdc:dotdot/src-tauri/src/agent/tools/tool_mapping.rs))
+### Tool Mapping ([tool_mapping.rs](mdc:src-tauri/src/agent/tools/tool_mapping.rs))
 ```rust
 // Add to appropriate category
 map.insert("your_tool", ToolCategory::YourCategory);
@@ -281,4 +281,4 @@ mod tests {
 - Validate tool definitions are correct
 
 ## Examples
-See [accessibility_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/accessibility_tools.rs) and [accessibility.rs](mdc:dotdot/src-tauri/src/commands/accessibility.rs) for complete implementation examples following these patterns.
+See [accessibility_tools.rs](mdc:src-tauri/src/agent/tools/accessibility_tools.rs) and [accessibility.rs](mdc:src-tauri/src/commands/accessibility.rs) for complete implementation examples following these patterns.
