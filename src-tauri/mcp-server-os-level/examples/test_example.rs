@@ -2,7 +2,7 @@ use computer_use_ai_sdk::platforms::macos::MacOSEngine;
 use computer_use_ai_sdk::platforms::AccessibilityEngine;
 use computer_use_ai_sdk::{Selector, UIElement};
 
-fn print_element_tree(element: &UIElement, depth: usize) {
+fn _print_element_tree(element: &UIElement, depth: usize) {
     let attrs = element.attributes();
     let indent = "  ".repeat(depth);
     let label = attrs.label.unwrap_or_default();
@@ -14,7 +14,7 @@ fn print_element_tree(element: &UIElement, depth: usize) {
         if let Ok(children) = element.children() {
             for child in children.iter().take(3) {
                 // limit to 3 children
-                print_element_tree(child, depth + 1);
+                _print_element_tree(child, depth + 1);
             }
         }
     }
