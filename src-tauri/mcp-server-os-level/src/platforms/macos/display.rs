@@ -217,7 +217,7 @@ mod tests {
 
         // Corner point should have sqrt(50^2 + 50^2) distance
         let distance = distance_to_rect_center(CGPoint::new(0.0, 0.0), rect);
-        let expected = (50.0 * 50.0 + 50.0 * 50.0).sqrt();
+        let expected = (50.0_f64 * 50.0 + 50.0 * 50.0).sqrt();
         assert!((distance - expected).abs() < 0.001);
     }
 }

@@ -5,13 +5,12 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use computer_use_ai_sdk::platforms::macos::ClickMethodSelection;
 use computer_use_ai_sdk::platforms::macos::MacOSEngine;
 use computer_use_ai_sdk::platforms::AccessibilityEngine;
 use computer_use_ai_sdk::Selector;
@@ -33,10 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Remove the early log file setup and keep logs in memory instead
     // We'll create a vector to store all log messages
-    let mut log_messages: Vec<String> = Vec::new();
+    let _log_messages: Vec<String> = Vec::new();
 
     // Helper function to log to console and store for later file writing
-    let log_both = |message: &str, log_store: &mut Vec<String>| {
+    let _log_both = |message: &str, log_store: &mut Vec<String>| {
         // Log to console
         info!("{}", message);
         // Store for later file writing
