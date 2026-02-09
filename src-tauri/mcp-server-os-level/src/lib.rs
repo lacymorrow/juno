@@ -5,13 +5,12 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::str::FromStr;
 use tracing::{error, info};
-use serde_json::{json, from_value};
+use serde_json::{self, json, from_value};
 use std::fs;
 use std::process::Command;
 use crate::platforms::AccessibilityEngine;

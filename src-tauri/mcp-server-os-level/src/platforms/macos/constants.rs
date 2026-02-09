@@ -87,7 +87,7 @@ pub(crate) fn key_name_to_keycode(key_name: &str) -> Option<CGKeyCode> {
         _ => {
             // If not a special key, try treating as a single character
             if key_lower.len() == 1 {
-                let c = key_lower.chars().next().unwrap();
+                let c = key_lower.chars().next()?;
 
                 // Handle alphabetic keys (a-z)
                 if c.is_ascii_alphabetic() {
