@@ -1,6 +1,5 @@
 use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime};
 use std::sync::{Arc, Mutex};
-use serde_json;
 
 pub mod controller;
 pub mod commands;
@@ -88,10 +87,8 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
                 // List available files in the models directory for debugging
                 if let Ok(entries) = std::fs::read_dir("models") {
                     tracing::info!("Available files in models directory:");
-                    for entry in entries {
-                        if let Ok(entry) = entry {
-                            tracing::info!("  - {}", entry.path().display());
-                        }
+                    for entry in entries.flatten() {
+                        tracing::info!("  - {}", entry.path().display());
                     }
                 } else {
                     tracing::warn!("Could not read models directory");
@@ -144,12 +141,12 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             tracing::info!("Creating AlwaysListeningController with shared Whisper context (no duplicate model loading)");
             let always_listening_controller = match AlwaysListeningController::new_with_shared_context(&resolved_model_path, shared_context) {
                 Ok(always_listening_controller) => {
-                    tracing::info!("✅ AlwaysListeningController initialized with shared context");
+                    tracing::info!("AlwaysListeningController initialized with shared context");
                     always_listening_controller
                 }
                 Err(e) => {
-                    tracing::error!("❌ Failed to initialize always listening controller with shared context: {}. Always listening will be unavailable.", e);
-                    return Ok(());
+                    tracing::error!("Failed to initialize always listening controller: {}. Registering uninitialized controller.", e);
+                    AlwaysListeningController::new_uninitialized(&resolved_model_path)
                 }
             };
 

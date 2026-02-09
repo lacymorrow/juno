@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-force-transcription-test"
+description = "Enables the force_transcription_test command without any pre-configured scope."
+commands.allow = ["force_transcription_test"]
+
+[[permission]]
+identifier = "deny-force-transcription-test"
+description = "Denies the force_transcription_test command without any pre-configured scope."
+commands.deny = ["force_transcription_test"]

@@ -15,6 +15,19 @@ use crate::constants;
 use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
+const SINC_LENGTH: usize = 256;
+const OVERSAMPLING_FACTOR: usize = 256;
+
+/// Create standard sinc interpolation parameters for audio resampling.
+fn sinc_resampling_params() -> SincInterpolationParameters {
+    SincInterpolationParameters {
+        sinc_len: SINC_LENGTH,
+        f_cutoff: 0.95,
+        interpolation: SincInterpolationType::Linear,
+        oversampling_factor: OVERSAMPLING_FACTOR,
+        window: WindowFunction::BlackmanHarris2,
+    }
+}
 
 /// Clean up common Whisper artifacts from transcription text
 fn clean_whisper_artifacts(text: &str) -> String {
@@ -151,11 +164,11 @@ impl VoiceController {
     /// Helper method to check initialization before performing operations
     fn ensure_initialized(&self) -> Result<&Arc<WhisperContext>> {
         if !self.is_initialized {
-            let _error_msg = self.initialization_error
+            let error_msg = self.initialization_error
                 .as_ref()
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "Voice controller not initialized".to_string());
-            return Err(Error::NotInitialized);
+            return Err(Error::InitializationError(error_msg));
         }
         self.ctx.as_ref().ok_or(Error::NotInitialized)
     }
@@ -212,13 +225,7 @@ impl VoiceController {
 
         // Resample if needed
         if sample_rate != WHISPER_SAMPLE_RATE {
-            let params = SincInterpolationParameters {
-                sinc_len: 256,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 256,
-                window: WindowFunction::BlackmanHarris2,
-            };
+            let params = sinc_resampling_params();
 
             let mut resampler = SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
@@ -340,13 +347,14 @@ impl VoiceController {
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
-        let _model_path_for_thread = self.model_path.clone();
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
 
-        let shared_context = self.ctx.as_ref().unwrap().clone();
+        let shared_context = self.ctx.as_ref()
+            .ok_or_else(|| Error::Whisper("Whisper context not initialized".to_string()))?
+            .clone();
 
         let audio_thread_handle = thread::spawn(move || {
             Self::audio_thread_worker(
@@ -371,6 +379,7 @@ impl VoiceController {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn audio_thread_worker<R: Runtime + 'static>(
         shared_whisper_context: Arc<WhisperContext>,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
@@ -483,13 +492,7 @@ impl VoiceController {
         // Resampler setup
         let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
         if actual_rate != WHISPER_SAMPLE_RATE {
-            let params = SincInterpolationParameters {
-                sinc_len: 256,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 256,
-                window: WindowFunction::BlackmanHarris2,
-            };
+            let params = sinc_resampling_params();
             chunk_resampler = SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
                 2.0,
@@ -539,26 +542,23 @@ impl VoiceController {
             }
 
             // Process audio data
-            match audio_data_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(audio_chunk) => {
-                    raw_full_session_audio.extend_from_slice(&audio_chunk);
-                    audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
+            if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
+                raw_full_session_audio.extend_from_slice(&audio_chunk);
+                audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
 
-                    // Process partial transcriptions
-                    if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
-                        info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
-                              audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
-                        Self::process_partial_transcription(
-                            &mut whisper_state,
-                            &audio_buffer_for_whisper_chunks,
-                            actual_rate,
-                            chunk_resampler.as_mut(),
-                            &app_handle,
-                        );
-                        audio_buffer_for_whisper_chunks.clear();
-                    }
+                // Process partial transcriptions
+                if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
+                    info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
+                          audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
+                    Self::process_partial_transcription(
+                        &mut whisper_state,
+                        &audio_buffer_for_whisper_chunks,
+                        actual_rate,
+                        chunk_resampler.as_mut(),
+                        &app_handle,
+                    );
+                    audio_buffer_for_whisper_chunks.clear();
                 }
-                Err(_) => {}
             }
         }
     }
@@ -617,7 +617,7 @@ impl VoiceController {
         audio_buffer: &[f32],
         raw_full_session_audio: &[f32],
         actual_rate: u32,
-        mut resampler: Option<&mut SincFixedIn<f32>>,
+        resampler: Option<&mut SincFixedIn<f32>>,
         app_handle: &AppHandle<R>,
         last_buffer_arc: &Arc<Mutex<Option<Vec<f32>>>>,
     ) {
@@ -627,7 +627,7 @@ impl VoiceController {
                 whisper_state,
                 audio_buffer,
                 actual_rate,
-                resampler.as_deref_mut(),
+                resampler,
                 app_handle,
             );
         }
@@ -773,11 +773,28 @@ impl VoiceController {
 
     pub fn get_last_processed_audio_buffer(&self) -> Option<(Vec<f32>, u32)> {
         let buffer = self.last_processed_audio_buffer.lock().ok()?.clone()?;
-        let rate = self.actual_recording_sample_rate.lock().ok()?.clone()?;
+        let rate = (*self.actual_recording_sample_rate.lock().ok()?)?;
         Some((buffer, rate))
     }
 }
 
-// Ensure the controller is thread-safe
+impl Drop for VoiceController {
+    fn drop(&mut self) {
+        if self.is_dictating {
+            tracing::info!("[VoiceController] Drop: stopping active dictation");
+            self.is_dictating = false;
+            if let Some((thread_handle, control_tx)) = self.audio_thread.take() {
+                let _ = control_tx.send(AudioThreadMessage::Stop);
+                // Give the thread a moment to finish, but don't block indefinitely
+                let _ = thread_handle.join();
+            }
+        }
+    }
+}
+
+// SAFETY NOTE: VoiceController is always wrapped in Arc<Mutex<VoiceController>> at call sites
+// (see lib.rs). The Mutex provides the necessary synchronization, so we only need Send.
+// All fields are individually Send (Arc, Mutex, Option, bool, String).
+// We do NOT impl Sync because mutable fields (is_dictating, audio_thread) lack interior
+// mutability — the wrapping Mutex handles thread safety.
 unsafe impl Send for VoiceController {}
-unsafe impl Sync for VoiceController {}

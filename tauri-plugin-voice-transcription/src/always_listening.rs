@@ -31,6 +31,14 @@ const MAX_AGENT_CALLS_PER_MINUTE: u32 = 5; // Rate limit for agent calls
 
 const COMMAND_COMPLETION_TIMEOUT_MS: u64 = 5000; // Return to wake word after command completion
 
+// Sensitivity bounds
+const MIN_SENSITIVITY: f32 = 0.1;
+const MAX_SENSITIVITY: f32 = 2.0;
+const DEFAULT_SENSITIVITY: f32 = 0.5;
+
+// Default wake words for activation
+const DEFAULT_WAKE_WORDS: &[&str] = &["hey juno", "juno", "joono", "computer", "hey computer"];
+
 // Stop words that should end always listening mode
 const STOP_WORDS: &[&str] = &[
     "stop", "nevermind", "never mind", "cancel", "quit", "exit",
@@ -49,6 +57,18 @@ const NOISE_WORDS: &[&str] = &[
     // Single letter transcriptions are usually noise
     "a", "i", "o", "e", "u"
 ];
+
+/// Create standard sinc interpolation parameters for audio resampling.
+/// Used consistently across all resampling operations in this module.
+fn sinc_resampling_params() -> SincInterpolationParameters {
+    SincInterpolationParameters {
+        sinc_len: SINC_LENGTH,
+        f_cutoff: 0.95,
+        interpolation: SincInterpolationType::Linear,
+        oversampling_factor: OVERSAMPLING_FACTOR,
+        window: WindowFunction::BlackmanHarris2,
+    }
+}
 
 enum AlwaysListeningMessage {
     Stop,
@@ -77,13 +97,6 @@ pub struct AlwaysListeningController {
     sensitivity: f32,
     wake_words: Vec<String>,
     last_activity: Arc<Mutex<Option<Instant>>>,
-    // New fields for intelligent filtering
-    #[allow(dead_code)] // Reserved for future intelligent filtering
-    agent_call_timestamps: Arc<Mutex<Vec<Instant>>>,
-    #[allow(dead_code)] // Reserved for future intelligent filtering
-    last_meaningful_command: Arc<Mutex<Option<Instant>>>,
-    #[allow(dead_code)] // Reserved for future intelligent filtering
-    command_processing_count: Arc<Mutex<u32>>,
 }
 
 impl AlwaysListeningController {
@@ -103,12 +116,9 @@ impl AlwaysListeningController {
             is_active: false,
             state: AlwaysListeningState::Monitoring,
             audio_thread: None,
-            sensitivity: 0.5,
-            wake_words: vec!["hey juno".to_string(), "juno".to_string(), "joono".to_string(), "computer".to_string(), "hey computer".to_string()],
+            sensitivity: DEFAULT_SENSITIVITY,
+            wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
             last_activity: Arc::new(Mutex::new(None)),
-            agent_call_timestamps: Arc::new(Mutex::new(Vec::new())),
-            last_meaningful_command: Arc::new(Mutex::new(None)),
-            command_processing_count: Arc::new(Mutex::new(0)),
         })
     }
 
@@ -123,13 +133,24 @@ impl AlwaysListeningController {
             is_active: false,
             state: AlwaysListeningState::Monitoring,
             audio_thread: None,
-            sensitivity: 0.5,
-            wake_words: vec!["hey juno".to_string(), "juno".to_string(), "joono".to_string(), "computer".to_string(), "hey computer".to_string()],
+            sensitivity: DEFAULT_SENSITIVITY,
+            wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
             last_activity: Arc::new(Mutex::new(None)),
-            agent_call_timestamps: Arc::new(Mutex::new(Vec::new())),
-            last_meaningful_command: Arc::new(Mutex::new(None)),
-            command_processing_count: Arc::new(Mutex::new(0)),
         })
+    }
+
+    /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
+    pub fn new_uninitialized(model_path_str: &str) -> Self {
+        Self {
+            shared_whisper_context: None,
+            model_path: model_path_str.to_string(),
+            is_active: false,
+            state: AlwaysListeningState::Monitoring,
+            audio_thread: None,
+            sensitivity: DEFAULT_SENSITIVITY,
+            wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
+            last_activity: Arc::new(Mutex::new(None)),
+        }
     }
 
     pub fn start_always_listening<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
@@ -159,15 +180,16 @@ impl AlwaysListeningController {
 
         info!("[AlwaysListeningController] Starting always listening mode...");
 
+        // Validate whisper context BEFORE setting is_active to prevent stale state
+        let shared_context = self.shared_whisper_context.as_ref()
+            .ok_or_else(|| Error::Whisper("Shared whisper context not initialized".to_string()))?
+            .clone();
+
         // Emit always listening started event
         app_handle.emit("always-listening:started", ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
-        self.is_active = true;
-        self.state = AlwaysListeningState::Monitoring;
-
         let (control_tx, control_rx) = channel::<AlwaysListeningMessage>();
-        let shared_context = self.shared_whisper_context.as_ref().unwrap().clone();
         let app_handle_for_thread = app_handle.clone();
         let sensitivity = self.sensitivity;
         let wake_words = self.wake_words.clone();
@@ -185,6 +207,9 @@ impl AlwaysListeningController {
         });
 
         self.audio_thread = Some((audio_thread_handle, control_tx));
+        // Set is_active AFTER all fallible operations succeed — prevents stale state
+        self.is_active = true;
+        self.state = AlwaysListeningState::Monitoring;
 
         info!("[AlwaysListeningController] Always listening mode started");
         Ok(())
@@ -218,42 +243,99 @@ impl AlwaysListeningController {
             }
         };
 
-        let config = device.default_input_config().unwrap();
+        let config = match device.default_input_config() {
+            Ok(config) => config,
+            Err(e) => {
+                error!("Failed to get default input config: {:?}", e);
+                return;
+            }
+        };
         let sample_format = config.sample_format();
         let sample_rate = config.sample_rate().0;
+        let channels = config.channels() as usize;
+
+        if channels > 2 {
+            error!("[AlwaysListening] Unsupported channel count: {}. Only mono (1) or stereo (2) supported.", channels);
+            return;
+        }
+        if channels == 2 {
+            info!("[AlwaysListening] Stereo input detected - will convert to mono");
+        }
 
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
         let stream = match sample_format {
-            SampleFormat::F32 => device.build_input_stream(
-                &config.config(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if let Err(e) = audio_data_tx.send(data.to_vec()) {
-                        error!("Failed to send audio data: {:?}", e);
-                    }
-                },
-                move |err| {
-                    error!("Audio stream error: {}", err);
-                },
-                None
-            ).expect("Failed to build f32 input stream"),
-            SampleFormat::I16 => device.build_input_stream(
-                &config.config(),
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
-                    if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
-                        error!("Failed to convert i16 to f32: {:?}", e);
+            SampleFormat::F32 => {
+                let channels_for_cb = channels;
+                match device.build_input_stream(
+                    &config.config(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let mono_data = if channels_for_cb == 2 {
+                            // Convert stereo to mono by averaging channels
+                            data.chunks(2)
+                                .map(|pair| {
+                                    if pair.len() == 2 { (pair[0] + pair[1]) / 2.0 } else { pair[0] }
+                                })
+                                .collect()
+                        } else {
+                            data.to_vec()
+                        };
+                        if let Err(e) = audio_data_tx.send(mono_data) {
+                            error!("Failed to send audio data: {:?}", e);
+                        }
+                    },
+                    move |err| {
+                        error!("Audio stream error: {}", err);
+                    },
+                    None
+                ) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Failed to build f32 input stream: {:?}", e);
                         return;
                     }
-                    if let Err(e) = audio_data_tx.send(audio_f32) {
-                        error!("Failed to send converted audio data: {:?}", e);
+                }
+            },
+            SampleFormat::I16 => {
+                let channels_for_cb = channels;
+                match device.build_input_stream(
+                    &config.config(),
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        // Convert stereo to mono first if needed
+                        let mono_data: Vec<i16> = if channels_for_cb == 2 {
+                            data.chunks(2)
+                                .map(|pair| {
+                                    if pair.len() == 2 {
+                                        ((pair[0] as i32 + pair[1] as i32) / 2) as i16
+                                    } else {
+                                        pair[0]
+                                    }
+                                })
+                                .collect()
+                        } else {
+                            data.to_vec()
+                        };
+                        let mut audio_f32: Vec<f32> = vec![0.0f32; mono_data.len()];
+                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(&mono_data, &mut audio_f32) {
+                            error!("Failed to convert i16 to f32: {:?}", e);
+                            return;
+                        }
+                        if let Err(e) = audio_data_tx.send(audio_f32) {
+                            error!("Failed to send converted audio data: {:?}", e);
+                        }
+                    },
+                    move |err| {
+                        error!("Audio stream error: {}", err);
+                    },
+                    None
+                ) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Failed to build i16 input stream: {:?}", e);
+                        return;
                     }
-                },
-                move |err| {
-                    error!("Audio stream error: {}", err);
-                },
-                None
-            ).expect("Failed to build i16 input stream"),
+                }
+            },
             _ => {
                 error!("Unsupported sample format {:?}", sample_format);
                 return;
@@ -321,12 +403,12 @@ impl AlwaysListeningController {
 
                                         // Log audio chunk reception occasionally for debugging
                     thread_local! {
-                        static LAST_CHUNK_LOG: std::cell::RefCell<Option<Instant>> = std::cell::RefCell::new(None);
+                        static LAST_CHUNK_LOG: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
                     }
 
                     LAST_CHUNK_LOG.with(|last_log| {
                         let mut last_log = last_log.borrow_mut();
-                        if last_log.map_or(true, |last| last.elapsed().as_secs() > 10) {
+                        if last_log.is_none_or(|last| last.elapsed().as_secs() > 10) {
                             info!("[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}", audio_chunk.len(), volume);
                             *last_log = Some(Instant::now());
                         }
@@ -335,7 +417,8 @@ impl AlwaysListeningController {
                     match current_state {
                         AlwaysListeningState::Monitoring => {
                             // Check for intent to activate
-                            let volume_threshold = VOLUME_THRESHOLD * sensitivity;
+                            // Divide by sensitivity so higher sensitivity = lower threshold = triggers more easily
+                            let volume_threshold = VOLUME_THRESHOLD / sensitivity;
 
                             if volume > volume_threshold {
                                 // Mark the start of audio activity if not already tracking
@@ -400,7 +483,7 @@ impl AlwaysListeningController {
                                 }
                             } else {
                                 // Volume below threshold - use hysteresis for ending activity
-                                let end_threshold = VOLUME_THRESHOLD_END * sensitivity;
+                                let end_threshold = VOLUME_THRESHOLD_END / sensitivity;
 
                                 if audio_activity_start.is_some() && volume < end_threshold {
                                     // Check if we should tolerate brief volume drops
@@ -421,12 +504,12 @@ impl AlwaysListeningController {
 
                                 // Log volume levels more frequently for debugging
                                 thread_local! {
-                                    static LAST_VOLUME_LOG: std::cell::RefCell<Option<Instant>> = std::cell::RefCell::new(None);
+                                    static LAST_VOLUME_LOG: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
                                 }
 
                                 LAST_VOLUME_LOG.with(|last_log| {
                                     let mut last_log = last_log.borrow_mut();
-                                    if last_log.map_or(true, |last| last.elapsed().as_secs() > 5) { // Reduced frequency
+                                    if last_log.is_none_or(|last| last.elapsed().as_secs() > 5) { // Reduced frequency
                                         debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
                                         *last_log = Some(Instant::now());
                                     }
@@ -440,7 +523,7 @@ impl AlwaysListeningController {
                         }
                         AlwaysListeningState::Activated => {
                             // Actively transcribing - check for silence to return to monitoring
-                            let end_threshold = VOLUME_THRESHOLD_END * sensitivity;
+                            let end_threshold = VOLUME_THRESHOLD_END / sensitivity;
 
                             if volume < end_threshold { // Lower threshold for ending activity
                                 if let Ok(activity) = last_activity.lock() {
@@ -480,7 +563,7 @@ impl AlwaysListeningController {
                         }
                         AlwaysListeningState::WaitingForWakeWord => {
                             // Waiting for wake word after command completion
-                            let end_threshold = VOLUME_THRESHOLD_END * sensitivity;
+                            let end_threshold = VOLUME_THRESHOLD_END / sensitivity;
 
                             if volume < end_threshold { // Lower threshold for ending activity
                                 if let Ok(activity) = last_activity.lock() {
@@ -574,13 +657,7 @@ impl AlwaysListeningController {
               sample_rate, WHISPER_SAMPLE_RATE, sample_rate != WHISPER_SAMPLE_RATE);
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
-            let config = SincInterpolationParameters {
-                sinc_len: SINC_LENGTH,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: OVERSAMPLING_FACTOR,
-                window: WindowFunction::BlackmanHarris2,
-            };
+            let config = sinc_resampling_params();
 
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
@@ -712,13 +789,7 @@ impl AlwaysListeningController {
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
-            let config = SincInterpolationParameters {
-                sinc_len: SINC_LENGTH,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: OVERSAMPLING_FACTOR,
-                window: WindowFunction::BlackmanHarris2,
-            };
+            let config = sinc_resampling_params();
 
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
@@ -850,7 +921,7 @@ impl AlwaysListeningController {
             .filter(|word| NOISE_WORDS.contains(word))
             .count();
 
-        if noise_word_count == words.len() && words.len() > 0 {
+        if noise_word_count == words.len() && !words.is_empty() {
             info!("[AlwaysListening] Text consists entirely of noise words: '{}'", text_trimmed);
             return false;
         }
@@ -890,9 +961,19 @@ impl AlwaysListeningController {
 
     fn contains_stop_words(text: &str) -> bool {
         let text_lower = text.to_lowercase();
+        let words: Vec<&str> = text_lower.split_whitespace().collect();
         for stop_word in STOP_WORDS {
-            if text_lower.contains(stop_word) {
-                return true;
+            // Multi-word stop phrases: check if text contains the exact phrase
+            if stop_word.contains(' ') {
+                if text_lower.contains(stop_word) {
+                    return true;
+                }
+            } else {
+                // Single-word stop words: match whole words only to avoid
+                // false positives like "end" matching "pending" or "friend"
+                if words.contains(stop_word) {
+                    return true;
+                }
             }
         }
         false
@@ -947,13 +1028,7 @@ impl AlwaysListeningController {
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
-            let config = SincInterpolationParameters {
-                sinc_len: SINC_LENGTH,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: OVERSAMPLING_FACTOR,
-                window: WindowFunction::BlackmanHarris2,
-            };
+            let config = sinc_resampling_params();
 
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
@@ -994,13 +1069,34 @@ impl AlwaysListeningController {
                     }
                 }
 
-                if !transcribed_text.trim().is_empty() {
-                    info!("[AlwaysListening] Waiting transcription result: '{}'", transcribed_text);
+                let cleaned_text = transcribed_text.trim();
+                if !cleaned_text.is_empty() {
+                    info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
 
-                    // Emit the transcription result
-                    if let Err(e) = app_handle.emit("always-listening:transcription",
-                        serde_json::json!({ "text": transcribed_text })) {
-                        error!("[AlwaysListening] Failed to emit transcription event: {}", e);
+                    // Apply the same content filtering as active transcription
+                    if Self::should_process_with_agent(cleaned_text) {
+                        // Check for stop words
+                        if Self::contains_stop_words(cleaned_text) {
+                            info!("[AlwaysListening] Stop word detected in waiting mode: '{}' - stopping", cleaned_text);
+                            if let Err(e) = app_handle.emit("always-listening:stop-requested",
+                                serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
+                                error!("[AlwaysListening] Failed to emit stop-requested event: {}", e);
+                            }
+                            return;
+                        }
+
+                        // Check agent call rate limiting
+                        if Self::is_agent_call_allowed() {
+                            Self::record_agent_call();
+                            if let Err(e) = app_handle.emit("always-listening:transcription",
+                                serde_json::json!({ "text": cleaned_text })) {
+                                error!("[AlwaysListening] Failed to emit transcription event: {}", e);
+                            }
+                        } else {
+                            warn!("[AlwaysListening] Agent call rate limit exceeded in waiting mode, skipping: '{}'", cleaned_text);
+                        }
+                    } else {
+                        info!("[AlwaysListening] Content filtered out in waiting mode (noise/meaningless): '{}'", cleaned_text);
                     }
                 }
             }
@@ -1046,7 +1142,7 @@ impl AlwaysListeningController {
     }
 
     pub fn set_sensitivity(&mut self, sensitivity: f32) -> Result<()> {
-        self.sensitivity = sensitivity.clamp(0.1, 2.0);
+        self.sensitivity = sensitivity.clamp(MIN_SENSITIVITY, MAX_SENSITIVITY);
 
         if let Some((_, control_tx)) = &self.audio_thread {
             control_tx.send(AlwaysListeningMessage::UpdateSensitivity(self.sensitivity))
@@ -1289,5 +1385,22 @@ impl AlwaysListeningController {
     }
 }
 
+impl Drop for AlwaysListeningController {
+    fn drop(&mut self) {
+        if self.is_active {
+            tracing::info!("[AlwaysListeningController] Drop: stopping active listening");
+            self.is_active = false;
+            if let Some((thread_handle, control_tx)) = self.audio_thread.take() {
+                let _ = control_tx.send(AlwaysListeningMessage::Stop);
+                let _ = thread_handle.join();
+            }
+        }
+    }
+}
+
+// SAFETY NOTE: AlwaysListeningController is always wrapped in Arc<Mutex<AlwaysListeningController>>
+// at call sites (see lib.rs). The Mutex provides the necessary synchronization, so we only need Send.
+// All fields are individually Send (Arc, Mutex, Option, Vec, bool, f32, String).
+// We do NOT impl Sync because mutable fields (is_active, state, audio_thread, etc.) lack interior
+// mutability — the wrapping Mutex handles thread safety.
 unsafe impl Send for AlwaysListeningController {}
-unsafe impl Sync for AlwaysListeningController {}

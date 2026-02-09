@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-test-whisper-model"
+description = "Enables the test_whisper_model command without any pre-configured scope."
+commands.allow = ["test_whisper_model"]
+
+[[permission]]
+identifier = "deny-test-whisper-model"
+description = "Denies the test_whisper_model command without any pre-configured scope."
+commands.deny = ["test_whisper_model"]

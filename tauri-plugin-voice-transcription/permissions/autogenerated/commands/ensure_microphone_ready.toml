@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-ensure-microphone-ready"
+description = "Enables the ensure_microphone_ready command without any pre-configured scope."
+commands.allow = ["ensure_microphone_ready"]
+
+[[permission]]
+identifier = "deny-ensure-microphone-ready"
+description = "Denies the ensure_microphone_ready command without any pre-configured scope."
+commands.deny = ["ensure_microphone_ready"]

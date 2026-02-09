@@ -295,6 +295,42 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the check_microphone_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-microphone-permission",
+          "markdownDescription": "Enables the check_microphone_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_microphone_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-microphone-permission",
+          "markdownDescription": "Denies the check_microphone_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ensure_microphone_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ensure-microphone-ready",
+          "markdownDescription": "Enables the ensure_microphone_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ensure_microphone_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ensure-microphone-ready",
+          "markdownDescription": "Denies the ensure_microphone_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the force_transcription_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-force-transcription-test",
+          "markdownDescription": "Enables the force_transcription_test command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the force_transcription_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-force-transcription-test",
+          "markdownDescription": "Denies the force_transcription_test command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_always_listening_sensitivity command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-always-listening-sensitivity",
@@ -343,6 +379,18 @@
           "markdownDescription": "Denies the get_dictation_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_initialization_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-initialization-status",
+          "markdownDescription": "Enables the get_initialization_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_initialization_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-initialization-status",
+          "markdownDescription": "Denies the get_initialization_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_model_path command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-model-path",
@@ -353,6 +401,18 @@
           "type": "string",
           "const": "deny-get-model-path",
           "markdownDescription": "Denies the get_model_path command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_microphone_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-microphone-permission",
+          "markdownDescription": "Enables the request_microphone_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_microphone_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-microphone-permission",
+          "markdownDescription": "Denies the request_microphone_permission command without any pre-configured scope."
         },
         {
           "description": "Enables the set_always_listening_sensitivity command without any pre-configured scope.",
@@ -379,6 +439,18 @@
           "markdownDescription": "Denies the set_always_listening_wake_words command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_audio_level_monitoring command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-audio-level-monitoring",
+          "markdownDescription": "Enables the set_audio_level_monitoring command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_audio_level_monitoring command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-audio-level-monitoring",
+          "markdownDescription": "Denies the set_audio_level_monitoring command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_model_path command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-model-path",
@@ -389,6 +461,18 @@
           "type": "string",
           "const": "deny-set-model-path",
           "markdownDescription": "Denies the set_model_path command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_transcription_debugging command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-transcription-debugging",
+          "markdownDescription": "Enables the set_transcription_debugging command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_transcription_debugging command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-transcription-debugging",
+          "markdownDescription": "Denies the set_transcription_debugging command without any pre-configured scope."
         },
         {
           "description": "Enables the start_always_listening command without any pre-configured scope.",
@@ -437,6 +521,18 @@
           "type": "string",
           "const": "deny-stop-dictation",
           "markdownDescription": "Denies the stop_dictation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_whisper_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-whisper-model",
+          "markdownDescription": "Enables the test_whisper_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_whisper_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-whisper-model",
+          "markdownDescription": "Denies the test_whisper_model command without any pre-configured scope."
         },
         {
           "description": "Enables the toggle_always_listening command without any pre-configured scope.",

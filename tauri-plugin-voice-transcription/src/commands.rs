@@ -65,15 +65,29 @@ pub async fn get_initialization_status(
 ) -> Result<serde_json::Value, Error> {
     info!("[Plugin] get_initialization_status command called");
 
-    let voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    let voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Ok(json!({
+                "is_initialized": true,
+                "model_path": null,
+                "initialization_error": null,
+                "is_dictating": null,
+                "state_managed": true,
+                "lock_busy": true
+            }));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     let status = json!({
         "is_initialized": voice_controller.is_initialized(),
         "model_path": voice_controller.model_path,
         "initialization_error": voice_controller.get_initialization_error(),
         "is_dictating": voice_controller.is_dictating(),
-        "state_managed": true  // If we get here, state is definitely managed
+        "state_managed": true
     });
 
     info!("[Plugin] Initialization status: {}", status);
@@ -167,8 +181,17 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
     // Enhanced check that verifies both state management and initialization status
     check_voice_controller_availability(&app)?;
 
-    let mut voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] VoiceController is busy - toggle deferred");
+            return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     let was_dictating = voice_controller.is_dictating();
 
@@ -201,8 +224,17 @@ pub async fn get_dictation_status(
 ) -> Result<bool, Error> {
     info!("[Plugin] get_dictation_status command called");
 
-    let voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    let voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            // Lock held means some operation is in progress, assume dictating
+            info!("[Plugin] VoiceController lock busy - assuming active");
+            return Ok(true);
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     Ok(voice_controller.is_dictating())
 }
@@ -218,11 +250,18 @@ pub async fn transcribe_file<R: tauri::Runtime>(
     // Check initialization status before proceeding
     check_voice_controller_availability(&app)?;
 
-    let voice_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+    let voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+        }
+    };
 
     voice_controller.transcribe_audio_file(&path)
-        .map_err(|e| Error::TranscriptionError(e))
+        .map_err(Error::TranscriptionError)
 }
 
 #[tauri::command]
@@ -236,75 +275,81 @@ pub async fn set_model_path<R: tauri::Runtime>(
     let resolved_model_path = resolve_model_path(&app, &path);
 
     // Update config
-    let mut config = VoiceTranscriptionConfig::default();
-    config.model_path = resolved_model_path.clone();
+    let _config = VoiceTranscriptionConfig {
+        model_path: resolved_model_path.clone(),
+        ..VoiceTranscriptionConfig::default()
+    };
     // Note: Configuration is now managed through centralized settings
 
     // Reinitialize the shared Whisper context with the new model
     use crate::shared_whisper::SharedWhisperManager;
 
     info!("[Plugin] Reinitializing shared Whisper context with new model path: {}", resolved_model_path);
-    let shared_context = match SharedWhisperManager::initialize(&resolved_model_path) {
+    let shared_context = match SharedWhisperManager::reinitialize(&resolved_model_path) {
         Ok(context) => {
-            info!("[Plugin] ✅ Shared Whisper context reinitialized successfully");
+            info!("[Plugin] Shared Whisper context reinitialized successfully");
             context
         }
         Err(e) => {
-            error!("[Plugin] ❌ Failed to reinitialize shared Whisper context: {}", e);
+            error!("[Plugin] Failed to reinitialize shared Whisper context: {}", e);
             return Err(Error::ModelError(format!("Failed to load model: {}", e)));
         }
     };
 
     // Update existing VoiceController with new shared context (proper state management)
     if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        match voice_controller_state.lock() {
+        match voice_controller_state.try_lock() {
             Ok(mut controller) => {
                 match controller.update_shared_context(&resolved_model_path, shared_context.clone()) {
                     Ok(_) => {
-                        info!("[Plugin] ✅ Voice controller updated with shared context (no state replacement)");
+                        info!("[Plugin] Voice controller updated with shared context");
                     }
                     Err(e) => {
-                        error!("[Plugin] ❌ Failed to update voice controller with shared context: {}", e);
+                        error!("[Plugin] Failed to update voice controller with shared context: {}", e);
                         return Err(Error::ModelError(format!("Failed to update voice controller: {}", e)));
                     }
                 }
             }
-            Err(e) => {
-                error!("[Plugin] ❌ Failed to lock VoiceController for update: {}", e);
-                return Err(Error::LockError(format!("Failed to lock VoiceController: {}", e)));
+            Err(std::sync::TryLockError::WouldBlock) => {
+                error!("[Plugin] VoiceController is busy - cannot update model path now");
+                return Err(Error::LockError("VoiceController is busy - cannot update model while in use".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+                return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
             }
         }
     } else {
-        // VoiceController should already be managed during plugin initialization
-        // Log this as a critical error since voice controller is essential
         let error_msg = "VoiceController state not found - should be managed during plugin initialization";
-        error!("[Plugin] ❌ {}", error_msg);
+        error!("[Plugin] {}", error_msg);
         return Err(Error::InitializationError(error_msg.to_string()));
     }
 
     // Update existing AlwaysListeningController with new shared context (proper state management)
     if let Some(always_listening_state) = app.try_state::<Arc<Mutex<crate::always_listening::AlwaysListeningController>>>() {
-        match always_listening_state.lock() {
+        match always_listening_state.try_lock() {
             Ok(mut controller) => {
                 match controller.update_shared_context(&resolved_model_path, shared_context.clone()) {
                     Ok(_) => {
-                        info!("[Plugin] ✅ AlwaysListeningController updated with shared context (no state replacement)");
+                        info!("[Plugin] AlwaysListeningController updated with shared context");
                     }
                     Err(e) => {
-                        error!("[Plugin] ⚠️  Failed to update AlwaysListeningController with shared context: {}", e);
+                        error!("[Plugin] Failed to update AlwaysListeningController with shared context: {}", e);
                         // Don't fail the whole operation, voice controller still works
                     }
                 }
             }
-            Err(e) => {
-                error!("[Plugin] ⚠️  Failed to lock AlwaysListeningController for update: {}", e);
-                // Don't fail the whole operation, voice controller still works
+            Err(std::sync::TryLockError::WouldBlock) => {
+                error!("[Plugin] AlwaysListeningController is busy - skipping model update");
+                // Don't fail the whole operation
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                error!("[Plugin] AlwaysListeningController mutex is poisoned: {}", e);
+                // Don't fail the whole operation
             }
         }
     } else {
-        // AlwaysListeningController should already be managed during plugin initialization
-        // Log this as unusual but don't create duplicate state management
-        error!("[Plugin] ⚠️  AlwaysListeningController state not found - should be managed during plugin initialization");
+        error!("[Plugin] AlwaysListeningController state not found - should be managed during plugin initialization");
     }
 
     Ok(())
@@ -336,8 +381,15 @@ pub async fn start_always_listening<R: tauri::Runtime + 'static>(
         }
     }
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     always_listening_controller.start_always_listening(&app)?;
 
@@ -356,8 +408,16 @@ pub async fn stop_always_listening<R: tauri::Runtime>(
 ) -> Result<bool, Error> {
     info!("[Plugin] stop_always_listening command called");
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] AlwaysListeningController is busy - stop deferred");
+            return Ok(false);
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     let result = always_listening_controller.stop_always_listening()?;
 
@@ -378,8 +438,15 @@ pub async fn toggle_always_listening<R: tauri::Runtime + 'static>(
 ) -> Result<bool, Error> {
     info!("[Plugin] toggle_always_listening command called");
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     let was_active = always_listening_controller.is_active();
 
@@ -402,8 +469,16 @@ pub async fn get_always_listening_status(
 ) -> Result<bool, Error> {
     info!("[Plugin] get_always_listening_status command called");
 
-    let always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] AlwaysListeningController lock busy - assuming active");
+            return Ok(true);
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     Ok(always_listening_controller.is_active())
 }
@@ -415,8 +490,15 @@ pub async fn set_always_listening_sensitivity(
 ) -> Result<(), Error> {
     info!("[Plugin] set_always_listening_sensitivity command called with sensitivity: {}", sensitivity);
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     always_listening_controller.set_sensitivity(sensitivity)?;
     Ok(())
@@ -426,8 +508,15 @@ pub async fn set_always_listening_sensitivity(
 pub async fn get_always_listening_sensitivity(
     controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
 ) -> Result<f32, Error> {
-    let always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     Ok(always_listening_controller.get_sensitivity())
 }
@@ -439,8 +528,15 @@ pub async fn set_always_listening_wake_words(
 ) -> Result<(), Error> {
     info!("[Plugin] set_always_listening_wake_words command called with wake words: {:?}", wake_words);
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     always_listening_controller.set_wake_words(wake_words)?;
     Ok(())
@@ -452,8 +548,15 @@ pub async fn get_always_listening_wake_words(
 ) -> Result<Vec<String>, Error> {
     info!("[Plugin] get_always_listening_wake_words command called");
 
-    let always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     Ok(always_listening_controller.get_wake_words())
 }
@@ -468,8 +571,15 @@ pub async fn set_transcription_debugging<R: tauri::Runtime>(
 ) -> Result<(), Error> {
     info!("[Plugin] set_transcription_debugging command called with enabled: {}", enabled);
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     always_listening_controller.set_transcription_debugging(enabled, &app)?;
 
@@ -485,8 +595,15 @@ pub async fn set_audio_level_monitoring<R: tauri::Runtime>(
 ) -> Result<(), Error> {
     info!("[Plugin] set_audio_level_monitoring command called with enabled: {}", enabled);
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     always_listening_controller.set_audio_level_monitoring(enabled, &app)?;
 
@@ -500,8 +617,15 @@ pub async fn test_whisper_model(
 ) -> Result<serde_json::Value, Error> {
     info!("[Plugin] test_whisper_model command called");
 
-    let always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     let test_result = always_listening_controller.test_whisper_model()?;
 
@@ -516,8 +640,15 @@ pub async fn force_transcription_test<R: tauri::Runtime>(
 ) -> Result<serde_json::Value, Error> {
     info!("[Plugin] force_transcription_test command called");
 
-    let mut always_listening_controller = controller.lock()
-        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+    let mut always_listening_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+        }
+    };
 
     let test_result = always_listening_controller.force_transcription_test(&app)?;
 

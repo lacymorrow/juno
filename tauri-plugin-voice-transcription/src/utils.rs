@@ -37,7 +37,7 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
         tracing::info!("  Resource directory: {:?}", resource_dir);
 
         // Modern bundled paths in production builds (_up_ directory)
-        let bundled_paths = vec![
+        let bundled_paths = [
             // _up_ paths for production builds
             resource_dir.join("_up_").join("models").join(model_path),
             resource_dir.join("_up_").join(model_path),

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-transcription-debugging"
+description = "Enables the set_transcription_debugging command without any pre-configured scope."
+commands.allow = ["set_transcription_debugging"]
+
+[[permission]]
+identifier = "deny-set-transcription-debugging"
+description = "Denies the set_transcription_debugging command without any pre-configured scope."
+commands.deny = ["set_transcription_debugging"]

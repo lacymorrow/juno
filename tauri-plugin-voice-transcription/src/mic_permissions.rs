@@ -87,53 +87,98 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
 #[cfg(target_os = "macos")]
 pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatus, String> {
     use std::sync::Mutex;
-    
+
     // Use Arc<Mutex> to share the result between threads
     let result: Arc<Mutex<Option<Result<MicrophonePermissionStatus, String>>>> = Arc::new(Mutex::new(None));
     let result_clone = result.clone();
-    
-    // Request permission on main thread
-    Queue::main().exec_sync(move || {
+
+    // SAFETY: exec_sync on the main queue deadlocks if called FROM the main thread.
+    // Tauri async commands run on tokio worker threads, so this is safe in normal use.
+    // Guard defensively in case this is ever called from a different context.
+    let is_main_thread: bool = unsafe {
+        let ns_thread_class = class!(NSThread);
+        let main: BOOL = msg_send![ns_thread_class, isMainThread];
+        main == YES
+    };
+    if is_main_thread {
+        warn!("request_microphone_permission called from main thread — dispatching async to avoid deadlock");
+        // Fall through to exec_async path by running inline
+        let result_for_inline = result_clone.clone();
         unsafe {
             let _pool = NSAutoreleasePool::new(nil);
-            
-            // Get AVAudioSession sharedInstance
             let av_audio_session_class = class!(AVAudioSession);
             let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
-            
             if shared_instance == nil {
-                if let Ok(mut res) = result_clone.lock() {
-                    *res = Some(Err("Failed to get AVAudioSession shared instance".to_string()));
-                }
-                return;
+                return Err("Failed to get AVAudioSession shared instance".to_string());
             }
-            
-            // Create completion handler block
-            let result_for_block = result_clone.clone();
+            let result_for_block = result_for_inline.clone();
             let block = block::ConcreteBlock::new(move |granted: BOOL| {
                 let status = if granted == YES {
-                    info!("Microphone permission granted by user");
+                    info!("Microphone permission granted by user (main thread path)");
                     PERMISSION_GRANTED.store(true, Ordering::SeqCst);
                     PERMISSION_CACHED.store(true, Ordering::SeqCst);
                     MicrophonePermissionStatus::Granted
                 } else {
-                    info!("Microphone permission denied by user");
+                    info!("Microphone permission denied by user (main thread path)");
                     PERMISSION_GRANTED.store(false, Ordering::SeqCst);
                     PERMISSION_CACHED.store(true, Ordering::SeqCst);
                     MicrophonePermissionStatus::Denied
                 };
-                
                 if let Ok(mut res) = result_for_block.lock() {
                     *res = Some(Ok(status));
                 }
             });
-            
-            // Request permission
+            let block = block.copy();
             let _: () = msg_send![shared_instance, requestRecordPermission: block];
         }
-    });
-    
-    // Poll for result with timeout
+    } else {
+        // Request permission on main thread (safe — we are NOT on main thread)
+        Queue::main().exec_sync(move || {
+            unsafe {
+                let _pool = NSAutoreleasePool::new(nil);
+
+                // Get AVAudioSession sharedInstance
+                let av_audio_session_class = class!(AVAudioSession);
+                let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
+
+                if shared_instance == nil {
+                    if let Ok(mut res) = result_clone.lock() {
+                        *res = Some(Err("Failed to get AVAudioSession shared instance".to_string()));
+                    }
+                    return;
+                }
+
+                // Create completion handler block
+                let result_for_block = result_clone.clone();
+                let block = block::ConcreteBlock::new(move |granted: BOOL| {
+                    let status = if granted == YES {
+                        info!("Microphone permission granted by user");
+                        PERMISSION_GRANTED.store(true, Ordering::SeqCst);
+                        PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                        MicrophonePermissionStatus::Granted
+                    } else {
+                        info!("Microphone permission denied by user");
+                        PERMISSION_GRANTED.store(false, Ordering::SeqCst);
+                        PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                        MicrophonePermissionStatus::Denied
+                    };
+
+                    if let Ok(mut res) = result_for_block.lock() {
+                        *res = Some(Ok(status));
+                    }
+                });
+
+                // Copy block to heap before passing to ObjC runtime
+                // (stack blocks may be deallocated before the async callback fires)
+                let block = block.copy();
+
+                // Request permission
+                let _: () = msg_send![shared_instance, requestRecordPermission: block];
+            }
+        });
+    }
+
+    // Poll for result with timeout (shared by both main-thread and worker-thread paths)
     let start_time = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(30);
     
@@ -182,19 +227,49 @@ pub fn initialize_audio_session() -> Result<(), String> {
         
         // Set category to PlayAndRecord
         let category = NSString::alloc(nil).init_str("AVAudioSessionCategoryPlayAndRecord");
-        let error: id = nil;
-        let success: BOOL = msg_send![shared_instance, setCategory:category error:&error];
-        
+        let mut error: id = nil;
+        let success: BOOL = msg_send![shared_instance, setCategory:category error:&mut error];
+
         if success != YES {
-            return Err("Failed to set audio session category".to_string());
+            let description = if error != nil {
+                let desc: id = msg_send![error, localizedDescription];
+                if desc != nil {
+                    let utf8: *const i8 = msg_send![desc, UTF8String];
+                    if !utf8.is_null() {
+                        std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string()
+                    } else {
+                        "unknown error".to_string()
+                    }
+                } else {
+                    "unknown error".to_string()
+                }
+            } else {
+                "unknown error".to_string()
+            };
+            return Err(format!("Failed to set audio session category: {}", description));
         }
-        
+
         // Activate the audio session
-        let activate_error: id = nil;
-        let activate_success: BOOL = msg_send![shared_instance, setActive:YES error:&activate_error];
-        
+        let mut activate_error: id = nil;
+        let activate_success: BOOL = msg_send![shared_instance, setActive:YES error:&mut activate_error];
+
         if activate_success != YES {
-            return Err("Failed to activate audio session".to_string());
+            let description = if activate_error != nil {
+                let desc: id = msg_send![activate_error, localizedDescription];
+                if desc != nil {
+                    let utf8: *const i8 = msg_send![desc, UTF8String];
+                    if !utf8.is_null() {
+                        std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string()
+                    } else {
+                        "unknown error".to_string()
+                    }
+                } else {
+                    "unknown error".to_string()
+                }
+            } else {
+                "unknown error".to_string()
+            };
+            return Err(format!("Failed to activate audio session: {}", description));
         }
         
         debug!("Audio session initialized successfully");
@@ -213,7 +288,7 @@ pub fn is_microphone_available() -> bool {
     {
         // Quick hardware check using system_profiler
         if let Ok(output) = std::process::Command::new("system_profiler")
-            .args(&["SPAudioDataType", "-detailLevel", "mini"])
+            .args(["SPAudioDataType", "-detailLevel", "mini"])
             .output()
         {
             if output.status.success() {
