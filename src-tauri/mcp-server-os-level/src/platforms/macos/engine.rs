@@ -111,16 +111,16 @@ impl MacOSEngine {
                     let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
 
                     if !app_name_obj.is_null() {
-                        let app_name_str: &str = {
+                        let app_name_string: String = {
                             let nsstring = app_name_obj as *const objc::runtime::Object;
                             let bytes: *const std::os::raw::c_char =
                                 msg_send![nsstring, UTF8String];
                             let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
                             let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                            std::str::from_utf8_unchecked(bytes_slice)
+                            String::from_utf8_lossy(bytes_slice).into_owned()
                         };
 
-                        if app_name_str.to_lowercase() == name.to_lowercase() {
+                        if app_name_string.to_lowercase() == name.to_lowercase() {
                             let _: () = msg_send![app, activateWithOptions:1];
                             debug!("Activated application: {}", name);
 
@@ -457,14 +457,14 @@ fn check_ax_element_attributes_match(
                 e.attribute(&focus_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFBoolean>())
-                    .map_or(false, |b| b == expected_focus.into())
+                    .is_some_and(|b| b == expected_focus.into())
             }
             "role" => {
                 let role_attr = AXAttribute::new(&CFString::new("AXRole"));
                 e.attribute(&role_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFString>())
-                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                    .is_some_and(|s| s.to_string().to_lowercase() == value_lower)
             }
             "title" | "label" => {
                 // Check AXTitle first
@@ -473,7 +473,7 @@ fn check_ax_element_attributes_match(
                     .attribute(&title_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFString>())
-                    .map_or(false, |s| {
+                    .is_some_and(|s| {
                         !s.to_string().is_empty() && s.to_string().to_lowercase() == value_lower
                     });
 
@@ -485,7 +485,7 @@ fn check_ax_element_attributes_match(
                     e.attribute(&label_attr)
                         .ok()
                         .and_then(|v| v.downcast_into::<CFString>())
-                        .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                        .is_some_and(|s| s.to_string().to_lowercase() == value_lower)
                 }
             }
             "description" => {
@@ -493,11 +493,11 @@ fn check_ax_element_attributes_match(
                 e.attribute(&desc_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFString>())
-                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                    .is_some_and(|s| s.to_string().to_lowercase() == value_lower)
             }
             "value" => {
                 let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-                e.attribute(&value_attr).ok().map_or(false, |v| {
+                e.attribute(&value_attr).ok().is_some_and(|v| {
                     if let Some(s) = v.clone().downcast_into::<CFString>() {
                         s.to_string().to_lowercase() == value_lower
                     } else if let Some(n) = v.clone().downcast_into::<CFNumber>() {
@@ -522,7 +522,7 @@ fn check_ax_element_attributes_match(
                 e.attribute(&axid_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFString>())
-                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                    .is_some_and(|s| s.to_string().to_lowercase() == value_lower)
                 // Note: We don't check the generated ID here for efficiency
             }
             // Add more attribute checks here if needed (e.g., AXEnabled)
@@ -705,8 +705,6 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     /// Safer implementation using NSWorkspace to get focused element
-
-
     fn get_application_by_name(&self, name: &str) -> Result<UIElement, AutomationError> {
         // Refresh the accessibility tree before searching
         self.refresh_accessibility_tree(Some(name))?;
@@ -755,7 +753,7 @@ impl AccessibilityEngine for MacOSEngine {
                     .element
                     .0
                     .role()
-                    .map_or(false, |r| r.to_string() == "AXApplication")
+                    .is_ok_and(|r| r == "AXApplication")
                 {
                     if let Some(app_name) = root_elem.attributes().label {
                         self.refresh_accessibility_tree(Some(&app_name))?;
@@ -764,16 +762,18 @@ impl AccessibilityEngine for MacOSEngine {
             }
         }
 
-        let start_element = root
-            .map(|el| {
+        let start_element = match root {
+            Some(el) => {
                 if let Some(macos_el) = el.as_any().downcast_ref::<MacOSUIElement>() {
                     &macos_el.element.0
                 } else {
-                    // Use panic! for now as this indicates a programming error
-                    panic!("Root element is not a macOS element")
+                    return Err(AutomationError::Internal(
+                        "Root element is not a macOS element".to_string(),
+                    ));
                 }
-            })
-            .unwrap_or(&self.system_wide.0);
+            }
+            None => &self.system_wide.0,
+        };
 
         // Regular element finding logic
         match selector {
@@ -831,7 +831,7 @@ impl AccessibilityEngine for MacOSEngine {
                         let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
                         if let Ok(axid_val) = e.attribute(&axid_attr) {
                             if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
-                                if cf_string.to_string() == id_owned {
+                                if cf_string == id_owned {
                                     return true;
                                 }
                             }
@@ -877,7 +877,7 @@ impl AccessibilityEngine for MacOSEngine {
                         // Check AXTitle first
                         let title_match = e
                             .title()
-                            .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
+                            .is_ok_and(|t| t.to_string().to_lowercase() == name_lower);
                         if title_match {
                             return true;
                         }
@@ -1105,15 +1105,18 @@ impl AccessibilityEngine for MacOSEngine {
         root: Option<&UIElement>,
     ) -> Result<Vec<UIElement>, AutomationError> {
         // Get the start element from the provided root or fall back to system_wide
-        let start_element = root
-            .map(|el| {
+        let start_element = match root {
+            Some(el) => {
                 if let Some(macos_el) = el.as_any().downcast_ref::<MacOSUIElement>() {
                     &macos_el.element.0
                 } else {
-                    panic!("Root element is not a macOS element") // Indicate programming error
+                    return Err(AutomationError::Internal(
+                        "Root element is not a macOS element".to_string(),
+                    ));
                 }
-            })
-            .unwrap_or(&self.system_wide.0);
+            }
+            None => &self.system_wide.0,
+        };
 
         match selector {
             Selector::Role { role, name } => {
@@ -1155,7 +1158,7 @@ impl AccessibilityEngine for MacOSEngine {
                     let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
                     if let Ok(axid_val) = e.attribute(&axid_attr) {
                         if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
-                            if cf_string.to_string() == id_owned {
+                            if cf_string == id_owned {
                                 return true;
                             }
                         }
@@ -1182,7 +1185,7 @@ impl AccessibilityEngine for MacOSEngine {
                     // Check AXTitle first
                     let title_match = e
                         .title()
-                        .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
+                        .is_ok_and(|t| t.to_string().to_lowercase() == name_lower);
                     if title_match {
                         return true;
                     }
@@ -1346,13 +1349,13 @@ impl AccessibilityEngine for MacOSEngine {
                     let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
 
                     if !app_name_obj.is_null() {
-                        let found_name: &str = {
+                        let found_name: String = {
                             let nsstring = app_name_obj as *const objc::runtime::Object;
                             let bytes: *const std::os::raw::c_char =
                                 msg_send![nsstring, UTF8String];
                             let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
                             let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                            std::str::from_utf8_unchecked(bytes_slice)
+                            String::from_utf8_lossy(bytes_slice).into_owned()
                         };
 
                         if found_name.to_lowercase() == app_name.to_lowercase() {

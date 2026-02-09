@@ -126,7 +126,7 @@ pub(crate) fn parse_ax_attribute_value(
                     // Create an array of element addresses
                     let mut items = Vec::with_capacity(count as usize);
                     for i in 0..count {
-                        let item = CFArrayGetValueAtIndex(array_ref, i as isize);
+                        let item = CFArrayGetValueAtIndex(array_ref, i);
                         if !item.is_null() {
                             // Correctly wrap the raw pointer into AXUIElement
                             let ax_element = AXUIElement::wrap_under_get_rule(item as *mut _);

@@ -37,11 +37,15 @@ impl Locator {
     }
 
     /// Get the first element matching this locator
+    ///
+    /// Returns `Ok(None)` if no matching element is found,
+    /// `Ok(Some(element))` if found, or `Err(...)` for real errors.
     pub fn first(&self) -> Result<Option<UIElement>, AutomationError> {
-        let element = self
-            .engine
-            .find_element(&self.selector, self.root.as_ref())?;
-        Ok(Some(element))
+        match self.engine.find_element(&self.selector, self.root.as_ref()) {
+            Ok(element) => Ok(Some(element)),
+            Err(AutomationError::ElementNotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Get all elements matching this locator

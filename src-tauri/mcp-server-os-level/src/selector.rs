@@ -47,9 +47,9 @@ impl From<&str> for Selector {
                     name: Some(parts[1].to_string()),
                 }
             }
-            _ if s.starts_with('#') => Selector::Id(s[1..].to_string()),
+            _ if s.starts_with('#') => Selector::Id(s.strip_prefix('#').unwrap_or(s).to_string()),
             _ if s.starts_with('/') => Selector::Path(s.to_string()),
-            _ if s.starts_with("text:") => Selector::Text(s[5..].to_string()),
+            _ if s.starts_with("text:") => Selector::Text(s.strip_prefix("text:").unwrap_or(s).to_string()),
             _ => Selector::Name(s.to_string()),
         }
     }

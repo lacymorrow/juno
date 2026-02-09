@@ -162,10 +162,10 @@ pub fn create_engine(
 ) -> Result<Box<dyn AccessibilityEngine>, AutomationError> {
     #[cfg(target_os = "macos")]
     {
-        return Ok(Box::new(macos::MacOSEngine::new(
+        Ok(Box::new(macos::MacOSEngine::new(
             use_background_apps,
             activate_app,
-        )?));
+        )?))
     }
     #[cfg(target_os = "windows")]
     {
@@ -195,11 +195,11 @@ pub fn create_engine_with_auto_redirect(
 ) -> Result<Box<dyn AccessibilityEngine>, AutomationError> {
     #[cfg(target_os = "macos")]
     {
-        return Ok(Box::new(macos::MacOSEngine::new_with_auto_redirect(
+        Ok(Box::new(macos::MacOSEngine::new_with_auto_redirect(
             use_background_apps,
             activate_app,
             auto_open_settings,
-        )?));
+        )?))
     }
     #[cfg(target_os = "windows")]
     {

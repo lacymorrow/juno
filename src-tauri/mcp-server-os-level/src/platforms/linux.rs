@@ -16,7 +16,8 @@ impl LinuxEngine {
 
 impl AccessibilityEngine for LinuxEngine {
     fn get_root_element(&self) -> UIElement {
-        panic!("Linux implementation is not yet available")
+        // Return a placeholder element instead of panicking
+        UIElement::new(Box::new(LinuxUIElement))
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {

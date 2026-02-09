@@ -320,8 +320,8 @@ impl UIElementImpl for MacOSUIElement {
         let stable_id = self.generate_stable_id();
         let mut hasher = DefaultHasher::new();
         stable_id.hash(&mut hasher);
-        let id = hasher.finish() as usize;
-        id
+        
+        hasher.finish() as usize
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -695,7 +695,7 @@ impl UIElementImpl for MacOSUIElement {
         let action_attr = AXAttribute::new(&CFString::new(action));
         self.element
             .0
-            .perform_action(&action_attr.as_CFString())
+            .perform_action(action_attr.as_CFString())
             .map_err(|e| {
                 AutomationError::PlatformError(format!(
                     "Failed to perform action {}: {}",
@@ -710,7 +710,7 @@ impl UIElementImpl for MacOSUIElement {
             .element
             .0
             .role()
-            .map_or(false, |r| r.to_string() == "AXApplication")
+            .is_ok_and(|r| r == "AXApplication")
         {
             if let Some(app_name) = self.attributes().label {
                 engine.refresh_accessibility_tree(Some(&app_name))?;

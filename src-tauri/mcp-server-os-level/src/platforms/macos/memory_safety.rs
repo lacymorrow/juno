@@ -1,6 +1,5 @@
 /// Memory safety utilities for macOS API usage
 /// Provides autorelease pool management and safe resource handling
-
 use objc::{class, msg_send, sel, sel_impl};
 #[allow(unused_imports)]
 use std::ffi::c_void;
@@ -12,6 +11,7 @@ pub struct NSAutoreleasePool {
 
 impl NSAutoreleasePool {
     /// Create a new autorelease pool
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         unsafe {
             let pool: *mut objc::runtime::Object = msg_send![class!(NSAutoreleasePool), new];
@@ -38,6 +38,9 @@ where
 }
 
 /// Safely retain an Objective-C object
+///
+/// # Safety
+/// Caller must ensure `obj` is a valid Objective-C object pointer or null.
 pub unsafe fn retain_object(obj: *mut objc::runtime::Object) -> *mut objc::runtime::Object {
     if !obj.is_null() {
         let _: *mut objc::runtime::Object = msg_send![obj, retain];
@@ -46,6 +49,10 @@ pub unsafe fn retain_object(obj: *mut objc::runtime::Object) -> *mut objc::runti
 }
 
 /// Safely release an Objective-C object
+///
+/// # Safety
+/// Caller must ensure `obj` is a valid Objective-C object pointer or null,
+/// and that the object has a positive retain count.
 pub unsafe fn release_object(obj: *mut objc::runtime::Object) {
     if !obj.is_null() {
         let _: () = msg_send![obj, release];
@@ -53,6 +60,10 @@ pub unsafe fn release_object(obj: *mut objc::runtime::Object) {
 }
 
 /// Safely autorelease an Objective-C object
+///
+/// # Safety
+/// Caller must ensure `obj` is a valid Objective-C object pointer or null,
+/// and that an autorelease pool is active on the current thread.
 pub unsafe fn autorelease_object(obj: *mut objc::runtime::Object) -> *mut objc::runtime::Object {
     if !obj.is_null() {
         let _: *mut objc::runtime::Object = msg_send![obj, autorelease];
@@ -98,7 +109,7 @@ impl CGImageGuard {
         Self { image }
     }
 
-    pub fn as_ref(&self) -> &core_graphics::image::CGImage {
+    pub fn inner_ref(&self) -> &core_graphics::image::CGImage {
         &self.image
     }
 
