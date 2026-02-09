@@ -154,6 +154,7 @@ struct SafariElement {
     timestamp: u64,
 }
 
+#[allow(clippy::new_without_default)]
 impl SafariTools {
     /// Creates a new SafariTools instance
     pub fn new() -> Self {

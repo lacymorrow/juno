@@ -270,7 +270,7 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
     // If handle_cli_commands returns Ok(true), it means a command was executed
     // and the application should exit.
     if let Some(desktop_ref) = desktop_arc.as_ref() {
-        match cli::runner::handle_cli_commands(&cli, desktop_ref) {
+        match cli::runner::handle_cli_commands(cli, desktop_ref) {
             Ok(should_exit) => {
                 if should_exit {
                     return Ok(false); // Exit early if a CLI command was handled
@@ -286,7 +286,7 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
         // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
         match Desktop::new(false, false) {
             Ok(minimal_desktop) => {
-                match cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
+                match cli::runner::handle_cli_commands(cli, &minimal_desktop) {
                     Ok(should_exit) => {
                         if should_exit {
                             return Ok(false);
@@ -301,7 +301,7 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
             Err(_) => {
                 // If CLI commands require desktop and can't create minimal instance,
                 // only handle non-desktop CLI commands
-                if cli::runner::handle_non_desktop_cli_commands(&cli) {
+                if cli::runner::handle_non_desktop_cli_commands(cli) {
                     return Ok(false);
                 }
             }

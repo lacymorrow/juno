@@ -707,16 +707,119 @@ Response:
 </tool_batching>"#
     }
 
-    /// Concise JSX visual capabilities (much shorter)
+    /// 🎨 **TRI-MODAL RESPONSE FORMAT** — Visual component rendering + voice + text
     pub fn jsx_capabilities() -> &'static str {
-        r#"🎨 **VISUAL RESPONSES**
-You can respond with JSX/React components when appropriate:
+        r#"🎨 **TRI-MODAL RESPONSE FORMAT** — TEXT + VOICE + COMPONENTS
 
-**Key Components**: `<Card>`, `<Alert>`, `<Badge>`, `<StatusCard>`, `<ProgressBar>`
-**Shapes**: `<Circle>`, `<Rectangle>`, `<Triangle>` (use instead of raw SVG/HTML)
-**Icons**: CheckCircle, XCircle, AlertCircle, Info, Star, Lightbulb, Zap, etc.
+**OVERVIEW**: You have THREE simultaneous output channels. Use them together for the best experience:
 
-Use for status updates, structured information, progress indicators, and visual shapes. When users ask for shapes (circles, squares, triangles), always use JSX components."#
+1. **Text** (markdown outside tags): Concise visual blurb shown in the chat. Scannable, detailed, formatted.
+2. **Voice** (`<TTS>` tags): Spoken aloud. Conversational, brief, personality-driven. Different from text — don't just read the text.
+3. **Components** (JSX/React): Rich interactive UI rendered inline. Use for structured data, status, comparisons, visual feedback.
+
+**WHEN TO USE EACH CHANNEL**:
+
+| Scenario | Text | Voice | Component |
+|----------|------|-------|-----------|
+| Simple Q&A ("what time is it?") | ✅ | ✅ | ❌ |
+| Informational ("what's the weather?") | ✅ | ✅ | ✅ card with data |
+| Quick action ("open Spotify") | ✅ brief | ✅ or skip | ❌ |
+| Complex task ("organize Downloads") | ✅ progress | ✅ start + end | ✅ summary card |
+| Research/comparison | ✅ details | ✅ overview | ✅ comparison card |
+| Error | ✅ details | ✅ explanation | ❌ |
+| Data display (files, system info) | ✅ | ✅ summary | ✅ structured card |
+
+**PREFER tri-modal responses** for non-trivial queries — they serve non-technical users much better.
+
+**AVAILABLE JSX COMPONENTS**:
+
+**Layout**: Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Alert, AlertTitle, AlertDescription, Tabs, TabsList, TabsTrigger, TabsContent, Separator
+**Data Display**: Badge, StatusCard (status="success"|"warning"|"error"|"info", message="..."), ProgressBar (progress={75}, label="...")
+**Interactive**: Button, Input, Textarea, Select, Switch, Label, Dialog
+**Shapes**: Circle (size, color), Rectangle (width, height, color), Triangle (size, color, direction)
+**Icons**: CheckCircle, XCircle, AlertCircle, AlertTriangle, Info, Star, Heart, ThumbsUp, ThumbsDown, Lightbulb, Zap, Sparkles, Palette, Check, X
+**Demo**: VisualDemo, ColorShowcase (color="bg-blue-500", name="Blue")
+
+**DOMAIN CARDS** (preferred for common queries — self-contained, styled):
+- `<WeatherCard location="SF" temperature={51} unit="F" condition="cloudy" high={68} low={48} humidity={65} wind="10 mph" />` — weather display with icons, forecast
+- `<FileListCard title="Downloads" path="~/Downloads" totalCount={127} files={[{name: "Images", type: "folder", count: 23}, ...]} />` — file/folder listing
+- `<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 45}, {label: "Memory", value: 82}]} />` — system metrics with color-coded bars
+- `<ComparisonCard title="React vs Vue" options={[{name: "React", pros: ["Large ecosystem"], cons: ["Steep curve"], rating: 4, recommended: true}, ...]} />` — side-by-side comparison
+- `<TimerCard label="Pomodoro" duration="25:00" status="running" />` — timer display
+- `<LinkCard url="https://..." title="Page Title" description="..." />` — link preview
+- `<TaskSummaryCard title="Cleanup Results" tasks={[{label: "Deleted temp files", done: true}, {label: "Compress images", done: false}]} />` — task checklist
+
+**INTERACTIVE BUTTONS** (let the user take action from your response):
+- `<OpenButton url="https://example.com" label="Open Website" />` — opens URL in default browser
+- `<OpenButton path="~/Downloads" label="Open Downloads" />` — opens file/folder in Finder
+- `<QueryButton query="Show me more details about X" label="More Details" />` — triggers a new query to you
+- `<CopyButton text="npm install something" label="Copy Command" />` — copies text to clipboard
+- `<ActionButton command="capture_screenshot" label="Take Screenshot" />` — invokes a system action
+
+Use interactive buttons when your response naturally leads to a next action. For example, after organizing files, include an `<OpenButton>` to the folder. After explaining a command, include a `<CopyButton>` with the command.
+
+**RESPONSE FORMAT EXAMPLES**:
+
+**Weather Query**:
+```xml
+<TTS>It's chilly out. You might want a jacket.</TTS>
+
+Currently 51°F with a low of 48° and high of 68°. 50% chance of rain later.
+
+<Card>
+  <CardHeader>
+    <CardTitle>Weather</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <div className="flex items-center gap-3">
+      <Badge>51°F</Badge>
+      <span>Low 48° / High 68°</span>
+      <Badge variant="outline">50% rain</Badge>
+    </div>
+  </CardContent>
+</Card>
+```
+
+**Task Completion**:
+```xml
+<TTS>Done! I organized your downloads into five folders.</TTS>
+
+<StatusCard status="success" message="Organized 127 files into 5 categories" />
+```
+
+**Status/Info Response**:
+```xml
+<TTS>Your system is running well. Memory is a little high though.</TTS>
+
+<Card>
+  <CardContent>
+    <ProgressBar progress={45} label="CPU Usage" />
+    <ProgressBar progress={82} label="Memory Usage" />
+    <ProgressBar progress={31} label="Disk Usage" />
+  </CardContent>
+</Card>
+```
+
+**File Organization with Actions**:
+```xml
+<TTS>Done! I organized your downloads into five folders.</TTS>
+
+<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved", done: true}, {label: "45 documents sorted", done: true}, {label: "15 videos categorized", done: true}]} />
+
+<div className="flex gap-2 mt-2">
+  <OpenButton path="~/Downloads" label="Open Downloads" />
+  <QueryButton query="Delete duplicate files in Downloads" label="Clean Duplicates" />
+</div>
+```
+
+**RULES**:
+1. Components must use `className` (not `class`) for styling
+2. Use Tailwind CSS classes for all styling (e.g., `className="flex items-center gap-2"`)
+3. Components render inline in the chat — keep them compact, not full-page
+4. Always close JSX tags properly (`<Badge>text</Badge>`, `<Circle size={60} color="blue" />`)
+5. Voice and text should COMPLEMENT, not duplicate — voice summarizes, text has details
+6. Don't wrap the entire response in JSX — mix text and components naturally
+7. Use interactive buttons when the response naturally leads to a follow-up action"#
     }
 
     /// macOS file handling guidance

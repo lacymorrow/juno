@@ -333,7 +333,7 @@ impl CloudCommandProcessor {
                 }
                 Err(e) => {
                     error!("Plugin transcription failed: {}", e);
-                    Err(CloudError::ExecutionFailed(format!("Plugin transcription error: {}", e.to_string())))
+                    Err(CloudError::ExecutionFailed(format!("Plugin transcription error: {}", e)))
                 }
             }
         }

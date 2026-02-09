@@ -39,7 +39,7 @@ impl DeviceAuth {
     pub fn create_registration(&self) -> Result<DeviceRegistration, CloudError> {
         let device_id = self.config.device_id
             .clone()
-            .unwrap_or_else(|| Self::generate_device_id());
+            .unwrap_or_else(Self::generate_device_id);
 
         let api_key = self.config.api_key
             .clone()

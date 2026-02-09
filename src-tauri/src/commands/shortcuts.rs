@@ -284,7 +284,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
         if !allowed_standalone.contains(&single_key.as_str()) {
             // Provide more specific guidance based on key type
-            if single_key.len() == 1 && single_key.chars().next().map_or(false, |c| c.is_alphabetic()) {
+            if single_key.len() == 1 && single_key.chars().next().is_some_and(|c| c.is_alphabetic()) {
                 return Err(format!("Letter keys like '{}' should include a modifier (Alt, Ctrl, Cmd, Shift) to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut.to_uppercase(), shortcut.to_uppercase()));
             } else if single_key.chars().all(|c| c.is_ascii_digit()) {
                 return Err(format!("Number keys like '{}' should include a modifier to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut, shortcut));
@@ -446,7 +446,7 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
             "Attempting to register dictation input shortcut: {} -> {:?}",
             shortcuts.dictation_input, shortcut
         );
-        match app.global_shortcut().register(shortcut.clone()) {
+        match app.global_shortcut().register(shortcut) {
             Ok(()) => {
                 info!("✅ Successfully registered dictation input shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);
             },
@@ -495,18 +495,14 @@ pub async fn validate_keyboard_shortcut(
     }
 
     // Validate format
-    if let Err(e) = validate_shortcut_format(&shortcut_value) {
-        return Err(e);
-    }
+    validate_shortcut_format(&shortcut_value)?;
 
     // Get current shortcuts for conflict checking
     let current_shortcuts = state.get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Check for conflicts
-    if let Err(e) = check_shortcut_conflicts(&shortcut_value, &current_shortcuts, shortcut_name.as_deref()) {
-        return Err(e);
-    }
+    check_shortcut_conflicts(&shortcut_value, &current_shortcuts, shortcut_name.as_deref())?;
 
     Ok("Valid shortcut".to_string())
 }

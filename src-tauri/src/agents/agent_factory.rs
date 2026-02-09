@@ -10,6 +10,7 @@ pub struct AgentRegistry {
     agents: RwLock<HashMap<AgentType, Arc<dyn SpecializedAgent>>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl AgentRegistry {
     /// Create a new agent registry
     pub fn new() -> Self {

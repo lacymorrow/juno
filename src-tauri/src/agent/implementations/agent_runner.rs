@@ -40,7 +40,7 @@ where
     pub fn new(
         memory: M,
         tool_provider: T,
-        brain: impl AgentBrain + Send + Sync + 'static,
+        brain: impl AgentBrain + 'static,
         max_steps: u32,
         app_handle: AppHandle, // Added AppHandle
     ) -> Self {
@@ -258,10 +258,10 @@ where
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(
+        tool_results_cache: &mut [(
             crate::agent::core::ToolCall,
             Option<Result<crate::agent::core::ToolResult, AgentError>>,
-        )>,
+        )],
     ) -> Result<bool, AgentError> {
         log::info!("Executing tool batch: {} tools", batch.len());
 
@@ -276,10 +276,10 @@ where
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
         start_index: usize,
-        tool_results_cache: &mut Vec<(
+        tool_results_cache: &mut [(
             crate::agent::core::ToolCall,
             Option<Result<crate::agent::core::ToolResult, AgentError>>,
-        )>,
+        )],
     ) -> Result<bool, AgentError> {
         // Batch approval for sequential operations
         if !self.check_batch_approval(batch, cancel_rx).await? {
@@ -345,10 +345,8 @@ where
                             screenshot_data.as_str().map(|s| s.to_string())
                         } else if let Some(screenshot_data) = result.output.get("data") {
                             screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_str) = result.output.as_str() {
-                            Some(screenshot_str.to_string())
                         } else {
-                            None
+                            result.output.as_str().map(|s| s.to_string())
                         }
                     } else {
                         None

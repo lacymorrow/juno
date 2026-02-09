@@ -329,7 +329,7 @@ impl RGBConnectedGraphAnalyzer {
         } else if variance < 0.1 {
             // Low variance indicates solid colors (background or chrome)
             let brightness = (color.r as f32 + color.g as f32 + color.b as f32) / (3.0 * 255.0);
-            if brightness < 0.2 || brightness > 0.8 {
+            if !(0.2..=0.8).contains(&brightness) {
                 TokenType::Background
             } else {
                 TokenType::Chrome

@@ -543,7 +543,7 @@ impl HeadlessRuntime {
             .app_handle
             .try_state::<AppState>()
             .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
-        let _submit_result = crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
+        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
@@ -672,11 +672,10 @@ impl HeadlessRuntime {
         // Gather provider/model/agent mode from centralized settings where possible
         let mut provider_id: String = "unknown".to_string();
         let mut model_id: String = "unknown".to_string();
-        let agent_mode_str: String;
 
         // Agent mode via BrainFactory helper
         let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&self.app_handle).await;
-        agent_mode_str = agent_mode.to_string().to_string();
+        let agent_mode_str: String = agent_mode.to_string().to_owned();
 
         // Active provider + model via SettingsManager -> ProviderConfig
         if let Ok(settings_manager) = SettingsManager::new(self.app_handle.clone()) {
@@ -858,7 +857,7 @@ impl HeadlessRuntime {
             let _status_result = self.execute_status().await?;
 
             // Simple daemon logic - could be enhanced with task queue, file watching, etc.
-            if iteration_count % 10 == 0 { // Every 5 minutes, perform a system check
+            if iteration_count.is_multiple_of(10) { // Every 5 minutes, perform a system check
                 let system_query = "Perform a system health check and report any issues or recommendations";
                 if let Ok(health_result) = self.execute_query(system_query.to_string()).await {
                     if self.verbosity >= cli::verbosity::NORMAL {

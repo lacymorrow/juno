@@ -15,6 +15,7 @@ pub struct CollaborativeAIState {
     pub designer: Arc<RwLock<CollaborativeAIDesigner>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl CollaborativeAIState {
     pub fn new() -> Self {
         let config = CollaborativeAIConfig::default();
@@ -303,7 +304,7 @@ fn estimate_design_time(request: &CollaborativeAIRequest) -> f32 {
     // Adjust based on calculated complexity
     let adjusted_time = base_time * (complexity / 5.0);
 
-    adjusted_time.max(0.5).min(168.0) // Between 30 minutes and 1 week
+    adjusted_time.clamp(0.5, 168.0) // Between 30 minutes and 1 week
 }
 
 /// Get available complexity levels with descriptions

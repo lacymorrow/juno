@@ -8,10 +8,9 @@ use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
+use tauri_plugin_store::StoreExt;
 use crate::settings::{manager::SettingsManager, AgentSettings, AudioSettings};
 use crate::utils::coordinates;
-
-#[cfg(target_os = "macos")]
 
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
@@ -105,13 +104,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                                 standard_width, standard_height, display_width, display_height, origin_x, origin_y
                             ))?;
 
-                            return Ok(ScreenshotResult {
+                            Ok(ScreenshotResult {
                                 base64_image: final_base64,
                                 original_width: display_width,
                                 original_height: display_height,
                                 resized_width: standard_width,
                                 resized_height: standard_height,
-                            });
+                            })
                         }
                         Err(e) => {
                             tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
@@ -132,13 +131,13 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                                 original_width, original_height);
 
                             send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
-                            return Ok(ScreenshotResult {
+                            Ok(ScreenshotResult {
                                 base64_image: base64_string,
                                 original_width,
                                 original_height,
                                 resized_width: original_width, // Fallback: no resize
                                 resized_height: original_height,
-                            });
+                            })
                         }
                     }
                     } else {
@@ -272,7 +271,7 @@ pub(crate) async fn capture_window_screenshot_command(
     let target_window = windows
         .into_iter()
         .find(|window| {
-            window.id().map_or(false, |id| id == window_id)
+            window.id().is_some_and(|id| id == window_id)
         })
         .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
 
@@ -409,12 +408,12 @@ pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
 
 /// Set the active AI provider
 #[tauri::command]
-pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
-    // Set environment variable for the current process
-    std::env::set_var("AI_PROVIDER", provider_id.clone());
-
-    // For a real implementation, you would want to persist this setting
-    // to a config file or database so it's remembered across app restarts
+pub async fn set_ai_provider(provider_id: String, app_handle: AppHandle) -> Result<(), String> {
+    // Persist via Tauri store instead of unsafe std::env::set_var
+    let store = app_handle.store("settings.json")
+        .map_err(|e| format!("Failed to open settings store: {}", e))?;
+    store.set("ai_provider", serde_json::json!(provider_id.clone()));
+    store.save().map_err(|e| format!("Failed to save settings: {}", e))?;
 
     tracing::info!("Set AI provider to: {}", provider_id);
     Ok(())
@@ -686,7 +685,8 @@ pub async fn get_screenshot_scaling_info() -> Result<serde_json::Value, String> 
 
     match coordinates::get_scaling_info() {
         Ok(scaling_info) => {
-            Ok(serde_json::to_value(scaling_info).unwrap_or(serde_json::Value::Null))
+            serde_json::to_value(scaling_info)
+                .map_err(|e| format!("Failed to serialize scaling info: {}", e))
         }
         Err(e) => Err(format!("Failed to get scaling info: {}", e))
     }
@@ -785,7 +785,7 @@ pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) ->
             // Send debug notification if enabled
             if debug_config.send_notifications {
                 let preview = if content.len() > 50 {
-                    format!("{}...", &content[..50])
+                    format!("{}...", content.chars().take(50).collect::<String>())
                 } else {
                     content.clone()
                 };
@@ -825,7 +825,7 @@ pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<
             // Send debug notification if enabled
             if debug_config.send_notifications {
                 let preview = if content.len() > 50 {
-                    format!("{}...", &content[..50])
+                    format!("{}...", content.chars().take(50).collect::<String>())
                 } else {
                     content.clone()
                 };

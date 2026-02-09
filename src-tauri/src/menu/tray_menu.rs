@@ -88,6 +88,7 @@ pub struct TrayIconManager {
     current_state: TrayIconState,
 }
 
+#[allow(clippy::new_without_default)]
 impl TrayIconManager {
     pub fn new() -> Self {
         Self {
@@ -312,7 +313,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
+                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
                     let new_state = if is_active {
                         TrayIconState::AgentActive
                     } else {
@@ -331,7 +332,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
+                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
                     let new_state = if is_active {
                         TrayIconState::DictationActive
                     } else {
@@ -349,7 +350,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         move |event| {
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_pressed) = serde_json::from_str::<bool>(&event.payload()) {
+                if let Ok(is_pressed) = serde_json::from_str::<bool>(event.payload()) {
                     let new_state = if is_pressed {
                         TrayIconState::DictationActive
                     } else {
@@ -380,7 +381,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             tauri::async_runtime::spawn(async move {
                 // When dictation finishes, check if it's transitioning to agent mode
                 // If there's a query payload, it means agent mode is starting
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                     if payload.get("query").is_some() {
                         // Dictation finished and agent is about to start
                         update_tray_icon_state(TrayIconState::Processing).await;
@@ -414,7 +415,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(&event.payload()) {
+                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
                     if is_active {
                         update_tray_icon_state(TrayIconState::AlwaysListening).await;
                     } else {
@@ -431,7 +432,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         move |event| {
             tauri::async_runtime::spawn(async move {
                 let event = event.clone();
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                     if let Some(state) = payload.get("barState").and_then(|s| s.as_str()) {
                         let icon_state = match state {
                             "loading"
@@ -534,7 +535,7 @@ pub async fn set_tray_icon_state(state: TrayIconState) {
 }
 
 /// Convenience functions for common state changes
-
+///
 /// Set tray icon to indicate agent is active
 pub async fn set_agent_active() {
     set_tray_icon_state(TrayIconState::AgentActive).await;

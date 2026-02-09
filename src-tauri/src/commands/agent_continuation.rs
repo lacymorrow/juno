@@ -39,6 +39,7 @@ pub struct ContinuationManager {
         Arc<Mutex<HashMap<String, oneshot::Sender<Option<ContinuationResponse>>>>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl ContinuationManager {
     pub fn new() -> Self {
         Self {
@@ -157,7 +158,7 @@ impl ContinuationManager {
         {
             let mut notifiers = self.continuation_notifiers.lock().await;
             if let Some(tx) = notifiers.remove(&request_id) {
-                if let Err(_) = tx.send(Some(response.clone())) {
+                if tx.send(Some(response.clone())).is_err() {
                     warn!("Failed to send continuation response: receiver dropped (agent may have timed out)");
                     // Don't return error - this is expected if agent timed out
                     // Clean up the orphaned request
@@ -209,7 +210,7 @@ static CONTINUATION_MANAGER: std::sync::OnceLock<ContinuationManager> = std::syn
 
 /// Get or initialize the global continuation manager
 pub fn get_continuation_manager() -> &'static ContinuationManager {
-    CONTINUATION_MANAGER.get_or_init(|| ContinuationManager::new())
+    CONTINUATION_MANAGER.get_or_init(ContinuationManager::new)
 }
 
 /// Request continuation when agent reaches max iterations

@@ -29,6 +29,7 @@ pub struct StopCoordinator {
     emergency_stop_active: Arc<AtomicBool>,
 }
 
+#[allow(clippy::new_without_default)]
 impl StopCoordinator {
     pub fn new() -> Self {
         Self {
@@ -312,7 +313,7 @@ impl StopCoordinator {
 
 // Global coordinator instance
 static STOP_COORDINATOR: Lazy<StopCoordinator> =
-    Lazy::new(|| StopCoordinator::new());
+    Lazy::new(StopCoordinator::new);
 
 /// Get the global stop coordinator
 pub fn get_stop_coordinator() -> &'static StopCoordinator {

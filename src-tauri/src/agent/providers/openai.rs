@@ -100,7 +100,10 @@ impl OpenAIBrain {
         let temperature = temperature.unwrap_or(crate::constants::agent::config::DEFAULT_TEMPERATURE);
 
         Ok(OpenAIBrain {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .map_err(|e| AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e)))?,
             api_key,
             model,
             max_tokens,

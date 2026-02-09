@@ -15,11 +15,7 @@ use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
 use crate::constants::events;
 use crate::constants::errors::{templates, prefixes};
-
-// Helper function for error formatting - properly handles template substitution
-fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
-}
+use crate::format_error;
 
 // Global deduplication cache for preventing duplicate agent submissions
 lazy_static::lazy_static! {
@@ -144,13 +140,21 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 }
 
                                 // Submit the query to the agent system
-                                if let Err(e) = crate::anthropic::submit_query(
+                                match crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
                                     app_handle_clone.clone()
                                 ).await {
-                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                    Ok(_) => {
+                                        // Unregister escape key after successful completion
+                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
+                                    }
+                                    Err(e) => {
+                                        // Unregister escape key after error
+                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
+                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                    }
                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
@@ -213,13 +217,21 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 }
 
                                 // Submit the query to the agent system
-                                if let Err(e) = crate::anthropic::submit_query(
+                                match crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
                                     app_handle_clone.clone()
                                 ).await {
-                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                    Ok(_) => {
+                                        // Unregister escape key after successful completion
+                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
+                                    }
+                                    Err(e) => {
+                                        // Unregister escape key after error
+                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
+                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                    }
                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
@@ -607,18 +619,10 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
     });
 }
 
-/// Setup agent control event listeners for stop, cancel, and force stop
+/// Setup agent control event listeners for cancel and force stop
 fn setup_agent_control_listeners(app_handle: &AppHandle) {
-    // Listen for agent stop events (hold mode - normal completion)
-    let app_handle_for_agent_stop = app_handle.clone();
-    app_handle.listen(constants::events::agent::STOP_ALL, move |_event| {
-        info!("[Event] Received agent-stop event - stopping agent mode via hold");
-
-        let app_handle_clone = app_handle_for_agent_stop.clone();
-        safe_spawn_async_task(move || async move {
-            handle_agent_stop(&app_handle_clone).await;
-        });
-    });
+    // Note: agent-stop-all is handled by setup_agent_stop_all_listener() which does
+    // comprehensive emergency cleanup. We don't register a duplicate listener here.
 
     // Listen for agent cancel events (hold mode - cancelled before threshold)
     let app_handle_for_agent_cancel = app_handle.clone();
@@ -762,67 +766,6 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
         }
         None => {
             warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
-
-            // Reset agent input monitor state
-            crate::agent_monitor::force_reset_agent_input_state().await;
-
-            // Use synchronize_component_state to update UI manager AND emit event
-            if let Err(e) = utils::synchronize_component_state(
-                app_handle,
-                "agent",
-                false,
-                Some(constants::events::agent::ACTIVE),
-            ).await {
-                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-            }
-        }
-    }
-}
-
-/// Handle agent stop (normal completion)
-async fn handle_agent_stop(app_handle: &AppHandle) {
-    // Stop agent mode using voice transcription
-    match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                app_handle.clone(),
-                controller_state,
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!("[Agent Mode] Stopped agent transcription successfully");
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        false,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-                    }
-                }
-                Err(e) => {
-                    error!("[Agent Mode] Failed to stop agent transcription: {}", e);
-
-                    // Force reset agent input monitor state on failure
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        false,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change after stop failure: {}", e);
-                    }
-                }
-            }
-        }
-        None => {
-            warn!("[Agent Mode] Voice controller not available - cannot stop agent transcription");
 
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;

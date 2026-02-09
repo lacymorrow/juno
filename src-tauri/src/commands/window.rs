@@ -97,12 +97,12 @@ pub(crate) async fn scroll_window(
         match (x, y) {
             (Some(px), Some(py)) => {
                 let desktop = &state.desktop;
-                result = desktop.scroll_at_position(px, py, &direction, scroll_amount).map_err(|e| AutomationError::Internal(e));
+                result = desktop.scroll_at_position(px, py, &direction, scroll_amount).map_err(AutomationError::Internal);
                 action_desc = format!("Scrolled {} by {} at ({}, {})", direction, scroll_amount, px, py);
             }
             _ => {
                 let desktop = &state.desktop;
-                result = desktop.scroll_at_current_position(&direction, scroll_amount).map_err(|e| AutomationError::Internal(e));
+                result = desktop.scroll_at_current_position(&direction, scroll_amount).map_err(AutomationError::Internal);
                 action_desc = format!("Scrolled {} by {} at current position", direction, scroll_amount);
             }
         }
