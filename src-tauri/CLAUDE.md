@@ -153,22 +153,19 @@ tool_provider.register_async_tool(tool_def, executor).await;
 
 ### AgentError Enum
 
+Defined in `src/agent/core.rs`:
 ```rust
-#[derive(Debug, Clone, PartialEq)]
 pub enum AgentError {
-    Terminated,                    // User cancellation (escape key)
+    LlmError(String),             // LLM communication failure
+    ToolError(String),            // Tool execution failure
+    MemoryError(String),          // Memory management failure
+    ConfigurationError(String),   // Configuration/setup failure (also for HTTP client init)
+    StateError(String),           // Invalid state transition
     MaxStepsReached,              // Iteration limit reached
-    ToolNotFound(String),         // Invalid tool request
-    ProviderError(String),        // AI provider failure
-    ToolExecutionError(String),   // Tool execution failure
-}
-
-// Usage in functions
-pub async fn some_operation() -> Result<String, AgentError> {
-    match risky_operation().await {
-        Ok(result) => Ok(result),
-        Err(e) => Err(AgentError::ToolExecutionError(e.to_string()))
-    }
+    LoopError(String),            // Agent loop failure
+    InputError(String),           // Input validation failure
+    OutputError(String),          // Output processing failure
+    InvalidOutput(String),        // Invalid output format
 }
 ```
 
@@ -376,20 +373,47 @@ async fn test_with_mock() {
 ### Error Handling
 - Use `AgentError` enum for agent-related errors
 - Use `Result<T, String>` for Tauri commands
-- Never use `std::process::exit()` - implement graceful degradation
+- Never use `std::process::exit()` — use `app_handle.exit(0)` for Tauri-managed shutdown
+- Never use `std::env::set_var()` — unsafe in multithreaded Rust; use Tauri Store instead
 - Log errors at appropriate levels (error, warn, info, debug)
-- **NEVER use `.unwrap()` in production code** - always handle errors properly
+- **NEVER use `.unwrap()` or `.expect()` in production code** — always handle errors properly
+- Never byte-slice strings (`&s[..n]`) — panics on multi-byte UTF-8; use `s.chars().take(n).collect::<String>()`
+
+### Async Runtime
+- **Always** use `tauri::async_runtime::spawn()` instead of `tokio::spawn()` / `tokio::task::spawn()`
+- Use `tauri::async_runtime::JoinHandle` (not `tokio::task::JoinHandle`) for spawn return types
+- Use `tokio::task::spawn_blocking()` for blocking operations (shell commands, sync file I/O)
 
 ### Escape Key Management
 - Register escape key ONLY during agent execution
 - Register at start of `submit_query`/`submit_orchestrated_query`
-- Always unregister on completion/error/cancellation
+- Always unregister on **every** exit path — completion, error, cancellation, AND early returns
+
+### Deadlock Prevention
+- Never hold an async mutex while calling a function that acquires another mutex
+- Use check-init-recheck pattern for lazy initialization (see `state.rs:get_or_init_browser_controller`)
+- Never acquire the same `std::sync::Mutex` twice in one call chain
+
+### HTTP Client Initialization
+AI providers must set timeouts — default `Client::new()` has no timeout:
+```rust
+let client = Client::builder()
+    .timeout(std::time::Duration::from_secs(120))
+    .build()
+    .map_err(|e| AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e)))?;
+```
 
 ### Security Requirements
 - All file operations must use security validation
 - All command execution must pass whitelist validation
 - Implement different security levels for development vs production
 - Add comprehensive audit logging for security events
+- See `SECURITY_AUDIT.md` in project root for 32 tracked vulnerabilities (2026-02-08)
+
+### Code Deduplication
+- `parse_shortcut_string` lives in `src/shortcuts.rs` — do not duplicate in `lib.rs`
+- `format_error` helper is `pub` in `lib.rs` — use `crate::format_error` instead of local copies
+- Event listeners: one handler per event — check `setup_agent_control_listeners` before adding
 
 ## Key Files Reference
 
@@ -432,11 +456,12 @@ app_handle.emit("event_name", payload)?;
 
 ### Safe Unwrapping Patterns
 
-**Production Code Rule: ZERO `.unwrap()` calls allowed**
+**Production Code Rule: ZERO `.unwrap()` or `.expect()` calls allowed**
 
 ```rust
 // ❌ NEVER DO THIS IN PRODUCTION
 let value = some_option.unwrap();
+let value = some_option.expect("msg");
 let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 let guard = mutex.lock().unwrap();
 
