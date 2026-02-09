@@ -24,6 +24,7 @@ pub struct DictationInputMonitorState {
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
 }
 
+#[allow(clippy::new_without_default)]
 impl DictationInputMonitorState {
     pub fn new() -> Self {
         Self {

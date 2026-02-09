@@ -336,7 +336,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
+            .map_err(|e| error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string()))?
             .as_secs();
         let trigger_time = now + delay_seconds;
 
@@ -485,7 +485,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
+            .map_err(|e| error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string()))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -704,7 +704,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
+            .map_err(|e| error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string()))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -947,12 +947,13 @@ mod timer_tools_impl {
         let active_timers = timer_manager.list_active_timers().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("{}", error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())))?
+            .map_err(|e| error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string()))?
             .as_secs();
 
         let timer_info: Vec<Value> = active_timers
             .iter()
             .map(|timer| {
+                #[allow(clippy::if_same_then_else)]
                 let time_remaining = if timer.trigger_time > now && timer.trigger_time != u64::MAX {
                     timer.trigger_time - now
                 } else if timer.trigger_time == u64::MAX {

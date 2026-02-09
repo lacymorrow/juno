@@ -124,7 +124,7 @@ fn validate_coordinate_bounds(coord: i64, index: usize) -> Result<(), Coordinate
     const MAX_COORDINATE: i64 = 7680;
     const MIN_COORDINATE: i64 = -1000; // Allow some negative coordinates
 
-    if coord < MIN_COORDINATE || coord > MAX_COORDINATE {
+    if !(MIN_COORDINATE..=MAX_COORDINATE).contains(&coord) {
         return Err(CoordinateValidationError::OutOfBounds(index, coord));
     }
 

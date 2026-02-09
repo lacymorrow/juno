@@ -34,6 +34,7 @@ pub mod model_ids {
 }
 
 /// Unified agent runtime - can be either single or multi-agent
+#[allow(clippy::large_enum_variant)]
 pub enum AgentRuntime {
     Single(Box<dyn AgentRunnable + Send + Sync>),
     Multi(MultiAgentOrchestrator),
@@ -109,6 +110,7 @@ pub enum Provider {
 
 impl Provider {
     /// Convert a string to a Provider enum
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "anthropic" => Some(Provider::Anthropic),
@@ -334,10 +336,9 @@ impl BrainFactory {
 
                 // Convert Arc<dyn ToolProvider> to concrete type if needed
                 let local_tool_provider = if let Some(ref handle) = app_handle {
-                    let provider = LocalToolProvider::with_app_handle(handle.clone());
                     // Copy tools from the Arc provider to local provider
                     // This is a simplified approach - you might need to adjust based on your implementation
-                    provider
+                    LocalToolProvider::with_app_handle(handle.clone())
                 } else {
                     LocalToolProvider::new()
                 };
@@ -629,23 +630,23 @@ impl BrainFactory {
             Some(Provider::OpenAI) => {
                 info!("Initializing OpenAI brain with custom system prompt...");
                 // TODO: Implement custom system prompt for OpenAI
-                return Err(AgentError::ConfigurationError(
+                Err(AgentError::ConfigurationError(
                     "Custom system prompts not yet implemented for OpenAI".to_string(),
-                ));
+                ))
             }
             Some(Provider::Rig) => {
                 info!("Initializing Rig brain with custom system prompt...");
                 // TODO: Implement custom system prompt for Rig
-                return Err(AgentError::ConfigurationError(
+                Err(AgentError::ConfigurationError(
                     "Custom system prompts not yet implemented for Rig".to_string(),
-                ));
+                ))
             }
             Some(Provider::Gemini) => {
                 info!("Initializing Gemini brain with custom system prompt...");
                 // TODO: Implement custom system prompt for Gemini
-                return Err(AgentError::ConfigurationError(
+                Err(AgentError::ConfigurationError(
                     "Custom system prompts not yet implemented for Gemini".to_string(),
-                ));
+                ))
             }
             None => Err(AgentError::ConfigurationError(format!(
                 "Unknown AI provider: {}",

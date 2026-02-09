@@ -33,7 +33,7 @@ pub async fn debug_tool_configuration(state: State<'_, AppState>) -> Result<Valu
 
     // Count tools by category
     let mut category_counts = std::collections::HashMap::new();
-    for (_, tool_config) in &config_guard.tools {
+    for tool_config in config_guard.tools.values() {
         let category_name = format!("{:?}", tool_config.category);
         *category_counts.entry(category_name).or_insert(0) += 1;
     }

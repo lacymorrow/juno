@@ -118,8 +118,6 @@ pub async fn get_tool_choice_config(
         "dictation"
     } else if state.get_always_listening_active().unwrap_or(false) {
         "alwayslistening"
-    } else if state.is_agent_active() {
-        "agent"
     } else {
         "agent"
     };

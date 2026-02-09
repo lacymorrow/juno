@@ -22,6 +22,7 @@ pub struct AgentInputMonitorState {
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
 }
 
+#[allow(clippy::new_without_default)]
 impl AgentInputMonitorState {
     pub fn new() -> Self {
         Self {

@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use crate::constants::errors::templates;
 
 /// String interning cache for reducing format! allocations
+#[allow(clippy::type_complexity)]
 static STRING_CACHE: Lazy<Arc<RwLock<HashMap<String, Arc<str>>>>> =
     Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
@@ -61,7 +62,7 @@ impl StringCache {
         if let Ok(cache) = STRING_CACHE.read() {
             if let Some(cached_template) = cache.get(&cache_key) {
                 // Use the same replacement logic as cache miss for consistency
-                return Self::replace_placeholders_by_position(&cached_template, &[&error.to_string()]);
+                return Self::replace_placeholders_by_position(cached_template, &[&error.to_string()]);
             }
         }
 

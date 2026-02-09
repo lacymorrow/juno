@@ -19,6 +19,7 @@ pub struct EscapeKeyCoordinator {
     registered_users: RwLock<HashMap<String, Instant>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl EscapeKeyCoordinator {
     pub fn new() -> Self {
         Self {
@@ -184,7 +185,7 @@ impl EscapeKeyCoordinator {
 
 // Global coordinator instance
 static ESCAPE_KEY_COORDINATOR: Lazy<EscapeKeyCoordinator> =
-    Lazy::new(|| EscapeKeyCoordinator::new());
+    Lazy::new(EscapeKeyCoordinator::new);
 
 /// Get the global escape key coordinator
 pub fn get_escape_key_coordinator() -> &'static EscapeKeyCoordinator {

@@ -1067,15 +1067,13 @@ async fn get_user_preferences(
                 confidence: 0.9, // High confidence if currently running
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(browser)) {
-            if browser_preference.is_none() {
-                browser_preference = Some(browser.to_string());
-                preferred_applications.push(PreferredApp {
-                    category: "browser".to_string(),
-                    app_name: browser.to_string(),
-                    confidence: 0.6, // Medium confidence if just installed
-                });
-            }
+        } else if installed_apps.iter().any(|app| app.name.contains(browser)) && browser_preference.is_none() {
+            browser_preference = Some(browser.to_string());
+            preferred_applications.push(PreferredApp {
+                category: "browser".to_string(),
+                app_name: browser.to_string(),
+                confidence: 0.6, // Medium confidence if just installed
+            });
         }
     }
 
@@ -1101,15 +1099,13 @@ async fn get_user_preferences(
                 confidence: 0.9,
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(editor)) {
-            if editor_preference.is_none() {
-                editor_preference = Some(editor.to_string());
-                preferred_applications.push(PreferredApp {
-                    category: "editor".to_string(),
-                    app_name: editor.to_string(),
-                    confidence: 0.6,
-                });
-            }
+        } else if installed_apps.iter().any(|app| app.name.contains(editor)) && editor_preference.is_none() {
+            editor_preference = Some(editor.to_string());
+            preferred_applications.push(PreferredApp {
+                category: "editor".to_string(),
+                app_name: editor.to_string(),
+                confidence: 0.6,
+            });
         }
     }
 
@@ -1124,15 +1120,13 @@ async fn get_user_preferences(
                 confidence: 0.9,
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(terminal)) {
-            if terminal_preference.is_none() {
-                terminal_preference = Some(terminal.to_string());
-                preferred_applications.push(PreferredApp {
-                    category: "terminal".to_string(),
-                    app_name: terminal.to_string(),
-                    confidence: 0.6,
-                });
-            }
+        } else if installed_apps.iter().any(|app| app.name.contains(terminal)) && terminal_preference.is_none() {
+            terminal_preference = Some(terminal.to_string());
+            preferred_applications.push(PreferredApp {
+                category: "terminal".to_string(),
+                app_name: terminal.to_string(),
+                confidence: 0.6,
+            });
         }
     }
 
@@ -1156,7 +1150,7 @@ async fn get_user_preferences(
             } else if suite == "Google Chrome"
                 && browser_preference
                     .as_ref()
-                    .map_or(false, |b| b.contains("Chrome"))
+                    .is_some_and(|b| b.contains("Chrome"))
             {
                 productivity_suite = Some("Google Workspace".to_string());
             }
@@ -1355,10 +1349,7 @@ async fn get_selected_text_via_clipboard_trick(
     app_state: &crate::state::AppState,
 ) -> Option<String> {
     // Save current clipboard content
-    let original_clipboard = match app_state.desktop.get_clipboard_content() {
-        Ok(content) => Some(content),
-        Err(_) => None,
-    };
+    let original_clipboard = app_state.desktop.get_clipboard_content().ok();
 
     // Try to copy selected text using Cmd+C
     match app_state.desktop.get_desktop() {
@@ -1450,7 +1441,7 @@ async fn get_cpu_usage_direct() -> Option<f32> {
         use tokio::process::Command;
 
         match Command::new("top")
-            .args(&["-l", "1", "-n", "0"])
+            .args(["-l", "1", "-n", "0"])
             .output()
             .await
         {
@@ -1563,7 +1554,7 @@ async fn get_disk_usage_direct() -> Option<f32> {
     {
         use tokio::process::Command;
 
-        match Command::new("df").args(&["-h", "/"]).output().await {
+        match Command::new("df").args(["-h", "/"]).output().await {
             Ok(output) => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
                 parse_disk_usage_direct(&output_str)
@@ -1687,15 +1678,11 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
     } else {
         // Fallback to the old method if display_info is not available
-        if let Some((_width, _height)) = context.system_info.screen_resolution {
+        if context.system_info.screen_resolution.is_some() {
             // Get the standard resolution that screenshots are scaled to
             use crate::utils::coordinates::get_current_standard_resolution;
-            match get_current_standard_resolution() {
-                Ok((standard_width, standard_height)) => {
-                    context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
-                }
-                Err(_) => {
-                }
+            if let Ok((standard_width, standard_height)) = get_current_standard_resolution() {
+                context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
             }
         }
     }

@@ -88,12 +88,12 @@ impl TokenReducer {
     /// Reduces redundant tokens using connected graph information
     async fn reduce_redundant_tokens(
         &self,
-        tokens: &mut Vec<VisualToken>,
+        tokens: &mut [VisualToken],
         redundancy_groups: &[Vec<u32>],
         _connections: &[Vec<bool>],
     ) -> Result<Vec<VisualToken>, String> {
         if !self.config.token_reduction.enable_redundancy_grouping {
-            return Ok(tokens.clone());
+            return Ok(tokens.to_vec());
         }
 
         let mut reduced_tokens = Vec::new();

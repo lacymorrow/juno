@@ -136,7 +136,7 @@ impl MCPServerConnection {
         let url = self
             .config
             .args
-            .get(0)
+            .first()
             .cloned()
             .ok_or_else(|| "HTTP MCP server requires args[0] to be the endpoint URL".to_string())?;
         self.http_url = Some(url.clone());
@@ -897,7 +897,7 @@ impl MCPManager {
             let mut server_found = false;
             for (server_id, connection) in servers_guard.iter() {
                 if connection.get_tools().iter().any(|t| t.name == tool_call.name) {
-                    server_batches.entry(server_id.clone()).or_insert_with(Vec::new).push(tool_call.clone());
+                    server_batches.entry(server_id.clone()).or_default().push(tool_call.clone());
                     server_found = true;
                     break;
                 }
@@ -1197,8 +1197,7 @@ impl MCPServerConnection {
                 }
 
                 // Handle missing responses (if responses.len() < tool_calls.len())
-                for index in min_count..tool_calls.len() {
-                    let tool_call = &tool_calls[index];
+                for tool_call in &tool_calls[min_count..] {
                     failed_count += 1;
 
                     results.push(MCPBatchResult {

@@ -48,6 +48,7 @@ pub async fn get_cloud_config(
 }
 
 /// Update cloud configuration
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn update_cloud_config(
     enabled: bool,
@@ -131,6 +132,7 @@ pub async fn get_cloud_status(
                     });
                 },
                 ConnectionState::Connected => {
+                    connected = true;
                     connection_state = serde_json::json!({
                         "status": "connected",
                         "message": "Connected to cloud"

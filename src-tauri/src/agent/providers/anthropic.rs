@@ -19,10 +19,11 @@ use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, Default)]
 #[serde(untagged)]
 pub enum ToolChoice {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "any")]
     Any,
@@ -33,12 +34,6 @@ pub enum ToolChoice {
         choice_type: String, // "tool"
         name: String,
     },
-}
-
-impl Default for ToolChoice {
-    fn default() -> Self {
-        ToolChoice::Auto
-    }
 }
 
 #[derive(Serialize, Debug)]
@@ -318,7 +313,7 @@ impl AnthropicBrain {
         let stream = response.bytes_stream();
         let reader =
             StreamReader::new(stream.map(|result| {
-                result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                result.map_err(std::io::Error::other)
             }));
 
         let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
@@ -902,7 +897,7 @@ impl AnthropicBrain {
             return false;
         }
         let partial_tags = ["<", "<T", "<TT", "<TTS"];
-        partial_tags.iter().any(|&tag| s == tag)
+        partial_tags.contains(&s)
     }
 
     /// Check if a string could be the beginning of a partial "</TTS>" tag
@@ -911,7 +906,7 @@ impl AnthropicBrain {
             return false;
         }
         let partial_tags = ["<", "</", "</T", "</TT", "</TTS"];
-        partial_tags.iter().any(|&tag| s == tag)
+        partial_tags.contains(&s)
     }
 
     /// Strip TTS XML tags from text, removing them completely (content was already processed for TTS)
@@ -1089,18 +1084,15 @@ impl AgentBrain for AnthropicBrain {
         let mut orphaned_results_found = false;
 
         for message in messages {
-            match message.role {
-                Role::Tool => {
-                    if let Some(tool_call_id) = &message.tool_call_id {
-                        // Check if this tool result has a corresponding tool call
-                        if !pending_tool_calls.contains(tool_call_id) {
-                            log::warn!("Removing orphaned tool result with ID: {} - no corresponding tool_use found", tool_call_id);
-                            orphaned_results_found = true;
-                            continue; // Skip this message
-                        }
+            if message.role == Role::Tool {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    // Check if this tool result has a corresponding tool call
+                    if !pending_tool_calls.contains(tool_call_id) {
+                        log::warn!("Removing orphaned tool result with ID: {} - no corresponding tool_use found", tool_call_id);
+                        orphaned_results_found = true;
+                        continue; // Skip this message
                     }
                 }
-                _ => {}
             }
             valid_messages.push(message.clone());
         }

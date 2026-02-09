@@ -50,29 +50,19 @@ pub struct KeyboardShortcuts {
 }
 
 /// Agent trigger mode configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum AgentTriggerMode {
+    #[default]
     Tap,  // Press and release to toggle agent mode
     Hold, // Hold to activate agent mode, release to stop
 }
 
-impl Default for AgentTriggerMode {
-    fn default() -> Self {
-        AgentTriggerMode::Tap // Default to existing behavior
-    }
-}
-
 /// Dictation trigger mode configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum DictationTriggerMode {
     Tap,  // Press and release to toggle dictation mode
+    #[default]
     Hold, // Hold to activate dictation mode, release to stop
-}
-
-impl Default for DictationTriggerMode {
-    fn default() -> Self {
-        DictationTriggerMode::Hold // Default to existing hold behavior
-    }
 }
 
 impl Default for KeyboardShortcuts {
@@ -93,6 +83,7 @@ pub struct TimestampTracker {
     pub events_since_last_timestamp: usize,
 }
 
+#[allow(clippy::new_without_default)]
 impl TimestampTracker {
     pub fn new() -> Self {
         Self {
@@ -188,25 +179,13 @@ impl Default for AudioSettings {
 }
 
 /// Agent execution state grouped together
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AgentExecutionState {
     pub execution_active: bool,
     pub execution_id: Option<String>,
     pub current_step: Option<u32>,
     pub max_steps: Option<u32>,
     pub tool_approval_required: bool,
-}
-
-impl Default for AgentExecutionState {
-    fn default() -> Self {
-        Self {
-            execution_active: false,
-            execution_id: None,
-            current_step: None,
-            max_steps: None,
-            tool_approval_required: false,
-        }
-    }
 }
 
 /// UI and display settings grouped together
@@ -240,26 +219,16 @@ impl Default for UISettings {
 }
 
 /// Input configuration grouped together
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct InputSettings {
     pub keyboard_shortcuts: KeyboardShortcuts,
     pub agent_trigger_mode: AgentTriggerMode,
     pub dictation_trigger_mode: DictationTriggerMode,
 }
 
-impl Default for InputSettings {
-    fn default() -> Self {
-        Self {
-            keyboard_shortcuts: KeyboardShortcuts::default(),
-            agent_trigger_mode: AgentTriggerMode::default(),
-            dictation_trigger_mode: DictationTriggerMode::default(),
-        }
-    }
-}
-
 /// Synchronized wrapper for backward compatibility
 /// This provides Deref/DerefMut to the actual value while keeping state synchronized
-
+///
 /// Application state structure - Simplified with grouped settings
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
@@ -807,11 +776,15 @@ impl AppState {
             })
     }
 
-    // Method to get agent step progress info
+    // Method to get agent step progress info (single lock acquisition for consistency)
     pub fn get_agent_step_progress(&self) -> (Option<u32>, Option<u32>) {
-        let current_step = self.get_agent_current_step();
-        let max_steps = self.get_agent_max_steps();
-        (current_step, max_steps)
+        self.agent_execution
+            .lock()
+            .map(|guard| (guard.current_step, guard.max_steps))
+            .unwrap_or_else(|e| {
+                error!("Failed to get agent step progress: {}", e);
+                (None, None)
+            })
     }
 
     /// Check if agent mode is currently active
@@ -864,43 +837,50 @@ impl AppState {
             driver_guard
                 .as_ref()
                 .ok_or_else(|| "Playwright driver is None despite check".to_string())
-                .map(|driver| driver.clone())
+                .cloned()
         }
     }
 
     // Method to get or initialize the browser controller
+    // NOTE: Initializes playwright driver BEFORE acquiring browser_controller lock
+    // to prevent deadlock from nested async lock acquisition.
     pub async fn get_or_init_browser_controller(&self) -> Result<BrowserController, String> {
-        let mut controller_guard = self.browser_controller.lock().await;
-
-        if controller_guard.is_none() {
-            info!("Initializing persistent browser controller (was None in AppState)");
-            // Get or initialize the Playwright driver first
-            let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
-                format!(
-                    "Cannot init BrowserController without Playwright driver: {}",
-                    e
-                )
-            })?;
-
-            match BrowserController::new(playwright_arc).await {
-                Ok(controller) => {
-                    *controller_guard = Some(controller.clone());
-                    info!("BrowserController initialized and stored in AppState.");
-                    Ok(controller)
-                }
-                Err(e) => {
-                    let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "browser controller", e);
-                    error!("{}", err_msg);
-                    Err(err_msg)
-                }
+        // First, check if controller already exists (short lock)
+        {
+            let controller_guard = self.browser_controller.lock().await;
+            if let Some(controller) = controller_guard.as_ref() {
+                debug!("Reusing existing browser controller from AppState.");
+                return Ok(controller.clone());
             }
-        } else {
-            debug!("Reusing existing browser controller from AppState.");
-            controller_guard
-                .as_ref()
-                .ok_or_else(|| "Browser controller is None despite check".to_string())
-                .map(|controller| controller.clone())
         }
+        // Lock released here
+
+        // Initialize playwright driver OUTSIDE the browser_controller lock
+        info!("Initializing persistent browser controller (was None in AppState)");
+        let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
+            format!(
+                "Cannot init BrowserController without Playwright driver: {}",
+                e
+            )
+        })?;
+
+        let new_controller = BrowserController::new(playwright_arc).await.map_err(|e| {
+            let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "browser controller", e);
+            error!("{}", err_msg);
+            err_msg
+        })?;
+
+        // Re-acquire lock to store the controller (double-check pattern)
+        let mut controller_guard = self.browser_controller.lock().await;
+        if let Some(controller) = controller_guard.as_ref() {
+            // Another task initialized it while we were working
+            debug!("Browser controller was initialized by another task, reusing.");
+            return Ok(controller.clone());
+        }
+
+        *controller_guard = Some(new_controller.clone());
+        info!("BrowserController initialized and stored in AppState.");
+        Ok(new_controller)
     }
 
     // Method to get the persistent memory manager
@@ -1472,12 +1452,15 @@ impl AppState {
     }
 
     /// Notify that MCP tools have been updated - this triggers a refresh in active agents
+    /// NOTE: This is currently a stub awaiting implementation. It does not actually emit
+    /// any event or notify agents. A proper implementation would need an AppHandle to
+    /// emit events to the frontend and trigger tool provider refreshes.
     pub async fn notify_mcp_tools_updated(&self) {
         // Try to get an app handle and emit the event
         if let Ok(controller_guard) = self.browser_controller.try_lock() {
             if let Some(ref _controller) = *controller_guard {
                 // Just emit without trying to get app handle from controller
-                debug!("MCP tools updated, notifying frontend");
+                warn!("MCP tools updated notification is a stub - no event emitted to frontend");
             }
         }
     }

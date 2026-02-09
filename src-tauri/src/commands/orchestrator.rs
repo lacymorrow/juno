@@ -36,7 +36,7 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 
     // Initialize default MCP servers in the background to not block app startup
     let mcp_manager_bg = mcp_manager.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         if let Err(e) = initialize_default_mcp_servers_safely(&mcp_manager_bg).await {
             tracing::warn!("Background MCP server initialization had issues: {}", e);
             tracing::info!("MCP servers can be configured and started manually via Settings");
@@ -205,7 +205,7 @@ async fn get_orchestrator() -> Result<Arc<Mutex<Orchestrator>>, String> {
     ORCHESTRATOR
         .get()
         .ok_or_else(|| "Orchestrator not initialized".to_string())
-        .map(|o| o.clone())
+        .cloned()
 }
 
 /// Get the global MCP manager instance
@@ -213,7 +213,7 @@ fn get_mcp_manager() -> Result<Arc<MCPManager>, String> {
     MCP_MANAGER
         .get()
         .ok_or_else(|| "MCP manager not initialized".to_string())
-        .map(|m| m.clone())
+        .cloned()
 }
 
 /// Enhanced configuration structure for Tauri
@@ -323,8 +323,7 @@ pub async fn submit_orchestrated_query(
     if !use_orchestrator {
         // Fall back to the existing single-agent system
         crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle)
-            .await
-            .map_err(|e| e)?;
+            .await?;
         return Ok(format!("Query processed: {}", trimmed_query));
     }
 
@@ -1088,7 +1087,7 @@ pub async fn benchmark_orchestrator_performance(
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
 
-    let test_task_count = test_task_count.min(20).max(1); // Safety bounds
+    let test_task_count = test_task_count.clamp(1, 20); // Safety bounds
 
     tracing::info!(
         "Starting orchestrator performance benchmark with {} tasks",
@@ -1134,11 +1133,15 @@ pub async fn benchmark_orchestrator_performance(
     match results {
         Ok(task_results) => {
             let successful_tasks = task_results.iter().filter(|r| r.success).count();
-            let average_execution_time = task_results
-                .iter()
-                .map(|r| r.execution_time.as_millis())
-                .sum::<u128>() as f32
-                / task_results.len() as f32;
+            let average_execution_time = if task_results.is_empty() {
+                0.0
+            } else {
+                task_results
+                    .iter()
+                    .map(|r| r.execution_time.as_millis())
+                    .sum::<u128>() as f32
+                    / task_results.len() as f32
+            };
 
             Ok(serde_json::json!({
                 "benchmark_results": {

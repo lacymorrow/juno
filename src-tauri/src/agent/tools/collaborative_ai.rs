@@ -507,6 +507,7 @@ pub struct WorkflowMemory {
     knowledge_cache: HashMap<String, KnowledgeEntry>,
 }
 
+#[allow(clippy::new_without_default)]
 impl WorkflowMemory {
     pub fn new() -> Self {
         Self {
@@ -544,6 +545,7 @@ pub struct PlanAgent {
     task_analyzer: TaskAnalyzer,
 }
 
+#[allow(clippy::new_without_default)]
 impl PlanAgent {
     pub fn new() -> Self {
         Self {
@@ -610,6 +612,7 @@ pub struct CombineAgent {
     compatibility_checker: CompatibilityChecker,
 }
 
+#[allow(clippy::new_without_default)]
 impl CombineAgent {
     pub fn new() -> Self {
         Self {
@@ -643,6 +646,7 @@ impl CombineAgent {
 /// AdaptAgent - Responsible for adaptive optimization
 pub struct AdaptAgent;
 
+#[allow(clippy::new_without_default)]
 impl AdaptAgent {
     pub fn new() -> Self {
         Self
@@ -684,6 +688,7 @@ impl AdaptAgent {
 /// RefineAgent - Responsible for refinement and validation
 pub struct RefineAgent;
 
+#[allow(clippy::new_without_default)]
 impl RefineAgent {
     pub fn new() -> Self {
         Self
@@ -744,6 +749,7 @@ impl RefineAgent {
 /// RetrieveAgent - Responsible for knowledge retrieval
 pub struct RetrieveAgent;
 
+#[allow(clippy::new_without_default)]
 impl RetrieveAgent {
     pub fn new() -> Self {
         Self
@@ -811,6 +817,7 @@ pub struct AnalyzedTask {
 
 pub struct StrategyGenerator;
 
+#[allow(clippy::new_without_default)]
 impl StrategyGenerator {
     pub fn new() -> Self {
         Self
@@ -894,6 +901,7 @@ def initialize_ai_components():
 
 pub struct TaskAnalyzer;
 
+#[allow(clippy::new_without_default)]
 impl TaskAnalyzer {
     pub fn new() -> Self {
         Self
@@ -927,6 +935,7 @@ impl TaskAnalyzer {
 
 pub struct WorkflowIntegrator;
 
+#[allow(clippy::new_without_default)]
 impl WorkflowIntegrator {
     pub fn new() -> Self {
         Self
@@ -959,6 +968,7 @@ impl WorkflowIntegrator {
 
 pub struct CompatibilityChecker;
 
+#[allow(clippy::new_without_default)]
 impl CompatibilityChecker {
     pub fn new() -> Self {
         Self

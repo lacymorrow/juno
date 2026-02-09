@@ -123,7 +123,10 @@ impl GeminiBrain {
         let temperature = temperature.unwrap_or(0.1); // Low temperature for consistent routing decisions
 
         Ok(GeminiBrain {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .map_err(|e| AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e)))?,
             api_key,
             model,
             max_tokens,
@@ -395,7 +398,10 @@ impl Default for GeminiBrain {
         // Default implementation should provide safe defaults
         // Using empty API key will fail when actually trying to use the provider
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             api_key: String::new(),
             model: "gemini-1.5-flash".to_string(),
             max_tokens: 8192,

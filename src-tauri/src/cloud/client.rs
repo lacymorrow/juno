@@ -158,7 +158,7 @@ impl CloudClient {
         // Authenticate first
         {
             let mut sender_guard = ws_sender.lock().await;
-            self.authenticate(&mut *sender_guard).await?;
+            self.authenticate(&mut sender_guard).await?;
         }
 
         // Start heartbeat task
@@ -532,7 +532,7 @@ impl CloudClient {
         {
             use std::process::Command;
 
-            match Command::new("top").args(&["-l", "1", "-n", "0"]).output() {
+            match Command::new("top").args(["-l", "1", "-n", "0"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
                     Self::parse_cpu_usage(&output_str)
@@ -658,11 +658,11 @@ impl CloudClient {
         {
             use std::process::Command;
 
-            match Command::new("df").args(&["-h", "/"]).output() {
+            match Command::new("df").args(["-h", "/"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    for line in output_str.lines().skip(1) {
-                        // Skip header
+                    if let Some(line) = output_str.lines().nth(1) {
+                        // Skip header, only process first (root) filesystem
                         let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 5 {
                             // Format: Filesystem Size Used Avail Capacity Mounted
@@ -674,7 +674,6 @@ impl CloudClient {
                                 }
                             }
                         }
-                        break; // Only process first (root) filesystem
                     }
                     None
                 }
@@ -699,7 +698,7 @@ impl CloudClient {
             use std::process::Command;
 
             match Command::new("system_profiler")
-                .args(&["SPDisplaysDataType"])
+                .args(["SPDisplaysDataType"])
                 .output()
             {
                 Ok(output) => {

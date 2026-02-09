@@ -207,7 +207,7 @@ impl UITokenSelector {
 
         // Step 4: Display-specific optimization (if multi-monitor info available)
         let optimized_tokens = if let Some(ref display) = display_info {
-            self.display_optimizer.optimize_for_display(tokens, &display).await
+            self.display_optimizer.optimize_for_display(tokens, display).await
                 .map_err(|e| TokenSelectionError::DisplayOptimization(e.to_string()))?
         } else {
             tokens
@@ -267,7 +267,7 @@ impl UITokenSelector {
 
         // Validate new configuration
         new_config.validate()
-            .map_err(|e| TokenSelectionError::Configuration(e))?;
+            .map_err(TokenSelectionError::Configuration)?;
 
         self.config = new_config;
 

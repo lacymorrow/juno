@@ -338,10 +338,8 @@ impl UIManager {
                     }
                 });
             }
-        } else {
-            if self.bar_state == BarState::Input && self.input_value.trim().is_empty() {
-                self.handle_bar_input_blur().await?;
-            }
+        } else if self.bar_state == BarState::Input && self.input_value.trim().is_empty() {
+            self.handle_bar_input_blur().await?;
         }
 
         Ok(())
@@ -883,11 +881,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
-            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
-                Some(payload)
-            } else {
-                None
-            };
+            let transition_id = serde_json::from_str::<String>(event.payload()).ok();
 
             if manager.current_transition_id.as_ref() == transition_id.as_ref() {
                 manager.set_bar_state(BarState::Default).await;
@@ -902,11 +896,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
-            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
-                Some(payload)
-            } else {
-                None
-            };
+            let transition_id = serde_json::from_str::<String>(event.payload()).ok();
 
             if manager.current_transition_id.as_ref() == transition_id.as_ref() {
                 manager.current_error = None;

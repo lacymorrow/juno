@@ -383,6 +383,7 @@ pub struct WorkflowTemplate {
     pub alternative_paths: Vec<Vec<String>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl ExplorationEngine {
     /// Creates a new exploration engine
     pub fn new() -> Self {
@@ -555,10 +556,7 @@ impl ExplorationEngine {
         // This would integrate with computer vision models in production
         // For now, return a simplified implementation
 
-        let mut elements = Vec::new();
-
-        // Simulate detection of common UI elements
-        elements.push(InteractiveElement {
+        let elements = vec![InteractiveElement {
             element_type: "button".to_string(),
             x: 100.0,
             y: 50.0,
@@ -567,7 +565,7 @@ impl ExplorationEngine {
             function_description: Some("Primary action button".to_string()),
             text_content: Some("Submit".to_string()),
             confidence: 0.85,
-        });
+        }];
 
         Ok(elements)
     }
@@ -584,7 +582,7 @@ impl ExplorationEngine {
 
         // Simple exploration strategy: click on unexplored interactive elements
         for element in &current_state.interactive_elements {
-            if !self.has_interacted_with_element(&element) {
+            if !self.has_interacted_with_element(element) {
                 return Ok(ExplorationAction {
                     action_type: ActionType::Click { x: element.x, y: element.y },
                     target_element: Some(element.clone()),
@@ -712,6 +710,7 @@ pub struct ExplorationAction {
 
 // Implementation of supporting structures
 
+#[allow(clippy::new_without_default)]
 impl FunctionAwareTaskGoalGenerator {
     pub fn new() -> Self {
         Self {
@@ -725,26 +724,26 @@ impl FunctionAwareTaskGoalGenerator {
         _app_context: &AppContext,
     ) -> Result<Vec<ExplorationGoal>, ExplorationError> {
         // Generate goals based on application type
-        let mut goals = Vec::new();
-
-        goals.push(ExplorationGoal {
-            description: "Explore main navigation".to_string(),
-            target_elements: vec!["menu".to_string(), "navigation".to_string()],
-            expected_outcomes: vec!["Find main app sections".to_string()],
-            priority: 1,
-        });
-
-        goals.push(ExplorationGoal {
-            description: "Identify primary actions".to_string(),
-            target_elements: vec!["button".to_string(), "action".to_string()],
-            expected_outcomes: vec!["Find key functionality".to_string()],
-            priority: 2,
-        });
+        let goals = vec![
+            ExplorationGoal {
+                description: "Explore main navigation".to_string(),
+                target_elements: vec!["menu".to_string(), "navigation".to_string()],
+                expected_outcomes: vec!["Find main app sections".to_string()],
+                priority: 1,
+            },
+            ExplorationGoal {
+                description: "Identify primary actions".to_string(),
+                target_elements: vec!["button".to_string(), "action".to_string()],
+                expected_outcomes: vec!["Find key functionality".to_string()],
+                priority: 2,
+            },
+        ];
 
         Ok(goals)
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl GUITransitionGraph {
     pub fn new() -> Self {
         Self {
@@ -762,11 +761,12 @@ impl GUITransitionGraph {
     pub fn add_transition(&mut self, transition: GUITransition) {
         self.transitions
             .entry(transition.from_state.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(transition);
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl AppStructureMapping {
     pub fn new() -> Self {
         Self {
@@ -815,6 +815,7 @@ impl ExplorationMemory {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl TransitionAwareKnowledgeExtractor {
     pub fn new() -> Self {
         Self {
@@ -839,6 +840,7 @@ impl TransitionAwareKnowledgeExtractor {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl PatternRecognizer {
     pub fn new() -> Self {
         Self {
@@ -871,6 +873,7 @@ impl PatternRecognizer {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl LayoutAnalyzer {
     pub fn new() -> Self {
         Self {
@@ -886,25 +889,22 @@ impl LayoutAnalyzer {
         let mut structure = AppStructureMapping::new();
 
         // Simple structure detection
-        for (_state_id, state) in &graph.states {
+        for state in graph.states.values() {
             for element in &state.interactive_elements {
-                match element.element_type.as_str() {
-                    "button" => {
-                        // Add to toolbar areas
-                        structure.toolbar_areas.push(ToolbarArea {
+                if element.element_type.as_str() == "button" {
+                    // Add to toolbar areas
+                    structure.toolbar_areas.push(ToolbarArea {
+                        x: element.x,
+                        y: element.y,
+                        width: element.width,
+                        height: element.height,
+                        items: vec![ToolbarItem {
+                            label: element.text_content.clone().unwrap_or_default(),
+                            item_type: "button".to_string(),
                             x: element.x,
                             y: element.y,
-                            width: element.width,
-                            height: element.height,
-                            items: vec![ToolbarItem {
-                                label: element.text_content.clone().unwrap_or_default(),
-                                item_type: "button".to_string(),
-                                x: element.x,
-                                y: element.y,
-                            }],
-                        });
-                    }
-                    _ => {} // Handle other element types
+                        }],
+                    });
                 }
             }
         }
@@ -913,6 +913,7 @@ impl LayoutAnalyzer {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl WorkflowDetector {
     pub fn new() -> Self {
         Self {

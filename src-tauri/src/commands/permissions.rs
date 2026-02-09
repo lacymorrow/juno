@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::task::JoinHandle;
+use tauri::async_runtime::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
@@ -321,7 +321,7 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
             _ => return Err(format!("Unknown preference pane: {}", preference_pane)),
         };
 
-        match Command::new("open").args(&[url]).status() {
+        match Command::new("open").args([url]).status() {
             Ok(status) => {
                 if status.success() {
                     info!("Successfully opened system preferences for {}", preference_pane);
@@ -371,7 +371,7 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
     let token_clone = cancellation_token.clone();
     let app_clone = app.clone();
 
-    let handle = tokio::spawn(async move {
+    let handle = tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
 
         loop {
@@ -524,7 +524,7 @@ async fn check_audio_devices_system() -> serde_json::Value {
     #[cfg(target_os = "macos")]
     {
         match Command::new("system_profiler")
-            .args(&["SPAudioDataType", "-json", "-detailLevel", "basic"])
+            .args(["SPAudioDataType", "-json", "-detailLevel", "basic"])
             .output()
         {
             Ok(output) => {
@@ -533,38 +533,38 @@ async fn check_audio_devices_system() -> serde_json::Value {
 
                     // Try to parse as JSON first
                     if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&result) {
-                        return serde_json::json!({
+                        serde_json::json!({
                             "status": "success",
                             "method": "system_profiler_json",
                             "data": json_value,
                             "has_audio_devices": true
-                        });
+                        })
                     } else {
                         // Fallback to text parsing
                         let has_microphone = result.contains("Built-in Microphone") ||
                                            result.contains("Microphone") ||
                                            result.contains("Input");
-                        return serde_json::json!({
+                        serde_json::json!({
                             "status": "success",
                             "method": "system_profiler_text",
                             "has_microphone": has_microphone,
                             "has_audio_devices": true,
                             "raw_output_length": result.len()
-                        });
+                        })
                     }
                 } else {
-                    return serde_json::json!({
+                    serde_json::json!({
                         "status": "failed",
                         "error": "system_profiler command failed",
                         "stderr": String::from_utf8_lossy(&output.stderr)
-                    });
+                    })
                 }
             }
             Err(e) => {
-                return serde_json::json!({
+                serde_json::json!({
                     "status": "error",
                     "error": format!("Failed to run system_profiler: {}", e)
-                });
+                })
             }
         }
     }
