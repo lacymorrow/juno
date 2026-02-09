@@ -41,6 +41,7 @@ pub struct SecurityConfig {
 
 impl SecurityConfig {
     /// Create default security configuration
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
         let mut allowed_extensions = HashSet::new();
         // Safe text and code file extensions
@@ -188,8 +189,7 @@ fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
     match fs::read_dir(path) {
         Ok(entries) => {
             let mut items = Vec::new();
-            for entry in entries {
-                if let Ok(entry) = entry {
+            for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     let is_dir = entry
                         .file_type()
@@ -200,7 +200,6 @@ fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
                     } else {
                         name
                     });
-                }
             }
             items.sort();
             Ok(items.join("\n"))

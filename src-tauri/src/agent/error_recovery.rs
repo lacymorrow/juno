@@ -173,6 +173,7 @@ pub struct ErrorRecoveryManager {
     cascading_failure_count: u32,
 }
 
+#[allow(clippy::new_without_default)]
 impl ErrorRecoveryManager {
     /// Create a new error recovery manager with enhanced capabilities
     pub fn new() -> Self {
@@ -447,7 +448,7 @@ impl ErrorRecoveryManager {
 
         // Auto-create checkpoint if configured
         if self.config.enable_checkpoints &&
-           self.step_counter % self.config.checkpoint_interval == 0 {
+           self.step_counter.is_multiple_of(self.config.checkpoint_interval) {
             if let Ok(checkpoint_id) = self.create_checkpoint(format!("Auto-checkpoint at step {}", self.step_counter)) {
                 if let Some(last_entry) = self.execution_history.last_mut() {
                     last_entry.checkpoint_created = Some(checkpoint_id);
@@ -1130,11 +1131,8 @@ impl ErrorRecoveryManager {
         modified_call.name = fallback_tool.to_string();
 
         // Adjust input for fallback tool
-        match fallback_tool {
-            "screenshot" => {
-                modified_call.input = json!({});
-            }
-            _ => {}
+        if fallback_tool == "screenshot" {
+            modified_call.input = json!({});
         }
 
         Ok(Some(modified_call))

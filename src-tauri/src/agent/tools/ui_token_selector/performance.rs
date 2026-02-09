@@ -81,6 +81,7 @@ pub struct CostReductionTracker {
     pub measurements_count: u64,
 }
 
+#[allow(clippy::new_without_default)]
 impl PerformanceTracker {
     /// Creates a new performance tracker
     pub fn new() -> Self {
@@ -321,6 +322,7 @@ impl PerformanceTracker {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl PerformanceMetrics {
     pub fn new() -> Self {
         Self {
@@ -369,6 +371,7 @@ impl PerformanceMetrics {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl TokenReductionMetrics {
     pub fn new() -> Self {
         Self {
@@ -427,6 +430,7 @@ impl DisplayMetrics {
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl CostReductionTracker {
     pub fn new() -> Self {
         Self {

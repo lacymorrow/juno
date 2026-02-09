@@ -1,5 +1,5 @@
-/// Application cleanup module
-/// Handles resource cleanup on application exit
+//! Application cleanup module
+//! Handles resource cleanup on application exit
 
 use crate::utils::resource_manager::ResourceManager;
 use crate::state::AppState;
@@ -26,17 +26,20 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
     
     // Setup ctrl+c handler for CLI mode
     let app_handle_ctrl_c = app_handle.clone();
-    ctrlc::set_handler(move || {
+    if let Err(e) = ctrlc::set_handler(move || {
         info!("Received interrupt signal, cleaning up...");
         let handle = app_handle_ctrl_c.clone();
-        
+
         std::thread::spawn(move || {
             tauri::async_runtime::block_on(async {
                 cleanup_application(&handle).await;
             });
-            std::process::exit(0);
+            // Use Tauri's managed exit instead of std::process::exit
+            handle.exit(0);
         });
-    }).expect("Error setting Ctrl-C handler");
+    }) {
+        error!("Failed to set Ctrl-C handler: {}", e);
+    }
 }
 
 /// Perform full application cleanup

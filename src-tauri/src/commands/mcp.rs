@@ -217,10 +217,8 @@ pub async fn set_mcp_server_enabled(
         if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), server_id.clone()).await {
             error!("{}", format_error(templates::FAILED_TO_START, "MCP server", e));
         }
-    } else {
-        if let Err(e) = stop_mcp_server(app_handle.clone(), state.clone(), server_id).await {
-            error!("{}", format_error(templates::FAILED_TO_STOP, "MCP server", e));
-        }
+    } else if let Err(e) = stop_mcp_server(app_handle.clone(), state.clone(), server_id).await {
+        error!("{}", format_error(templates::FAILED_TO_STOP, "MCP server", e));
     }
 
     // The start/stop functions will emit their own updates, but emit one more to be sure
@@ -569,7 +567,7 @@ pub async fn troubleshoot_mcp_issues(
     }
 
     report["recommendations"] = serde_json::Value::Array(
-        recommendations.into_iter().map(|r| serde_json::Value::String(r)).collect()
+        recommendations.into_iter().map(serde_json::Value::String).collect()
     );
 
     Ok(report)
@@ -750,7 +748,7 @@ pub async fn get_mcp_system_diagnostics(
     }
 
     diagnostics["recommendations"] = serde_json::Value::Array(
-        recommendations.into_iter().map(|r| serde_json::Value::String(r)).collect()
+        recommendations.into_iter().map(serde_json::Value::String).collect()
     );
 
     // System info
@@ -906,7 +904,7 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
 
     for package in &mcp_packages {
         let package_check = std::process::Command::new("npm")
-            .args(&["info", package, "version"])
+            .args(["info", package, "version"])
             .output();
 
         match package_check {

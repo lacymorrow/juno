@@ -147,6 +147,7 @@ pub struct UniversalBlockParser {
     config: UBPConfig,
 }
 
+#[allow(clippy::new_without_default)]
 impl UniversalBlockParser {
     /// Creates a new UBP parser with default configuration
     pub fn new() -> Self {
@@ -278,8 +279,8 @@ impl UniversalBlockParser {
             let block_relative_x = clamped_x - block.global_x as f64;
             let block_relative_y = clamped_y - block.global_y as f64;
 
-            let relative_x = (block_relative_x / block.width as f64).max(0.0).min(1.0) as f32;
-            let relative_y = (block_relative_y / block.height as f64).max(0.0).min(1.0) as f32;
+            let relative_x = (block_relative_x / block.width as f64).clamp(0.0, 1.0) as f32;
+            let relative_y = (block_relative_y / block.height as f64).clamp(0.0, 1.0) as f32;
 
             // Adjust confidence based on whether coordinates were clamped
             let confidence = if global_x != clamped_x || global_y != clamped_y {
@@ -343,8 +344,8 @@ impl UniversalBlockParser {
         // Prevent division by zero by ensuring block_size is at least 1
         let safe_block_size = block_size.max(1);
 
-        let blocks_x = (width + safe_block_size - 1) / safe_block_size; // Ceiling division
-        let blocks_y = (height + safe_block_size - 1) / safe_block_size;
+        let blocks_x = width.div_ceil(safe_block_size);
+        let blocks_y = height.div_ceil(safe_block_size);
 
         (blocks_x, blocks_y, safe_block_size)
     }
@@ -410,8 +411,8 @@ impl UniversalBlockParser {
         let mut embedding = Vec::with_capacity(16); // 16-dimensional embedding
 
         // Calculate grid dimensions using actual block size to prevent division by zero
-        let blocks_x = if actual_block_size > 0 { (image_width + actual_block_size - 1) / actual_block_size } else { 1 };
-        let blocks_y = if actual_block_size > 0 { (image_height + actual_block_size - 1) / actual_block_size } else { 1 };
+        let blocks_x = if actual_block_size > 0 { image_width.div_ceil(actual_block_size) } else { 1 };
+        let blocks_y = if actual_block_size > 0 { image_height.div_ceil(actual_block_size) } else { 1 };
 
         // Ensure we don't divide by zero
         let blocks_x_f32 = blocks_x.max(1) as f32;
@@ -565,10 +566,9 @@ impl UniversalBlockParser {
                 total_pixels += 1;
 
                 // Check for edge characteristics (border pixels)
-                if dx == 0 || dx == width - 1 || dy == 0 || dy == height - 1 {
-                    if brightness > 200.0 || brightness < 50.0 {
-                        edge_pixels += 1;
-                    }
+                if (dx == 0 || dx == width - 1 || dy == 0 || dy == height - 1)
+                    && !(50.0..=200.0).contains(&brightness) {
+                    edge_pixels += 1;
                 }
             }
         }
@@ -634,7 +634,7 @@ impl UniversalBlockParser {
             line_brightness /= line_pixels as f32;
 
             // Check for horizontal line patterns (very bright or very dark lines)
-            if line_brightness < 50.0 || line_brightness > 200.0 {
+            if !(50.0..=200.0).contains(&line_brightness) {
                 horizontal_lines += 1;
             }
         }

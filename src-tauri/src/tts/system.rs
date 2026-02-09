@@ -43,15 +43,21 @@ pub async fn invoke_system_tts(
 
     info!("Generating audio to temporary file: {}", output_path_str);
 
-    // Execute the 'say' command
-    let output = Command::new("say")
-        .arg("-o")
-        .arg(output_path_str)
-        // Optionally specify voice, format, etc. here if needed
-        // .arg("-v")
-        // .arg("Alex") // Example voice
-        .arg(&text)
-        .output(); // Use output() to wait for completion and capture stderr
+    // Execute the 'say' command in a blocking task to avoid blocking the async runtime
+    let output_path_for_cmd = output_path_str.to_string();
+    let text_clone = text.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new("say")
+            .arg("-o")
+            .arg(&output_path_for_cmd)
+            // Optionally specify voice, format, etc. here if needed
+            // .arg("-v")
+            // .arg("Alex") // Example voice
+            .arg(&text_clone)
+            .output() // Use output() to wait for completion and capture stderr
+    })
+    .await
+    .map_err(|e| format!("Failed to run 'say' command task: {}", e))?;
 
     // Check if stop was requested during execution
     if crate::tts::is_tts_stop_requested() {

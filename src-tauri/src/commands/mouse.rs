@@ -146,7 +146,7 @@ pub(crate) async fn window_relative_click(
     let target_window = windows
         .into_iter()
         .find(|window| {
-            window.id().map_or(false, |id| id == window_id)
+            window.id().is_some_and(|id| id == window_id)
         })
         .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
 

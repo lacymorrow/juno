@@ -43,12 +43,13 @@ pub struct DictationStateManager {
     current_state: Arc<RwLock<DictationState>>,
     component_states: Arc<RwLock<ComponentStates>>,
     state_history: Arc<Mutex<Vec<StateChangeEvent>>>,
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::type_complexity)]
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(StateChangeEvent) + Send + Sync>>>>,
     inconsistency_threshold: u32,
     force_reset_in_progress: Arc<Mutex<bool>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl DictationStateManager {
     pub fn new() -> Self {
         Self {
@@ -414,19 +415,19 @@ impl DictationStateManager {
         let should_be_active = matches!(unified_state, DictationState::Active { .. });
 
         if real_app_state != should_be_active {
-            inconsistencies.push(format!("App state real-time mismatch"));
+            inconsistencies.push("App state real-time mismatch".to_string());
         }
 
         if real_voice_state != should_be_active {
-            inconsistencies.push(format!("Voice controller real-time mismatch"));
+            inconsistencies.push("Voice controller real-time mismatch".to_string());
         }
 
         if component_states.app_state_active != real_app_state {
-            inconsistencies.push(format!("App state tracking drift"));
+            inconsistencies.push("App state tracking drift".to_string());
         }
 
         if component_states.voice_controller_active != real_voice_state {
-            inconsistencies.push(format!("Voice controller tracking drift"));
+            inconsistencies.push("Voice controller tracking drift".to_string());
         }
 
         inconsistencies
@@ -477,7 +478,7 @@ impl DictationStateManager {
 
 // Global state manager instance
 static DICTATION_STATE_MANAGER: once_cell::sync::Lazy<DictationStateManager> =
-    once_cell::sync::Lazy::new(|| DictationStateManager::new());
+    once_cell::sync::Lazy::new(DictationStateManager::new);
 
 // Public API functions
 

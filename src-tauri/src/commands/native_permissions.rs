@@ -31,7 +31,7 @@ impl NativePermissionChecker {
         {
             // Method 1: Try to detect microphone hardware without admin privileges
             match Command::new("system_profiler")
-                .args(&["SPAudioDataType", "-detailLevel", "mini"])
+                .args(["SPAudioDataType", "-detailLevel", "mini"])
                 .output()
             {
                 Ok(output) => {
@@ -56,7 +56,7 @@ impl NativePermissionChecker {
 
             // Method 2: Check if audio units framework is available (no admin required)
             match Command::new("ls")
-                .args(&["/System/Library/Frameworks/AudioToolbox.framework"])
+                .args(["/System/Library/Frameworks/AudioToolbox.framework"])
                 .output()
             {
                 Ok(output) => {
@@ -72,7 +72,7 @@ impl NativePermissionChecker {
 
             // Method 3: Check if we can query Core Audio (no admin required)
             match Command::new("ioreg")
-                .args(&["-r", "-c", "IOAudioDevice"])
+                .args(["-r", "-c", "IOAudioDevice"])
                 .output()
             {
                 Ok(output) => {
@@ -112,7 +112,7 @@ impl NativePermissionChecker {
 
             // Open microphone settings to let user grant permission manually
             match Command::new("open")
-                .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
                 .status()
             {
                 Ok(status) => {
@@ -182,7 +182,7 @@ impl NativePermissionChecker {
                         info!("Accessibility permission dialog shown, opening System Settings for manual grant");
                         // Open accessibility settings to let user grant permission manually
                         match Command::new("open")
-                            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+                            .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
                             .status()
                         {
                             Ok(status) => {
@@ -206,7 +206,7 @@ impl NativePermissionChecker {
                     // Still try to open settings as fallback
                     info!("Opening accessibility settings as fallback");
                     match Command::new("open")
-                        .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
                         .status()
                     {
                         Ok(status) => {
@@ -270,7 +270,7 @@ impl NativePermissionChecker {
             // If not granted, open System Settings for manual grant
             info!("Opening screen recording privacy settings for manual grant");
             match Command::new("open")
-                .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
                 .status()
             {
                 Ok(status) => {
@@ -310,10 +310,8 @@ impl NativePermissionChecker {
             
             // First, try using sqlite3 to check TCC database (works without admin on user's own TCC)
             match Command::new("sqlite3")
-                .args(&[
-                    &format!("{}/Library/Application Support/com.apple.TCC/TCC.db", std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string())),
-                    "SELECT allowed FROM access WHERE service='kTCCServiceListenEvent' AND client='com.juno.app' OR client LIKE '%juno%';"
-                ])
+                .arg(format!("{}/Library/Application Support/com.apple.TCC/TCC.db", std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string())))
+                .arg("SELECT allowed FROM access WHERE service='kTCCServiceListenEvent' AND client='com.juno.app' OR client LIKE '%juno%';")
                 .output()
             {
                 Ok(output) => {
@@ -337,7 +335,7 @@ impl NativePermissionChecker {
             // Alternative: Try to test with a simple AppleScript that checks for Listen Event permission
             // This is less reliable but doesn't require special APIs
             match Command::new("osascript")
-                .args(&[
+                .args([
                     "-e",
                     "use framework \"Foundation\"
                      use framework \"AppKit\"
@@ -385,7 +383,7 @@ impl NativePermissionChecker {
 
             // Open input monitoring settings to let user grant permission manually
             match Command::new("open")
-                .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
                 .status()
             {
                 Ok(status) => {

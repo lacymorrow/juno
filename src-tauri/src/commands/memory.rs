@@ -424,11 +424,11 @@ pub async fn get_tiered_memory_context(
         .map_err(|e| format!("Failed to get tiered context: {}", e))?;
 
     let immediate_tokens: usize = immediate_context.iter()
-        .map(|m| crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens(m))
+        .map(crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens)
         .sum();
 
     let background_tokens: usize = background_context.iter()
-        .map(|m| crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens(m))
+        .map(crate::agent::implementations::memory_manager::AdvancedMemoryManager::estimate_message_tokens)
         .sum();
 
     Ok(serde_json::json!({

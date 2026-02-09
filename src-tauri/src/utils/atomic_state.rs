@@ -15,6 +15,7 @@ pub struct AtomicStateManager {
     version: AtomicU64,
 }
 
+#[allow(clippy::new_without_default)]
 impl AtomicStateManager {
     pub fn new() -> Self {
         Self {
@@ -117,6 +118,12 @@ impl<T> AtomicQueue<T> {
         let items = self.items.lock().await;
         items.len()
     }
+
+    /// Check if the queue is empty
+    pub async fn is_empty(&self) -> bool {
+        let items = self.items.lock().await;
+        items.is_empty()
+    }
 }
 
 /// Atomic execution coordinator to prevent concurrent executions
@@ -127,6 +134,7 @@ pub struct AtomicExecutionCoordinator {
     state_manager: Arc<AtomicStateManager>,
 }
 
+#[allow(clippy::new_without_default)]
 impl AtomicExecutionCoordinator {
     pub fn new() -> Self {
         Self {

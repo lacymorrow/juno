@@ -448,7 +448,7 @@ impl AdvancedMemoryManager {
         let useful_messages = messages.iter()
             .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
             .count();
-        metrics.memory_efficiency_ratio = if messages.len() > 0 {
+        metrics.memory_efficiency_ratio = if !messages.is_empty() {
             useful_messages as f64 / messages.len() as f64
         } else {
             1.0
@@ -485,16 +485,16 @@ impl AdvancedMemoryManager {
             let emergency_keep = std::cmp::max(config.min_messages_to_keep, limits::EMERGENCY_MIN_KEEP);
             drop(config);
             self.prune_memory(Some(emergency_keep)).await?;
-            return Ok(true);
+            Ok(true)
         } else if needs_normal_pruning {
             log::info!("Memory pruning triggered: {} messages, ~{} tokens",
                       messages_count, estimated_tokens);
             drop(config);
             self.prune_memory(None).await?;
-            return Ok(true);
+            Ok(true)
         } else {
             drop(config);
-            return Ok(false);
+            Ok(false)
         }
     }
 
@@ -662,7 +662,7 @@ impl AdvancedMemoryManager {
         let start_time = Instant::now();
 
         // Clean orphaned tool calls
-        let _orphaned_cleaned = self.clean_orphaned_tool_calls().await?;
+        self.clean_orphaned_tool_calls().await?;
 
         // Force pruning if over limits
         let _pruned = self.prune_memory_if_needed().await?;
@@ -746,7 +746,7 @@ impl AdvancedMemoryManager {
         if let Some(prefs) = user_preferences {
             let prefs_message = Message {
                 role: Role::System,
-                content: format!("User preferences: {}", prefs.to_string()),
+                content: format!("User preferences: {}", prefs),
                 tool_calls: None,
                 tool_call_id: None,
                 name: Some("session_context".to_string()),
@@ -867,7 +867,7 @@ impl AdvancedMemoryManager {
                 let useful_messages = messages.iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
+                metrics.memory_efficiency_ratio = if !messages.is_empty() {
                     useful_messages as f64 / messages.len() as f64
                 } else {
                     1.0
@@ -968,7 +968,7 @@ impl AdvancedMemoryManager {
                 let useful_messages = messages.iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
+                metrics.memory_efficiency_ratio = if !messages.is_empty() {
                     useful_messages as f64 / messages.len() as f64
                 } else {
                     1.0
@@ -1049,7 +1049,7 @@ impl AdvancedMemoryManager {
                 let useful_messages = messages.iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
-                metrics.memory_efficiency_ratio = if messages.len() > 0 {
+                metrics.memory_efficiency_ratio = if !messages.is_empty() {
                     useful_messages as f64 / messages.len() as f64
                 } else {
                     1.0

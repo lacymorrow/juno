@@ -232,7 +232,7 @@ pub async fn set_always_listening_sensitivity(
     );
 
     // Validate sensitivity range
-    if sensitivity < 0.0 || sensitivity > 1.0 {
+    if !(0.0..=1.0).contains(&sensitivity) {
         return Err("Sensitivity must be between 0.0 and 1.0".to_string());
     }
 
@@ -441,7 +441,6 @@ pub async fn debug_always_listening_status(
 }
 
 /// Enhanced Debugging Commands
-
 /// Enable/disable transcription debugging
 #[tauri::command]
 pub async fn set_transcription_debugging(enabled: bool, app: AppHandle) -> Result<String, String> {

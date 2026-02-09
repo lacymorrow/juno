@@ -177,19 +177,16 @@ impl BrowserController {
             chrome_debug_urls::ALTERNATIVE_2,
         ] {
             let version_url = format!("{}/json/version", endpoint);
-            match tokio::time::timeout(
+            if let Ok(Ok(response)) = tokio::time::timeout(
                 std::time::Duration::from_secs(1),
                 reqwest::get(&version_url),
             )
             .await
             {
-                Ok(Ok(response)) => {
-                    if response.status().is_success() {
-                        log::info!("Remote debugging is enabled on {}", endpoint);
-                        return true;
-                    }
+                if response.status().is_success() {
+                    log::info!("Remote debugging is enabled on {}", endpoint);
+                    return true;
                 }
-                _ => {} // Continue to next port
             }
         }
 

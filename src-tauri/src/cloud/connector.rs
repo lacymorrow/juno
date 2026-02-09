@@ -33,6 +33,7 @@ pub struct ProductionCloudConnector {
     connection_state: Arc<TokioMutex<ConnectorState>>,
 
     // WebSocket sender for outgoing messages
+    #[allow(clippy::type_complexity)]
     ws_sender: Arc<
         TokioMutex<
             Option<
@@ -140,7 +141,7 @@ impl HardwareMonitor {
         {
             use std::process::Command;
 
-            match Command::new("top").args(&["-l", "1", "-n", "0"]).output() {
+            match Command::new("top").args(["-l", "1", "-n", "0"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
                     Self::parse_cpu_usage(&output_str)
@@ -286,11 +287,11 @@ impl HardwareMonitor {
         {
             use std::process::Command;
 
-            match Command::new("df").args(&["-h", "/"]).output() {
+            match Command::new("df").args(["-h", "/"]).output() {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    for line in output_str.lines().skip(1) {
-                        // Skip header
+                    if let Some(line) = output_str.lines().nth(1) {
+                        // Skip header, only process first (root) filesystem
                         let parts: Vec<&str> = line.split_whitespace().collect();
                         if parts.len() >= 5 {
                             // Format: Filesystem Size Used Avail Capacity Mounted
@@ -302,7 +303,6 @@ impl HardwareMonitor {
                                 }
                             }
                         }
-                        break; // Only process first (root) filesystem
                     }
                     None
                 }
@@ -327,7 +327,7 @@ impl HardwareMonitor {
             use std::process::Command;
 
             match Command::new("system_profiler")
-                .args(&["SPDisplaysDataType"])
+                .args(["SPDisplaysDataType"])
                 .output()
             {
                 Ok(output) => {
@@ -431,19 +431,19 @@ impl ProductionCloudConnector {
 
         // Start main connector loop
         let connector = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             connector.run_connector_loop().await;
         });
 
         // Start heartbeat task
         let heartbeat_connector = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             heartbeat_connector.run_heartbeat_loop().await;
         });
 
         // Start status reporting task
         let status_connector = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             status_connector.run_status_loop().await;
         });
 
@@ -601,7 +601,7 @@ impl ProductionCloudConnector {
         // Use a channel to signal authentication completion
         let (auth_tx, auth_rx) = tokio::sync::oneshot::channel();
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             // Handle authentication response within the spawned task
             let auth_result = match Self::handle_authentication_response_in_task(
                 &mut ws_receiver,
@@ -1017,7 +1017,7 @@ impl ProductionCloudConnector {
     async fn handle_command_response(&self, response: DeviceResponse) {
         let mut pending = self.pending_commands.lock().await;
         if let Some(sender) = pending.remove(&response.command_id) {
-            if let Err(_) = sender.send(response) {
+            if sender.send(response).is_err() {
                 warn!("Failed to deliver command response - receiver dropped");
             }
         } else {
@@ -1155,7 +1155,7 @@ impl ProductionCloudConnector {
             if matches!(*state, ConnectorState::Ready) {
                 drop(state);
 
-                if let Err(_) = self.command_tx.send(ConnectorMessage::UpdateStatus) {
+                if self.command_tx.send(ConnectorMessage::UpdateStatus).is_err() {
                     warn!("Failed to queue status update");
                 }
             }
@@ -1315,7 +1315,7 @@ impl ProductionCloudConnector {
         info!("Disconnecting from cloud");
 
         // Send disconnect message
-        if let Err(_) = self.command_tx.send(ConnectorMessage::Disconnect) {
+        if self.command_tx.send(ConnectorMessage::Disconnect).is_err() {
             warn!("Failed to send disconnect message");
         }
 

@@ -240,7 +240,7 @@ impl ToolConfigManager {
                 description: settings_server.description.clone(),
                 command: settings_server.command.clone(),
                 args: settings_server.args.clone(),
-                working_directory: settings_server.working_directory.as_ref().map(|s| std::path::PathBuf::from(s)),
+                working_directory: settings_server.working_directory.as_ref().map(std::path::PathBuf::from),
                 environment_variables: settings_server.environment_variables.clone(),
                 enabled: settings_server.enabled,
                 auto_start: settings_server.auto_start,
@@ -255,9 +255,7 @@ impl ToolConfigManager {
 
         // Ensure all categories are represented
         for category in ToolCategory::all_categories() {
-            if !category_enabled.contains_key(&category) {
-                category_enabled.insert(category, true);
-            }
+            category_enabled.entry(category).or_insert(true);
         }
 
         Ok(Self {
@@ -292,7 +290,7 @@ impl ToolConfigManager {
         }
 
         // Convert MCP servers
-        for (_, server_config) in &self.mcp_servers {
+        for server_config in self.mcp_servers.values() {
             let settings_server = SettingsMCPServerConfig {
                 id: server_config.id.clone(),
                 name: server_config.name.clone(),
@@ -379,7 +377,7 @@ impl ToolConfigManager {
     /// * `enabled` - New enablement state
     pub fn set_tool_enabled(&mut self, tool_name: &str, enabled: bool) {
         if let Some(tool_config) = self.tools.get_mut(tool_name) {
-            if !(tool_config.required && !enabled) {
+            if !tool_config.required || enabled {
                 tool_config.enabled = enabled;
             }
         }
@@ -458,10 +456,10 @@ impl ToolConfigManager {
     /// Resets all tool configurations to default values while preserving MCP servers.
     /// Used by: Settings UI reset functionality.
     pub fn reset_to_defaults(&mut self) {
-        let mut new_config = Self::default();
-
-        // Preserve MCP server configurations
-        new_config.mcp_servers = self.mcp_servers.clone();
+        let new_config = Self {
+            mcp_servers: self.mcp_servers.clone(),
+            ..Default::default()
+        };
 
         *self = new_config;
     }
@@ -650,9 +648,7 @@ impl ToolConfigManager {
 
         // Add missing default tools
         for (name, config) in default_tools {
-            if !tools.contains_key(&name) {
-                tools.insert(name, config);
-            }
+            tools.entry(name).or_insert(config);
         }
     }
 

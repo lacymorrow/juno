@@ -258,7 +258,7 @@ pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
 
 /// Tauri command functions for window management
 /// These are the command handlers that can be called from the frontend
-
+///
 /// Open the native settings window
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {

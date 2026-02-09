@@ -144,25 +144,23 @@ impl ToolChoiceIntelligence {
         // 1. Pattern-based analysis
         for (category, matchers) in &self.pattern_matchers {
             for matcher in matchers {
-                if matcher.pattern.is_match(user_input) {
-                    if matcher.confidence >= self.config.confidence_threshold {
-                        decisions.push(ToolChoiceDecision {
-                            tool_choice: match matcher.force_mode {
-                                ForceMode::ForceSpecific => Some(ToolChoice::Tool {
-                                    choice_type: "tool".to_string(),
-                                    name: matcher.tool_name.clone(),
-                                }),
-                                ForceMode::ForceAny => Some(ToolChoice::Any),
-                                ForceMode::Suggest => Some(ToolChoice::Auto),
-                            },
-                            confidence: matcher.confidence,
-                            reasoning: format!(
-                                "Pattern match in {}: {} ({})",
-                                category, matcher.description, matcher.tool_name
-                            ),
-                            source: DecisionSource::Pattern,
-                        });
-                    }
+                if matcher.pattern.is_match(user_input) && matcher.confidence >= self.config.confidence_threshold {
+                    decisions.push(ToolChoiceDecision {
+                        tool_choice: match matcher.force_mode {
+                            ForceMode::ForceSpecific => Some(ToolChoice::Tool {
+                                choice_type: "tool".to_string(),
+                                name: matcher.tool_name.clone(),
+                            }),
+                            ForceMode::ForceAny => Some(ToolChoice::Any),
+                            ForceMode::Suggest => Some(ToolChoice::Auto),
+                        },
+                        confidence: matcher.confidence,
+                        reasoning: format!(
+                            "Pattern match in {}: {} ({})",
+                            category, matcher.description, matcher.tool_name
+                        ),
+                        source: DecisionSource::Pattern,
+                    });
                 }
             }
         }
@@ -444,7 +442,7 @@ impl ToolChoiceIntelligence {
 }
 
 /// Context information for tool choice analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnalysisContext {
     /// Whether the previous message was a tool call
     pub previous_was_tool_call: bool,
@@ -456,18 +454,6 @@ pub struct AnalysisContext {
     pub conversation_length: usize,
     /// Available tools in current context
     pub available_tools: Vec<String>,
-}
-
-impl Default for AnalysisContext {
-    fn default() -> Self {
-        Self {
-            previous_was_tool_call: false,
-            last_tool_name: None,
-            last_tool_error: false,
-            conversation_length: 0,
-            available_tools: Vec::new(),
-        }
-    }
 }
 
 /// Decision about tool choice made by the intelligence system

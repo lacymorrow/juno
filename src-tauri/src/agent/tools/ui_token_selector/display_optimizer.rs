@@ -242,7 +242,7 @@ impl DisplayOptimizer {
             let relative_y = token.y as f64 / display_info.bounds.height;
 
             // Boost importance for elements in the "golden zone" (center-left quadrant)
-            if relative_x >= 0.2 && relative_x <= 0.8 && relative_y >= 0.2 && relative_y <= 0.8 {
+            if (0.2..=0.8).contains(&relative_x) && (0.2..=0.8).contains(&relative_y) {
                 adjusted_importance = (adjusted_importance * 1.1).min(1.0);
             }
 

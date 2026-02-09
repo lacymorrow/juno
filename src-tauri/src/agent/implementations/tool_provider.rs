@@ -579,7 +579,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let _config_manager = if let Some(state) = app_state {
+        if let Some(state) = app_state {
             let config_arc = state.get_tool_config_manager().await;
             let config_guard = config_arc.lock().await;
             let is_enabled = config_guard.is_tool_enabled(&definition.name);
@@ -592,7 +592,7 @@ impl LocalToolProvider {
                 );
                 return;
             }
-        };
+        }
 
         self.register_async_tool(definition, executor).await;
     }
@@ -1640,6 +1640,7 @@ pub struct CombinedToolProvider {
     providers: Vec<Box<dyn CombinableToolProvider>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl CombinedToolProvider {
     pub fn new() -> Self {
         Self {

@@ -118,7 +118,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     // Load keyboard shortcuts from centralized settings
     if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_centralized_settings(
         &app_handle,
-        &*app_state,
+        &app_state,
     )
     .await
     {
@@ -130,14 +130,14 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
 
     // Load agent trigger mode from persistent storage
     if let Err(e) =
-        crate::commands::core::load_agent_trigger_mode_from_store(&app_handle, &*app_state).await
+        crate::commands::core::load_agent_trigger_mode_from_store(&app_handle, &app_state).await
     {
         warn!("Failed to load agent trigger mode: {} - using defaults", e);
     }
 
     // Load dictation trigger mode from persistent storage
     if let Err(e) =
-        crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &*app_state)
+        crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &app_state)
             .await
     {
         warn!(
@@ -151,7 +151,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         .map_err(|e| format!("Failed to create settings manager for tool config: {}", e))?;
     if let Err(e) = crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
         &settings_manager,
-        &*app_state,
+        &app_state,
     )
     .await
     {
@@ -163,7 +163,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
 
     // Register global shortcuts after loading configuration
     if let Err(e) =
-        crate::commands::shortcuts::update_global_shortcuts(&app_handle, &*app_state).await
+        crate::commands::shortcuts::update_global_shortcuts(&app_handle, &app_state).await
     {
         warn!(
             "Failed to register global shortcuts: {} - continuing without shortcuts",
@@ -194,7 +194,7 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
 
     // Load audio settings from centralized settings
     if let Err(e) =
-        crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &*app_state)
+        crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &app_state)
             .await
     {
         warn!(
@@ -242,7 +242,6 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
         partial_interval_ms: 500,
         enable_partial_transcription: true,
         enable_playback: audio_settings.sound_enabled,
-        ..Default::default()
     };
 
     // Note: The voice transcription plugin currently uses stub implementation

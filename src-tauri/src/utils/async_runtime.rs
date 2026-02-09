@@ -18,11 +18,11 @@ where
     // Check if we're already in a Tokio runtime context
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         // We're in a runtime context, use tokio::spawn directly (most efficient)
-        let _ = handle.spawn(task());
+        drop(handle.spawn(task()));
     } else {
         // We're not in a runtime context, use tauri's async runtime
         // Note: tauri::async_runtime::spawn returns a JoinHandle, not a Result
-        let _ = tauri::async_runtime::spawn(task());
+        drop(tauri::async_runtime::spawn(task()));
     }
 }
 

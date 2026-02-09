@@ -13,24 +13,20 @@ use std::time::{Duration, Instant};
 use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
 
 // Configuration cache to prevent redundant loading
+#[allow(clippy::type_complexity)]
 static CONFIG_CACHE: std::sync::LazyLock<Arc<Mutex<HashMap<String, (ProviderConfig, Instant)>>>> =
     std::sync::LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 const CACHE_DURATION: Duration = Duration::from_secs(5); // 5 second cache
 
 /// Agent execution mode
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentMode {
     /// Single agent handles all tasks directly
     Single,
     /// Multi-agent system with specialized agents
+    #[default]
     Multi,
-}
-
-impl Default for AgentMode {
-    fn default() -> Self {
-        AgentMode::Multi
-    }
 }
 
 impl AgentMode {
@@ -41,6 +37,7 @@ impl AgentMode {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "single" => Some(AgentMode::Single),

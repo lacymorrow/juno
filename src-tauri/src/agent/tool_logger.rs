@@ -87,6 +87,7 @@ fn format_timestamp(timestamp_ms: u64, use_24h: bool) -> String {
 }
 
 /// Enhanced tool usage entry creation with timestamp grouping
+#[allow(clippy::too_many_arguments)]
 fn create_tool_usage_entry(
     timestamp: u64,
     tool: String,
@@ -713,6 +714,7 @@ pub fn log_tool_call_result(
 }
 
 // NEW: Enhanced tool call result logging with metadata and timing
+#[allow(clippy::too_many_arguments)]
 pub async fn log_enhanced_tool_call_result(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -743,6 +745,7 @@ pub async fn log_enhanced_tool_call_result(
 }
 
 // NEW: Enhanced tool call result logging with original inputs for better details
+#[allow(clippy::too_many_arguments)]
 pub async fn log_enhanced_tool_call_result_with_inputs(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -1446,9 +1449,11 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
+    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
-        "complete_text": complete_text
+        "complete_text": complete_text,
+        "is_jsx": is_jsx
     });
 
     if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {
@@ -1462,10 +1467,12 @@ pub fn emit_stream_end_with_state(
     complete_text: String,
     agent_state: String,
 ) {
+    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
         "complete_text": complete_text,
-        "agent_state": agent_state
+        "agent_state": agent_state,
+        "is_jsx": is_jsx
     });
 
     if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {

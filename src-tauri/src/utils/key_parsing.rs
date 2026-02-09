@@ -147,7 +147,7 @@ pub fn to_applescript_format(key_combo: &str) -> Result<String, String> {
             }
         }
         script.push_str(&apple_modifiers.join(", "));
-        script.push_str("}");
+        script.push('}');
     }
 
     debug!("Generated AppleScript: {}", script);

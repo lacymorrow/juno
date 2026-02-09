@@ -72,19 +72,14 @@ pub fn filter_tts_content(text: &str) -> String {
 
     let mut filtered_text = text.to_string();
 
-    // Helper function to safely apply regex replacement
-    let safe_regex_replace = |text: &str, pattern: &str, replacement: &str| -> String {
-        match Regex::new(pattern) {
-            Ok(regex) => regex.replace_all(text, replacement).to_string(),
-            Err(e) => {
-                warn!("Failed to compile regex '{}': {}", pattern, e);
-                text.to_string()
-            }
+    // Remove only TTS tags (if present); do not strip other content
+    filtered_text = match Regex::new(r"</?TTS>") {
+        Ok(regex) => regex.replace_all(&filtered_text, "").to_string(),
+        Err(e) => {
+            warn!("Failed to compile regex '</?TTS>': {}", e);
+            filtered_text
         }
     };
-
-    // Remove only TTS tags (if present); do not strip other content
-    filtered_text = safe_regex_replace(&filtered_text, r"</?TTS>", "");
 
     // // 4. Remove function calls and method chaining (e.g., getData(), object.method())
     // let function_call_regex = Regex::new(r"\w+\([^)]*\)").unwrap();
@@ -331,11 +326,17 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
 }
 
 // Function to stop speech playback - Enhanced to handle all audio processes
+// KNOWN ISSUE: `killall afplay` and `killall say` kill ALL system-wide instances of these
+// processes, not just those spawned by Juno. This can interfere with other applications
+// that use `afplay` or `say` (e.g., other TTS apps, system audio playback, scripts).
+// A proper fix requires tracking spawned child PIDs and only killing those specific processes.
+// This is a design limitation that needs a larger refactor to implement PID-based cleanup.
 pub fn stop_speech() {
     info!("[TTS] Stop speech requested - killing all audio processes");
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
 
     // Kill platform-specific audio processes
+    // WARNING: This kills ALL system instances, not just Juno's. See comment above.
     #[cfg(target_os = "macos")]
     {
         // Kill macOS audio processes

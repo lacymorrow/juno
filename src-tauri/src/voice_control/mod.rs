@@ -18,7 +18,7 @@ pub use types::{VoiceControllerConfig, AudioThreadMessage, TranscriptionResult};
 use std::path::Path;
 use crate::constants::audio;
 
-/// Create a new VoiceController with default configuration
+// Create a new VoiceController with default configuration
 // pub fn new_voice_controller(model_path: &str) -> Result<VoiceController, String> {
 //     let config = VoiceControllerConfig::default();
 //     VoiceController::new_with_config(model_path, config)

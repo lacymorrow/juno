@@ -63,23 +63,23 @@ pub fn handle_application_startup_error(error: tauri::Error) -> JunoError {
 
     // Enhanced user-friendly error messages
     eprintln!("🚨 Juno failed to start properly.");
-    eprintln!("");
+    eprintln!();
     eprintln!("This is most commonly due to missing system permissions.");
     eprintln!("Please ensure you have granted the following permissions:");
-    eprintln!("");
+    eprintln!();
     eprintln!("📋 Required Permissions:");
     eprintln!("  • Accessibility (System Settings > Privacy & Security > Accessibility)");
     eprintln!("  • Screen Recording (System Settings > Privacy & Security > Screen Recording)");
     eprintln!("  • Microphone (System Settings > Privacy & Security > Microphone)");
-    eprintln!("");
+    eprintln!();
     eprintln!("🔄 If permissions are already granted:");
     eprintln!("  • Try restarting the application");
     eprintln!("  • Check if another instance is already running");
     eprintln!("  • Restart your computer if the issue persists");
-    eprintln!("");
+    eprintln!();
     eprintln!("🛠️  Technical Details:");
     eprintln!("  Error: {}", error);
-    eprintln!("");
+    eprintln!();
     eprintln!("💬 Need help? Visit: https://github.com/juno-ai/issues");
 
     // Return an error instead of exiting

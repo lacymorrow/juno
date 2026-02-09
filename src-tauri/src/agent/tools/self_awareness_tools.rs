@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use std::process::Command;
 use std::path::{Path, PathBuf};
 use std::fs;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 
 /// Registers self-awareness and introspection tools with the tool provider.
 ///
@@ -180,13 +180,13 @@ async fn build_self_exec(input: Value) -> Result<Value, String> {
     let mut cmd = Command::new("cargo");
     match target {
         "dev" => {
-            cmd.args(&["build", "--manifest-path", manifest_path]);
+            cmd.args(["build", "--manifest-path", manifest_path]);
         }
         "release" => {
-            cmd.args(&["build", "--release", "--manifest-path", manifest_path]);
+            cmd.args(["build", "--release", "--manifest-path", manifest_path]);
         }
         "check" => {
-            cmd.args(&["check", "--manifest-path", manifest_path]);
+            cmd.args(["check", "--manifest-path", manifest_path]);
         }
         _ => {
             return Err(format!("Invalid target: {}. Must be 'dev', 'release', or 'check'", target));
@@ -284,13 +284,7 @@ async fn inspect_prompt_system_exec(input: Value) -> Result<Value, String> {
     info!("Inspecting prompt system, show_content: {}", show_content);
 
     // Load the prompt manager
-    let prompt_manager = match (|| Ok::<crate::agent::prompts::PromptManager, String>(crate::agent::prompts::PromptManager::new()))() {
-        Ok(manager) => manager,
-        Err(e) => {
-            warn!("Failed to load prompt manager, using default: {}", e);
-            crate::agent::prompts::PromptManager::default()
-        }
-    };
+    let prompt_manager = crate::agent::prompts::PromptManager::new();
 
     let templates = prompt_manager.get_templates();
     let mut prompt_info = Vec::new();

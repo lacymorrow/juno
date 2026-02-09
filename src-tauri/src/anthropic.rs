@@ -138,7 +138,7 @@ static AGENT_EXECUTION_QUEUE: std::sync::OnceLock<AgentExecutionQueue> = std::sy
 
 /// Get or initialize the global agent execution queue
 fn get_agent_execution_queue() -> &'static AgentExecutionQueue {
-    AGENT_EXECUTION_QUEUE.get_or_init(|| AgentExecutionQueue::new())
+    AGENT_EXECUTION_QUEUE.get_or_init(AgentExecutionQueue::new)
 }
 
 // Remove unused structs AnthropicContentBlock, AnthropicUsage, AnthropicResponse
@@ -156,7 +156,7 @@ pub struct SubmitQueryResult {
 // --- Helper Functions ---
 
 /// Optimized JSX content detection using pattern matching
-fn is_jsx_content(content: &str) -> bool {
+pub fn is_jsx_content(content: &str) -> bool {
     // Early exit for content that's too short to be JSX
     if content.len() < 3 {
         return false;
@@ -170,7 +170,10 @@ fn is_jsx_content(content: &str) -> bool {
     // Use static array for better performance than contains() calls
     const JSX_INDICATORS: &[&str] = &[
         "Card", "Alert", "Button", "Badge", "Circle", "Rectangle", "Triangle",
-        "StatusCard", "ColorShowcase", "VisualDemo", "className=", "jsx", "React"
+        "StatusCard", "ColorShowcase", "VisualDemo", "className=", "jsx", "React",
+        "WeatherCard", "FileListCard", "SystemStatusCard", "ComparisonCard",
+        "TimerCard", "LinkCard", "TaskSummaryCard", "ProgressBar",
+        "ActionButton", "QueryButton", "OpenButton", "CopyButton"
     ];
 
     // Check for JSX patterns efficiently
@@ -291,7 +294,9 @@ pub async fn submit_query(
         .map_err(|e| format!("Failed to queue query: {}", e))?;
     
     // Execute the next queued query (will be the one we just queued)
-    queue.execute_next_query(state.clone()).await;
+    if queue.execute_next_query(state.clone()).await.is_none() {
+        warn!("execute_next_query returned None despite having a queued query - execution may have been blocked by a concurrent run");
+    }
     
     Ok(())
 }
@@ -335,16 +340,17 @@ async fn execute_agent_internal(
                     crate::commands::ui_commands::handle_agent_started(&app_handle_for_bar_start).await;
     });
 
+    // Reset cancellation signal BEFORE registering escape key
+    // so any escape press after registration is honored
+    state.reset_cancel();
+    info!("Reset cancellation signal for new agent execution");
+
     // Register escape key for cancellation during agent execution
     if let Err(e) =
         crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
     {
         warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
     }
-
-    // Reset cancellation signal for the new agent
-    state.reset_cancel();
-    info!("Reset cancellation signal for new agent execution");
 
     let trimmed_query = query.trim();
 
@@ -403,13 +409,14 @@ async fn execute_agent_internal(
     
     // TEMPORARY DEBUG FIX: Force single agent mode for computer use tasks
     // This ensures direct tool access instead of delegation
-    let contains_computer_keywords = trimmed_query.to_lowercase().contains("click") 
-        || trimmed_query.to_lowercase().contains("drag") 
-        || trimmed_query.to_lowercase().contains("mouse")
-        || trimmed_query.to_lowercase().contains("screenshot")
-        || trimmed_query.to_lowercase().contains("computer")
-        || trimmed_query.to_lowercase().contains("spiral")
-        || trimmed_query.to_lowercase().contains("draw");
+    let lower_query = trimmed_query.to_lowercase();
+    let contains_computer_keywords = lower_query.contains("click")
+        || lower_query.contains("drag")
+        || lower_query.contains("mouse")
+        || lower_query.contains("screenshot")
+        || lower_query.contains("computer")
+        || lower_query.contains("spiral")
+        || lower_query.contains("draw");
         
     let effective_agent_mode = if contains_computer_keywords {
         warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
@@ -497,12 +504,14 @@ async fn execute_agent_internal(
             {
                 let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
                 error!("{}", err_msg);
+                let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                state.mark_agent_execution_finished();
                 return Err(err_msg);
             }
             info!("✅ Registered full Computer Use tools for single agent mode");
 
             // Create single agent brain with enriched system prompt including available MCP tools
-            let brain = match {
+            let brain_result = {
                 // Load prompt manager to render system prompt with variables
                 let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
                     Ok(m) => Some(m),
@@ -551,7 +560,8 @@ async fn execute_agent_internal(
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt)
-            } {
+            };
+            let brain = match brain_result {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
@@ -574,6 +584,8 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
+                    let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                    state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
             };
@@ -634,6 +646,8 @@ async fn execute_agent_internal(
             {
                 let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
                 error!("{}", err_msg);
+                let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                state.mark_agent_execution_finished();
                 return Err(err_msg);
             }
             info!("✅ Registered full Computer Use tools for specialist mode");
@@ -707,7 +721,7 @@ async fn execute_agent_internal(
             }
 
             // Build orchestrator system prompt with available MCP tools listed for visibility
-            let orchestrator_brain = match {
+            let orchestrator_brain_result = {
                 // Settings → PromptManager
                 let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
                     Ok(m) => Some(m),
@@ -758,7 +772,8 @@ async fn execute_agent_internal(
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt)
-            } {
+            };
+            let orchestrator_brain = match orchestrator_brain_result {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
@@ -781,6 +796,8 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
+                    let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                    state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
             };
@@ -999,7 +1016,7 @@ async fn execute_agent_internal(
             if let Some(original_provider) = original_tts_provider {
                 // We'll restore it after TTS processing below
                 let state_ref = state.inner().clone();
-                tokio::task::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     // Give TTS time to process
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     if let Ok(()) = state_ref.set_tts_provider(original_provider) {
@@ -1324,26 +1341,6 @@ async fn execute_specialized_agent_task(
         // Return the completely isolated memory manager
         fresh_memory
     };
-
-    // Clean up only genuinely orphaned tool calls from previous executions
-    // Generate a current execution ID to distinguish between current and previous sessions
-    let current_execution_id = uuid::Uuid::new_v4().to_string();
-    {
-        let mut memory_manager = specialist_memory.clone();
-
-        // Mark current execution so new tools won't be considered orphaned
-        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
-            warn!("Failed to set current execution ID for {} agent: {}", agent_type, e);
-        }
-
-        // Now safely clean only tools from previous executions
-        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
-            warn!(
-                "Failed to clean orphaned tool calls for {} agent: {}",
-                agent_type, e
-            );
-        }
-    }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;

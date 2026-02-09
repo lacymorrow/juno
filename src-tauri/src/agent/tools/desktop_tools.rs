@@ -78,7 +78,6 @@ use std::time::Duration;
 //
 // This eliminates redundancy and ensures 100% compliance with the official Anthropic Computer Use API specification.
 // Agents should use the unified 'computer' tool for ALL screen interactions.
-
 async fn register_additional_computer_use_tools(
     _provider: &mut LocalToolProvider,
     _app_handle: tauri::AppHandle,

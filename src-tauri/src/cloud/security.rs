@@ -100,11 +100,7 @@ impl CloudSecurity {
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = current_timestamp_secs();
 
-        let time_diff = if now > timestamp {
-            now - timestamp
-        } else {
-            timestamp - now
-        };
+        let time_diff = now.abs_diff(timestamp);
 
         // Generous time skew allowance - warn but allow (1 hour)
         if time_diff > 3600 {
@@ -247,7 +243,7 @@ impl CloudSecurity {
         let mut sanitized = command.clone();
 
         // Remove sensitive data from logs
-        if let Some(_) = &sanitized.payload.audio_base64 {
+        if sanitized.payload.audio_base64.is_some() {
             sanitized.payload.audio_base64 = Some("[AUDIO_DATA_REDACTED]".to_string());
         }
 

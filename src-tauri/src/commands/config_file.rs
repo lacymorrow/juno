@@ -124,7 +124,7 @@ pub async fn open_config_file(app_handle: AppHandle, file_name: String) -> Resul
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
-            .args(&["/C", "start", "", file_path.to_str().unwrap()])
+            .args(&["/C", "start", "", &file_path.to_string_lossy()])
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
     }

@@ -1058,8 +1058,7 @@ impl Orchestrator {
         };
 
         ((base_batch_size as f32 * load_factor * agent_factor) as usize)
-            .max(1)
-            .min(8)
+            .clamp(1, 8)
     }
 
     /// NEW: Adaptive timeout calculation based on task characteristics
@@ -1105,7 +1104,7 @@ impl Orchestrator {
             complexity_score += desc_complexity + tool_complexity + agent_complexity;
         }
 
-        (complexity_score / tasks.len() as f32).max(0.5).min(3.0)
+        (complexity_score / tasks.len() as f32).clamp(0.5, 3.0)
     }
 
     /// NEW: Get current system load factor

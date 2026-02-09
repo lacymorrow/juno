@@ -1,5 +1,5 @@
-/// Rate limiting utilities for Tauri commands
-/// Prevents abuse and ensures system stability
+//! Rate limiting utilities for Tauri commands
+//! Prevents abuse and ensures system stability
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -196,6 +196,7 @@ pub struct GlobalRateLimiters {
     pub browser_operations: RateLimiter,
 }
 
+#[allow(clippy::new_without_default)]
 impl GlobalRateLimiters {
     pub fn new() -> Self {
         Self {

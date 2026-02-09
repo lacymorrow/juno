@@ -702,6 +702,7 @@ impl VisualReasoningEngine {
 
 pub struct MultimodalProcessor;
 
+#[allow(clippy::new_without_default)]
 impl MultimodalProcessor {
     pub fn new() -> Self {
         Self
@@ -767,6 +768,7 @@ impl MultimodalProcessor {
 
 pub struct SpatialReasoner;
 
+#[allow(clippy::new_without_default)]
 impl SpatialReasoner {
     pub fn new() -> Self {
         Self
@@ -829,14 +831,14 @@ impl SpatialReasoner {
 
         let angle = dy.atan2(dx).to_degrees();
         match angle {
-            a if a >= -22.5 && a < 22.5 => Direction::East,
-            a if a >= 22.5 && a < 67.5 => Direction::SouthEast,
-            a if a >= 67.5 && a < 112.5 => Direction::South,
-            a if a >= 112.5 && a < 157.5 => Direction::SouthWest,
-            a if a >= 157.5 || a < -157.5 => Direction::West,
-            a if a >= -157.5 && a < -112.5 => Direction::NorthWest,
-            a if a >= -112.5 && a < -67.5 => Direction::North,
-            a if a >= -67.5 && a < -22.5 => Direction::NorthEast,
+            a if (-22.5..22.5).contains(&a) => Direction::East,
+            a if (22.5..67.5).contains(&a) => Direction::SouthEast,
+            a if (67.5..112.5).contains(&a) => Direction::South,
+            a if (112.5..157.5).contains(&a) => Direction::SouthWest,
+            a if !(-157.5..157.5).contains(&a) => Direction::West,
+            a if (-157.5..-112.5).contains(&a) => Direction::NorthWest,
+            a if (-112.5..-67.5).contains(&a) => Direction::North,
+            a if (-67.5..-22.5).contains(&a) => Direction::NorthEast,
             _ => Direction::Center,
         }
     }
@@ -889,6 +891,7 @@ impl SpatialReasoner {
 
 pub struct TemporalModeler;
 
+#[allow(clippy::new_without_default)]
 impl TemporalModeler {
     pub fn new() -> Self {
         Self
@@ -921,6 +924,7 @@ impl TemporalModeler {
 
 pub struct CrossModalGrounder;
 
+#[allow(clippy::new_without_default)]
 impl CrossModalGrounder {
     pub fn new() -> Self {
         Self
@@ -952,6 +956,7 @@ impl CrossModalGrounder {
 
 pub struct HierarchicalAnalyzer;
 
+#[allow(clippy::new_without_default)]
 impl HierarchicalAnalyzer {
     pub fn new() -> Self {
         Self

@@ -1,5 +1,5 @@
-/// Resource management utilities for preventing resource leaks
-/// Provides RAII patterns and lifecycle management for expensive resources
+//! Resource management utilities for preventing resource leaks
+//! Provides RAII patterns and lifecycle management for expensive resources
 
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -139,6 +139,7 @@ pub struct BrowserControllerManager {
     active_controllers: Arc<RwLock<HashMap<String, Arc<crate::agent::tools::browser_controller::BrowserController>>>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl BrowserControllerManager {
     pub fn new() -> Self {
         Self {
@@ -266,6 +267,7 @@ pub struct AutoreleasePool {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::new_without_default)]
 impl AutoreleasePool {
     pub fn new() -> Self {
         use objc::{class, msg_send, sel, sel_impl};
@@ -315,6 +317,7 @@ pub struct ResourceManager {
     temp_files: Arc<Mutex<Vec<std::path::PathBuf>>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl ResourceManager {
     pub fn new() -> Self {
         Self {
@@ -325,7 +328,7 @@ impl ResourceManager {
 
     /// Get the global resource manager instance
     pub fn global() -> &'static ResourceManager {
-        RESOURCE_MANAGER.get_or_init(|| ResourceManager::new())
+        RESOURCE_MANAGER.get_or_init(ResourceManager::new)
     }
 
     /// Get the browser controller manager

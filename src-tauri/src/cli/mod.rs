@@ -191,8 +191,8 @@ pub enum VoiceCommands {
         duration: u32,
 
         /// Output file path
-        #[arg(short, long, help = "Output audio file path")]
-        output: Option<String>,
+        #[arg(short = 'O', long = "output-file", help = "Output audio file path")]
+        output_file: Option<String>,
 
         /// Audio format
         #[arg(long, value_enum, default_value_t = AudioFormat::Wav, help = "Audio format")]
@@ -609,9 +609,10 @@ pub enum TestCommands {
     },
 }
 
-#[derive(ValueEnum, Clone, Debug, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Debug, Default, Serialize, Deserialize)]
 pub enum OutputFormat {
     /// Human-readable text output
+    #[default]
     Text,
     /// JSON structured output
     Json,
@@ -625,9 +626,10 @@ pub enum OutputFormat {
     Table,
 }
 
-#[derive(ValueEnum, Clone, Debug, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Debug, Default, Serialize, Deserialize)]
 pub enum AudioFormat {
     /// WAV audio format
+    #[default]
     Wav,
     /// MP3 audio format
     Mp3,
@@ -637,11 +639,12 @@ pub enum AudioFormat {
     Flac,
 }
 
-#[derive(ValueEnum, Clone, Debug, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Debug, Default, Serialize, Deserialize)]
 pub enum VerbosityLevel {
     /// Minimal output
     Quiet,
     /// Normal output
+    #[default]
     Normal,
     /// Verbose output
     Verbose,
@@ -651,23 +654,7 @@ pub enum VerbosityLevel {
     Trace,
 }
 
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::Text
-    }
-}
 
-impl Default for AudioFormat {
-    fn default() -> Self {
-        AudioFormat::Wav
-    }
-}
-
-impl Default for VerbosityLevel {
-    fn default() -> Self {
-        VerbosityLevel::Normal
-    }
-}
 
 // Utility functions for CLI
 impl Cli {

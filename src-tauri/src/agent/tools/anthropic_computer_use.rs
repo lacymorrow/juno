@@ -127,7 +127,7 @@ fn extract_line_range(content: &str, start_line: usize, end_line: Option<usize>)
     }
 
     let end_idx = match end_line {
-        Some(end) if end == 0 => return Err("Line numbers are 1-indexed, end_line cannot be 0".to_string()),
+        Some(0) => return Err("Line numbers are 1-indexed, end_line cannot be 0".to_string()),
         Some(end) => {
             let end_idx = end;
             if end_idx > total_lines {
@@ -154,6 +154,7 @@ fn extract_line_range(content: &str, start_line: usize, end_line: Option<usize>)
 }
 
 /// Preserves original line ending style when writing files
+#[allow(clippy::if_same_then_else)]
 fn detect_line_ending(content: &str) -> &'static str {
     if content.contains("\r\n") {
         "\r\n"
@@ -866,7 +867,7 @@ pub async fn execute_str_replace_tool(
 
             // Handle view_range if provided
             if let (Some(start), end) = (
-                input["view_range"].as_array().and_then(|arr| arr.get(0)).and_then(|v| v.as_u64()),
+                input["view_range"].as_array().and_then(|arr| arr.first()).and_then(|v| v.as_u64()),
                 input["view_range"].as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_u64())
             ) {
                 let start_line = start as usize;

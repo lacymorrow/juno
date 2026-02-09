@@ -14,6 +14,7 @@ pub struct VisualReasoningState {
     pub engine: Arc<RwLock<VisualReasoningEngine>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl VisualReasoningState {
     pub fn new() -> Self {
         let config = VisualReasoningConfig::default();
@@ -70,12 +71,14 @@ pub async fn analyze_gui_scene_with_visual_reasoning(
     // Update engine configuration based on request
     {
         let mut engine = state.engine.write().await;
-        let mut config = VisualReasoningConfig::default();
-        config.enable_multimodal_processing = request.enable_multimodal_processing;
-        config.enable_spatial_reasoning = request.enable_spatial_reasoning;
-        config.enable_temporal_modeling = request.enable_temporal_modeling;
-        config.enable_cross_modal_grounding = request.enable_cross_modal_grounding;
-        config.enable_hierarchical_analysis = request.enable_hierarchical_analysis;
+        let config = VisualReasoningConfig {
+            enable_multimodal_processing: request.enable_multimodal_processing,
+            enable_spatial_reasoning: request.enable_spatial_reasoning,
+            enable_temporal_modeling: request.enable_temporal_modeling,
+            enable_cross_modal_grounding: request.enable_cross_modal_grounding,
+            enable_hierarchical_analysis: request.enable_hierarchical_analysis,
+            ..Default::default()
+        };
 
         *engine = VisualReasoningEngine::new(config);
     }
