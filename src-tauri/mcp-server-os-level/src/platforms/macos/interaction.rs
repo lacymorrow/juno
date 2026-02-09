@@ -24,6 +24,13 @@ use arboard::Clipboard;
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
 const KEYCODE_A: CGKeyCode = 0;    // 'A' key
 
+// Timing constants for UI automation delays (milliseconds)
+const MOUSE_EVENT_DELAY_MS: u64 = 50;   // Delay between mouse events (move, down, up)
+const KEY_EVENT_DELAY_MS: u64 = 50;     // Delay between key press/release events
+const MOUSE_MOVE_STEP_DELAY_MS: u64 = 20;  // Delay between mouse move interpolation steps
+const DRAG_HOLD_DELAY_MS: u64 = 100;    // Delay to hold before/after drag operations
+const APP_ACTIVATION_DELAY_MS: u64 = 100; // Delay after app activation
+
 /// Helper function to create multi-monitor aware CGPoint
 /// Adjusts coordinates for the appropriate display and logs any changes
 fn create_adjusted_point(x: f64, y: f64) -> Result<CGPoint, AutomationError> {
@@ -45,26 +52,26 @@ struct NativeClipboard {
 
 impl NativeClipboard {
     fn new() -> Result<Self, AutomationError> {
-        let clipboard = Clipboard::new().map_err(|_e| {
-            AutomationError::PlatformError("Failed to initialize clipboard".to_string())
+        let clipboard = Clipboard::new().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to initialize clipboard: {}", e))
         })?;
         Ok(NativeClipboard { clipboard })
     }
 
     fn read(&self) -> Result<String, AutomationError> {
         // Create a new clipboard instance for reading since arboard methods take &mut self
-        let mut clipboard = Clipboard::new().map_err(|_e| {
-            AutomationError::PlatformError("Failed to access clipboard for reading".to_string())
+        let mut clipboard = Clipboard::new().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to access clipboard for reading: {}", e))
         })?;
 
-        clipboard.get_text().map_err(|_e| {
-            AutomationError::PlatformError("Failed to read from clipboard".to_string())
+        clipboard.get_text().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to read from clipboard: {}", e))
         })
     }
 
     fn write(&mut self, content: String) -> Result<(), AutomationError> {
-        self.clipboard.set_text(content).map_err(|_e| {
-            AutomationError::PlatformError("Failed to write to clipboard".to_string())
+        self.clipboard.set_text(content).map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to write to clipboard: {}", e))
         })
     }
 }
@@ -75,8 +82,7 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
     let attr = AXAttribute::new(&CFString::new("AXTopLevelUIElement"));
     match element.element.0.attribute(&attr) {
         Ok(value) => {
-            if let Some(app) = value.downcast::<AXUIElement>() {
-                Some(MacOSUIElement {
+            value.downcast::<AXUIElement>().map(|app| MacOSUIElement {
                     element: ThreadSafeAXUIElement::new(app),
                     use_background_apps: element.use_background_apps,
                     activate_app: element.activate_app,
@@ -85,9 +91,6 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
                     cached_description: None,
                     cached_value: None,
                 })
-            } else {
-                None
-            }
         }
         Err(_) => None,
     }
@@ -131,7 +134,7 @@ pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, Automa
 
 pub(crate) fn click_press(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
     let press_attr = AXAttribute::new(&CFString::new("AXPress"));
-    match element.element.0.perform_action(&press_attr.as_CFString()) {
+    match element.element.0.perform_action(press_attr.as_CFString()) {
         Ok(_) => {
             debug!("Successfully clicked element with AXPress");
             Ok(ClickResult {
@@ -151,7 +154,7 @@ pub(crate) fn click_accessibility_click(
     element: &MacOSUIElement,
 ) -> Result<ClickResult, AutomationError> {
     let click_attr = AXAttribute::new(&CFString::new("AXClick"));
-    match element.element.0.perform_action(&click_attr.as_CFString()) {
+    match element.element.0.perform_action(click_attr.as_CFString()) {
         Ok(_) => {
             debug!("Successfully clicked element with AXClick");
             Ok(ClickResult {
@@ -188,7 +191,7 @@ pub(crate) fn click_mouse_simulation(
                 AutomationError::PlatformError("Failed to create mouse move event".to_string())
             })?;
             mouse_move.post(CGEventTapLocation::HID);
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
 
             debug!("Mouse down at ({}, {})", center_x, center_y);
             let mouse_down = CGEvent::new_mouse_event(
@@ -201,7 +204,7 @@ pub(crate) fn click_mouse_simulation(
                 AutomationError::PlatformError("Failed to create mouse down event".to_string())
             })?;
             mouse_down.post(CGEventTapLocation::HID);
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
 
             debug!("Mouse up at ({}, {})", center_x, center_y);
             let mouse_up = CGEvent::new_mouse_event(
@@ -240,7 +243,7 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
     if element
         .element
         .0
-        .perform_action(&raise_attr.as_CFString())
+        .perform_action(raise_attr.as_CFString())
         .is_ok()
     {
         debug!("Successfully raised element");
@@ -255,7 +258,7 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
                     debug!("Successfully set focus to element via AXFocusedUIElement");
                     return Ok(());
                 } else {
-                    let error = accessibility::Error::from(accessibility::Error::Ax(result));
+                    let error = accessibility::Error::Ax(result);
                     debug!("Failed to set AXFocusedUIElement: {:?}", error);
                 }
             }
@@ -264,7 +267,7 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
     debug!("Raise action failed or app not found, attempting focus via click");
     click_auto(element).map(|_result| {
         debug!("Focus achieved via click method: {}", _result.method);
-        ()
+        
     })
 }
 
@@ -419,7 +422,7 @@ pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
     debug!("Performing right click at ({}, {}) [adjusted]", point.x, point.y);
     mouse_move(x, y)?; // Ensure cursor is at the correct position
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(MOUSE_MOVE_STEP_DELAY_MS));
 
     let source = get_pooled_event_source()
         .map_err(|_| AutomationError::PlatformError("Failed to create event source for right click".to_string()))?;
@@ -582,7 +585,7 @@ pub(crate) fn left_click_drag(
     let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, start_point, CGMouseButton::Left)
         .map_err(|_| AutomationError::PlatformError("Failed to create drag down event".to_string()))?;
     down_event.post(CGEventTapLocation::HID);
-    std::thread::sleep(std::time::Duration::from_millis(100)); // Hold briefly before dragging
+    thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS)); // Hold briefly before dragging
 
     // 3. Move to end position (drag event)
     let drag_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, end_point, CGMouseButton::Left)
@@ -648,7 +651,7 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
                  // Let's proceed cautiously, AXValue might still work if focus is weird.
             } else {
                  // Add a small delay after fallback click before trying to type
-                 thread::sleep(Duration::from_millis(100));
+                 thread::sleep(Duration::from_millis(APP_ACTIVATION_DELAY_MS));
             }
         }
     }
@@ -666,7 +669,7 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
             debug!("Successfully set text value via AXValue");
             return Ok(());
         } else {
-            let error = accessibility::Error::from(accessibility::Error::Ax(result));
+            let error = accessibility::Error::Ax(result);
             debug!("Failed to set text via AXValue: {:?}. Falling back to clipboard paste.", error);
         }
     }
@@ -838,7 +841,9 @@ pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
 
     // If not in predefined map, check if it's a single alphanumeric character
     if key_lower.len() == 1 {
-        let c = key_lower.chars().next().unwrap();
+        let c = key_lower.chars().next().ok_or_else(|| AutomationError::InvalidArgument(
+            format!("Failed to parse key: {}", key)
+        ))?;
 
         // Handle alphabetic keys (a-z)
         if c.is_ascii_alphabetic() {
@@ -962,7 +967,7 @@ pub(crate) fn press_key(element: &MacOSUIElement, key_combo: &str) -> Result<(),
     }
     key_down.post(CGEventTapLocation::HID);
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
 
     let key_up = CGEvent::new_keyboard_event(source, key_code as CGKeyCode, false)
         .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
@@ -984,7 +989,7 @@ pub(crate) fn set_value(element: &MacOSUIElement, value: &str) -> Result<(), Aut
         let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
         let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
         if result != 0 {
-            let error = accessibility::Error::from(accessibility::Error::Ax(result));
+            let error = accessibility::Error::Ax(result);
             debug!("Failed to set value via AXValue: {:?}", error);
             return Err(AutomationError::PlatformError(format!(
                 "Failed to set value: {:?}",
@@ -1037,14 +1042,13 @@ pub(crate) fn scroll(
     let scroll_event = CGEvent::new(source.clone()) // Clone source again here
         .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
 
-    // Constants for scroll wheel event
-    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    // Constants for scroll wheel event field IDs
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
     const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll mode
 
-    // Set event type to scroll wheel - use transmute instead of from_type_id
-    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+    // Set event type to scroll wheel
+    scroll_event.set_type(CGEventType::ScrollWheel);
 
     // Set the line scroll bit
     scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
@@ -1067,7 +1071,7 @@ pub(crate) fn select_text(element: &MacOSUIElement) -> Result<(), AutomationErro
 
     // Try using AXSelectText action if available
     let select_attr = AXAttribute::new(&CFString::new("AXSelectText"));
-    match element.element.0.perform_action(&select_attr.as_CFString()) {
+    match element.element.0.perform_action(select_attr.as_CFString()) {
         Ok(_) => {
             debug!("Successfully selected text using AXSelectText action");
             return Ok(());
@@ -1380,14 +1384,13 @@ pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Re
         AutomationError::PlatformError("Failed to create scroll event".to_string())
     })?;
 
-    // Constants for scroll wheel event types
-    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    // Constants for scroll wheel event field IDs
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
     const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll mode
 
-    // Set event type to scroll wheel using transmute for safety
-    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+    // Set event type to scroll wheel
+    scroll_event.set_type(CGEventType::ScrollWheel);
 
     // Set the line scroll bit
     scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
@@ -1465,14 +1468,13 @@ pub(crate) fn scroll_with_modifiers(
         .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
 
     // Set scroll event fields directly
-    // Constants for scroll wheel event types
-    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    // Constants for scroll wheel event field IDs
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta (main scroll axis)
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
     const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll (as opposed to pixel scroll)
 
-    // Set event type using CGEventType transmute
-    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+    // Set event type to scroll wheel
+    scroll_event.set_type(CGEventType::ScrollWheel);
 
     // Apply modifiers if any are specified
     if let Some(flags) = modifiers {

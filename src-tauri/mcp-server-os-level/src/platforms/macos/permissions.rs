@@ -46,16 +46,14 @@ pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, Automa
         if is_trusted {
             debug!("accessibility permissions are granted");
             Ok(true)
+        } else if !show_prompt {
+            debug!("accessibility permissions not granted");
+            Err(AutomationError::PermissionDenied(
+                "Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.".to_string(),
+            ))
         } else {
-            if !show_prompt {
-                debug!("accessibility permissions not granted");
-                Err(AutomationError::PermissionDenied(
-                    "Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.".to_string(),
-                ))
-            } else {
-                debug!("accessibility permissions prompt displayed");
-                Ok(false)
-            }
+            debug!("accessibility permissions prompt displayed");
+            Ok(false)
         }
     }
 }

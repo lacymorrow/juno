@@ -61,20 +61,20 @@ pub(crate) fn map_generic_role_to_macos_roles(role: &str) -> Vec<String> {
 
 pub(crate) fn macos_role_to_generic_role(role: &str) -> Vec<String> {
     match role.to_lowercase().as_str() {
-        "AXWindow" => vec!["window".to_string()],
-        "AXButton" | "AXMenuItem" | "AXMenuBarItem" => vec!["button".to_string()],
-        "AXTextField" | "AXTextArea" | "AXTextEdit" | "AXSearchField" | "AXURIField"
-        | "AXAddressField" => vec![
+        "axwindow" => vec!["window".to_string()],
+        "axbutton" | "axmenuitem" | "axmenubaritem" => vec!["button".to_string()],
+        "axtextfield" | "axtextarea" | "axtextedit" | "axsearchfield" | "axurifield"
+        | "axaddressfield" => vec![
             "textfield".to_string(),
             "input".to_string(),
             "textbox".to_string(),
             "url".to_string(),
             "urlfield".to_string(),
         ],
-        "AXList" => vec!["list".to_string()],
-        "AXCell" => vec!["listitem".to_string()],
-        "AXSheet" | "AXDialog" => vec!["dialog".to_string()],
-        "AXGroup" | "AXGenericElement" | "AXWebArea" => {
+        "axlist" => vec!["list".to_string()],
+        "axcell" => vec!["listitem".to_string()],
+        "axsheet" | "axdialog" => vec!["dialog".to_string()],
+        "axgroup" | "axgenericelement" | "axwebarea" => {
             vec!["group".to_string(), "genericElement".to_string()]
         }
         _ => vec![role.to_string()],
@@ -112,12 +112,12 @@ pub(crate) fn get_running_application_pids(
             // Filter out common background workers by bundle identifier
             let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
             if !bundle_id.is_null() {
-                let bundle_id_str: &str = {
+                let bundle_id_str: String = {
                     let nsstring = bundle_id as *const objc::runtime::Object;
                     let bytes: *const std::os::raw::c_char = msg_send![nsstring, UTF8String];
                     let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4]; // NSUTF8StringEncoding = 4
                     let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                    std::str::from_utf8_unchecked(bytes_slice)
+                    String::from_utf8_lossy(bytes_slice).into_owned()
                 };
 
                 // Skip common background processes and workers
@@ -148,7 +148,7 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
         .value()
         .ok()
         .and_then(|v| v.downcast_into::<CFString>())
-        .map_or(false, |s| s.to_string().contains(text));
+        .is_some_and(|s| s.to_string().contains(text));
 
     if contains_in_value {
         return true;
@@ -158,12 +158,12 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
     let contains_in_title = e
         .title()
         .ok()
-        .map_or(false, |t| t.to_string().contains(text));
+        .is_some_and(|t| t.to_string().contains(text));
 
     let contains_in_desc = e
         .description()
         .ok()
-        .map_or(false, |d| d.to_string().contains(text));
+        .is_some_and(|d| d.to_string().contains(text));
 
     // Check common text attributes
     for attr_name in &[
@@ -333,7 +333,7 @@ pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, Au
          );
          warn!("{}", err_msg);
          // Keep this as PlatformError as well (conversion/clamping issue)
-         return Err(AutomationError::PlatformError(err_msg));
+         Err(AutomationError::PlatformError(err_msg))
     } else {
         // Crop the buffer using the original element bounds (as u32)
         let cropped_buffer = imageops::crop_imm(
@@ -450,7 +450,7 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
             label, x, y, width, height
         );
         warn!("{}", err_msg);
-        return Err(AutomationError::PlatformError(err_msg));
+        Err(AutomationError::PlatformError(err_msg))
     } else {
         // Crop the buffer using the window bounds
         let cropped_buffer = imageops::crop_imm(
