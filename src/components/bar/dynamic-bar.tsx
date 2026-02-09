@@ -592,7 +592,7 @@ const AIFloatingChatbot = ({
   const handleIslandClick = useCallback(async () => {
     const interaction = createInteraction(UI.INTERACTION_TYPES_CLICK);
     await sendInteraction(interaction);
-  }, []);
+  }, [createInteraction, sendInteraction]);
 
   /**
    * Handle keyboard shortcuts (especially Escape key)
@@ -620,7 +620,7 @@ const AIFloatingChatbot = ({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [barState.barState]);
+  }, [barState.barState, createInteraction, sendInteraction]);
 
   const renderCurrentWidget = () => {
     return <WidgetRenderer widget={currentWidgetData} />;

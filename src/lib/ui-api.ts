@@ -309,12 +309,28 @@ export class UIElementManager {
 
     // === Event Management ===
 
+    /**
+     * Replace any existing listener for the given key before registering a new one.
+     * Prevents listener leaks when the same method is called multiple times.
+     */
+    private async replaceListener(key: string, unlisten: UnlistenFn): Promise<void> {
+        const existing = this.listeners.get(key);
+        if (existing) {
+            try {
+                existing();
+            } catch (error) {
+                console.warn(`Failed to clean up previous ${key} listener for ${this.elementId}:`, error);
+            }
+        }
+        this.listeners.set(key, unlisten);
+    }
+
     async onStateUpdate(callback: (state: UIStateData) => void): Promise<UnlistenFn> {
         const eventName = `ui-state-update-${this.elementId}`;
         const unlisten = await listen<UIEventPayload<UIStateData>>(eventName, (event) => {
             callback(event.payload.data);
         });
-        this.listeners.set("state-update", unlisten);
+        await this.replaceListener("state-update", unlisten);
         return unlisten;
     }
 
@@ -323,7 +339,7 @@ export class UIElementManager {
         const unlisten = await listen<UIEventPayload<UIElementConfig>>(eventName, (event) => {
             callback(event.payload.data);
         });
-        this.listeners.set("config-update", unlisten);
+        await this.replaceListener("config-update", unlisten);
         return unlisten;
     }
 
@@ -332,7 +348,7 @@ export class UIElementManager {
         const unlisten = await listen<UIEventPayload<any>>(eventName, (event) => {
             callback(event.payload.data);
         });
-        this.listeners.set("agent-event", unlisten);
+        await this.replaceListener("agent-event", unlisten);
         return unlisten;
     }
 
@@ -341,7 +357,7 @@ export class UIElementManager {
         const unlisten = await listen<UIEventPayload<any>>(eventName, (event) => {
             callback(event.payload.data);
         });
-        this.listeners.set("voice-event", unlisten);
+        await this.replaceListener("voice-event", unlisten);
         return unlisten;
     }
 

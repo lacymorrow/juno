@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 type KeyPressInfo = {
   key: string;
@@ -32,26 +33,33 @@ const KeyPressOverlay = () => {
     // Only listen for events if overlay is enabled
     if (!isEnabled) return;
 
-    // Listen for key press visualization events from the backend
-    const unlisten = listen<{ key: string; modifier?: string }>(
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    listen<{ key: string; modifier?: string }>(
       "key-press-visualization",
       (event) => {
+        if (!mounted) return;
         const { key, modifier } = event.payload;
-        // Add new key press with unique ID
         const newKeyPress: KeyPressInfo = {
           key,
           modifier,
-          id: Date.now() + Math.random(), // Ensure unique ID even for rapid key presses
+          id: Date.now() + Math.random(),
           timestamp: Date.now(),
         };
-
         setKeyPresses((prevKeyPresses) => [...prevKeyPresses, newKeyPress]);
       }
-    );
+    ).then((fn) => {
+      if (mounted) {
+        unlisten = fn;
+      } else {
+        safeCleanupEventListener(fn);
+      }
+    }).catch((err) => console.error("Failed to setup key-press listener:", err));
 
     return () => {
-      // Cleanup listener when component unmounts or is disabled
-      unlisten.then((unlistenFn) => unlistenFn());
+      mounted = false;
+      safeCleanupEventListener(unlisten);
     };
   }, [isEnabled]);
 

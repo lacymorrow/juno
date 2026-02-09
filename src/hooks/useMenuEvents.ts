@@ -32,189 +32,147 @@ export function useMenuEvents({
 	handleUpdateCheck,
 }: MenuEventsProps) {
 	useEffect(() => {
+		let mounted = true;
 		let unlistenCallbacks: (() => void)[] = [];
+
+		const addListener = async (event: string, handler: () => void) => {
+			const unlisten = await listen(event, () => {
+				if (mounted) handler();
+			});
+			if (mounted) unlistenCallbacks.push(unlisten);
+			else safeCleanupEventListener(unlisten);
+		};
 
 		const setupMenuListeners = async () => {
 			// View management
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_VIEW_CHAT, () => {
-					console.log("📱 Menu: Switching to chat view");
-					setCurrentView("chat");
-				})
-			);
+			await addListener(EVENTS.MENU_VIEW_CHAT, () => {
+				console.log("📱 Menu: Switching to chat view");
+				setCurrentView("chat");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_VIEW_DEVTOOLS, () => {
-					console.log("🛠️ Menu: Switching to devtools view");
-					setCurrentView("devtools");
-				})
-			);
+			await addListener(EVENTS.MENU_VIEW_DEVTOOLS, () => {
+				console.log("🛠️ Menu: Switching to devtools view");
+				setCurrentView("devtools");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_VIEW_PERMISSIONS, () => {
-					console.log("🔒 Menu: Switching to permissions view");
-					setCurrentView("permissions");
-				})
-			);
+			await addListener(EVENTS.MENU_VIEW_PERMISSIONS, () => {
+				console.log("🔒 Menu: Switching to permissions view");
+				setCurrentView("permissions");
+			});
 
 			// Modal management
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_SHOW_HELP, () => {
-					console.log("❓ Menu: Opening help modal");
-					setActiveModal("help");
-				})
-			);
+			await addListener(EVENTS.MENU_SHOW_HELP, () => {
+				console.log("❓ Menu: Opening help modal");
+				setActiveModal("help");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_SHOW_FEEDBACK, () => {
-					console.log("📝 Menu: Opening feedback modal");
-					setFeedbackData({
-						type: "general",
-						title: "",
-						description: "",
-						email: "",
-						priority: "medium",
-					});
-					setActiveModal("feedback");
-				})
-			);
+			await addListener(EVENTS.MENU_SHOW_FEEDBACK, () => {
+				console.log("📝 Menu: Opening feedback modal");
+				setFeedbackData({
+					type: "general",
+					title: "",
+					description: "",
+					email: "",
+					priority: "medium",
+				});
+				setActiveModal("feedback");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_EXPORT_CHAT, () => {
-					console.log("📤 Menu: Opening export modal");
-					setActiveModal("export");
-				})
-			);
+			await addListener(EVENTS.MENU_EXPORT_CHAT, () => {
+				console.log("📤 Menu: Opening export modal");
+				setActiveModal("export");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_IMPORT_CHAT, () => {
-					console.log("📥 Menu: Opening import modal");
-					setActiveModal("import");
-				})
-			);
+			await addListener(EVENTS.MENU_IMPORT_CHAT, () => {
+				console.log("📥 Menu: Opening import modal");
+				setActiveModal("import");
+			});
 
 			// Chat management
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
-					console.log("🆕 Menu: Starting new chat");
-					startNewChat();
-					addSystemMessage("🆕 New chat started");
-				})
-			);
+			await addListener(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
+				console.log("🆕 Menu: Starting new chat");
+				startNewChat();
+				addSystemMessage("🆕 New chat started");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_CLEAR_CHAT, () => {
-					console.log("🗑️ Menu: Clearing chat (using new chat)");
-					startNewChat();
-					addSystemMessage("🗑️ Chat history cleared");
-				})
-			);
+			await addListener(EVENTS.MENU_CLEAR_CHAT, () => {
+				console.log("🗑️ Menu: Clearing chat (using new chat)");
+				startNewChat();
+				addSystemMessage("🗑️ Chat history cleared");
+			});
 
 			// Update management
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_UPDATE_CHECK_REQUESTED, () => {
-					console.log("🔄 Menu: Checking for updates");
-					handleUpdateCheck();
-				})
-			);
+			await addListener(EVENTS.MENU_UPDATE_CHECK_REQUESTED, () => {
+				console.log("🔄 Menu: Checking for updates");
+				handleUpdateCheck();
+			});
 
 			// Application events
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_APP_READY, () => {
-					console.log("🚀 App ready event received");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_APP_READY, () => {
+				console.log("🚀 App ready event received");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_APP_FOCUS, () => {
-					console.log("👀 App focus event received");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_APP_FOCUS, () => {
+				console.log("👀 App focus event received");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_APP_BLUR, () => {
-					console.log("😴 App blur event received");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_APP_BLUR, () => {
+				console.log("😴 App blur event received");
+			});
 
 			// Window management
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_WINDOW_MINIMIZE, () => {
-					console.log("⬇️ Window minimize requested");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_WINDOW_MINIMIZE, () => {
+				console.log("⬇️ Window minimize requested");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_WINDOW_MAXIMIZE, () => {
-					console.log("⬆️ Window maximize requested");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_WINDOW_MAXIMIZE, () => {
+				console.log("⬆️ Window maximize requested");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.SYSTEM_WINDOW_CLOSE, () => {
-					console.log("❌ Window close requested");
-				})
-			);
+			await addListener(EVENTS.SYSTEM_WINDOW_CLOSE, () => {
+				console.log("❌ Window close requested");
+			});
 
 			// Settings and configuration
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_OPEN_SETTINGS, () => {
-					console.log("⚙️ Menu: Opening settings");
-					// Note: Settings opens in a separate window via backend
-				})
-			);
+			await addListener(EVENTS.MENU_OPEN_SETTINGS, () => {
+				console.log("⚙️ Menu: Opening settings");
+				// Note: Settings opens in a separate window via backend
+			});
 
 			// Developer tools - using generated constants
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_DEVTOOLS_REQUESTED, () => {
-					console.log("🔧 Menu: Opening developer tools");
-					setCurrentView("devtools");
-				})
-			);
+			await addListener(EVENTS.MENU_DEVTOOLS_REQUESTED, () => {
+				console.log("🔧 Menu: Opening developer tools");
+				setCurrentView("devtools");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_TOGGLE_DEV_PANEL_REQUESTED, () => {
-					console.log("🔧 Menu: Toggling dev tools panel");
-					setIsDevPanelOpen((current: boolean) => !current);
-				})
-			);
+			await addListener(EVENTS.MENU_TOGGLE_DEV_PANEL_REQUESTED, () => {
+				console.log("🔧 Menu: Toggling dev tools panel");
+				setIsDevPanelOpen((current: boolean) => !current);
+			});
 
 			// Performance and debugging
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_RELOAD_APP, () => {
-					console.log("🔄 Menu: Reloading application");
-					window.location.reload();
-				})
-			);
+			await addListener(EVENTS.MENU_RELOAD_APP, () => {
+				console.log("🔄 Menu: Reloading application");
+				window.location.reload();
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_FORCE_RELOAD, () => {
-					console.log("🔄 Menu: Force reloading application");
-					window.location.reload();
-				})
-			);
+			await addListener(EVENTS.MENU_FORCE_RELOAD, () => {
+				console.log("🔄 Menu: Force reloading application");
+				window.location.reload();
+			});
 
 			// Accessibility and user assistance
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_ZOOM_IN, () => {
-					console.log("🔍 Menu: Zoom in requested");
-					// Zoom functionality could be implemented here
-				})
-			);
+			await addListener(EVENTS.MENU_ZOOM_IN, () => {
+				console.log("🔍 Menu: Zoom in requested");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_ZOOM_OUT, () => {
-					console.log("🔍 Menu: Zoom out requested");
-					// Zoom functionality could be implemented here
-				})
-			);
+			await addListener(EVENTS.MENU_ZOOM_OUT, () => {
+				console.log("🔍 Menu: Zoom out requested");
+			});
 
-			unlistenCallbacks.push(
-				await listen(EVENTS.MENU_RESET_ZOOM, () => {
-					console.log("🔍 Menu: Reset zoom requested");
-					// Reset zoom functionality could be implemented here
-				})
-			);
+			await addListener(EVENTS.MENU_RESET_ZOOM, () => {
+				console.log("🔍 Menu: Reset zoom requested");
+			});
 
 			// Edit operations are now handled natively by Tauri's PredefinedMenuItem
 			// No frontend event listeners needed for copy, paste, cut, undo, redo, select all
@@ -228,6 +186,7 @@ export function useMenuEvents({
 
 		// Cleanup function
 		return () => {
+			mounted = false;
 			unlistenCallbacks.forEach((unlisten) => {
 				safeCleanupEventListener(unlisten);
 			});

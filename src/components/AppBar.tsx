@@ -131,7 +131,6 @@ export function AppBar() {
 
   // === LOCAL STATE ===
   const [inputValue, setInputValue] = useState("");
-  const [isWindowHovered] = useState(false);
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
 
@@ -258,10 +257,7 @@ export function AppBar() {
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
-    const hoverEffect =
-      currentState?.uiState === UI.BAR_STATES_DEFAULT && isWindowHovered
-        ? "ring-2 ring-white/30"
-        : "";
+    const hoverEffect = "";
 
     const clickable = [
       UI.BAR_STATES_DEFAULT,

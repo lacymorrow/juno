@@ -87,16 +87,20 @@ export const CloudTestPanel: React.FC = () => {
   const [editingConfig, setEditingConfig] = useState(false);
   const [configForm, setConfigForm] = useState<CloudConfig | null>(null);
 
+  const mountedRef = React.useRef(true);
+
   useEffect(() => {
+    mountedRef.current = true;
     loadCloudStatus();
     loadCloudConfig();
     loadDiagnostics();
+    return () => { mountedRef.current = false; };
   }, []);
 
   const loadCloudStatus = async () => {
     try {
       const status = await invoke<CloudStatus>("get_cloud_status");
-      setCloudStatus(status);
+      if (mountedRef.current) setCloudStatus(status);
     } catch (error) {
       console.error("Failed to load cloud status:", error);
     }
@@ -105,8 +109,10 @@ export const CloudTestPanel: React.FC = () => {
   const loadCloudConfig = async () => {
     try {
       const config = await invoke<CloudConfig>("get_cloud_config");
-      setCloudConfig(config);
-      setConfigForm(config); // Initialize form with current config
+      if (mountedRef.current) {
+        setCloudConfig(config);
+        setConfigForm(config); // Initialize form with current config
+      }
     } catch (error) {
       console.error("Failed to load cloud config:", error);
     }
@@ -117,7 +123,7 @@ export const CloudTestPanel: React.FC = () => {
       const diag = await invoke<WebSocketDiagnostics>(
         "get_websocket_diagnostics"
       );
-      setDiagnostics(diag);
+      if (mountedRef.current) setDiagnostics(diag);
     } catch (error) {
       console.error("Failed to load diagnostics:", error);
     }

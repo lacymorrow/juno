@@ -14,7 +14,7 @@ import {
   Shield,
   Zap,
 } from "lucide-react";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   getPermissionsStatus,
   invalidatePermissionsCache,
@@ -63,6 +63,20 @@ export function PermissionsManager({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Track mounted state for async callbacks
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const timer of pendingTimers.current) {
+        clearTimeout(timer);
+      }
+      pendingTimers.current = [];
+    };
+  }, []);
 
   // Check permissions status with optional auto-redirect
   const checkPermissions = useCallback(
@@ -78,7 +92,9 @@ export function PermissionsManager({
 
         // Auto-complete if all permissions are granted
         if (result.all_granted && onComplete) {
-          setTimeout(() => onComplete(), 1000);
+          pendingTimers.current.push(setTimeout(() => {
+            if (mountedRef.current) onComplete();
+          }, 1000));
         }
 
         if (onRefresh) {
@@ -111,9 +127,9 @@ export function PermissionsManager({
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
-        setTimeout(async () => {
-          await checkPermissions(true);
-        }, 2000);
+        pendingTimers.current.push(setTimeout(async () => {
+          if (mountedRef.current) await checkPermissions(true);
+        }, 2000));
       }
     } catch (err) {
       setError(err as string);
@@ -140,9 +156,9 @@ export function PermissionsManager({
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
-        setTimeout(async () => {
-          await checkPermissions(true);
-        }, 2000);
+        pendingTimers.current.push(setTimeout(async () => {
+          if (mountedRef.current) await checkPermissions(true);
+        }, 2000));
       }
     } catch (err) {
       setError(err as string);
@@ -169,9 +185,9 @@ export function PermissionsManager({
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
-        setTimeout(async () => {
-          await checkPermissions(true);
-        }, 2000);
+        pendingTimers.current.push(setTimeout(async () => {
+          if (mountedRef.current) await checkPermissions(true);
+        }, 2000));
       }
     } catch (err) {
       setError(err as string);
@@ -198,9 +214,9 @@ export function PermissionsManager({
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
-        setTimeout(async () => {
-          await checkPermissions(true);
-        }, 2000);
+        pendingTimers.current.push(setTimeout(async () => {
+          if (mountedRef.current) await checkPermissions(true);
+        }, 2000));
       }
     } catch (err) {
       setError(err as string);
@@ -259,30 +275,44 @@ export function PermissionsManager({
 
   // Set up permissions monitoring
   useEffect(() => {
+    let mounted = true;
     let unlistenPermissions: (() => void) | undefined;
 
     const setupListeners = async () => {
       if (variant === "splash") {
         // Only set up monitoring for splash screen variant
-        unlistenPermissions = await listen<PermissionsState>(
+        const fn = await listen<PermissionsState>(
           "permissions-changed",
           (event) => {
+            if (!mounted || !mountedRef.current) return;
             setPermissions(event.payload);
             if (event.payload.all_granted && onComplete) {
-              setTimeout(() => onComplete(), 1000);
+              pendingTimers.current.push(setTimeout(() => {
+                if (mountedRef.current) onComplete();
+              }, 1000));
             }
           }
         );
 
+        if (mounted) {
+          unlistenPermissions = fn;
+        } else {
+          fn(); // Unmounted during setup, clean up immediately
+          return;
+        }
+
         await startMonitoring();
       }
 
-      await checkPermissions(autoRedirectEnabled && variant === "splash");
+      if (mounted) {
+        await checkPermissions(autoRedirectEnabled && variant === "splash");
+      }
     };
 
     setupListeners();
 
     return () => {
+      mounted = false;
       if (variant === "splash") {
         stopMonitoring().catch((err) => {
           console.error(

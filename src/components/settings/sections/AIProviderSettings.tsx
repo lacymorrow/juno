@@ -19,7 +19,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Save, CheckCircle, Brain, Cpu } from "lucide-react";
 import { SettingsSectionProps } from "../types";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface ModelInfo {
@@ -32,32 +32,41 @@ interface ModelInfo {
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const loadRequestRef = useRef(0);
 
-  const currentProvider = settings.providers.find(
+  const currentProvider = settings.providers?.find(
     (p) => p.id === settings.activeProvider
   );
+
+  const loadModelsForProvider = useCallback(async (providerId: string) => {
+    const requestId = ++loadRequestRef.current;
+    setLoadingModels(true);
+    try {
+      const models = await invoke<ModelInfo[]>("get_provider_models", {
+        providerId,
+      });
+      // Only apply results if this is still the latest request (prevents race condition)
+      if (requestId === loadRequestRef.current) {
+        setAvailableModels(models);
+      }
+    } catch (error) {
+      console.error("Failed to load models for provider:", error);
+      if (requestId === loadRequestRef.current) {
+        setAvailableModels([]);
+      }
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setLoadingModels(false);
+      }
+    }
+  }, []);
 
   // Load models when active provider changes
   useEffect(() => {
     if (settings.activeProvider && !settings.isLoading) {
       loadModelsForProvider(settings.activeProvider);
     }
-  }, [settings.activeProvider, settings.isLoading]);
-
-  const loadModelsForProvider = async (providerId: string) => {
-    setLoadingModels(true);
-    try {
-      const models = await invoke<ModelInfo[]>("get_provider_models", {
-        providerId,
-      });
-      setAvailableModels(models);
-    } catch (error) {
-      console.error("Failed to load models for provider:", error);
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  };
+  }, [settings.activeProvider, settings.isLoading, loadModelsForProvider]);
 
   const selectedModel = availableModels.find(
     (m) => m.id === settings.formData.model

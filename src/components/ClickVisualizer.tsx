@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 type ClickInfo = {
   x: number;
@@ -33,30 +34,34 @@ const ClickVisualizer = () => {
     // Only listen for events if overlay is enabled
     if (!isEnabled) return;
 
-    let unlistenFn: (() => void) | null = null;
-    let isCleanedUp = false;
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
 
     // Listen for click visualization events from the backend
     const setupListener = async () => {
       try {
-        unlistenFn = await listen<[number, number, string]>(
+        const fn = await listen<[number, number, string]>(
           "click-visualization",
           (event) => {
-            if (isCleanedUp) return; // Prevent updates after cleanup
-            
+            if (!mounted) return;
+
             const [x, y, color] = event.payload;
-            // Add new click with unique ID
             const newClick: ClickInfo = {
               x,
               y,
               color,
-              id: Date.now() + Math.random(), // More unique ID
+              id: Date.now() + Math.random(),
               timestamp: Date.now(),
             };
 
             setClicks((prevClicks) => [...prevClicks, newClick]);
           }
         );
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
       } catch (error) {
         console.error("Failed to setup click visualization listener:", error);
       }
@@ -65,15 +70,8 @@ const ClickVisualizer = () => {
     setupListener();
 
     return () => {
-      isCleanedUp = true;
-      // Cleanup listener when component unmounts or is disabled
-      if (unlistenFn) {
-        try {
-          unlistenFn();
-        } catch (error) {
-          console.error("Error cleaning up click visualization listener:", error);
-        }
-      }
+      mounted = false;
+      safeCleanupEventListener(unlisten);
     };
   }, [isEnabled]);
 

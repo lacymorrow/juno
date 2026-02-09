@@ -15,6 +15,7 @@ let cachedPermissions: PermissionsState | null = null;
 let cacheTimestamp = 0;
 let pendingRequest: Promise<PermissionsState> | null = null;
 let focusListenerInitialized = false;
+let focusUnlisten: (() => void) | null = null;
 
 /**
  * Initialize window focus listener to invalidate cache when app regains focus.
@@ -25,7 +26,7 @@ async function initFocusListener(): Promise<void> {
 
   try {
     const currentWindow = getCurrentWindow();
-    await currentWindow.onFocusChanged(({ payload: focused }) => {
+    focusUnlisten = await currentWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         // Invalidate cache when window gains focus
         // This handles the case where user grants permission in System Settings
@@ -108,6 +109,10 @@ export function __resetPermissionsServiceCacheForTests(): void {
   cachedPermissions = null;
   cacheTimestamp = 0;
   pendingRequest = null;
+  if (focusUnlisten) {
+    focusUnlisten();
+    focusUnlisten = null;
+  }
   focusListenerInitialized = false;
 }
 

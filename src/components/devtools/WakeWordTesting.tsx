@@ -99,10 +99,20 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   // Load initial status
   useEffect(() => {
     loadStatus();
-    const cleanup = setupEventListeners();
+    let mounted = true;
+    let cleanupFn: (() => void) | undefined;
+
+    setupEventListeners().then((fn) => {
+      if (mounted) {
+        cleanupFn = fn;
+      } else if (typeof fn === 'function') {
+        fn();
+      }
+    }).catch((err) => console.error("Failed to setup wake word listeners:", err));
 
     return () => {
-      cleanup.then((cleanupFn) => cleanupFn && cleanupFn());
+      mounted = false;
+      if (typeof cleanupFn === 'function') cleanupFn();
     };
   }, []);
 
