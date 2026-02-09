@@ -15,6 +15,7 @@ import React from "react";
 export class NotificationService {
   private static instance: NotificationService;
   private isInitialized = false;
+  private unlistenFn: (() => void) | null = null;
 
   private constructor() {}
 
@@ -32,7 +33,7 @@ export class NotificationService {
 
     try {
       // Listen for toast notification events from the backend
-      await listen<any>(EVENTS.NOTIFICATIONS_TOAST, (event) => {
+      this.unlistenFn = await listen<any>(EVENTS.NOTIFICATIONS_TOAST, (event) => {
         this.showToastNotification(event.payload);
       });
 
@@ -41,6 +42,14 @@ export class NotificationService {
     } catch (error) {
       console.error("Failed to initialize NotificationService:", error);
     }
+  }
+
+  public destroy(): void {
+    if (this.unlistenFn) {
+      this.unlistenFn();
+      this.unlistenFn = null;
+    }
+    this.isInitialized = false;
   }
 
   private showToastNotification(data: any): void {

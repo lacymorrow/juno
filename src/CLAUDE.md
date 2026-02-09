@@ -66,25 +66,49 @@ const result = await invoke('command_name', { param: value });
 
 ### Event Handling
 
+**Use `useEventListener` hook** for all Tauri event listeners in React components. It handles the async listen/cleanup race condition and uses a ref to always call the latest handler:
+
 ```typescript
-// Listen to backend events
-import { listen } from '@tauri-apps/api/event';
+import { useEventListener } from '@/hooks/useEventListener';
 
-const unlisten = await listen('event_name', (event) => {
-  // Handle event
+// Simple — no dependency arrays needed (ref pattern keeps handler current)
+useEventListener<{ chunk: string }>('event_name', (payload) => {
+  // payload is event.payload, already unwrapped
 });
+```
 
-// Cleanup in useEffect
+**Manual pattern** (only when `useEventListener` won't work, e.g. conditional listeners):
+```typescript
 useEffect(() => {
   let unlisten: (() => void) | undefined;
-  
-  const setupListener = async () => {
-    unlisten = await listen('event_name', handler);
+  let mounted = true;
+
+  const setup = async () => {
+    try {
+      const fn = await listen('event', (e) => {
+        if (!mounted) return;
+        handler(e);
+      });
+      if (mounted) unlisten = fn;
+      else safeCleanupEventListener(fn); // Resolved after unmount — clean up immediately
+    } catch (err) {
+      console.error('Failed to setup listener:', err);
+    }
   };
-  
-  setupListener();
-  return () => unlisten?.();
+  setup();
+
+  return () => {
+    mounted = false;
+    safeCleanupEventListener(unlisten);
+  };
 }, []);
+```
+
+**BANNED pattern** (race condition — cleanup runs before promise resolves):
+```typescript
+// DO NOT USE — listener leaks if component unmounts before listen() resolves
+const unlisten = listen('event', handler);
+return () => { unlisten.then((fn) => fn()); };
 ```
 
 ### Common Tauri Commands
@@ -296,17 +320,12 @@ const handleAsyncOperation = async () => {
 ### Tauri Event Cleanup
 
 ```typescript
-// Always clean up event listeners
-useEffect(() => {
-  let unlisten: (() => void) | undefined;
-  
-  const setup = async () => {
-    unlisten = await listen('event', handler);
-  };
-  
-  setup();
-  return () => unlisten?.();
-}, []);
+// PREFERRED: Use useEventListener hook — handles cleanup automatically
+import { useEventListener } from '@/hooks/useEventListener';
+useEventListener<PayloadType>('event-name', (payload) => { /* ... */ });
+
+// For multiple listeners in one effect, use the mounted flag pattern
+// (see Event Handling section above)
 ```
 
 ### Type Safety

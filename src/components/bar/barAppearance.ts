@@ -4,7 +4,8 @@ export type BarAppearance =
   | typeof UI.BAR_APPEARANCES_FLOATING
   | typeof UI.BAR_APPEARANCES_APP
   | typeof UI.BAR_APPEARANCES_VOICE_AI
-  | typeof UI.BAR_APPEARANCES_DYNAMIC;
+  | typeof UI.BAR_APPEARANCES_DYNAMIC
+  | "elevenlabs";
 
 export function getBarLayoutWindowLabel(appearance: BarAppearance): string {
   switch (appearance) {

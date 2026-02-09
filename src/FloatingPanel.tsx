@@ -42,6 +42,9 @@ export default function FloatingPanel() {
   >("compact");
 
   useEffect(() => {
+    let mounted = true;
+    let unlistenFocus: (() => void) | undefined;
+
     const setupWindow = async () => {
       const appWindow = getCurrentWindow();
 
@@ -57,25 +60,33 @@ export default function FloatingPanel() {
         await appWindow.setIgnoreCursorEvents(false);
 
         // Set up window event listeners for enhanced interaction
-        const unlistenFocus = await appWindow.onFocusChanged(
+        const fn = await appWindow.onFocusChanged(
           ({ payload: focused }) => {
+            if (!mounted) return;
             console.log("Floating panel focus changed:", focused);
           }
         );
 
-        setWindowReady(true);
+        if (mounted) {
+          unlistenFocus = fn;
+        } else {
+          fn(); // Unmounted during setup
+          return;
+        }
 
-        // Cleanup function
-        return () => {
-          unlistenFocus();
-        };
+        setWindowReady(true);
       } catch (error) {
         console.error("Failed to setup floating panel window:", error);
-        setWindowReady(true); // Still show the panel even if setup fails
+        if (mounted) setWindowReady(true); // Still show the panel even if setup fails
       }
     };
 
     setupWindow();
+
+    return () => {
+      mounted = false;
+      unlistenFocus?.();
+    };
   }, []);
 
   // Update window size based on panel mode changes with delayed shrinking for smooth transitions
@@ -134,21 +145,31 @@ export default function FloatingPanel() {
 
   // Listen for Rust-based window hover events (same as floating bar)
   useEffect(() => {
+    let mounted = true;
     let unlistenEnter: (() => void) | undefined;
     let unlistenLeave: (() => void) | undefined;
 
     const setupListeners = async () => {
-      unlistenEnter = await listen<null>("mouse-entered-window", () => {
-        setIsHovered(true);
-      });
+      try {
+        const fnEnter = await listen<null>("mouse-entered-window", () => {
+          if (mounted) setIsHovered(true);
+        });
+        if (mounted) unlistenEnter = fnEnter;
+        else { fnEnter(); return; }
 
-      unlistenLeave = await listen<null>("mouse-left-window", () => {
-        setIsHovered(false);
-      });
+        const fnLeave = await listen<null>("mouse-left-window", () => {
+          if (mounted) setIsHovered(false);
+        });
+        if (mounted) unlistenLeave = fnLeave;
+        else { fnLeave(); return; }
+      } catch (error) {
+        console.error("Failed to setup hover listeners:", error);
+      }
     };
 
     setupListeners();
     return () => {
+      mounted = false;
       unlistenEnter?.();
       unlistenLeave?.();
     };

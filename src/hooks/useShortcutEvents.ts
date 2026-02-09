@@ -23,6 +23,7 @@ export function useShortcutEvents({
   onDictationInputShortcut,
 }: UseShortcutEventsProps) {
   useEffect(() => {
+    let mounted = true;
     let unlisteners: (() => void)[] = [];
 
     const setupListeners = async () => {
@@ -31,11 +32,14 @@ export function useShortcutEvents({
         const unlisten = await listen<ShortcutEventPayload>(
           EVENTS.SHORTCUTS_AGENT_MODE,
           (event) => {
-            console.log("[Shortcut Event] Agent mode:", event.payload);
-            onAgentModeShortcut(event.payload);
+            if (mounted) {
+              console.log("[Shortcut Event] Agent mode:", event.payload);
+              onAgentModeShortcut(event.payload);
+            }
           }
         );
-        unlisteners.push(unlisten);
+        if (mounted) unlisteners.push(unlisten);
+        else safeCleanupEventListener(unlisten);
       }
 
       // Listen for dictation input shortcut events
@@ -43,11 +47,14 @@ export function useShortcutEvents({
         const unlisten = await listen<ShortcutEventPayload>(
           EVENTS.SHORTCUTS_DICTATION_INPUT,
           (event) => {
-            console.log("[Shortcut Event] Dictation input:", event.payload);
-            onDictationInputShortcut(event.payload);
+            if (mounted) {
+              console.log("[Shortcut Event] Dictation input:", event.payload);
+              onDictationInputShortcut(event.payload);
+            }
           }
         );
-        unlisteners.push(unlisten);
+        if (mounted) unlisteners.push(unlisten);
+        else safeCleanupEventListener(unlisten);
       }
     };
 
@@ -57,6 +64,7 @@ export function useShortcutEvents({
 
     // Cleanup
     return () => {
+      mounted = false;
       unlisteners.forEach((unlisten) => {
         safeCleanupEventListener(unlisten);
       });

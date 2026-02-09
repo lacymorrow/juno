@@ -9,19 +9,28 @@ export function useEventListener<T = any>(
 ) {
   const savedHandler = useRef(handler);
 
-  // Update ref when handler changes
+  // Update ref when handler changes — ensures listener always calls latest handler
   useEffect(() => {
     savedHandler.current = handler;
   }, [handler]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let mounted = true;
 
     const setupListener = async () => {
       try {
-        unlisten = await listen<T>(eventName, (event) => {
-          savedHandler.current(event.payload);
+        const unlistenFn = await listen<T>(eventName, (event) => {
+          if (mounted) {
+            savedHandler.current(event.payload);
+          }
         });
+        if (mounted) {
+          unlisten = unlistenFn;
+        } else {
+          // Component unmounted before listen() resolved — clean up immediately
+          safeCleanupEventListener(unlistenFn);
+        }
       } catch (error) {
         console.error(`Failed to setup listener for ${eventName}:`, error);
       }
@@ -30,7 +39,7 @@ export function useEventListener<T = any>(
     setupListener();
 
     return () => {
-      // Use safeCleanupEventListener for proper cleanup
+      mounted = false;
       safeCleanupEventListener(unlisten);
     };
   }, [eventName, ...dependencies]);

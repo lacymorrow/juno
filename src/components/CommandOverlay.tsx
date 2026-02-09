@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useState } from "react";
 import { EVENTS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
 
 interface CommandInfo {
   id: number;
@@ -28,79 +28,66 @@ export default function CommandOverlay() {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [isVisible, setIsVisible] = useState(false);
 
-  useEffect(() => {
-    // Listen for command execution start
-    const unlistenStart = listen<CommandStartPayload>(
-      EVENTS.TOOLS_COMMAND_EXECUTION_START,
-      (event) => {
-        const { id, command } = event.payload;
-        const timestamp = Date.now();
-        const commandId = id || timestamp;
-        const newCommand: CommandInfo = {
-          id: commandId,
-          command: command || "Unknown command",
-          timestamp,
-          status: "executing",
-        };
-        setCommands((prev) => [...prev, newCommand]);
-        setIsVisible(true);
-        setTimeout(() => {
-          setIsVisible(false);
-        }, 5000);
-      }
-    );
+  // Listen for command execution start
+  useEventListener<CommandStartPayload>(
+    EVENTS.TOOLS_COMMAND_EXECUTION_START,
+    (payload) => {
+      const { id, command } = payload;
+      const timestamp = Date.now();
+      const commandId = id || timestamp;
+      const newCommand: CommandInfo = {
+        id: commandId,
+        command: command || "Unknown command",
+        timestamp,
+        status: "executing",
+      };
+      setCommands((prev) => [...prev, newCommand]);
+      setIsVisible(true);
+      setTimeout(() => setIsVisible(false), 5000);
+    }
+  );
 
-    // Listen for command execution end
-    const unlistenEnd = listen<CommandEndPayload>(
-      EVENTS.TOOLS_COMMAND_EXECUTION_END,
-      (event) => {
-        const { id, command, success, error, duration } = event.payload;
-        const commandId = id;
-        const newStatus: "completed" | "failed" = success
-          ? "completed"
-          : "failed";
+  // Listen for command execution end
+  useEventListener<CommandEndPayload>(
+    EVENTS.TOOLS_COMMAND_EXECUTION_END,
+    (payload) => {
+      const { id, command, success, error, duration } = payload;
+      const commandId = id;
+      const newStatus: "completed" | "failed" = success
+        ? "completed"
+        : "failed";
 
-        setCommands((prev) => {
-          // Try to find and update the matching command by id
-          let updated = false;
-          const updatedCommands = prev.map((cmd) => {
-            if (commandId && cmd.id === commandId) {
-              updated = true;
-              return {
-                ...cmd,
-                status: newStatus,
-                duration: duration || 0,
-                error: error || undefined,
-              };
-            }
-            return cmd;
-          });
-          // If not found, add as new (fallback for out-of-order events)
-          if (!updated) {
-            const newCommand: CommandInfo = {
-              id: commandId || Date.now(),
-              command: command || "Unknown command",
-              timestamp: Date.now(),
+      setCommands((prev) => {
+        let updated = false;
+        const updatedCommands = prev.map((cmd) => {
+          if (commandId && cmd.id === commandId) {
+            updated = true;
+            return {
+              ...cmd,
               status: newStatus,
               duration: duration || 0,
               error: error || undefined,
             };
-            return [...prev, newCommand];
           }
-          return updatedCommands;
+          return cmd;
         });
-        setIsVisible(true);
-        setTimeout(() => {
-          setIsVisible(false);
-        }, 5000);
-      }
-    );
-
-    return () => {
-      unlistenStart.then((f) => f());
-      unlistenEnd.then((f) => f());
-    };
-  }, []);
+        if (!updated) {
+          const newCommand: CommandInfo = {
+            id: commandId || Date.now(),
+            command: command || "Unknown command",
+            timestamp: Date.now(),
+            status: newStatus,
+            duration: duration || 0,
+            error: error || undefined,
+          };
+          return [...prev, newCommand];
+        }
+        return updatedCommands;
+      });
+      setIsVisible(true);
+      setTimeout(() => setIsVisible(false), 5000);
+    }
+  );
 
   const getStatusDisplay = (status: string) => {
     switch (status) {

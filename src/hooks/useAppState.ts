@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { AppView } from "@/components/AppHeader";
 import type { ModalType, FeedbackData, UpdateInfo } from "@/components/ModalSystem";
 
@@ -63,6 +63,16 @@ export function useAppState() {
     // Copy and save operation state
     const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
     const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+    const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+    // Clean up pending timers on unmount
+    useEffect(() => {
+        return () => {
+            for (const timer of pendingTimers.current) {
+                clearTimeout(timer);
+            }
+        };
+    }, []);
 
     // Scroll management
     const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
@@ -95,11 +105,11 @@ export function useAppState() {
     }, []);
 
     const resetCopyingState = useCallback(() => {
-        setTimeout(() => setCopyingMessageId(null), 1000);
+        pendingTimers.current.push(setTimeout(() => setCopyingMessageId(null), 1000));
     }, []);
 
     const resetSavingState = useCallback(() => {
-        setTimeout(() => setSavingMessageId(null), 1000);
+        pendingTimers.current.push(setTimeout(() => setSavingMessageId(null), 1000));
     }, []);
 
     return {

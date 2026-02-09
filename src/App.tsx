@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
@@ -25,7 +25,6 @@ import { useConversation } from "@/hooks/useConversation";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
-import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
@@ -37,17 +36,22 @@ function App() {
   const audioPlayback = useAudioPlayback();
   const { playError } = useSound();
 
+  // Timer tracking for cleanup
+  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    return () => {
+      for (const timer of pendingTimers.current) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+
   // Use voice sounds hook
   useVoiceSounds();
 
-  // Scrolling management
-  const scrolling = useChatScrolling({
-    conversation: conversation.conversation,
-    userHasScrolledUp: appState.userHasScrolledUp,
-    lastScrollTime: appState.lastScrollTime,
-    setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    setLastScrollTime: appState.setLastScrollTime,
-  });
+  // Scrolling management — use-stick-to-bottom in ChatContainerV2 handles auto-scroll.
+  // We still provide a no-op throttledAutoScroll for useBackendEvents compatibility.
+  const noopScroll = React.useCallback(() => {}, []);
 
   // Enhanced submit handler
   const handleSubmit = useCallback(
@@ -156,7 +160,7 @@ function App() {
     setIsProcessing: appState.setIsProcessing,
     setServerStatus: appState.setServerStatus,
     setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    throttledAutoScroll: scrolling.throttledAutoScroll,
+    throttledAutoScroll: noopScroll,
   });
 
   // Menu events integration
@@ -250,65 +254,58 @@ function App() {
   // Listen for dictation-active events from backend
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    let currentDictationState = appState.isDictationActive;
-    let toastTimeout: NodeJS.Timeout | null = null;
+    let mounted = true;
+    let currentDictationState = false;
     let lastToastTime = 0;
-    const MIN_TOAST_INTERVAL = 1000; // Minimum 1 second between toasts
+    const MIN_TOAST_INTERVAL = 1000;
 
     const setupListener = async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      unlisten = await listen("dictation-active", (event) => {
-        const isActive = event.payload as boolean;
-        console.log("Dictation active event from backend:", isActive);
-        
-        // Update the app state
-        appState.setIsDictationActive(isActive);
-        
-        // Only show toast if state actually changed and enough time has passed
-        const now = Date.now();
-        if (currentDictationState !== isActive && (now - lastToastTime) > MIN_TOAST_INTERVAL) {
-          currentDictationState = isActive;
-          lastToastTime = now;
-          
-          // Clear any pending toast
-          if (toastTimeout) {
-            clearTimeout(toastTimeout);
-            toastTimeout = null;
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const fn = await listen("dictation-active", (event) => {
+          if (!mounted) return;
+          const isActive = event.payload as boolean;
+          console.log("Dictation active event from backend:", isActive);
+
+          appState.setIsDictationActive(isActive);
+
+          const now = Date.now();
+          if (currentDictationState !== isActive && (now - lastToastTime) > MIN_TOAST_INTERVAL) {
+            currentDictationState = isActive;
+            lastToastTime = now;
+
+            const toastId = `dictation-${isActive ? 'on' : 'off'}`;
+            toast.dismiss('dictation-on');
+            toast.dismiss('dictation-off');
+            toast.info(
+              isActive ? "Dictation mode activated" : "Dictation mode deactivated",
+              { id: toastId, duration: 2000 }
+            );
           }
-          
-          // Use a unique ID for the toast to prevent duplicates
-          const toastId = `dictation-${isActive ? 'on' : 'off'}`;
-          
-          // Dismiss any existing dictation toasts
-          toast.dismiss('dictation-on');
-          toast.dismiss('dictation-off');
-          
-          // Show the new toast
-          toast.info(
-            isActive ? "Dictation mode activated" : "Dictation mode deactivated",
-            { id: toastId, duration: 2000 }
-          );
+
+          if (!isActive) {
+            appState.setDictationState("idle");
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
         }
-        
-        // If dictation is deactivated, reset the dictation state
-        if (!isActive) {
-          appState.setDictationState("idle");
-        }
-      });
+      } catch (error) {
+        console.error("Failed to setup dictation listener:", error);
+      }
     };
 
     setupListener();
 
     return () => {
+      mounted = false;
       unlisten?.();
-      if (toastTimeout) {
-        clearTimeout(toastTimeout);
-      }
-      // Dismiss any lingering toasts on cleanup
       toast.dismiss('dictation-on');
       toast.dismiss('dictation-off');
     };
-  }, [appState]);
+  }, [appState.setIsDictationActive, appState.setDictationState]);
 
   // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
   // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"
@@ -331,10 +328,9 @@ function App() {
 
       // Set the query briefly for UI feedback, then submit
       conversation.setQuery(trimmedPrompt);
-      scrolling.autoScrollToBottom(true);
 
       // Auto-submit after a brief delay to show the query in the input
-      setTimeout(async () => {
+      pendingTimers.current.push(setTimeout(async () => {
         // IMMEDIATE FEEDBACK: Notify floating bar immediately
         try {
           await invoke("notify_query_submitted", { query: trimmedPrompt });
@@ -358,7 +354,7 @@ function App() {
           appState.setIsProcessing(false);
           playError();
         }
-      }, 100); // Brief delay to show the prompt in the input field
+      }, 100)); // Brief delay to show the prompt in the input field
     },
     [
       appState.canSubmit,
@@ -366,7 +362,6 @@ function App() {
       conversation.setQuery,
       conversation.addUserMessage,
       conversation.addSystemMessage,
-      scrolling.autoScrollToBottom,
       playError,
     ]
   );
@@ -423,10 +418,6 @@ function App() {
                       conversation={conversation.conversation}
                       copyingMessageId={appState.copyingMessageId}
                       savingMessageId={appState.savingMessageId}
-                      userHasScrolledUp={appState.userHasScrolledUp}
-                      lastScrollTime={appState.lastScrollTime}
-                      setUserHasScrolledUp={appState.setUserHasScrolledUp}
-                      setLastScrollTime={appState.setLastScrollTime}
                       onCopyResponse={handleCopyResponse}
                       onSaveResponse={handleSaveResponse}
                       onExamplePromptSelect={handleExamplePromptSelect}

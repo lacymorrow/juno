@@ -16,7 +16,8 @@ import {
   Info,
   Mic,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import AudioVisualizer from "../bar/audio-visualizer";
 
 // Permission status interface matching backend (snake_case)
@@ -171,10 +172,20 @@ function KeyboardShortcut({
     : { modifiers: ["option"], key: "d" };
   const { modifiers, key } = shortcut;
 
+  // Use refs to avoid re-creating listeners on every keystroke
+  const pressedKeysRef = useRef(pressedKeys);
+  pressedKeysRef.current = pressedKeys;
+  const onShortcutPressedRef = useRef(onShortcutPressed);
+  onShortcutPressedRef.current = onShortcutPressed;
+  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
   // Listen for both frontend key events and backend shortcut detection
   useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      const newPressedKeys = new Set(pressedKeys);
+      const newPressedKeys = new Set(pressedKeysRef.current);
 
       // Check for modifiers
       if (
@@ -234,14 +245,14 @@ function KeyboardShortcut({
       if (modifierPressed && e.key.toLowerCase() === key) {
         e.preventDefault();
         setIsComplete(true);
-        setTimeout(() => {
-          onShortcutPressed();
-        }, 800);
+        pendingTimers.current.push(setTimeout(() => {
+          if (mounted) onShortcutPressedRef.current();
+        }, 800));
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const newPressedKeys = new Set(pressedKeys);
+      const newPressedKeys = new Set(pressedKeysRef.current);
 
       if (!e.altKey) newPressedKeys.delete("option");
       if (!e.metaKey) newPressedKeys.delete("cmd");
@@ -255,45 +266,49 @@ function KeyboardShortcut({
     // Listen for backend shortcut detection events
     const setupBackendListener = async () => {
       try {
-        const unlisten = await listen(EVENTS.SHORTCUTS_AGENT_MODE, (event: any) => {
+        const fn = await listen(EVENTS.SHORTCUTS_AGENT_MODE, (event: any) => {
+          if (!mounted) return;
           if (event.payload?.state === "pressed") {
-            // Backend detected the shortcut, trigger visual feedback and completion
             setIsComplete(true);
-            // Simulate the visual feedback by temporarily setting all keys as pressed
             const allShortcutKeys = new Set([...modifiers, key]);
             setPressedKeys(allShortcutKeys);
 
-            setTimeout(() => {
-              onShortcutPressed();
-            }, 800);
+            pendingTimers.current.push(setTimeout(() => {
+              if (mounted) onShortcutPressedRef.current();
+            }, 800));
 
-            // Clear the visual feedback after a short delay
-            setTimeout(() => {
-              setPressedKeys(new Set());
-            }, 1200);
+            pendingTimers.current.push(setTimeout(() => {
+              if (mounted) setPressedKeys(new Set());
+            }, 1200));
           }
         });
 
-        return unlisten;
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
       } catch (error) {
         console.warn("Failed to setup backend shortcut listener:", error);
-        return null;
       }
     };
 
-    const backendListenerPromise = setupBackendListener();
+    setupBackendListener();
 
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
     return () => {
+      mounted = false;
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      if (backendListenerPromise) {
-        backendListenerPromise.then((unlisten: any) => unlisten());
+      safeCleanupEventListener(unlisten);
+      for (const timer of pendingTimers.current) {
+        clearTimeout(timer);
       }
+      pendingTimers.current = [];
     };
-  }, [pressedKeys, onShortcutPressed, modifiers, key]);
+  }, [modifiers, key]);
 
   // Display the shortcut keys
   const displayKeys = () => {
@@ -543,6 +558,20 @@ export default function OnboardingFlow({
   >(null);
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
+  const onboardingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const timer of onboardingTimers.current) {
+        clearTimeout(timer);
+      }
+      onboardingTimers.current = [];
+    };
+  }, []);
+
   console.log(
     "OnboardingFlow: State - currentStep:",
     currentStep,
@@ -606,9 +635,9 @@ export default function OnboardingFlow({
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
-        setTimeout(async () => {
-          await checkPermissionsStatus();
-        }, 2000);
+        onboardingTimers.current.push(setTimeout(async () => {
+          if (mountedRef.current) await checkPermissionsStatus();
+        }, 2000));
       }
     } catch (error) {
       console.error(`Error requesting ${permissionType} permission:`, error);
@@ -619,17 +648,20 @@ export default function OnboardingFlow({
   };
 
   useEffect(() => {
+    let mounted = true;
+
     const loadInitialData = async () => {
       try {
         console.log("OnboardingFlow: Loading initial data...");
 
         // CRITICAL: Always re-check permissions when component mounts
-        // This ensures "Restart onboarding" properly resets the permissions flow
         console.log("OnboardingFlow: Re-checking permissions status...");
         await checkPermissionsStatus();
+        if (!mounted) return;
 
         // Load onboarding info and shortcuts
         const onboardingInfo = await invoke("get_onboarding_info");
+        if (!mounted) return;
         if (
           onboardingInfo &&
           typeof onboardingInfo === "object" &&
@@ -642,13 +674,14 @@ export default function OnboardingFlow({
         const shortcutsWorking = await invoke<boolean>(
           "test_global_shortcuts_working"
         );
+        if (!mounted) return;
         setBackendShortcutsWorking(shortcutsWorking);
 
         // Load keyboard shortcuts as fallback
         try {
           const shortcuts = await invoke("get_keyboard_shortcuts");
-          if (!keyboardShortcuts) {
-            setKeyboardShortcuts(shortcuts);
+          if (mounted) {
+            setKeyboardShortcuts((prev: any) => prev ?? shortcuts);
           }
         } catch (error) {
           console.warn("Failed to load keyboard shortcuts:", error);
@@ -660,6 +693,7 @@ export default function OnboardingFlow({
 
     // Add window focus listener to re-check permissions when window gains focus
     const handleWindowFocus = async () => {
+      if (!mounted) return;
       console.log(
         "OnboardingFlow: Window gained focus, re-checking permissions"
       );
@@ -670,6 +704,7 @@ export default function OnboardingFlow({
     loadInitialData();
 
     return () => {
+      mounted = false;
       window.removeEventListener("focus", handleWindowFocus);
     };
   }, []);

@@ -115,88 +115,99 @@ const DesktopCursorOverlay = () => {
   useEffect(() => {
     if (!isEnabled) return;
 
+    let mounted = true;
+    const unlistenFns: (() => void)[] = [];
+
     const setupListeners = async () => {
-      // Cursor highlight start
-      const unlistenStart = await listen<[number, number]>(
-        "ui-cursor-highlight-start",
-        async (event) => {
-          const [x, y] = event.payload;
-          setCursorHighlight({ x, y, active: true, timestamp: Date.now() });
-          await positionOverlay(x, y, true); // Force initial positioning
-
-          // Show overlay window
-          if (overlayWindowRef.current) {
-            await overlayWindowRef.current.show();
-          }
-        }
-      );
-
-      // Cursor highlight move
-      const unlistenMove = await listen<[number, number]>(
-        "ui-cursor-highlight-move",
-        async (event) => {
-          const [x, y] = event.payload;
-          setCursorHighlight((prev) =>
-            prev ? { ...prev, x, y, timestamp: Date.now() } : null
-          );
-          await positionOverlay(x, y); // Allow throttling for smooth movement
-        }
-      );
-
-      // Cursor highlight stop
-      const unlistenStop = await listen<[number, number]>(
-        "ui-cursor-highlight-stop",
-        async () => {
-          setCursorHighlight(null);
-
-          // Hide overlay window after brief delay
-          setTimeout(async () => {
+      try {
+        // Cursor highlight start
+        const unlistenStart = await listen<[number, number]>(
+          "ui-cursor-highlight-start",
+          async (event) => {
+            if (!mounted) return;
+            const [x, y] = event.payload;
+            setCursorHighlight({ x, y, active: true, timestamp: Date.now() });
+            await positionOverlay(x, y, true);
             if (overlayWindowRef.current) {
-              await overlayWindowRef.current.hide();
+              await overlayWindowRef.current.show();
             }
-          }, 500);
-        }
-      );
-
-      // Click visualizations
-      const unlistenClick = await listen<[number, number, string]>(
-        "click-visualization",
-        async (event) => {
-          const [x, y, color] = event.payload;
-          const newClick: ClickVisualization = {
-            x,
-            y,
-            color,
-            id: Date.now(),
-            timestamp: Date.now(),
-          };
-
-          setClickVisualizations((prev) => [...prev, newClick]);
-          await positionOverlay(x, y, true); // Force positioning for click events
-
-          // Show overlay window for click
-          if (overlayWindowRef.current) {
-            await overlayWindowRef.current.show();
           }
+        );
+        if (mounted) unlistenFns.push(unlistenStart);
+        else unlistenStart();
 
-          // Hide after animation
-          setTimeout(async () => {
+        // Cursor highlight move
+        const unlistenMove = await listen<[number, number]>(
+          "ui-cursor-highlight-move",
+          async (event) => {
+            if (!mounted) return;
+            const [x, y] = event.payload;
+            setCursorHighlight((prev) =>
+              prev ? { ...prev, x, y, timestamp: Date.now() } : null
+            );
+            await positionOverlay(x, y);
+          }
+        );
+        if (mounted) unlistenFns.push(unlistenMove);
+        else unlistenMove();
+
+        // Cursor highlight stop
+        const unlistenStop = await listen<[number, number]>(
+          "ui-cursor-highlight-stop",
+          async () => {
+            if (!mounted) return;
+            setCursorHighlight(null);
+            setTimeout(async () => {
+              if (mounted && overlayWindowRef.current) {
+                await overlayWindowRef.current.hide();
+              }
+            }, 500);
+          }
+        );
+        if (mounted) unlistenFns.push(unlistenStop);
+        else unlistenStop();
+
+        // Click visualizations
+        const unlistenClick = await listen<[number, number, string]>(
+          "click-visualization",
+          async (event) => {
+            if (!mounted) return;
+            const [x, y, color] = event.payload;
+            const newClick: ClickVisualization = {
+              x,
+              y,
+              color,
+              id: Date.now(),
+              timestamp: Date.now(),
+            };
+
+            setClickVisualizations((prev) => [...prev, newClick]);
+            await positionOverlay(x, y, true);
             if (overlayWindowRef.current) {
-              await overlayWindowRef.current.hide();
+              await overlayWindowRef.current.show();
             }
-          }, 1000);
-        }
-      );
-
-      return () => {
-        unlistenStart();
-        unlistenMove();
-        unlistenStop();
-        unlistenClick();
-      };
+            setTimeout(async () => {
+              if (mounted && overlayWindowRef.current) {
+                await overlayWindowRef.current.hide();
+              }
+            }, 1000);
+          }
+        );
+        if (mounted) unlistenFns.push(unlistenClick);
+        else unlistenClick();
+      } catch (error) {
+        console.error("Failed to setup cursor overlay listeners:", error);
+      }
     };
 
     setupListeners();
+
+    return () => {
+      mounted = false;
+      for (const unlisten of unlistenFns) {
+        unlisten();
+      }
+    };
   }, [isEnabled]);
 
   // Clean up old click visualizations

@@ -30,6 +30,9 @@ export function useChatScrolling({
 }: UseChatScrollingProps) {
     const conversationEndRef = useRef<HTMLDivElement>(null);
     const scrollAreaRef = useRef<HTMLDivElement>(null);
+    // Keep a ref to userHasScrolledUp so the debounced function always reads the latest value
+    const userHasScrolledUpRef = useRef(userHasScrolledUp);
+    userHasScrolledUpRef.current = userHasScrolledUp;
 
     // Improved auto-scroll function
     const autoScrollToBottom = useCallback(
@@ -47,9 +50,10 @@ export function useChatScrolling({
     );
 
     // Throttled scroll function for streaming (limits frequency)
+    // Uses ref to always read latest userHasScrolledUp value
     const throttledAutoScroll = useRef(
         debounce(() => {
-            if (conversationEndRef.current && !userHasScrolledUp) {
+            if (conversationEndRef.current && !userHasScrolledUpRef.current) {
                 conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
                 setLastScrollTime(Date.now());
             }

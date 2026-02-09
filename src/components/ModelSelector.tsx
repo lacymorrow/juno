@@ -9,9 +9,9 @@ import {
 import { useSettings } from "@/hooks/useSettings";
 import { Brain, Cpu } from "lucide-react";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { useEventListener } from "@/hooks/useEventListener";
 
 interface ModelSelectorProps {
   variant?: "compact" | "full";
@@ -35,61 +35,56 @@ export function ModelSelector({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  // Load models when active provider changes or on initial load
-  useEffect(() => {
-    if (settings.activeProvider && !settings.isLoading) {
-      console.log(`Loading models for provider: ${settings.activeProvider}`);
-      loadModelsForProvider(settings.activeProvider);
-    }
-  }, [settings.activeProvider, settings.isLoading]);
+  const loadRequestRef = useRef(0);
 
-  // Listen for provider settings changes from backend to update model when changed
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-
-    const setupProviderListener = async () => {
-      unlisten = await listen(EVENTS.SYSTEM_PROVIDER_SETTINGS_CHANGED, (_event) => {
-        console.log("ModelSelector: Received provider settings update");
-        // Models list might have changed, reload models for current provider
-        if (settings.activeProvider) {
-          loadModelsForProvider(settings.activeProvider);
-        }
-      });
-    };
-
-    setupProviderListener();
-    return () => unlisten?.();
-  }, [settings.activeProvider]);
-
-  const loadModelsForProvider = async (providerId: string, isRetry = false) => {
+  const loadModelsForProvider = useCallback(async (providerId: string, isRetry = false) => {
+    const requestId = ++loadRequestRef.current;
     setLoadingModels(true);
     setLoadError(null);
-    
+
     try {
       const models = await invoke<ModelInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDER_MODELS, {
         providerId,
       });
+
+      if (requestId !== loadRequestRef.current) return; // Stale request
       setAvailableModels(models);
       setRetryCount(0);
 
       console.log(
         `ModelSelector: Loaded ${models.length} models for provider: ${providerId}`
       );
-
-      // If current model is not valid for this provider, we let the backend handle setting defaults
-      // The useSettings hook will get the updated settings via the provider_settings_changed event
     } catch (error) {
+      if (requestId !== loadRequestRef.current) return; // Stale request
       console.error("Failed to load models for provider:", error);
       setAvailableModels([]);
       setLoadError(error instanceof Error ? error.message : "Failed to load models");
-      
+
       if (isRetry) {
         setRetryCount(prev => prev + 1);
       }
     } finally {
-      setLoadingModels(false);
+      if (requestId === loadRequestRef.current) {
+        setLoadingModels(false);
+      }
     }
-  };
+  }, []);
+
+  // Load models when active provider changes or on initial load
+  useEffect(() => {
+    if (settings.activeProvider && !settings.isLoading) {
+      console.log(`Loading models for provider: ${settings.activeProvider}`);
+      loadModelsForProvider(settings.activeProvider);
+    }
+  }, [settings.activeProvider, settings.isLoading, loadModelsForProvider]);
+
+  // Listen for provider settings changes from backend to update model when changed
+  useEventListener(EVENTS.SYSTEM_PROVIDER_SETTINGS_CHANGED, () => {
+    console.log("ModelSelector: Received provider settings update");
+    if (settings.activeProvider) {
+      loadModelsForProvider(settings.activeProvider);
+    }
+  });
 
   const currentProvider = settings.providers.find(
     (p) => p.id === settings.activeProvider

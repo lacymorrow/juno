@@ -27,6 +27,7 @@ export function useDictationStateEvents({
   onInputChanged,
 }: UseDictationStateEventsProps) {
   useEffect(() => {
+    let mounted = true;
     let unlisteners: (() => void)[] = [];
 
     const setupListeners = async () => {
@@ -35,11 +36,14 @@ export function useDictationStateEvents({
         const unlisten = await listen<DictationStateChangeEvent>(
           EVENTS.DICTATION_STATE_CHANGED,
           (event) => {
-            console.log("[Dictation State] State changed:", event.payload);
-            onStateChanged(event.payload);
+            if (mounted) {
+              console.log("[Dictation State] State changed:", event.payload);
+              onStateChanged(event.payload);
+            }
           }
         );
-        unlisteners.push(unlisten);
+        if (mounted) unlisteners.push(unlisten);
+        else safeCleanupEventListener(unlisten);
       }
 
       // Listen for force reset events
@@ -47,11 +51,14 @@ export function useDictationStateEvents({
         const unlisten = await listen<string>(
           EVENTS.DICTATION_STATE_FORCE_RESET,
           (event) => {
-            console.log("[Dictation State] Force reset:", event.payload);
-            onForceReset(event.payload);
+            if (mounted) {
+              console.log("[Dictation State] Force reset:", event.payload);
+              onForceReset(event.payload);
+            }
           }
         );
-        unlisteners.push(unlisten);
+        if (mounted) unlisteners.push(unlisten);
+        else safeCleanupEventListener(unlisten);
       }
 
       // Listen for input state changes
@@ -59,11 +66,14 @@ export function useDictationStateEvents({
         const unlisten = await listen<any>(
           EVENTS.DICTATION_STATE_INPUT_CHANGED,
           (event) => {
-            console.log("[Dictation State] Input changed:", event.payload);
-            onInputChanged(event.payload);
+            if (mounted) {
+              console.log("[Dictation State] Input changed:", event.payload);
+              onInputChanged(event.payload);
+            }
           }
         );
-        unlisteners.push(unlisten);
+        if (mounted) unlisteners.push(unlisten);
+        else safeCleanupEventListener(unlisten);
       }
     };
 
@@ -73,6 +83,7 @@ export function useDictationStateEvents({
 
     // Cleanup
     return () => {
+      mounted = false;
       unlisteners.forEach((unlisten) => {
         safeCleanupEventListener(unlisten);
       });

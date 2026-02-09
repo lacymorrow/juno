@@ -32,9 +32,12 @@ export class ProductionCloudConnector {
 	private isInitialized = false;
 	private statusListeners: ((status: CloudConnectorStatus) => void)[] = [];
 	private messageListeners: ((message: CloudMessage) => void)[] = [];
+	private unlistenFns: (() => void)[] = [];
 
 	constructor() {
-		this.setupEventListeners();
+		this.setupEventListeners().catch((error) => {
+			console.error('[CloudConnector] Failed to setup event listeners:', error);
+		});
 	}
 
 	/**
@@ -118,29 +121,34 @@ export class ProductionCloudConnector {
 	 */
 	private async setupEventListeners(): Promise<void> {
 		// Listen for connection state changes
-		await listen(EVENTS.CLOUD_CONNECTOR_STATE, (event) => {
+		this.unlistenFns.push(await listen(EVENTS.CLOUD_CONNECTOR_STATE, (event) => {
 			console.log('[CloudConnector] State changed:', event.payload);
 			this.notifyStatusListeners();
-		});
+		}));
 
 		// Listen for cloud messages (handled by the Rust backend)
-		await listen('cloud-message-received', (event) => {
+		this.unlistenFns.push(await listen(EVENTS.CLOUD_COMMAND_RECEIVED, (event) => {
 			const message = event.payload as CloudMessage;
 			console.log('[CloudConnector] Received cloud message:', message);
 			this.messageListeners.forEach(listener => listener(message));
-		});
+		}));
 
-		// Listen for connection errors
-		await listen('cloud-connector-error', (event) => {
+		// Listen for connection errors (no generated constant for this event)
+		this.unlistenFns.push(await listen('cloud-connector-error', (event) => {
 			console.error('[CloudConnector] Connection error:', event.payload);
-		});
+		}));
+	}
 
-		// Listen for cloud commands from the native WebSocket connection
-		await listen('cloud-command-received', (event) => {
-			const command = event.payload;
-			console.log('[CloudConnector] Received cloud command:', command);
-			// Cloud commands are handled by the Rust backend
-		});
+	/**
+	 * Cleanup all event listeners
+	 */
+	destroy(): void {
+		for (const unlisten of this.unlistenFns) {
+			unlisten();
+		}
+		this.unlistenFns = [];
+		this.statusListeners = [];
+		this.messageListeners = [];
 	}
 
 	/**
@@ -206,6 +214,7 @@ export class CloudConnectorExample {
 	private connector: ProductionCloudConnector;
 	private statusUnsubscribe?: () => void;
 	private messageUnsubscribe?: () => void;
+	private healthMonitorInterval?: ReturnType<typeof setInterval>;
 
 	constructor() {
 		this.connector = new ProductionCloudConnector();
@@ -249,6 +258,12 @@ export class CloudConnectorExample {
 	 * Cleanup resources
 	 */
 	async cleanup(): Promise<void> {
+		// Stop health monitoring
+		if (this.healthMonitorInterval) {
+			clearInterval(this.healthMonitorInterval);
+			this.healthMonitorInterval = undefined;
+		}
+
 		// Unsubscribe from events
 		if (this.statusUnsubscribe) {
 			this.statusUnsubscribe();
@@ -259,6 +274,7 @@ export class CloudConnectorExample {
 
 		// Stop the connector
 		await this.connector.stop();
+		this.connector.destroy();
 		console.log('[Example] Cloud connector cleaned up');
 	}
 
@@ -266,7 +282,10 @@ export class CloudConnectorExample {
 	 * Monitor connection health
 	 */
 	async startHealthMonitoring(): Promise<void> {
-		setInterval(async () => {
+		if (this.healthMonitorInterval) {
+			clearInterval(this.healthMonitorInterval);
+		}
+		this.healthMonitorInterval = setInterval(async () => {
 			try {
 				const stats = await this.connector.getConnectionStats();
 				if (stats) {

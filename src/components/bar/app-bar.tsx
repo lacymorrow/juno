@@ -176,7 +176,6 @@ export function AppBar() {
   });
 
   const [localInputValue, setLocalInputValue] = useState("");
-  const [isWindowHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -343,11 +342,6 @@ export function AppBar() {
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
-    const hoverEffect =
-      barState.barState === UI.BAR_STATES_DEFAULT && isWindowHovered
-        ? "ring-2 ring-white/30"
-        : "";
-
     const clickable = [
       UI.BAR_STATES_DEFAULT,
       UI.BAR_STATES_DICTATION_READY,
@@ -358,7 +352,6 @@ export function AppBar() {
     return cn(
       bgColor,
       sizeStyles,
-      hoverEffect,
       clickable,
       "rounded-full backdrop-blur-xl border border-white/20 transition-all duration-300 ease-out shadow-lg"
     );

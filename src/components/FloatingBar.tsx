@@ -160,9 +160,11 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
    */
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let mounted = true;
 
     // Handler function for processing state updates
     const handleStateUpdate = (payload: any) => {
+      if (!mounted) return;
       console.log("📨 FloatingBar: Received state update:", payload);
 
       // Validate the received data structure
@@ -173,18 +175,21 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
       }
     };
 
+    // Store the DOM event handler so the same reference is used for add/remove
+    const domHandler = ((e: CustomEvent) =>
+      handleStateUpdate(e.detail)) as EventListener;
+
     const setupListener = async () => {
       try {
-        // Set up the standard backend event listener
-        unlisten = await listen<BarStateData>(
+        const fn = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => handleStateUpdate(event.payload)
         );
+        if (mounted) unlisten = fn;
+        else fn();
 
         // Also listen for component-specific events from event forwarding
-        document.addEventListener(`${COMPONENT_ID}-state-update`, ((
-          e: CustomEvent
-        ) => handleStateUpdate(e.detail)) as EventListener);
+        document.addEventListener(`${COMPONENT_ID}-state-update`, domHandler);
 
         console.log("✅ FloatingBar: Event listeners established");
       } catch (error) {
@@ -198,13 +203,11 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
     setupListener();
 
     return () => {
-      // Clean up both listeners
+      mounted = false;
       if (unlisten) {
         unlisten();
       }
-      document.removeEventListener(`${COMPONENT_ID}-state-update`, ((
-        e: CustomEvent
-      ) => handleStateUpdate(e.detail)) as EventListener);
+      document.removeEventListener(`${COMPONENT_ID}-state-update`, domHandler);
       console.log("🔄 FloatingBar: Event listeners cleaned up");
     };
   }, []);

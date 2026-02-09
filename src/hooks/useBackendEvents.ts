@@ -1,11 +1,10 @@
-import { useEffect, useCallback, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/components/ChatMessage";
 import { EVENTS } from "@/lib/constants.generated";
-import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { useEventListener } from "@/hooks/useEventListener";
 
 // Type definitions for backend events
 type SubmitQueryResult = {
@@ -39,6 +38,7 @@ type StreamEndEvent = {
 	message_id: string;
 	complete_text: string;
 	agent_state?: string; // "Finished", "Failed", "Cancelled", "Offline"
+	is_jsx?: boolean; // true if content contains JSX components to render
 };
 
 type DictationStateChangeEvent = {
@@ -107,59 +107,60 @@ export function useBackendEvents({
 }: UseBackendEventsProps) {
 	const hasCheckedServer = useRef(false);
 
-	// Handle backend responses via event listener
-	const handleBackendResponse = useCallback(
-		debounce((payload: BackendResponsePayload) => {
-			console.log("Debounced handler executing for:", payload.query);
-			const { response } = payload;
+	// Handle backend responses via event listener.
+	// Use refs to keep the debounced function stable while always calling latest handler.
+	const backendResponseHandlerRef = useRef<(payload: BackendResponsePayload) => void>(() => {});
+	backendResponseHandlerRef.current = (payload: BackendResponsePayload) => {
+		console.log("Debounced handler executing for:", payload.query);
+		const { response } = payload;
 
-			// Check if we have any streaming assistant messages in progress or recently completed
-			setConversationWithPruning((prevConversation) => {
-				const hasStreamingMessage = prevConversation.some(
-					(msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
-				);
+		setConversationWithPruning((prevConversation) => {
+			const hasStreamingMessage = prevConversation.some(
+				(msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
+			);
 
-				// Check if this response matches a recently streamed message (to prevent duplicates)
-				const now = Date.now();
-				const isRecentlyStreamed = prevConversation.some(
-					(msg: ChatMessage) =>
-						msg.role === "assistant" &&
-						msg.content === response.text &&
-						msg.timestamp &&
-						now - msg.timestamp < 2000 // Within last 2 seconds
-				);
+			const now = Date.now();
+			const isRecentlyStreamed = prevConversation.some(
+				(msg: ChatMessage) =>
+					msg.role === "assistant" &&
+					msg.content === response.text &&
+					msg.timestamp &&
+					now - msg.timestamp < 2000
+			);
 
-				// Only add assistant response message if we're not currently streaming
-				if (!hasStreamingMessage && !isRecentlyStreamed) {
-					console.log("Adding assistant message from backend response");
-					const assistantMessage: ChatMessage = {
-						role: "assistant",
-						content: response.text,
-						screenshot_base64: response.screenshot_base64,
-						timestamp: Date.now(),
-					};
+			if (!hasStreamingMessage && !isRecentlyStreamed) {
+				console.log("Adding assistant message from backend response");
+				const assistantMessage: ChatMessage = {
+					role: "assistant",
+					content: response.text,
+					screenshot_base64: response.screenshot_base64,
+					timestamp: Date.now(),
+				};
 
-					// Play audio if available (only when not streaming)
-					if (response.audio_base64) {
-						playAudioFromBase64(response.audio_base64);
-					}
-
-					return [...prevConversation, assistantMessage];
-				} else {
-					if (hasStreamingMessage) {
-						console.log("Skipping assistant message addition - streaming in progress");
-					} else if (isRecentlyStreamed) {
-						console.log("Skipping assistant message addition - recently streamed duplicate");
-					}
-					return prevConversation;
+				if (response.audio_base64) {
+					playAudioFromBase64(response.audio_base64);
 				}
-			});
 
-			// Reset processing state
-			setIsProcessing(false);
-		}, 100),
-		[setConversationWithPruning, playAudioFromBase64, setIsProcessing]
-	);
+				return [...prevConversation, assistantMessage];
+			} else {
+				if (hasStreamingMessage) {
+					console.log("Skipping assistant message addition - streaming in progress");
+				} else if (isRecentlyStreamed) {
+					console.log("Skipping assistant message addition - recently streamed duplicate");
+				}
+				return prevConversation;
+			}
+		});
+
+		setIsProcessing(false);
+	};
+
+	// Stable debounced function — created once, always calls latest handler via ref
+	const handleBackendResponse = useRef(
+		debounce((payload: BackendResponsePayload) => {
+			backendResponseHandlerRef.current(payload);
+		}, 100)
+	).current;
 
 	// Server status check (with duplicate prevention for React Strict Mode)
 	useEffect(() => {
@@ -185,41 +186,26 @@ export function useBackendEvents({
 	}, [setServerStatus, addSystemMessage]);
 
 	// Listen for responses broadcast from the backend
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setupListener = async () => {
-			unlisten = await listen<BackendResponsePayload>(
-				EVENTS.SYSTEM_BACKEND_RESPONSE,
-				(event) => {
-					console.log("Received backend-response event (raw):", event.payload);
-					handleBackendResponse(event.payload);
-				}
-			);
-		};
-
-		setupListener();
-		return () => unlisten?.();
-	}, [handleBackendResponse]);
+	useEventListener<BackendResponsePayload>(
+		EVENTS.SYSTEM_BACKEND_RESPONSE,
+		(payload) => {
+			console.log("Received backend-response event (raw):", payload);
+			handleBackendResponse(payload);
+		}
+	);
 
 	// Listen for system status updates for observability
-	useEffect(() => {
-		const unlisten = listen(EVENTS.SYSTEM_STATUS_UPDATE, (event) => {
-			try {
-				console.log("System status update:", event.payload);
-			} catch (e) {
-				console.warn("Failed to handle system status update:", e);
-			}
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, []);
+	useEventListener(
+		EVENTS.SYSTEM_STATUS_UPDATE,
+		(payload) => {
+			console.log("System status update:", payload);
+		}
+	);
 
 	// Listen for agent stopping events
-	useEffect(() => {
-		const unlisten = listen(EVENTS.AGENT_STOPPING, async () => {
+	useEventListener(
+		EVENTS.AGENT_STOPPING,
+		async () => {
 			console.log("Agent stopping event received - stopping TTS");
 			try {
 				await stopTTS((msg, level) =>
@@ -228,34 +214,24 @@ export function useBackendEvents({
 			} catch (error) {
 				console.error("Error stopping TTS:", error);
 			}
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, []);
+		}
+	);
 
 	// Listen for TTS audio ready events
-	useEffect(() => {
-		const unlisten = listen<{ audio_base64: string }>(
-			EVENTS.TTS_AUDIO_READY,
-			(event) => {
-				console.log("TTS audio ready event received");
-				const { audio_base64 } = event.payload;
-				if (audio_base64) {
-					playAudioFromBase64(audio_base64);
-				}
+	useEventListener<{ audio_base64: string }>(
+		EVENTS.TTS_AUDIO_READY,
+		(payload) => {
+			console.log("TTS audio ready event received");
+			if (payload.audio_base64) {
+				playAudioFromBase64(payload.audio_base64);
 			}
-		);
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [playAudioFromBase64]);
+		}
+	);
 
 	// Listen for TTS stop requests
-	useEffect(() => {
-		const unlisten = listen(EVENTS.TTS_STOP_REQUESTED, async () => {
+	useEventListener(
+		EVENTS.TTS_STOP_REQUESTED,
+		async () => {
 			console.log("TTS stop requested event received - stopping TTS immediately");
 			try {
 				stopCurrentAudio();
@@ -265,17 +241,14 @@ export function useBackendEvents({
 			} catch (error) {
 				console.error("Error stopping TTS:", error);
 			}
-		});
+		}
+	);
 
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [stopCurrentAudio]);
-
-	// Listen for agent events (thinking, tool calls, etc.) - MERGED VERSION
-	useEffect(() => {
-		const unlistenPromise = listen<AgentEventTauri>(EVENTS.AGENT_EVENT, (event) => {
-			const { type, payload } = event.payload;
+	// Listen for agent events (thinking, tool calls, etc.)
+	useEventListener<AgentEventTauri>(
+		EVENTS.AGENT_EVENT,
+		(agentEvent) => {
+			const { type, payload } = agentEvent;
 			const currentTime = Date.now();
 
 			// Handle conversation messages
@@ -324,7 +297,6 @@ export function useBackendEvents({
 			});
 
 			// Handle toast notifications with deduplication
-			// Use unique IDs to prevent duplicate toasts for rapid events
 			switch (type) {
 				case "tool_call_request": {
 					const notificationLevel = payload.notification_level || "standard";
@@ -334,7 +306,6 @@ export function useBackendEvents({
 						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
 						const toastId = `tool-request-${payload.tool_name}`;
 
-						// Dismiss any previous request toast for the same tool
 						toast.dismiss(toastId);
 						toast.info(message, {
 							id: toastId,
@@ -355,7 +326,6 @@ export function useBackendEvents({
 						const toastType = success ? "success" : "error";
 						const toastId = `tool-result-${payload.tool_name}`;
 
-						// Dismiss previous result and request toasts for this tool
 						toast.dismiss(toastId);
 						toast.dismiss(`tool-request-${payload.tool_name}`);
 						toast[toastType](message, {
@@ -366,7 +336,6 @@ export function useBackendEvents({
 
 						if (payload.screenshot_base64 && success) {
 							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
-							// Use consistent ID for screenshot toasts
 							toast.dismiss("screenshot-captured");
 							toast.success("📸 Screenshot captured", {
 								id: "screenshot-captured",
@@ -380,7 +349,6 @@ export function useBackendEvents({
 
 				case "thinking": {
 					if (payload.content) {
-						// Use a single ID for thinking toasts - only show the latest
 						toast.dismiss("thinking");
 						toast.info(`💭 ${payload.content}`, {
 							id: "thinking",
@@ -392,7 +360,6 @@ export function useBackendEvents({
 				}
 
 				case "screenshot": {
-					// Use consistent ID for screenshot toasts
 					toast.dismiss("screenshot-captured");
 					toast.success("📸 Screenshot captured", {
 						id: "screenshot-captured",
@@ -404,7 +371,6 @@ export function useBackendEvents({
 
 				case "generic_content": {
 					if (payload.content) {
-						// Use content-based ID for deduplication of generic content
 						const contentHash = payload.content.slice(0, 50).replace(/\s+/g, '-');
 						const toastId = `generic-${contentHash}`;
 						toast.dismiss(toastId);
@@ -418,7 +384,6 @@ export function useBackendEvents({
 				}
 
 				default:
-					// Handle any other event types silently
 					break;
 			}
 
@@ -426,197 +391,175 @@ export function useBackendEvents({
 			if (type === "tool_call_result" || type === "tool_call_request" || type === "thinking") {
 				throttledAutoScroll();
 			}
-		});
+		}
+	);
 
-		return () => {
-			unlistenPromise.then((unlistenFn) => unlistenFn());
-		};
-	}, [setConversationWithPruning, throttledAutoScroll]);
+	// Listen for streaming start events
+	useEventListener<StreamStartEvent>(
+		EVENTS.STREAMING_STREAM_START,
+		(payload) => {
+			console.log("Stream started:", payload);
+			const { message_id } = payload;
 
-	// Listen for streaming events
-	useEffect(() => {
-		const streamStartListener = listen<StreamStartEvent>(
-			EVENTS.STREAMING_STREAM_START,
-			(event) => {
-				console.log("Stream started:", event.payload);
-				const { message_id } = event.payload;
+			const streamingMessage: ChatMessage = {
+				role: "assistant",
+				content: "",
+				timestamp: Date.now(),
+				isStreaming: true,
+				messageId: message_id,
+			};
 
-				const streamingMessage: ChatMessage = {
-					role: "assistant",
-					content: "",
-					timestamp: Date.now(),
-					isStreaming: true,
-					messageId: message_id,
-				};
+			setConversationWithPruning((prev) => [...prev, streamingMessage]);
+		}
+	);
 
-				setConversationWithPruning((prev) => [...prev, streamingMessage]);
-			}
-		);
+	// Listen for streaming text chunks
+	useEventListener<StreamingTextEvent>(
+		EVENTS.STREAMING_TEXT_STREAM,
+		(payload) => {
+			const { chunk, message_id, tts_content } = payload;
 
-		const streamTextListener = listen<StreamingTextEvent>(
-			EVENTS.STREAMING_TEXT_STREAM,
-			(event) => {
-				console.log("Stream text chunk:", event.payload);
-				const { chunk, message_id, tts_content } = event.payload;
+			setConversationWithPruning((prev) =>
+				prev.map((msg) => {
+					if (msg.messageId === message_id && msg.isStreaming) {
+						const existingTtsContent = msg.tts_metadata?.tts_parts || [];
+						const newTtsContent = tts_content ? [...existingTtsContent, tts_content] : existingTtsContent;
 
-				setConversationWithPruning((prev) =>
-					prev.map((msg) => {
-						if (msg.messageId === message_id && msg.isStreaming) {
-							// Collect TTS content for decorative display
-							const existingTtsContent = msg.tts_metadata?.tts_parts || [];
-							const newTtsContent = tts_content ? [...existingTtsContent, tts_content] : existingTtsContent;
+						return {
+							...msg,
+							content: msg.content + chunk,
+							tts_metadata: {
+								has_spoken_content: (msg.tts_metadata?.has_spoken_content || false) || !!tts_content,
+								tts_parts: newTtsContent,
+								total_spoken_text: newTtsContent.join(' ')
+							}
+						};
+					}
+					return msg;
+				})
+			);
 
-							return {
-								...msg,
-								content: msg.content + chunk,
-								tts_metadata: {
-									has_spoken_content: (msg.tts_metadata?.has_spoken_content || false) || !!tts_content,
-									tts_parts: newTtsContent,
-									total_spoken_text: newTtsContent.join(' ')
-								}
-							};
-						}
-						return msg;
-					})
-				);
+			throttledAutoScroll();
+		}
+	);
 
-				throttledAutoScroll();
-			}
-		);
+	// Listen for streaming end events
+	useEventListener<StreamEndEvent>(
+		EVENTS.STREAMING_STREAM_END,
+		(payload) => {
+			console.log("Stream ended:", payload);
+			const { message_id, complete_text, agent_state, is_jsx } = payload;
 
-		const streamEndListener = listen<StreamEndEvent>(
-			EVENTS.STREAMING_STREAM_END,
-			(event) => {
-				console.log("Stream ended:", event.payload);
-				const { message_id, complete_text, agent_state } = event.payload;
+			setConversationWithPruning((prev) =>
+				prev.map((msg) => {
+					if (msg.messageId === message_id && msg.isStreaming) {
+						return {
+							...msg,
+							content: complete_text,
+							isStreaming: false,
+							agent_state,
+							isJsx: is_jsx ?? false,
+						};
+					}
+					return msg;
+				})
+			);
 
-				setConversationWithPruning((prev) =>
-					prev.map((msg) => {
-						if (msg.messageId === message_id && msg.isStreaming) {
-							return {
-								...msg,
-								content: complete_text,
-								isStreaming: false,
-								agent_state,
-							};
-						}
-						return msg;
-					})
-				);
+			setIsProcessing(false);
+		}
+	);
 
-				setIsProcessing(false);
-			}
-		);
+	// Listen for thinking stream start
+	useEventListener<{ message_id: string }>(
+		EVENTS.STREAMING_THINKING_START,
+		(payload) => {
+			console.log("Thinking stream started:", payload);
+			const { message_id } = payload;
 
-		return () => {
-			streamStartListener.then((unlistenFn) => unlistenFn());
-			streamTextListener.then((unlistenFn) => unlistenFn());
-			streamEndListener.then((unlistenFn) => unlistenFn());
-		};
-	}, [setConversationWithPruning, throttledAutoScroll, setIsProcessing]);
+			const thinkingMessage: ChatMessage = {
+				role: "thinking",
+				content: "",
+				messageId: message_id,
+				isStreaming: true,
+				timestamp: Date.now(),
+			};
 
-	// Listen for thinking streaming events (streamed thinking content)
-	useEffect(() => {
-		// Thinking stream start - create a new streaming thinking message
-		const thinkingStartListener = listen<{ message_id: string }>(
-			EVENTS.STREAMING_THINKING_START,
-			(event) => {
-				console.log("Thinking stream started:", event.payload);
-				const { message_id } = event.payload;
+			setConversationWithPruning((prev) => [...prev, thinkingMessage]);
+		}
+	);
 
-				const thinkingMessage: ChatMessage = {
-					role: "thinking",
-					content: "",
-					messageId: message_id,
-					isStreaming: true,
-					timestamp: Date.now(),
-				};
+	// Listen for thinking stream chunks
+	useEventListener<{ chunk: string; message_id: string | null }>(
+		EVENTS.STREAMING_THINKING_STREAM,
+		(payload) => {
+			const { chunk, message_id } = payload;
 
-				setConversationWithPruning((prev) => [...prev, thinkingMessage]);
-			}
-		);
+			setConversationWithPruning((prev) =>
+				prev.map((msg) => {
+					if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+						return {
+							...msg,
+							content: msg.content + chunk,
+						};
+					}
+					return msg;
+				})
+			);
 
-		// Thinking stream chunk - append to the streaming thinking message
-		const thinkingStreamListener = listen<{ chunk: string; message_id: string | null }>(
-			EVENTS.STREAMING_THINKING_STREAM,
-			(event) => {
-				const { chunk, message_id } = event.payload;
+			throttledAutoScroll();
+		}
+	);
 
-				setConversationWithPruning((prev) =>
-					prev.map((msg) => {
-						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
-							return {
-								...msg,
-								content: msg.content + chunk,
-							};
-						}
-						return msg;
-					})
-				);
+	// Listen for thinking stream end
+	useEventListener<{ message_id: string; complete_text: string }>(
+		EVENTS.STREAMING_THINKING_END,
+		(payload) => {
+			console.log("Thinking stream ended:", payload);
+			const { message_id, complete_text } = payload;
 
-				throttledAutoScroll();
-			}
-		);
-
-		// Thinking stream end - finalize the streaming thinking message
-		const thinkingEndListener = listen<{ message_id: string; complete_text: string }>(
-			EVENTS.STREAMING_THINKING_END,
-			(event) => {
-				console.log("Thinking stream ended:", event.payload);
-				const { message_id, complete_text } = event.payload;
-
-				setConversationWithPruning((prev) =>
-					prev.map((msg) => {
-						if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
-							return {
-								...msg,
-								content: complete_text,
-								isStreaming: false,
-							};
-						}
-						return msg;
-					})
-				);
-			}
-		);
-
-		return () => {
-			thinkingStartListener.then((unlistenFn) => unlistenFn());
-			thinkingStreamListener.then((unlistenFn) => unlistenFn());
-			thinkingEndListener.then((unlistenFn) => unlistenFn());
-		};
-	}, [setConversationWithPruning, throttledAutoScroll]);
+			setConversationWithPruning((prev) =>
+				prev.map((msg) => {
+					if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+						return {
+							...msg,
+							content: complete_text,
+							isStreaming: false,
+						};
+					}
+					return msg;
+				})
+			);
+		}
+	);
 
 	// Listen for agent error events
-	useEffect(() => {
-		const unlisten = listen<{
-			agent_state: string;
-			error_message: string;
-			original_query: string;
-		}>(EVENTS.AGENT_ERROR, (event) => {
-			console.log("Agent error event received:", event.payload);
-			const { agent_state, error_message } = event.payload;
+	useEventListener<{
+		agent_state: string;
+		error_message: string;
+		original_query: string;
+	}>(
+		EVENTS.AGENT_ERROR,
+		(payload) => {
+			console.log("Agent error event received:", payload);
+			const { agent_state, error_message } = payload;
 
 			setIsProcessing(false);
 			addSystemMessage(`Agent ${agent_state.toLowerCase()}: ${error_message}`);
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [setIsProcessing, addSystemMessage]);
+		}
+	);
 
 	// Listen for agent continuation requests
-	useEffect(() => {
-		const unlisten = listen<{
-			request_id: string;
-			execution_id: string;
-			current_step: number;
-			max_steps: number;
-			message: string;
-		}>(EVENTS.CONTINUATION_AGENT_REQUEST, (event) => {
-			console.log("Agent continuation request received:", event.payload);
-			const { request_id, current_step, max_steps, message } = event.payload;
+	useEventListener<{
+		request_id: string;
+		execution_id: string;
+		current_step: number;
+		max_steps: number;
+		message: string;
+	}>(
+		EVENTS.CONTINUATION_AGENT_REQUEST,
+		(payload) => {
+			console.log("Agent continuation request received:", payload);
+			const { request_id, current_step, max_steps, message } = payload;
 
 			// Add system message to conversation
 			addSystemMessage(
@@ -649,14 +592,14 @@ export function useBackendEvents({
 						});
 					},
 				},
-				closeButton: false, // Don't allow dismissing without action
+				closeButton: false,
 				className: "agent-continuation-toast-stop",
 			});
 
 			// Show secondary toast for continuation option
 			setTimeout(() => {
 				toast.warning("⚠️ Or click here to continue (not recommended)", {
-					duration: 300000, // Same timeout
+					duration: 300000,
 					id: `continuation-continue-${request_id}`,
 					description: "This will add 20 more steps and may continue indefinitely",
 					action: {
@@ -681,26 +624,23 @@ export function useBackendEvents({
 							});
 						},
 					},
-					closeButton: false, // Don't allow dismissing without action
+					closeButton: false,
 					className: "agent-continuation-toast-continue",
 				});
-			}, 100); // Small delay to show both toasts
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [addSystemMessage]);
+			}, 100);
+		}
+	);
 
 	// Listen for agent continuation responses
-	useEffect(() => {
-		const unlisten = listen<{
-			request_id: string;
-			approved: boolean;
-			additional_steps?: number;
-		}>(EVENTS.CONTINUATION_AGENT_RESPONSE, (event) => {
-			console.log("Agent continuation response received:", event.payload);
-			const { approved, additional_steps } = event.payload;
+	useEventListener<{
+		request_id: string;
+		approved: boolean;
+		additional_steps?: number;
+	}>(
+		EVENTS.CONTINUATION_AGENT_RESPONSE,
+		(payload) => {
+			console.log("Agent continuation response received:", payload);
+			const { approved, additional_steps } = payload;
 
 			if (approved) {
 				const steps = additional_steps || 20;
@@ -710,16 +650,13 @@ export function useBackendEvents({
 			} else {
 				addSystemMessage("❌ Agent continuation denied. Execution stopped.");
 			}
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [addSystemMessage]);
+		}
+	);
 
 	// Listen for comprehensive agent-stop-all events
-	useEffect(() => {
-		const unlisten = listen(EVENTS.AGENT_STOP_ALL, async () => {
+	useEventListener(
+		EVENTS.AGENT_STOP_ALL,
+		async () => {
 			console.log("Agent stop all event received - performing comprehensive UI cleanup");
 			try {
 				await stopTTS((msg, level) =>
@@ -731,53 +668,34 @@ export function useBackendEvents({
 			} catch (error) {
 				console.error("Error during agent stop all cleanup:", error);
 			}
-		});
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [setIsProcessing, stopCurrentAudio]);
+		}
+	);
 
 	// Listen for dictation state changes (for synchronization/debugging)
-	useEffect(() => {
-		const unlisten = listen<DictationStateChangeEvent>(
-			EVENTS.DICTATION_STATE_CHANGED,
-			(event) => {
-				console.log("Dictation state changed:", event.payload);
-				// Note: Primary UI state is driven by useAppState/voice_mode, 
-				// but this event provides detailed transition info for debugging
-				// or future fine-grained UI updates.
-			}
-		);
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, []);
+	useEventListener<DictationStateChangeEvent>(
+		EVENTS.DICTATION_STATE_CHANGED,
+		(payload) => {
+			console.log("Dictation state changed:", payload);
+		}
+	);
 
 	// Listen for user message submitted events (from voice input)
-	useEffect(() => {
-		const unlisten = listen<{ content: string; timestamp: number }>(
-			EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
-			(event) => {
-				console.log("User message submitted event received:", event.payload);
-				const { content, timestamp } = event.payload;
+	useEventListener<{ content: string; timestamp: number }>(
+		EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
+		(payload) => {
+			console.log("User message submitted event received:", payload);
+			const { content, timestamp } = payload;
 
-				setConversationWithPruning((prev) => [
-					...prev,
-					{
-						role: "user",
-						content,
-						timestamp,
-					}
-				]);
-			}
-		);
-
-		return () => {
-			unlisten.then((unlistenFn) => safeCleanupEventListener(unlistenFn));
-		};
-	}, [setConversationWithPruning]);
+			setConversationWithPruning((prev) => [
+				...prev,
+				{
+					role: "user",
+					content,
+					timestamp,
+				}
+			]);
+		}
+	);
 }
 
 // Helper functions for notifications
