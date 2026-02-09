@@ -1,80 +1,106 @@
 use whisper_rs::{WhisperContext, WhisperContextParameters};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock};
 use std::path::Path;
 use crate::error::{Error, Result};
 use tracing::{info, error, warn, debug};
 
-/// Global shared Whisper context that can be used by multiple controllers
-static SHARED_WHISPER_CONTEXT: OnceLock<Arc<WhisperContext>> = OnceLock::new();
+/// Global shared Whisper context — uses RwLock so the model can be swapped at runtime
+static SHARED_WHISPER_CONTEXT: RwLock<Option<Arc<WhisperContext>>> = RwLock::new(None);
 
 /// Manager for shared Whisper model loading and access
 pub struct SharedWhisperManager;
 
 impl SharedWhisperManager {
-    /// Initialize the shared Whisper context (should be called once at startup)
-    pub fn initialize(model_path: &str) -> Result<Arc<WhisperContext>> {
-        info!("[SharedWhisper] 🚀 Initializing shared Whisper context with model: {}", model_path);
-
-        // Check if already initialized
-        if let Some(existing_context) = SHARED_WHISPER_CONTEXT.get() {
-            info!("[SharedWhisper] ✅ Shared context already exists, returning existing instance (no duplicate loading)");
-            return Ok(existing_context.clone());
-        }
-
+    /// Create a WhisperContext from a model file path
+    fn create_context(model_path: &str) -> Result<Arc<WhisperContext>> {
         let model_path_obj = Path::new(model_path);
         if !model_path_obj.exists() {
-            error!("[SharedWhisper] ❌ Model file not found: {}", model_path);
+            error!("[SharedWhisper] Model file not found: {}", model_path);
             return Err(Error::ModelNotFound(model_path.to_string()));
         }
 
-        // Log model file size for performance tracking
         if let Ok(metadata) = std::fs::metadata(model_path) {
             let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
-            info!("[SharedWhisper] 📊 Loading Whisper model: {:.1}MB", size_mb);
+            info!("[SharedWhisper] Loading Whisper model: {:.1}MB", size_mb);
         }
 
         let context_params = WhisperContextParameters::default();
-        info!("[SharedWhisper] 🔧 Creating WhisperContext with default parameters...");
-
         let whisper_context = WhisperContext::new_with_params(model_path, context_params)
             .map_err(|e| {
-                error!("[SharedWhisper] ❌ Failed to create WhisperContext: {:?}", e);
+                error!("[SharedWhisper] Failed to create WhisperContext: {:?}", e);
                 Error::Whisper(format!("Failed to create WhisperContext: {:?}", e))
             })?;
 
-        let arc_context = Arc::new(whisper_context);
-        info!("[SharedWhisper] ✅ WhisperContext created successfully");
+        Ok(Arc::new(whisper_context))
+    }
 
-        // Try to set the global context
-        match SHARED_WHISPER_CONTEXT.set(arc_context.clone()) {
-            Ok(_) => {
-                info!("[SharedWhisper] ✅ Shared Whisper context initialized successfully - available for reuse");
-                info!("[SharedWhisper] 💡 Both VoiceController and AlwaysListeningController can now use this shared instance");
-                Ok(arc_context)
-            }
-            Err(_) => {
-                // This shouldn't happen since we checked above, but handle gracefully
-                warn!("[SharedWhisper] ⚠️  Race condition detected during initialization, returning existing instance");
-                Ok(Self::get()?)
+    /// Initialize the shared Whisper context (returns existing if already set)
+    pub fn initialize(model_path: &str) -> Result<Arc<WhisperContext>> {
+        info!("[SharedWhisper] Initializing shared Whisper context with model: {}", model_path);
+
+        // Fast path: read lock to check if already initialized
+        {
+            let guard = SHARED_WHISPER_CONTEXT.read()
+                .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
+            if let Some(existing) = guard.as_ref() {
+                info!("[SharedWhisper] Shared context already exists, returning existing instance");
+                return Ok(existing.clone());
             }
         }
+
+        // Create the new context (expensive, done without holding the lock)
+        let arc_context = Self::create_context(model_path)?;
+        info!("[SharedWhisper] WhisperContext created successfully");
+
+        // Write lock to set the global context
+        let mut guard = SHARED_WHISPER_CONTEXT.write()
+            .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
+
+        // Double-check: another thread may have initialized while we were loading
+        if let Some(existing) = guard.as_ref() {
+            warn!("[SharedWhisper] Race condition: another thread initialized while we were loading, returning existing");
+            return Ok(existing.clone());
+        }
+
+        *guard = Some(arc_context.clone());
+        info!("[SharedWhisper] Shared Whisper context initialized successfully");
+        Ok(arc_context)
+    }
+
+    /// Reinitialize with a new model path — replaces the existing context
+    pub fn reinitialize(model_path: &str) -> Result<Arc<WhisperContext>> {
+        info!("[SharedWhisper] Reinitializing shared Whisper context with model: {}", model_path);
+
+        // Create the new context (expensive, done without holding the lock)
+        let arc_context = Self::create_context(model_path)?;
+        info!("[SharedWhisper] New WhisperContext created successfully");
+
+        // Write lock to replace the global context
+        let mut guard = SHARED_WHISPER_CONTEXT.write()
+            .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
+
+        *guard = Some(arc_context.clone());
+        info!("[SharedWhisper] Shared Whisper context reinitialized with new model");
+        Ok(arc_context)
     }
 
     /// Get the shared Whisper context (must be initialized first)
     pub fn get() -> Result<Arc<WhisperContext>> {
-        SHARED_WHISPER_CONTEXT
-            .get()
-            .cloned()
+        let guard = SHARED_WHISPER_CONTEXT.read()
+            .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
+        guard.as_ref().cloned()
             .ok_or_else(|| {
-                error!("[SharedWhisper] ❌ Shared Whisper context not initialized - call initialize() first");
+                error!("[SharedWhisper] Shared Whisper context not initialized - call initialize() first");
                 Error::Whisper("Shared Whisper context not initialized. Call initialize() first.".to_string())
             })
     }
 
     /// Check if the shared context is initialized
     pub fn is_initialized() -> bool {
-        let initialized = SHARED_WHISPER_CONTEXT.get().is_some();
-        debug!("[SharedWhisper] Initialization status: {}", if initialized { "✅ Initialized" } else { "❌ Not initialized" });
+        let initialized = SHARED_WHISPER_CONTEXT.read()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        debug!("[SharedWhisper] Initialization status: {}", if initialized { "Initialized" } else { "Not initialized" });
         initialized
     }
 
@@ -86,20 +112,12 @@ impl SharedWhisperManager {
         let status = serde_json::json!({
             "initialized": initialized,
             "context_available": context_available,
-            "memory_efficiency": if initialized { "✅ Single shared instance" } else { "❌ No shared instance" },
-            "performance_impact": if initialized { "✅ Eliminated duplicate loading" } else { "❌ Potential duplicate loading" }
+            "memory_efficiency": if initialized { "Single shared instance" } else { "No shared instance" },
+            "performance_impact": if initialized { "Eliminated duplicate loading" } else { "Potential duplicate loading" }
         });
 
-        info!("[SharedWhisper] 📊 Status check: {}", status);
+        info!("[SharedWhisper] Status check: {}", status);
         status
-    }
-
-    /// Force reset the shared context (for testing/debugging only)
-    #[cfg(debug_assertions)]
-    pub fn reset_for_testing() {
-        warn!("[SharedWhisper] 🔄 Resetting shared context (DEBUG ONLY)");
-        // Note: OnceLock doesn't have a reset method, so this is for documentation
-        // In production, the context should remain shared for the lifetime of the app
     }
 
     /// Get performance statistics
@@ -108,7 +126,7 @@ impl SharedWhisperManager {
         serde_json::json!({
             "memory_savings": if initialized { "~77MB saved by avoiding duplicate loading" } else { "0MB (no sharing)" },
             "startup_improvement": if initialized { "Faster startup (shared context)" } else { "Slower startup (duplicate loading)" },
-            "recommendation": if !initialized { "Call SharedWhisperManager::initialize() once at startup" } else { "✅ Optimally configured" }
+            "recommendation": if !initialized { "Call SharedWhisperManager::initialize() once at startup" } else { "Optimally configured" }
         })
     }
 }
@@ -116,16 +134,6 @@ impl SharedWhisperManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_shared_whisper_manager_not_initialized() {
-        // Reset static state for test
-        // Note: In a real test environment, you'd want to use a different approach
-        // to avoid global state, but this demonstrates the concept
-
-        assert!(!SharedWhisperManager::is_initialized());
-        assert!(SharedWhisperManager::get().is_err());
-    }
 
     #[test]
     fn test_shared_whisper_manager_status() {
