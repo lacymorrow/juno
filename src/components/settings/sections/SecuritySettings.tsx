@@ -19,7 +19,7 @@ import {
   Keyboard,
   Info,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getPermissionsStatus,
   invalidatePermissionsCache,
@@ -235,6 +235,12 @@ export default function SecuritySettings() {
   // Add loading state for initial permission check
   const [isLoadingPermissions, setIsLoadingPermissions] =
     useState<boolean>(true);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Function to check current permissions status using centralized service
   const checkPermissionsStatus = async (forceRefresh = false) => {
@@ -294,7 +300,7 @@ export default function SecuritySettings() {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
-          await checkPermissionsStatus(true);
+          if (mountedRef.current) await checkPermissionsStatus(true);
         }, 2000);
       }
     } catch (error) {

@@ -177,80 +177,105 @@ export function useSettings() {
 	// Listen for MCP state updates from backend
 	useEffect(() => {
 		let unlisten: (() => void) | undefined;
+		let mounted = true;
 
 		const setupMcpListener = async () => {
-			unlisten = await listen<{
-				servers: MCPServerConfig[];
-				statuses: Record<string, MCPServerStatus>;
-				tools: MCPToolInfo[];
-			}>("mcp_state_updated", (event) => {
-				console.log("Received MCP state update:", event.payload);
-				setMcpServers(event.payload.servers);
-				setMcpServerStatuses(event.payload.statuses);
-				setMcpTools(event.payload.tools);
-			});
+			try {
+				const fn = await listen<{
+					servers: MCPServerConfig[];
+					statuses: Record<string, MCPServerStatus>;
+					tools: MCPToolInfo[];
+				}>("mcp_state_updated", (event) => {
+					if (!mounted) return;
+					console.log("Received MCP state update:", event.payload);
+					setMcpServers(event.payload.servers);
+					setMcpServerStatuses(event.payload.statuses);
+					setMcpTools(event.payload.tools);
+				});
+				if (mounted) {
+					unlisten = fn;
+				} else {
+					fn();
+				}
+			} catch (error) {
+				console.error("Failed to setup MCP listener:", error);
+			}
 		};
 
 		setupMcpListener();
-		return () => unlisten?.();
+		return () => {
+			mounted = false;
+			unlisten?.();
+		};
 	}, []);
 
 	// Listen for provider settings changes from backend
 	useEffect(() => {
 		let unlisten: (() => void) | undefined;
+		let mounted = true;
 
 		const setupProviderListener = async () => {
-			unlisten = await listen<{
-				active_provider: string;
-				providers: {
-					id: string;
-					api_key?: string;
-					model?: string;
-					max_tokens?: number;
-					temperature?: number;
-					system_prompt?: string;
-				}[];
-			}>("provider_settings_changed", (event) => {
-				console.log("useSettings: Received provider settings update:", event.payload);
-				const fullProviderSettings = event.payload;
+			try {
+				const fn = await listen<{
+					active_provider: string;
+					providers: {
+						id: string;
+						api_key?: string;
+						model?: string;
+						max_tokens?: number;
+						temperature?: number;
+						system_prompt?: string;
+					}[];
+				}>("provider_settings_changed", (event) => {
+					if (!mounted) return;
+					console.log("useSettings: Received provider settings update:", event.payload);
+					const fullProviderSettings = event.payload;
 
-				// Update active provider if it changed
-				if (fullProviderSettings.active_provider !== activeProvider) {
-					console.log(`useSettings: Active provider changed to: ${fullProviderSettings.active_provider}`);
+					// Update active provider
 					setActiveProvider(fullProviderSettings.active_provider);
-				}
 
-				// Find the current provider's settings
-				const currentProviderSettings = fullProviderSettings.providers.find(
-					p => p.id === fullProviderSettings.active_provider
-				);
+					// Find the current provider's settings
+					const currentProviderSettings = fullProviderSettings.providers.find(
+						p => p.id === fullProviderSettings.active_provider
+					);
 
-				if (currentProviderSettings) {
-					console.log("useSettings: Updating provider settings for:", fullProviderSettings.active_provider);
+					if (currentProviderSettings) {
+						console.log("useSettings: Updating provider settings for:", fullProviderSettings.active_provider);
 
-					// Update provider settings state
-					setProviderSettings(currentProviderSettings);
+						// Update provider settings state
+						setProviderSettings(currentProviderSettings);
 
-					// Update form data to reflect the changes
-					setFormData({
-						apiKey: currentProviderSettings.api_key || "",
-						model: currentProviderSettings.model || "",
-						maxTokens: currentProviderSettings.max_tokens?.toString() || "",
-						temperature: currentProviderSettings.temperature?.toString() || "",
-						systemPrompt: currentProviderSettings.system_prompt || "",
-					});
+						// Update form data to reflect the changes
+						setFormData({
+							apiKey: currentProviderSettings.api_key || "",
+							model: currentProviderSettings.model || "",
+							maxTokens: currentProviderSettings.max_tokens?.toString() || "",
+							temperature: currentProviderSettings.temperature?.toString() || "",
+							systemPrompt: currentProviderSettings.system_prompt || "",
+						});
+					} else {
+						console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
+					}
+
+					// Invalidate cache to force fresh data on next request
+					invalidateCache();
+				});
+				if (mounted) {
+					unlisten = fn;
 				} else {
-					console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
+					fn();
 				}
-
-				// Invalidate cache to force fresh data on next request
-				invalidateCache();
-			});
+			} catch (error) {
+				console.error("Failed to setup provider listener:", error);
+			}
 		};
 
 		setupProviderListener();
-		return () => unlisten?.();
-	}, [activeProvider]); // Include activeProvider in deps to handle provider changes
+		return () => {
+			mounted = false;
+			unlisten?.();
+		};
+	}, []); // No deps needed — handler always gets latest state via event payload
 
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);

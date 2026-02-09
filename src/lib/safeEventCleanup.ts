@@ -29,19 +29,28 @@ export function safeCleanupEventListener(unlisten: (() => void) | undefined | nu
 }
 
 /**
- * Creates a safe event listener setup that handles cleanup properly
+ * Creates a safe event listener setup that handles cleanup properly.
+ * Returns a cleanup function that safely tears down the listener.
  */
 export function createSafeEventListener<T>(
   eventName: string,
   handler: (event: { payload: T }) => void
 ): () => void {
   let unlisten: (() => void) | undefined;
+  let disposed = false;
 
   const setupListener = async () => {
     try {
-      // Dynamically import to ensure Tauri is available
       const { listen } = await import('@tauri-apps/api/event');
-      unlisten = await listen<T>(eventName, handler);
+      const fn = await listen<T>(eventName, (event) => {
+        if (!disposed) handler(event);
+      });
+      if (disposed) {
+        // Already cleaned up before listen() resolved
+        safeCleanupEventListener(fn);
+      } else {
+        unlisten = fn;
+      }
     } catch (error) {
       console.error(`Failed to setup listener for ${eventName}:`, error);
     }
@@ -49,5 +58,8 @@ export function createSafeEventListener<T>(
 
   setupListener();
 
-  return () => safeCleanupEventListener(unlisten);
+  return () => {
+    disposed = true;
+    safeCleanupEventListener(unlisten);
+  };
 }

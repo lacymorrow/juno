@@ -162,6 +162,20 @@ export function VoiceAIBar({
   >("collapsed");
   const [isCalculatingDimensions, setIsCalculatingDimensions] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const mountedRef = useRef(true);
+
+  // Clean up all pending timers on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const timer of pendingTimers.current) {
+        clearTimeout(timer);
+      }
+      pendingTimers.current = [];
+    };
+  }, []);
 
   // === WINDOW CONFIGURATION ===
 
@@ -187,13 +201,15 @@ export function VoiceAIBar({
    * This is the core pattern for all UI components - event-driven state updates
    */
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
       try {
-        unlisten = await listen<BarStateData>(
+        const fn = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
+            if (!mounted) return;
             console.log("📨 VoiceAIBar: Received state update:", event.payload);
 
             // Validate the received data structure
@@ -213,7 +229,12 @@ export function VoiceAIBar({
           }
         );
 
-        console.log("✅ VoiceAIBar: Event listener established");
+        if (mounted) {
+          unlisten = fn;
+          console.log("✅ VoiceAIBar: Event listener established");
+        } else {
+          fn(); // Resolved after unmount — clean up immediately
+        }
       } catch (error) {
         console.error("❌ VoiceAIBar: Failed to setup event listener:", error);
       }
@@ -222,6 +243,7 @@ export function VoiceAIBar({
     setupListener();
 
     return () => {
+      mounted = false;
       if (unlisten) {
         unlisten();
         console.log("🔄 VoiceAIBar: Event listener cleaned up");
@@ -467,8 +489,15 @@ const styles = \`
     setIsCalculatingDimensions(true);
     setResponsePhase("collapsed");
 
+    const scheduleTimer = (fn: () => void, delay: number) => {
+      const timer = setTimeout(() => {
+        if (mountedRef.current) fn();
+      }, delay);
+      pendingTimers.current.push(timer);
+    };
+
     // Calculate content dimensions first
-    setTimeout(() => {
+    scheduleTimer(() => {
       if (contentRef.current) {
         const rect = contentRef.current.getBoundingClientRect();
         const scrollbarWidth =
@@ -491,16 +520,16 @@ const styles = \`
       }
       setIsCalculatingDimensions(false);
 
-      setTimeout(() => {
+      scheduleTimer(() => {
         setResponsePhase("expanding-width");
 
-        setTimeout(() => {
+        scheduleTimer(() => {
           setResponsePhase("expanding-height");
 
-          setTimeout(() => {
+          scheduleTimer(() => {
             setResponsePhase("showing-content");
 
-            setTimeout(() => {
+            scheduleTimer(() => {
               setIsExpanded(false);
             }, 50);
           }, 500);
@@ -547,14 +576,16 @@ const styles = \`
   const toggleExpanded = useCallback(() => {
     if (!isExpanded) {
       setHeightTransitionTarget("expanded");
-      setTimeout(() => {
-        setIsExpanded(true);
+      const timer = setTimeout(() => {
+        if (mountedRef.current) setIsExpanded(true);
       }, 300);
+      pendingTimers.current.push(timer);
     } else {
       setIsExpanded(false);
-      setTimeout(() => {
-        setHeightTransitionTarget("summary");
+      const timer = setTimeout(() => {
+        if (mountedRef.current) setHeightTransitionTarget("summary");
       }, 200);
+      pendingTimers.current.push(timer);
     }
   }, [isExpanded]);
 

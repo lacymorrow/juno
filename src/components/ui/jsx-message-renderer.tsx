@@ -1,3 +1,18 @@
+import {
+  ActionButton,
+  QueryButton,
+  OpenButton,
+  CopyButton,
+} from "@/components/ui/agent-actions";
+import {
+  WeatherCard,
+  FileListCard,
+  SystemStatusCard,
+  ComparisonCard,
+  TimerCard,
+  LinkCard,
+  TaskSummaryCard,
+} from "@/components/ui/agent-cards";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -385,6 +400,21 @@ const availableComponents = {
 
   // Demo component
   VisualDemo,
+
+  // Domain-specific agent response cards
+  WeatherCard,
+  FileListCard,
+  SystemStatusCard,
+  ComparisonCard,
+  TimerCard,
+  LinkCard,
+  TaskSummaryCard,
+
+  // Interactive action components
+  ActionButton,
+  QueryButton,
+  OpenButton,
+  CopyButton,
 } as Record<string, React.ComponentType<any>>;
 
 export function JsxMessageRenderer({

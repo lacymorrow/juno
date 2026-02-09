@@ -8,41 +8,54 @@ import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
+import { ElevenLabsBar } from "@/components/bar/elevenlabs-bar";
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     let unlisten: (() => void) | undefined;
 
     const load = async () => {
       try {
         const config = await invoke<FloatingBarConfig>("ui_get_bar_config");
-        setBarConfig(config);
+        if (mounted) setBarConfig(config);
       } catch (error) {
         console.error("Failed to load bar config:", error);
-        setBarConfig({
-          show_voice_indicator: true,
-          enable_animations: true,
-          auto_hide: false,
-          auto_hide_delay: TIMEOUTS.UI_NOTIFICATION_DISPLAY_MS,
-          opacity: 0.95,
-          bar_appearance: UI.BAR_APPEARANCES_FLOATING,
-        });
+        if (mounted) {
+          setBarConfig({
+            show_voice_indicator: true,
+            enable_animations: true,
+            auto_hide: false,
+            auto_hide_delay: TIMEOUTS.UI_NOTIFICATION_DISPLAY_MS,
+            opacity: 0.95,
+            bar_appearance: UI.BAR_APPEARANCES_FLOATING,
+          });
+        }
       }
     };
 
     const setupListener = async () => {
-      unlisten = await listen<FloatingBarConfig>(
-        EVENTS.BAR_CONFIG_CHANGED,
-        (event) => setBarConfig(event.payload)
-      );
+      try {
+        const fn = await listen<FloatingBarConfig>(
+          EVENTS.BAR_CONFIG_CHANGED,
+          (event) => { if (mounted) setBarConfig(event.payload); }
+        );
+        if (mounted) unlisten = fn;
+        else fn();
+      } catch (error) {
+        console.error("Failed to setup bar config listener:", error);
+      }
     };
 
     load();
     setupListener();
 
-    return () => unlisten?.();
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
   }, []);
 
   const appearance = barConfig?.bar_appearance ?? UI.BAR_APPEARANCES_FLOATING;
@@ -55,6 +68,8 @@ export function BarHost() {
         return () => <VoiceAIBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_DYNAMIC:
         return () => <DynamicBar barAppearance={appearance} />;
+      case "elevenlabs":
+        return () => <ElevenLabsBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_FLOATING:
       default:
         return () => <FloatingBar barAppearance={appearance} />;

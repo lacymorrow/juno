@@ -47,6 +47,7 @@ export const stopTTS = async (logFn?: LogFn): Promise<void> => {
 		if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
 			URL.revokeObjectURL(currentAudio.src);
 		}
+		currentAudio.src = "";
 		currentAudio = null;
 		logFn("Audio playback stopped", "info");
 	}
@@ -116,6 +117,8 @@ const speakApi = async (text: string, logFn: LogFn, invokeFn: typeof invoke): Pr
 			if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
 				URL.revokeObjectURL(currentAudio.src);
 			}
+			currentAudio.src = "";
+			currentAudio = null;
 		}
 
 		const audioUrl: string = await invokeFn("invoke_replicate_tts", { text });

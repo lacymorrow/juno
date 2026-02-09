@@ -1,4 +1,5 @@
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
+import { useEffect, useRef } from 'react';
 
 /**
  * Wrapper around Tauri's listen function that provides safe cleanup
@@ -50,16 +51,14 @@ export async function safeListen<T>(
 }
 
 /**
- * Hook-friendly version that handles React component lifecycle
+ * Hook-friendly version that handles React component lifecycle.
+ * Prefer using useEventListener from @/hooks/useEventListener instead.
  */
 export function useSafeTauriEvent<T>(
   event: string,
   handler: EventCallback<T>,
   deps: React.DependencyList = []
 ): void {
-  const React = require('react');
-  const { useEffect, useRef } = React;
-  
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
@@ -69,11 +68,16 @@ export function useSafeTauriEvent<T>(
 
     const setup = async () => {
       try {
-        unlisten = await safeListen<T>(event, (e) => {
+        const fn = await safeListen<T>(event, (e) => {
           if (mounted) {
             handlerRef.current(e);
           }
         });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
       } catch (error) {
         console.error(`Failed to setup listener for ${event}:`, error);
       }

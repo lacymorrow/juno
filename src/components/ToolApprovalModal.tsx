@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useEventListener } from "@/hooks/useEventListener";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -35,21 +35,14 @@ export default function ToolApprovalModal() {
     useState<ToolApprovalRequest | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
-    // Listen for tool approval requests
-    const unlistenPromise = listen<ToolApprovalRequest>(
-      "tool-approval-request",
-      (event) => {
-        console.log("Tool approval request received:", event.payload);
-        setCurrentRequest(event.payload);
-        setIsOpen(true);
-      }
-    );
-
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, []);
+  useEventListener<ToolApprovalRequest>(
+    "tool-approval-request",
+    (payload) => {
+      console.log("Tool approval request received:", payload);
+      setCurrentRequest(payload);
+      setIsOpen(true);
+    }
+  );
 
   const handleApprove = async () => {
     if (!currentRequest) return;
