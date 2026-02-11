@@ -56,10 +56,12 @@ function bumpVersion(current: string, bump: string): string {
 async function findDmg(): Promise<string> {
   // Search common Tauri output paths for .dmg files
   const searchDirs = [
+    `${REPO_ROOT}/target/universal-apple-darwin/release/bundle/dmg`,
+    `${REPO_ROOT}/target/release/bundle/dmg`,
+    `${REPO_ROOT}/target/aarch64-apple-darwin/release/bundle/dmg`,
+    `${REPO_ROOT}/target/x86_64-apple-darwin/release/bundle/dmg`,
     `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/dmg`,
     `${REPO_ROOT}/src-tauri/target/release/bundle/dmg`,
-    `${REPO_ROOT}/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg`,
-    `${REPO_ROOT}/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg`,
   ];
 
   for (const dir of searchDirs) {
