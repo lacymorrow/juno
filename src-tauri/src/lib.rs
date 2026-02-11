@@ -45,6 +45,7 @@ pub mod tts;
 pub mod utils;
 pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
+pub mod testing; // Test harness and mock implementations for headless integration tests
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes

@@ -49,7 +49,9 @@ impl ContinuationManager {
         }
     }
 
-    /// Request continuation from user when max iterations reached
+    /// Request continuation from user when max iterations reached.
+    /// In headless mode, auto-denies continuation (returns None) since there is
+    /// no GUI to present the dialog — prevents hanging on user input.
     pub async fn request_continuation(
         &self,
         execution_id: String,
@@ -57,6 +59,15 @@ impl ContinuationManager {
         max_steps: u32,
         app_handle: &AppHandle,
     ) -> Result<Option<ContinuationResponse>, AgentError> {
+        // In headless mode, there is no user to approve continuation — auto-deny
+        if crate::cli::headless::is_headless_mode() {
+            info!(
+                "Headless mode: auto-denying continuation for execution {} at step {}/{}",
+                execution_id, current_step, max_steps
+            );
+            return Ok(None);
+        }
+
         let request_id = uuid::Uuid::new_v4().to_string();
         let message = format!(
             "Agent has reached the maximum iteration limit ({} steps). Continue execution?",

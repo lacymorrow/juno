@@ -116,3 +116,7 @@ cargo-clippy = []
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[[test]]
+name = "headless_runtime"
+harness = false
