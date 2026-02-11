@@ -41,6 +41,50 @@ RUST_LOG=debug bun run tauri dev
 bun run tauri:dev:multi
 ```
 
+## Architectural Boundary: Backend Owns Logic, Frontend is Display-Only
+
+This is the most critical architectural principle in Juno. Violating it creates bugs, breaks the CLI, and couples logic to the UI.
+
+### The Rule
+
+**Rust backend** = ALL business logic, I/O, state, control flow
+**TypeScript frontend** = Display layer. Renders backend state. Sends user interactions via `invoke()`.
+
+### What Lives Where
+
+| Concern | Where | NEVER in |
+|---------|-------|----------|
+| Keyboard shortcuts | Rust (`shortcuts.rs`, global hotkeys) | TypeScript |
+| Microphone recording | Rust (`tauri-plugin-voice-transcription`) | TypeScript (`getUserMedia`) |
+| Audio playback / TTS | Rust (`tts/`, `say` command, ElevenLabs API) | TypeScript (`Web Audio API`) |
+| Agent execution | Rust (`anthropic.rs`, agent system) | TypeScript |
+| File system operations | Rust (agent tools, commands) | TypeScript |
+| Shell commands | Rust (`commands/shell.rs`) | TypeScript |
+| WebSocket connections | Rust (`cloud/connector.rs`, `tokio-tungstenite`) | TypeScript (`@tauri-apps/plugin-websocket`) |
+| Settings persistence | Rust (Tauri Store) | TypeScript (localStorage) |
+| Rendering chat messages | TypeScript (React components) | Rust |
+| Styling / layout | TypeScript (Tailwind, shadcn/ui) | Rust |
+| Animations / transitions | TypeScript (CSS, React) | Rust |
+| User click → action routing | TypeScript calls `invoke()` | TypeScript runs the action directly |
+
+### Why This Matters
+
+1. **CLI independence**: Juno can run headlessly. The backend must function without any frontend.
+2. **No browser APIs for native work**: `getUserMedia()`, `Web Audio API`, `WebSocket` in JS are wrong — we have native Rust equivalents with better performance and permissions.
+3. **Single source of truth**: Backend emits events → frontend renders. Never the reverse.
+4. **Third-party web libraries**: Libraries like ElevenLabs React SDK assume a web app. We use only their rendering/layout components (Conversation, Message, Response). Any component that calls `getUserMedia()`, `AudioContext`, or browser networking is off-limits.
+
+### Frontend's Allowed Operations
+
+The frontend may ONLY:
+- Call `invoke('command_name', { params })` to request backend actions
+- Listen for Tauri events (`useEventListener`) to receive state updates
+- Read from Tauri Store for cached settings display
+- Render UI based on data received from the backend
+- Manage local UI state (modals open/closed, scroll position, animations)
+
+---
+
 ## Architecture
 
 ### Workspace Structure
