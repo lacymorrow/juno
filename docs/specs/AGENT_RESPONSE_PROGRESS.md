@@ -157,6 +157,30 @@ Instead of a React context (which doesn't work with `react-jsx-parser`), action 
 
 ---
 
+---
+
+## Architectural Boundary Documentation ✅
+
+**Goal**: Document the critical frontend/backend boundary across all CLAUDE.md files and specs.
+
+### Context
+User emphasized this is "of the utmost importance" — the frontend is ONLY a display layer. All business logic (audio, keyboard, I/O, agent execution) lives in Rust. The backend must function independently (headless/CLI). Third-party web libraries (e.g., ElevenLabs React SDK) are only used for rendering/layout components, never for their browser API features.
+
+### Tasks
+- [x] Added "Architectural Boundary" section to root `CLAUDE.md` with full concern-to-layer table
+- [x] Added "CRITICAL: Frontend is Display Layer ONLY" section to `src/CLAUDE.md` with do/don't lists
+- [x] Added "CRITICAL: Backend Owns ALL Business Logic" section to `src-tauri/CLAUDE.md`
+- [x] Added "Architectural Boundary" section to `docs/specs/AGENT_RESPONSE_SPEC.md`
+- [x] Updated memory files
+
+### Files modified
+- `CLAUDE.md` (root) — new section before Architecture
+- `src/CLAUDE.md` — new section at top, before Frontend Overview
+- `src-tauri/CLAUDE.md` — new section at top, before Backend Overview
+- `docs/specs/AGENT_RESPONSE_SPEC.md` — new section before Technical Constraints
+
+---
+
 ## Session Log
 
 ### 2026-02-08 — Session 1 (ElevenLabs UI Integration)
@@ -173,3 +197,9 @@ Instead of a React context (which doesn't work with `react-jsx-parser`), action 
 - **Phase 4**: Created 7 domain-specific agent cards + registered everywhere (5 files)
 - **Phase 5**: Created 4 interactive action components with security whitelist (5 files)
 - All 5 phases verified: TypeScript 0 errors, Rust 0 errors, 26/26 tests pass
+
+### 2026-02-08 — Session 3 (Architectural Boundary Documentation)
+- Documented frontend/backend boundary across all 3 CLAUDE.md files + spec
+- Key rule: Frontend is display-only. Backend owns ALL logic, I/O, audio, shortcuts, state.
+- ElevenLabs React SDK: only rendering components; no browser API components (getUserMedia, AudioContext)
+- Backend must function headlessly without any frontend

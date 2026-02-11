@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code when working with the Rust/Tauri backend in this repository.
 
+## CRITICAL: The Backend Owns ALL Business Logic
+
+The Rust backend is the entire application. The frontend is a display layer. The backend must function independently — headless, CLI, or with any UI.
+
+### What the backend owns
+- **Agent execution**: All AI provider calls, tool execution, orchestration
+- **Audio**: Microphone recording (voice-transcription plugin), TTS playback (`tts/`, `say` command)
+- **Input**: Global keyboard shortcuts, escape key management, hotkey registration
+- **I/O**: File system, shell commands, network requests, WebSocket connections
+- **State**: All persistent state (Tauri Store), all shared state (`AppState`)
+- **Control flow**: Agent loops, cancellation tokens, retries, delegation
+
+### Communication with frontend
+- **Backend → Frontend**: Emit Tauri events (`app_handle.emit("event-name", payload)`)
+- **Frontend → Backend**: Frontend calls `invoke("command_name", { params })`
+- **Never**: Frontend does not initiate I/O, audio, or network independently
+
+### Why this matters
+Juno can run as a CLI or headless process. The frontend is an optional UI skin. All logic, I/O, and state management live here so the application works without any frontend at all.
+
+---
+
 ## Backend Overview
 
 Rust-based Tauri v2 backend implementing a sophisticated multi-agent AI system with Computer Use capabilities for macOS automation. Features hierarchical agent architecture, comprehensive tool system, and advanced security framework.
