@@ -10,10 +10,12 @@
  *   bun run release 1.2.3    # explicit version
  */
 
-import { $ } from "bun";
+import { $} from "bun";
+import { existsSync } from "fs";
+import { readdir } from "fs/promises";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const DMG_GLOB = `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg`;
+const JUNO_WWW = `${REPO_ROOT}/../juno-www`;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -22,7 +24,9 @@ const DMG_GLOB = `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/b
 async function exec(cmd: string): Promise<string> {
   const result = await $`sh -c ${cmd}`.quiet().nothrow();
   if (result.exitCode !== 0) {
-    throw new Error(`Command failed (${result.exitCode}): ${cmd}\n${result.stderr.toString()}`);
+    throw new Error(
+      `Command failed (${result.exitCode}): ${cmd}\n${result.stderr.toString()}`
+    );
   }
   return result.stdout.toString().trim();
 }
@@ -49,6 +53,35 @@ function bumpVersion(current: string, bump: string): string {
   }
 }
 
+async function findDmg(): Promise<string> {
+  // Search common Tauri output paths for .dmg files
+  const searchDirs = [
+    `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/dmg`,
+    `${REPO_ROOT}/src-tauri/target/release/bundle/dmg`,
+    `${REPO_ROOT}/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg`,
+    `${REPO_ROOT}/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg`,
+  ];
+
+  for (const dir of searchDirs) {
+    if (!existsSync(dir)) continue;
+    const files = await readdir(dir);
+    const dmgs = files.filter((f) => f.endsWith(".dmg"));
+    if (dmgs.length > 0) {
+      // Return the most recently modified
+      const sorted = dmgs.sort((a, b) => {
+        const aFile = Bun.file(`${dir}/${a}`);
+        const bFile = Bun.file(`${dir}/${b}`);
+        return bFile.lastModified - aFile.lastModified;
+      });
+      return `${dir}/${sorted[0]}`;
+    }
+  }
+
+  throw new Error(
+    `No DMG found. Searched:\n${searchDirs.map((d) => `  ${d}`).join("\n")}`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -64,7 +97,9 @@ async function main() {
   // Clean git tree
   const status = await exec("git status --porcelain");
   if (status) {
-    throw new Error("Working tree is not clean. Commit or stash changes first.\n" + status);
+    throw new Error(
+      "Working tree is not clean. Commit or stash changes first.\n" + status
+    );
   }
 
   // Required tools
@@ -93,7 +128,9 @@ async function main() {
   } else if (/^\d+\.\d+\.\d+$/.test(arg)) {
     newVersion = arg;
   } else {
-    throw new Error(`Invalid version argument: ${arg}. Use patch, minor, major, or x.y.z`);
+    throw new Error(
+      `Invalid version argument: ${arg}. Use patch, minor, major, or x.y.z`
+    );
   }
 
   console.log(`📦 Version: ${currentVersion} → ${newVersion}\n`);
@@ -105,7 +142,10 @@ async function main() {
 
   // 4. Build
   console.log("🔨 Building universal macOS binary (this may take a while)...");
-  const buildResult = await $`sh -c ${"cd " + REPO_ROOT + " && bun run tauri build --target universal-apple-darwin"}`.quiet().nothrow();
+  const buildResult =
+    await $`sh -c ${"cd " + REPO_ROOT + " && bun run tauri build --target universal-apple-darwin"}`
+      .quiet()
+      .nothrow();
   if (buildResult.exitCode !== 0) {
     throw new Error(`Build failed:\n${buildResult.stderr.toString()}`);
   }
@@ -113,46 +153,78 @@ async function main() {
 
   // 5. Find DMG artifact
   console.log("📀 Looking for DMG artifact...");
-  const glob = new Bun.Glob("*.dmg");
-  const dmgDir = `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/dmg`;
-  const dmgFiles: string[] = [];
-  for await (const file of glob.scan(dmgDir)) {
-    dmgFiles.push(`${dmgDir}/${file}`);
+  const dmgPath = await findDmg();
+  const dmgName = dmgPath.split("/").pop()!;
+  console.log(`  ✓ Found: ${dmgName}\n`);
+
+  // 6. Copy DMG to juno-www as a zip for direct download
+  if (existsSync(JUNO_WWW)) {
+    console.log("📦 Packaging for juno-www...");
+    const downloadDir = `${JUNO_WWW}/public/downloads`;
+    await exec(`mkdir -p "${downloadDir}"`);
+
+    // Remove old downloads
+    const oldFiles = existsSync(downloadDir)
+      ? (await readdir(downloadDir)).filter(
+          (f) => f.endsWith(".zip") || f.endsWith(".dmg")
+        )
+      : [];
+    for (const f of oldFiles) {
+      await exec(`rm "${downloadDir}/${f}"`);
+    }
+
+    // Create zip containing the DMG
+    const zipName = `Juno_${newVersion}_universal.zip`;
+    await exec(
+      `cd "$(dirname "${dmgPath}")" && zip -j "${downloadDir}/${zipName}" "${dmgPath}"`
+    );
+
+    // Write release metadata
+    const releaseMeta = {
+      version: `v${newVersion}`,
+      file: `/downloads/${zipName}`,
+      releasedAt: new Date().toISOString(),
+    };
+    await Bun.write(
+      `${JUNO_WWW}/public/downloads/release.json`,
+      JSON.stringify(releaseMeta, null, 2) + "\n"
+    );
+
+    console.log(`  ✓ Copied to juno-www/public/downloads/${zipName}`);
+    console.log(
+      `  ✓ Updated juno-www/public/downloads/release.json\n`
+    );
+    console.log(
+      `  ⚠ Remember to commit & deploy juno-www for the download to go live.\n`
+    );
+  } else {
+    console.log(
+      `  ⚠ juno-www not found at ${JUNO_WWW}, skipping marketing site update.\n`
+    );
   }
 
-  if (dmgFiles.length === 0) {
-    throw new Error(`No DMG found in ${dmgDir}`);
-  }
-
-  // Use the most recently modified DMG
-  const dmgPath = dmgFiles.sort((a, b) => {
-    const aFile = Bun.file(a);
-    const bFile = Bun.file(b);
-    return bFile.lastModified - aFile.lastModified;
-  })[0];
-
-  console.log(`  ✓ Found: ${dmgPath.split("/").pop()}\n`);
-
-  // 6. Commit + tag
+  // 7. Commit + tag
   console.log("📝 Committing and tagging...");
   await exec(`cd ${REPO_ROOT} && git add -A`);
-  await exec(`cd ${REPO_ROOT} && git commit -m "release: v${newVersion}"`);
+  await exec(
+    `cd ${REPO_ROOT} && git commit -m "release: v${newVersion}"`
+  );
   await exec(`cd ${REPO_ROOT} && git tag v${newVersion}`);
   console.log(`  ✓ Tagged v${newVersion}\n`);
 
-  // 7. Push
+  // 8. Push
   console.log("⬆️  Pushing to origin...");
   await exec(`cd ${REPO_ROOT} && git push origin HEAD --tags`);
   console.log("  ✓ Pushed\n");
 
-  // 8. GitHub Release
+  // 9. GitHub Release
   console.log("🎉 Creating GitHub Release...");
   const releaseUrl = await exec(
     `cd ${REPO_ROOT} && gh release create v${newVersion} --title "v${newVersion}" --generate-notes "${dmgPath}"`
   );
   console.log(`  ✓ Release created\n`);
 
-  // 9. Done
+  // 10. Done
   console.log("━".repeat(50));
   console.log(`\n✅ Juno v${newVersion} released!\n`);
   console.log(`   ${releaseUrl}\n`);
