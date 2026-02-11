@@ -333,12 +333,14 @@ async fn execute_agent_internal(
     //     warn!("Failed to emit agent run start event: {}", e);
     // }
 
-    // --- FIXED: Notify Floating Bar Manager that Agent Started ---
-    // This ensures the floating bar shows agent activity regardless of trigger source
-    let app_handle_for_bar_start = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-                    crate::commands::ui_commands::handle_agent_started(&app_handle_for_bar_start).await;
-    });
+    // --- Notify Floating Bar Manager that Agent Started ---
+    // Skip in headless mode — no floating bar UI to update
+    if !crate::cli::headless::is_headless_mode() {
+        let app_handle_for_bar_start = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::commands::ui_commands::handle_agent_started(&app_handle_for_bar_start).await;
+        });
+    }
 
     // Reset cancellation signal BEFORE registering escape key
     // so any escape press after registration is honored
@@ -346,10 +348,13 @@ async fn execute_agent_internal(
     info!("Reset cancellation signal for new agent execution");
 
     // Register escape key for cancellation during agent execution
-    if let Err(e) =
-        crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
-    {
-        warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
+    // Skip in headless mode — no keyboard to listen to
+    if !crate::cli::headless::is_headless_mode() {
+        if let Err(e) =
+            crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
+        {
+            warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
+        }
     }
 
     let trimmed_query = query.trim();
@@ -871,10 +876,13 @@ async fn execute_agent_internal(
     // }
 
     // Unregister escape key as agent execution is complete
-    if let Err(e) =
-        crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
-    {
-                warn!("Failed to configure unregister escape key after agent execution: {} - continuing anyway", e);
+    // Skip in headless mode — escape key was never registered
+    if !crate::cli::headless::is_headless_mode() {
+        if let Err(e) =
+            crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
+        {
+            warn!("Failed to configure unregister escape key after agent execution: {} - continuing anyway", e);
+        }
     }
 
     // --- Process Agent Result ---
@@ -930,13 +938,15 @@ async fn execute_agent_internal(
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
                     // Play agent attention sound for cancellation (less intrusive than error)
-                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(
-                        app_handle.clone(),
-                        state.clone(),
-                    )
-                    .await
-                    {
-                        warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
+                    if !crate::cli::headless::is_headless_mode() {
+                        if let Err(e) = crate::commands::sound::play_agent_attention_sound(
+                            app_handle.clone(),
+                            state.clone(),
+                        )
+                        .await
+                        {
+                            warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
+                        }
                     }
                     (
                         "Cancelled".to_string(),
@@ -945,13 +955,15 @@ async fn execute_agent_internal(
                 }
                 AgentError::MaxStepsReached => {
                     // Play agent error sound for failure
-                    if let Err(e) = crate::commands::sound::play_agent_error_sound(
-                        app_handle.clone(),
-                        state.clone(),
-                    )
-                    .await
-                    {
-                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                    if !crate::cli::headless::is_headless_mode() {
+                        if let Err(e) = crate::commands::sound::play_agent_error_sound(
+                            app_handle.clone(),
+                            state.clone(),
+                        )
+                        .await
+                        {
+                            warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                        }
                     }
                     (
                         "Failed".to_string(),
@@ -963,13 +975,15 @@ async fn execute_agent_internal(
                     warn!("LLM error appears to be network-related: {}", error_message);
 
                     // Play different sound for network issues (less alarming)
-                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(
-                        app_handle.clone(),
-                        state.clone(),
-                    )
-                    .await
-                    {
-                        warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
+                    if !crate::cli::headless::is_headless_mode() {
+                        if let Err(e) = crate::commands::sound::play_agent_attention_sound(
+                            app_handle.clone(),
+                            state.clone(),
+                        )
+                        .await
+                        {
+                            warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
+                        }
                     }
 
                     (
@@ -979,13 +993,15 @@ async fn execute_agent_internal(
                 }
                 _ => {
                     // Play agent error sound for other failures
-                    if let Err(e) = crate::commands::sound::play_agent_error_sound(
-                        app_handle.clone(),
-                        state.clone(),
-                    )
-                    .await
-                    {
-                        warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                    if !crate::cli::headless::is_headless_mode() {
+                        if let Err(e) = crate::commands::sound::play_agent_error_sound(
+                            app_handle.clone(),
+                            state.clone(),
+                        )
+                        .await
+                        {
+                            warn!("{}", format!("{}: {}", "Failed to play error sound", e));
+                        }
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 }
@@ -1047,26 +1063,27 @@ async fn execute_agent_internal(
         final_response.agent_state
     );
 
-    // --- FIXED: Notify Floating Bar Manager that Agent Stopped ---
-    // First notify that the agent has stopped working
-    let app_handle_for_bar_stop = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar_stop).await;
-    });
+    // --- Notify Floating Bar Manager that Agent Stopped ---
+    // Skip in headless mode — no floating bar UI
+    if !crate::cli::headless::is_headless_mode() {
+        let app_handle_for_bar_stop = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::commands::ui_commands::handle_agent_stopped(&app_handle_for_bar_stop).await;
+        });
 
-    // --- Update Floating Bar Manager with Completion Details ---
-    let app_handle_for_bar = app_handle.clone();
-    let agent_state_for_bar = final_response.agent_state.clone();
-    let text_for_bar = final_response.text.clone();
-    tauri::async_runtime::spawn(async move {
-        // Provide the completion details (agent stop already notified above)
-        crate::commands::ui_commands::handle_backend_response(
-            &app_handle_for_bar,
-            Some(text_for_bar),
-            agent_state_for_bar,
-        )
-        .await;
-    });
+        // --- Update Floating Bar Manager with Completion Details ---
+        let app_handle_for_bar = app_handle.clone();
+        let agent_state_for_bar = final_response.agent_state.clone();
+        let text_for_bar = final_response.text.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::commands::ui_commands::handle_backend_response(
+                &app_handle_for_bar,
+                Some(text_for_bar),
+                agent_state_for_bar,
+            )
+            .await;
+        });
+    }
 
     // --- Emit agent error event for main chat interface ---
     if final_response.agent_state == "Failed" || final_response.agent_state == "Cancelled" {
@@ -1102,14 +1119,18 @@ pub async fn handle_tts_completion(
 ) -> Result<(), String> {
     info!("TTS completion event received from frontend");
 
-    // Update floating bar manager for TTS finish
-                crate::commands::ui_commands::handle_tts_finished(&app_handle).await;
+    // Update floating bar manager for TTS finish — skip in headless mode
+    if !crate::cli::headless::is_headless_mode() {
+        crate::commands::ui_commands::handle_tts_finished(&app_handle).await;
+    }
 
-    // Play agent success sound now that TTS has finished
-    if let Err(e) =
-        crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
-    {
-        warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
+    // Play agent success sound now that TTS has finished — skip in headless mode
+    if !crate::cli::headless::is_headless_mode() {
+        if let Err(e) =
+            crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
+        {
+            warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
+        }
     }
 
     Ok(())
