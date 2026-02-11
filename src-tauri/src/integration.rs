@@ -662,68 +662,88 @@ fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
 }
 
 /// Handle agent transcription start
+///
+/// Retries up to 3 times with a short delay to handle transient lock contention
+/// (e.g., when stop_dictation from a prior operation is still releasing the lock).
 async fn handle_agent_transcription_start(app_handle: &AppHandle) {
-    // Start agent mode using voice transcription
-    match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::start_dictation(
-                app_handle.clone(),
-                controller_state,
-            )
-            .await
-            {
-                Ok(()) => {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_DELAY_MS: u64 = 150;
+
+    // Verify voice controller is managed before entering retry loop
+    if app_handle.try_state::<Arc<Mutex<VoiceController>>>().is_none() {
+        warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
+        crate::agent_monitor::force_reset_agent_input_state().await;
+        if let Err(e) = utils::synchronize_component_state(
+            app_handle,
+            "agent",
+            false,
+            Some(constants::events::agent::ACTIVE),
+        ).await {
+            error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+        }
+        return;
+    }
+
+    let mut last_error = String::new();
+    for attempt in 0..MAX_RETRIES {
+        // Re-acquire state each iteration to avoid lifetime issues with tauri::State
+        let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+            last_error = "Voice controller disappeared unexpectedly".to_string();
+            break;
+        };
+        match tauri_plugin_voice_transcription::commands::start_dictation(
+            app_handle.clone(),
+            controller_state,
+        )
+        .await
+        {
+            Ok(()) => {
+                if attempt > 0 {
+                    info!("[Agent Mode] Started agent transcription on retry {}", attempt);
+                } else {
                     info!("[Agent Mode] Started agent transcription successfully");
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        true,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-                    }
                 }
-                Err(e) => {
-                    // Use centralized error handling for agent transcription errors
-                    crate::error_handling::utils::handle_agent_error(
-                        app_handle,
-                        &format!("Failed to start agent transcription: {}", e),
-                    )
-                    .await;
-
-                    // Reset agent input monitor state on failure
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
-                        app_handle,
-                        "agent",
-                        false,
-                        Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change after error: {}", e);
-                    }
+                if let Err(e) = utils::synchronize_component_state(
+                    app_handle,
+                    "agent",
+                    true,
+                    Some(constants::events::agent::ACTIVE),
+                ).await {
+                    error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
                 }
+                return;
+            }
+            Err(e) => {
+                last_error = format!("{}", e);
+                // Only retry on lock contention errors
+                let is_lock_error = last_error.contains("busy") || last_error.contains("Lock error");
+                if is_lock_error && attempt + 1 < MAX_RETRIES {
+                    info!(
+                        "[Agent Mode] VoiceController busy, retrying in {}ms (attempt {}/{})",
+                        RETRY_DELAY_MS, attempt + 1, MAX_RETRIES
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+                    continue;
+                }
+                break;
             }
         }
-        None => {
-            warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
+    }
 
-            // Reset agent input monitor state
-            crate::agent_monitor::force_reset_agent_input_state().await;
-
-            // Use synchronize_component_state to update UI manager AND emit event
-            if let Err(e) = utils::synchronize_component_state(
-                app_handle,
-                "agent",
-                false,
-                Some(constants::events::agent::ACTIVE),
-            ).await {
-                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
-            }
-        }
+    // All retries exhausted or non-retryable error
+    crate::error_handling::utils::handle_agent_error(
+        app_handle,
+        &format!("Failed to start agent transcription: {}", last_error),
+    )
+    .await;
+    crate::agent_monitor::force_reset_agent_input_state().await;
+    if let Err(e) = utils::synchronize_component_state(
+        app_handle,
+        "agent",
+        false,
+        Some(constants::events::agent::ACTIVE),
+    ).await {
+        error!("[Agent Mode] Failed to synchronize agent state change after error: {}", e);
     }
 }
 

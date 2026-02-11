@@ -20,6 +20,11 @@ type BackendResponsePayload = {
 	response: SubmitQueryResult;
 };
 
+type ServerStatus = {
+	backend_running: boolean;
+	desktop_available: boolean;
+};
+
 type StreamingTextEvent = {
 	chunk: string;
 	message_id?: string;
@@ -169,13 +174,17 @@ export function useBackendEvents({
 			hasCheckedServer.current = true;
 
 			try {
-				const isConnected: boolean = await invoke("check_server_status");
-				if (isConnected) {
+				const status: ServerStatus = await invoke("check_server_status");
+				if (status.backend_running) {
 					setServerStatus("connected");
-					addSystemMessage("Connected. Enter your query below.");
+					if (status.desktop_available) {
+						addSystemMessage("Connected. Enter your query below.");
+					} else {
+						addSystemMessage("Connected. Desktop automation requires accessibility permissions — grant them in System Settings > Privacy & Security > Accessibility.");
+					}
 				} else {
 					setServerStatus("error");
-					addSystemMessage("Failed to connect to backend. Please check logs.");
+					addSystemMessage("Backend is not responding. Please check logs.");
 				}
 			} catch (error) {
 				setServerStatus("error");

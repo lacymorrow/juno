@@ -393,9 +393,18 @@ pub(crate) async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>,
     }
 }
 
+#[derive(Serialize, Debug)]
+pub struct ServerStatus {
+    pub backend_running: bool,
+    pub desktop_available: bool,
+}
+
 #[tauri::command]
-pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
-    state.is_desktop_available()
+pub(crate) fn check_server_status(state: State<'_, AppState>) -> ServerStatus {
+    ServerStatus {
+        backend_running: true, // If this command executes, the backend is running
+        desktop_available: state.is_desktop_available(),
+    }
 }
 
 
