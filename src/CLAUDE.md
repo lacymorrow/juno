@@ -2,6 +2,38 @@
 
 This file provides guidance to Claude Code when working with the React/TypeScript frontend in this repository.
 
+## CRITICAL: The Frontend is a Display Layer ONLY
+
+The TypeScript frontend renders backend state and sends user interactions to Rust via `invoke()`. It contains **zero business logic**.
+
+### What the frontend DOES
+- Renders chat messages, components, and UI elements
+- Listens for Tauri events and updates the display
+- Sends user actions (clicks, text input, toggles) to the backend via `invoke()`
+- Manages purely visual state (modals, scroll position, animations, hover effects)
+
+### What the frontend NEVER does
+- Record audio or access the microphone (`getUserMedia` is banned)
+- Play audio or use `Web Audio API` / `AudioContext` (TTS is in Rust)
+- Register keyboard shortcuts (global hotkeys are in Rust)
+- Open WebSocket connections (`@tauri-apps/plugin-websocket` import causes build failure)
+- Execute shell commands or file operations
+- Make HTTP requests to AI providers
+- Store persistent data in `localStorage` (use Tauri Store via backend)
+
+### Third-party library rule
+Web-oriented libraries (e.g., ElevenLabs React SDK) are only used for their **rendering/layout** components. Any component that accesses browser APIs (`getUserMedia`, `AudioContext`, `WebSocket`, `navigator.mediaDevices`) is off-limits. The native Rust backend handles all I/O.
+
+### The pattern
+```
+Backend emits event → Frontend renders
+User clicks button → Frontend calls invoke() → Backend handles it
+```
+
+The backend must be able to function without any frontend (headless/CLI mode).
+
+---
+
 ## Frontend Overview
 
 React/TypeScript frontend for Juno - a Tauri v2 desktop application with AI-powered automation capabilities. Built with modern React patterns, shadcn/ui components, and comprehensive Tauri integration.

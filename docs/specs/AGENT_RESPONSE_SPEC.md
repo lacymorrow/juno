@@ -248,6 +248,36 @@ The agent should think: *"What does the user need to hear? What do they need to 
 
 ---
 
+## Architectural Boundary: Backend vs. Frontend
+
+The tri-modal response system spans both Rust and TypeScript, but the division is strict:
+
+### Rust Backend (ALL logic)
+- Agent execution, prompt construction, tool calling
+- TTS extraction from `<TTS>` tags → audio synthesis and playback
+- JSX detection (`is_jsx_content()`) → sets `is_jsx` flag on stream-end events
+- Keyboard shortcut triggers agent invocation
+- Microphone recording → transcription → query submission
+- All AI provider API calls (Anthropic, OpenAI, Gemini, etc.)
+
+### TypeScript Frontend (display ONLY)
+- Renders text channel as markdown via `Response` (streamdown)
+- Renders component channel as React via `JsxMessageRenderer` / `MixedContentRenderer`
+- Displays streaming state (cursor, loading indicators)
+- Sends user interactions via `invoke()` (button clicks, text input)
+
+### What the frontend NEVER does
+- Plays or records audio (no `getUserMedia`, no `Web Audio API`, no `AudioContext`)
+- Registers keyboard shortcuts (global hotkeys are in Rust)
+- Makes HTTP requests to AI providers
+- Opens WebSocket connections
+- Executes shell commands or file operations
+
+### Interactive components
+JSX action components (`ActionButton`, `QueryButton`, `OpenButton`, `CopyButton`) call `invoke()` to route actions to the backend. They do NOT execute logic directly — they are UI triggers that delegate to Rust.
+
+---
+
 ## Technical Constraints
 
 - **Streaming**: Text and TTS stream in real-time. JSX components can only be safely rendered after the JSX block is complete (opening + closing tags). Partial JSX should buffer, not render.
