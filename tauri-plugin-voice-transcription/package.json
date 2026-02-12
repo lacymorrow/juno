@@ -1,6 +1,6 @@
 {
   "name": "tauri-plugin-voice-transcription",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "A Tauri plugin for voice transcription and dictation using Whisper",
   "main": "api/dist/index.js",
   "module": "api/dist/index.mjs",
