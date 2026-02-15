@@ -11,11 +11,13 @@ export function safeCleanupEventListener(unlisten: (() => void) | undefined | nu
     try {
       // Check if we're in a Tauri context and the window is still available
       if (
-        typeof window !== 'undefined' && 
+        typeof window !== 'undefined' &&
         window.__TAURI_EVENT_PLUGIN_INTERNALS__ &&
         typeof window.__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener === 'function'
       ) {
-        unlisten();
+        // unlisten() is async (calls Tauri invoke internally) — catch its rejection
+        // to prevent unhandled promise rejections when the listener was already removed
+        Promise.resolve(unlisten()).catch(() => {});
       } else {
         // If Tauri internals aren't available, we're likely in a cleanup phase
         // where the window is already destroyed or we're not in a Tauri context
