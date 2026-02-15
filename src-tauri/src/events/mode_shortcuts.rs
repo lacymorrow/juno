@@ -3,7 +3,7 @@
 //! Simplified keyboard shortcut handlers for mode transitions
 
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutEvent, ShortcutState};
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
 use tracing::{error, info};
 
 use crate::mode_manager::{AppMode, get_mode_manager};
@@ -12,7 +12,7 @@ use crate::state;
 /// Handle global shortcut events for modes
 pub fn handle_mode_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
     let app_state = app.state::<state::AppState>();
-    
+
     // Get current keyboard shortcuts from state
     let shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(s) => s,
@@ -22,15 +22,17 @@ pub fn handle_mode_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shortc
         }
     };
 
-    // Parse shortcut configurations
-    let escape_shortcut = Shortcut::new(None, Code::Escape);
+    // Parse all shortcuts from configuration (including stop_current_task)
+    let stop_shortcut = crate::parse_shortcut_string(&shortcuts.stop_current_task);
     let agent_shortcut = crate::parse_shortcut_string(&shortcuts.agent_mode_toggle);
     let dictation_shortcut = crate::parse_shortcut_string(&shortcuts.dictation_input);
 
-    // Handle escape key - always transitions to idle
-    if *shortcut == escape_shortcut && event.state() == ShortcutState::Pressed {
-        handle_escape_key(app);
-        return;
+    // Handle stop shortcut - always transitions to idle
+    if let Some(stop) = stop_shortcut {
+        if *shortcut == stop && event.state() == ShortcutState::Pressed {
+            handle_escape_key(app);
+            return;
+        }
     }
 
     // Handle agent mode shortcut

@@ -149,126 +149,18 @@ const getOnboardingSteps = (
   },
 ];
 
-// Single-key detector for the Escape key cancel step.
-// Uses dual detection: frontend keydown (fallback) + backend global shortcut event (primary).
-function EscapeKeyIndicator({
-  onEscapePressed,
-}: {
-  onEscapePressed: () => void;
-}) {
-  const [isPressed, setIsPressed] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const onEscapePressedRef = useRef(onEscapePressed);
-  onEscapePressedRef.current = onEscapePressed;
-  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  const triggerComplete = (mounted: boolean) => {
-    setIsPressed(true);
-    setIsComplete(true);
-    pendingTimers.current.push(
-      setTimeout(() => {
-        if (mounted) onEscapePressedRef.current();
-      }, 800)
-    );
-    pendingTimers.current.push(
-      setTimeout(() => {
-        if (mounted) setIsPressed(false);
-      }, 1200)
-    );
-  };
-
-  useEffect(() => {
-    let mounted = true;
-    let unlisten: (() => void) | undefined;
-
-    // Frontend keydown detection (fallback if global shortcut doesn't fire)
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setIsPressed(true);
-        if (!isComplete) {
-          triggerComplete(mounted);
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsPressed(false);
-      }
-    };
-
-    // Backend global shortcut detection (primary — matches how Option+D works)
-    const setupBackendListener = async () => {
-      try {
-        const fn = await listen(EVENTS.SHORTCUTS_ESCAPE_KEY, (event: any) => {
-          if (!mounted) return;
-          if (event.payload?.state === "pressed" && !isComplete) {
-            triggerComplete(mounted);
-          }
-        });
-
-        if (mounted) {
-          unlisten = fn;
-        } else {
-          safeCleanupEventListener(fn);
-        }
-      } catch (error) {
-        console.warn("Failed to setup backend escape key listener:", error);
-      }
-    };
-
-    setupBackendListener();
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      mounted = false;
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      safeCleanupEventListener(unlisten);
-      for (const timer of pendingTimers.current) {
-        clearTimeout(timer);
-      }
-      pendingTimers.current = [];
-    };
-  }, [isComplete]);
-
-  return (
-    <div className="flex items-center justify-center gap-4 my-8 relative">
-      <motion.div
-        className={`relative flex items-center justify-center w-20 h-20 rounded-xl border-2 transition-all duration-200 ${
-          isPressed
-            ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
-            : "bg-white border-gray-300 text-gray-700 shadow-sm"
-        }`}
-        animate={isPressed ? { scale: 0.95 } : { scale: 1 }}
-      >
-        <span className="text-lg font-semibold">Esc</span>
-      </motion.div>
-
-      {isComplete && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-8 top-1/2 transform -translate-y-1/2"
-        >
-          <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
-            <CheckCircle className="w-5 h-5 text-white" />
-          </div>
-        </motion.div>
-      )}
-    </div>
-  );
-}
-
-// Keyboard shortcut component
+// Generic keyboard shortcut component — works for any shortcut (agent mode, cancel, etc.)
+// backendEvent: the Tauri event name emitted by the backend when the global shortcut fires
 function KeyboardShortcut({
   onShortcutPressed,
   shortcutString,
+  backendEvent,
+  defaultShortcut = "Option+D",
 }: {
   onShortcutPressed: () => void;
   shortcutString?: string;
+  backendEvent?: string;
+  defaultShortcut?: string;
 }) {
   const [isComplete, setIsComplete] = useState(false);
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -280,9 +172,7 @@ function KeyboardShortcut({
     return { modifiers, key };
   };
 
-  const shortcut = shortcutString
-    ? parseShortcut(shortcutString)
-    : { modifiers: ["option"], key: "d" };
+  const shortcut = parseShortcut(shortcutString || defaultShortcut);
   const { modifiers, key } = shortcut;
 
   // Use refs to avoid re-creating listeners on every keystroke
@@ -376,10 +266,12 @@ function KeyboardShortcut({
       setPressedKeys(newPressedKeys);
     };
 
-    // Listen for backend shortcut detection events
+    // Listen for backend shortcut detection events (if a backend event name is provided)
     const setupBackendListener = async () => {
+      const eventName = backendEvent;
+      if (!eventName) return; // No backend event to listen for
       try {
-        const fn = await listen(EVENTS.SHORTCUTS_AGENT_MODE, (event: any) => {
+        const fn = await listen(eventName, (event: any) => {
           if (!mounted) return;
           if (event.payload?.state === "pressed") {
             setIsComplete(true);
@@ -421,7 +313,7 @@ function KeyboardShortcut({
       }
       pendingTimers.current = [];
     };
-  }, [modifiers, key]);
+  }, [modifiers, key, backendEvent]);
 
   // Display the shortcut keys
   const displayKeys = () => {
@@ -445,7 +337,28 @@ function KeyboardShortcut({
       }
     });
 
-    return [...modifierKeys, key.toUpperCase()];
+    // Map special key names to shorter display labels
+    const displayKey = (() => {
+      switch (key) {
+        case "escape":
+          return "Esc";
+        case "space":
+          return "Space";
+        case "enter":
+        case "return":
+          return "Return";
+        case "backspace":
+          return "Delete";
+        case "delete":
+          return "Fwd Del";
+        case "tab":
+          return "Tab";
+        default:
+          return key.toUpperCase();
+      }
+    })();
+
+    return [...modifierKeys, displayKey];
   };
 
   const keys = displayKeys();
@@ -453,12 +366,13 @@ function KeyboardShortcut({
   return (
     <div className="flex items-center justify-center gap-4 my-8 relative">
       {keys.map((keySymbol, index) => {
+        const isLastKey = index === keys.length - 1;
         const isPressed =
           (keySymbol === "⌥" && pressedKeys.has("option")) ||
           (keySymbol === "⌘" && pressedKeys.has("cmd")) ||
           (keySymbol === "⌃" && pressedKeys.has("ctrl")) ||
           (keySymbol === "⇧" && pressedKeys.has("shift")) ||
-          (keySymbol === key.toUpperCase() && pressedKeys.has(key));
+          (isLastKey && pressedKeys.has(key));
 
         return (
           <div key={index} className="flex items-center">
@@ -937,6 +851,7 @@ export default function OnboardingFlow({
                     <KeyboardShortcut
                       onShortcutPressed={handleShortcutPressed}
                       shortcutString={keyboardShortcuts?.agent_mode_toggle}
+                      backendEvent={EVENTS.SHORTCUTS_AGENT_MODE}
                     />
                     <p className="text-sm text-gray-500 mt-4">
                       {shortcutPressed
@@ -954,13 +869,21 @@ export default function OnboardingFlow({
                 {/* Cancel shortcut for cancel step */}
                 {step.id === "cancel" && (
                   <div className="relative">
-                    <EscapeKeyIndicator
-                      onEscapePressed={() => setEscapePressed(true)}
+                    <KeyboardShortcut
+                      onShortcutPressed={() => setEscapePressed(true)}
+                      shortcutString={keyboardShortcuts?.stop_current_task}
+                      backendEvent={EVENTS.SHORTCUTS_ESCAPE_KEY}
+                      defaultShortcut="Escape"
                     />
                     <p className="text-sm text-gray-500 mt-4 text-center">
                       {escapePressed
                         ? "Perfect! You've got it."
-                        : "Press the Escape key to try it out"}
+                        : keyboardShortcuts?.stop_current_task
+                        ? `Press ${keyboardShortcuts.stop_current_task.replace(
+                            /\+/g,
+                            " + "
+                          )} to stop Juno`
+                        : "Press the key above to stop Juno"}
                     </p>
                   </div>
                 )}

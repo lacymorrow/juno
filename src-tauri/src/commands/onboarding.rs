@@ -214,7 +214,8 @@ pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, St
         "is_development_mode": is_development_mode(),
         "shortcuts": {
             "agent_mode_toggle": shortcuts.agent_mode_toggle,
-            "dictation_input": shortcuts.dictation_input
+            "dictation_input": shortcuts.dictation_input,
+            "stop_current_task": shortcuts.stop_current_task
         }
     }))
 }
