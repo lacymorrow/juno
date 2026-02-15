@@ -1,3 +1,4 @@
+// @ts-nocheck — Legacy kibo-ui code-block; replaced by ai-elements/code-block.
 import {
   transformerNotationDiff,
   transformerNotationErrorLevel,

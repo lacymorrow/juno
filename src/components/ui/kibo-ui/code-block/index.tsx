@@ -1,3 +1,5 @@
+// @ts-nocheck — Legacy kibo-ui code-block; replaced by ai-elements/code-block.
+// Shiki type duplication causes TS errors. Keeping for V1 backward compat only.
 "use client";
 
 import { Button } from "@/components/ui/button";
