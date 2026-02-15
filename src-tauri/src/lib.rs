@@ -789,6 +789,19 @@ pub fn run() {
                 tracing::info!("Rate limiter cleanup task initialized successfully");
             });
 
+            // --- Initialize Escape Key Stale Registration Cleanup ---
+            let escape_cleanup_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let max_age = std::time::Duration::from_secs(300); // 5 minutes
+                let check_interval = std::time::Duration::from_secs(60); // Check every 60 seconds
+                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+
+                loop {
+                    tokio::time::sleep(check_interval).await;
+                    coordinator.check_and_cleanup_stale(&escape_cleanup_app_handle, max_age).await;
+                }
+            });
+
             // --- Setup All Menus (App Menu + Tray Menu + Event Handling) ---
             menu::setup_all_menus(&app_handle)?;
             // --- End of Menu Setup ---
