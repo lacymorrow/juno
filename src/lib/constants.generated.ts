@@ -152,6 +152,7 @@ export const EVENTS = {
   DICTATION_STATE_INPUT_CHANGED: 'dictation-input-state-changed',
   SHORTCUTS_AGENT_MODE: 'shortcut-agent-mode',
   SHORTCUTS_DICTATION_INPUT: 'shortcut-dictation-input',
+  SHORTCUTS_ESCAPE_KEY: 'shortcut-escape-key',
   TOOL_CHOICE_CONFIG_CHANGED: 'tool-choice-config-changed',
   TOOL_CHOICE_CONFIG_RESET: 'tool-choice-config-reset',
   TOOL_CHOICE_ENABLED_CHANGED: 'tool-choice-enabled-changed',

@@ -264,6 +264,9 @@ pub struct AppState {
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
     pub cloud_enabled: Arc<StdMutex<bool>>,
+    /// Runtime flag: true when the onboarding window is actively showing.
+    /// Used to suppress agent/dictation actions while still providing visual shortcut feedback.
+    onboarding_active: Arc<std::sync::atomic::AtomicBool>,
 
     // Rate limiting for command safety
     pub rate_limiters: Arc<GlobalRateLimiters>,
@@ -337,6 +340,7 @@ impl AppState {
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
             cloud_enabled: Arc::new(StdMutex::new(false)),
+            onboarding_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             // Use the rate limiters created above
             rate_limiters,
@@ -812,6 +816,17 @@ impl AppState {
     /// Check if agent is currently active (alias for is_agent_mode_active)
     pub fn is_agent_active(&self) -> bool {
         self.is_agent_mode_active()
+    }
+
+    /// Check if onboarding is currently active
+    pub fn is_onboarding_active(&self) -> bool {
+        self.onboarding_active.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Set onboarding active state
+    pub fn set_onboarding_active(&self, active: bool) {
+        self.onboarding_active.store(active, std::sync::atomic::Ordering::Release);
+        info!("Onboarding active state set to: {}", active);
     }
 
     // Method to get or initialize the Playwright driver

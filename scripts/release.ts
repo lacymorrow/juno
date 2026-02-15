@@ -196,9 +196,14 @@ async function main() {
     console.log(
       `  ✓ Updated juno-www/public/downloads/release.json\n`
     );
-    console.log(
-      `  ⚠ Remember to commit & deploy juno-www for the download to go live.\n`
+
+    // Auto-commit and push juno-www
+    console.log("🌐 Deploying juno-www...");
+    await exec(
+      `cd "${JUNO_WWW}" && git add public/downloads/release.json public/downloads/${zipName} && git commit -m "release: update download to Juno v${newVersion}"`
     );
+    await exec(`cd "${JUNO_WWW}" && git push origin main`);
+    console.log("  ✓ juno-www committed and pushed (Vercel will auto-deploy)\n");
   } else {
     console.log(
       `  ⚠ juno-www not found at ${JUNO_WWW}, skipping marketing site update.\n`

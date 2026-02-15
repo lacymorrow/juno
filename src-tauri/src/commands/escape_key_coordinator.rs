@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
 use std::time::Instant;
-use tauri::AppHandle;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tracing::{info, warn, error, debug};
 use tokio::sync::RwLock;
 use std::collections::HashMap;
@@ -101,42 +101,54 @@ impl EscapeKeyCoordinator {
         Ok(())
     }
 
-    /// Register the global escape key shortcut
-    async fn register_global_shortcut(&self, app_handle: &AppHandle) -> Result<(), String> {
-        info!("[EscapeKeyCoordinator] Registering global Escape key shortcut");
+    /// Resolve the configured stop shortcut from AppState, falling back to Escape
+    fn resolve_stop_shortcut(app_handle: &AppHandle) -> Shortcut {
+        let app_state = app_handle.state::<crate::state::AppState>();
+        if let Ok(shortcuts) = app_state.get_keyboard_shortcuts() {
+            if let Some(shortcut) = crate::parse_shortcut_string(&shortcuts.stop_current_task) {
+                return shortcut;
+            }
+            warn!("[EscapeKeyCoordinator] Failed to parse stop_current_task '{}', falling back to Escape", shortcuts.stop_current_task);
+        }
+        Shortcut::new(None, tauri_plugin_global_shortcut::Code::Escape)
+    }
 
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        let result = app_handle.global_shortcut().register(escape_shortcut);
+    /// Register the global stop shortcut (configured via stop_current_task setting)
+    async fn register_global_shortcut(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let stop_shortcut = Self::resolve_stop_shortcut(app_handle);
+        info!("[EscapeKeyCoordinator] Registering global stop shortcut: {:?}", stop_shortcut);
+
+        let result = app_handle.global_shortcut().register(stop_shortcut);
 
         match result {
             Ok(_) => {
                 self.is_registered.store(true, Ordering::SeqCst);
-                info!("[EscapeKeyCoordinator] Global Escape key shortcut registered successfully");
+                info!("[EscapeKeyCoordinator] Global stop shortcut registered successfully");
                 Ok(())
             }
             Err(e) => {
-                error!("[EscapeKeyCoordinator] Failed to register global Escape key shortcut: {}", e);
-                Err(format!("Failed to register escape key: {}", e))
+                error!("[EscapeKeyCoordinator] Failed to register global stop shortcut: {}", e);
+                Err(format!("Failed to register stop shortcut: {}", e))
             }
         }
     }
 
-    /// Unregister the global escape key shortcut
+    /// Unregister the global stop shortcut
     async fn unregister_global_shortcut(&self, app_handle: &AppHandle) -> Result<(), String> {
-        info!("[EscapeKeyCoordinator] Unregistering global Escape key shortcut");
+        let stop_shortcut = Self::resolve_stop_shortcut(app_handle);
+        info!("[EscapeKeyCoordinator] Unregistering global stop shortcut: {:?}", stop_shortcut);
 
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        let result = app_handle.global_shortcut().unregister(escape_shortcut);
+        let result = app_handle.global_shortcut().unregister(stop_shortcut);
 
         match result {
             Ok(_) => {
                 self.is_registered.store(false, Ordering::SeqCst);
-                info!("[EscapeKeyCoordinator] Global Escape key shortcut unregistered successfully");
+                info!("[EscapeKeyCoordinator] Global stop shortcut unregistered successfully");
                 Ok(())
             }
             Err(e) => {
-                error!("[EscapeKeyCoordinator] Failed to unregister global Escape key shortcut: {}", e);
-                Err(format!("Failed to unregister escape key: {}", e))
+                error!("[EscapeKeyCoordinator] Failed to unregister global stop shortcut: {}", e);
+                Err(format!("Failed to unregister stop shortcut: {}", e))
             }
         }
     }
