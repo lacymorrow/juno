@@ -18,16 +18,23 @@ use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
 pub mod model_ids {
-    // Anthropic Claude Models
-    pub const CLAUDE_4_5_OPUS: &str = "claude-opus-4-5-20251124";
-    pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
-    pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";
+    // Anthropic Claude Models — Current Generation
+    pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
+    pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
+    pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
+
+    // Anthropic Claude Models — Legacy
+    pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
+    pub const CLAUDE_OPUS_4_1: &str = "claude-opus-4-1-20250805";
+    pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
+    pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
 
     /// Models that require the 2025-11-24 computer-use beta flag
-    pub const OPUS_4_5_MODELS: &[&str] = &[CLAUDE_4_5_OPUS];
+    pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6];
 
     // OpenAI Models
     pub const OPENAI_CUA: &str = "computer-use-preview";
+    pub const OPENAI_CODEX_5_3: &str = "gpt-5.3-codex";
 
     // Google Gemini Models
     pub const GEMINI_2_5_COMPUTER_USE_PREVIEW: &str = "gemini-2.5-computer-use-preview-10-2025";
@@ -150,7 +157,7 @@ impl Provider {
 
         match self {
             Provider::Anthropic => {
-                if model_ids::OPUS_4_5_MODELS.contains(&model) {
+                if model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) {
                     beta_flags::COMPUTER_USE_2025_11_24
                 } else {
                     beta_flags::COMPUTER_USE_2025_01_24
@@ -165,23 +172,53 @@ impl Provider {
         match self {
             Provider::Anthropic => {
                 &[
+                    // Current generation
                     ModelDefinition {
-                        id: model_ids::CLAUDE_4_SONNET,
-                        name: "Claude 4 Sonnet",
+                        id: model_ids::CLAUDE_OPUS_4_6,
+                        name: "Claude Opus 4.6",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: true,
                     },
                     ModelDefinition {
-                        id: model_ids::CLAUDE_4_OPUS,
-                        name: "Claude 4 Opus",
+                        id: model_ids::CLAUDE_SONNET_4_5,
+                        name: "Claude Sonnet 4.5",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: false,
                     },
                     ModelDefinition {
-                        id: model_ids::CLAUDE_4_5_OPUS,
-                        name: "Claude 4.5 Opus",
+                        id: model_ids::CLAUDE_HAIKU_4_5,
+                        name: "Claude Haiku 4.5",
+                        category: ModelCategory::GeneralChat,
+                        supports_computer_use: false,
+                        is_recommended: false,
+                    },
+                    // Legacy models
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_4_5,
+                        name: "Claude Opus 4.5",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_4_1,
+                        name: "Claude Opus 4.1",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_SONNET_4,
+                        name: "Claude Sonnet 4",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_4,
+                        name: "Claude Opus 4",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: false,
@@ -190,11 +227,18 @@ impl Provider {
             }
             Provider::OpenAI => &[
                 ModelDefinition {
+                    id: model_ids::OPENAI_CODEX_5_3,
+                    name: "GPT-5.3 Codex",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelDefinition {
                     id: model_ids::OPENAI_CUA,
                     name: "Computer-Using Agent (CUA)",
                     category: ModelCategory::ComputerUse,
                     supports_computer_use: true,
-                    is_recommended: true,
+                    is_recommended: false,
                 },
             ],
             Provider::Rig => &[
@@ -255,7 +299,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_4_SONNET,
+                    Provider::Anthropic => model_ids::CLAUDE_OPUS_4_6,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::OPENAI_CUA,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
