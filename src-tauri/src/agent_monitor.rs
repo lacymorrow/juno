@@ -1,8 +1,26 @@
 use crate::constants::{events, monitor_sessions};
 use crate::state::{AgentTriggerMode, AppState};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
+
+/// Generation counter to prevent race conditions between start and cancel.
+/// Incremented when an agent session starts and when it's cancelled, so that
+/// async handlers can detect if their session was invalidated mid-flight.
+static AGENT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Returns the current agent session generation.
+pub fn current_agent_generation() -> u64 {
+    AGENT_SESSION_GENERATION.load(Ordering::SeqCst)
+}
+
+/// Increments and returns the new agent session generation.
+fn increment_agent_generation() -> u64 {
+    let new_gen = AGENT_SESSION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    debug!("[AgentMonitor] Generation incremented to {}", new_gen);
+    new_gen
+}
 
 // Configuration constants
 // const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
@@ -71,7 +89,8 @@ impl AgentInputMonitorState {
         // If agent was started but threshold wasn't reached, it means we're cancelling
         if agent_was_started && !threshold_was_reached {
             self.last_cancellation_time = Some(Instant::now());
-            warn!("[AgentMonitor] Cancelling agent after {}ms - recording cancellation time for cooldown", duration.as_millis());
+            let gen = increment_agent_generation();
+            warn!("[AgentMonitor] Cancelling agent after {}ms - recording cancellation time for cooldown (generation={})", duration.as_millis(), gen);
         }
 
         // Force reset all state immediately to prevent stuck state
@@ -98,9 +117,10 @@ impl AgentInputMonitorState {
             if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.agent_started = true;
                 self.agent_start_time = Some(Instant::now());
+                let gen = increment_agent_generation();
                 info!(
-                    "[AgentMonitor] Agent input held for {}ms - starting immediate agent mode",
-                    duration.as_millis()
+                    "[AgentMonitor] Agent input held for {}ms - starting immediate agent mode (generation={})",
+                    duration.as_millis(), gen
                 );
                 return true;
             }
