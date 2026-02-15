@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn, debug};
 use tokio::sync::RwLock;
@@ -41,10 +41,12 @@ impl StopCoordinator {
         }
     }
 
-    /// Atomically try to start cleanup, checking timing and state in one operation
-    /// Returns true if cleanup was successfully started, false if already in progress or too recent
+    /// Atomically try to start cleanup, preventing concurrent runs.
+    /// Returns true if cleanup was successfully started, false if already in progress.
+    /// NOTE: No time-based debounce — the CAS guard prevents concurrent runs while
+    /// allowing sequential ones. A user pressing Escape should never be silently dropped.
     async fn try_start_cleanup(&self) -> bool {
-        // First, atomically try to set cleanup_in_progress from false to true
+        // Atomically try to set cleanup_in_progress from false to true
         let was_already_in_progress = self.cleanup_in_progress.compare_exchange(
             false,
             true,
@@ -57,20 +59,7 @@ impl StopCoordinator {
             return false;
         }
 
-        // We successfully set the flag, now check timing
-        if let Ok(last_cleanup_guard) = self.last_cleanup.lock() {
-            if let Some(last_time) = *last_cleanup_guard {
-                let elapsed = last_time.elapsed();
-                if elapsed < Duration::from_millis(500) {
-                    debug!("[StopCoordinator] Recent cleanup detected ({}ms ago), skipping", elapsed.as_millis());
-                    // Reset the flag since we're not proceeding
-                    self.cleanup_in_progress.store(false, Ordering::SeqCst);
-                    return false;
-                }
-            }
-        }
-
-        // Update timestamp now that we're proceeding
+        // Update timestamp for diagnostics only (not used for gating)
         if let Ok(mut last_cleanup_guard) = self.last_cleanup.lock() {
             *last_cleanup_guard = Some(Instant::now());
         }
@@ -129,7 +118,7 @@ impl StopCoordinator {
 
         // Atomically try to start cleanup
         if !self.try_start_cleanup().await {
-            return Ok("Cleanup skipped - already in progress or too recent".to_string());
+            return Ok("Cleanup skipped - already in progress".to_string());
         }
 
         // Register this cleanup operation
@@ -147,6 +136,19 @@ impl StopCoordinator {
     /// Perform the actual coordinated cleanup
     async fn perform_coordinated_cleanup(&self, app_handle: &AppHandle, reason: &str) -> Result<String, String> {
         info!("[StopCoordinator] Performing coordinated cleanup: {}", reason);
+
+        // Clear all non-cleanup operations to prevent stale entries from blocking critical steps
+        {
+            let mut operations = self.active_operations.write().await;
+            let stale_ops: Vec<String> = operations.iter()
+                .filter(|op| !op.starts_with("cleanup"))
+                .cloned()
+                .collect();
+            for op in &stale_ops {
+                debug!("[StopCoordinator] Clearing stale operation before cleanup: {}", op);
+                operations.remove(op);
+            }
+        }
 
         let app_state = app_handle.state::<AppState>();
         let mut cleanup_results = Vec::new();
@@ -226,14 +228,15 @@ impl StopCoordinator {
         ).await;
         cleanup_results.push("Floating bar updated".to_string());
 
-        // 8. CRITICAL: Force unregister escape key to release it back to other applications
+        // 8. CRITICAL: Cooperatively unregister all escape key users to release key to other apps
+        // Uses unregister_all_users (not force_reset) so stale unregister calls from
+        // agent cleanup paths safely no-op instead of decrementing a new operation's count.
         if let Some(escape_op_id) = self.try_register_operation("escape_key_cleanup").await {
-            info!("[StopCoordinator] Force unregistering escape key to release to other applications");
+            info!("[StopCoordinator] Cooperatively unregistering all escape key users");
 
-            // Force reset the escape key coordinator to ensure complete cleanup
             let escape_coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-            if let Err(e) = escape_coordinator.force_reset(app_handle).await {
-                warn!("[StopCoordinator] Failed to force reset escape key coordinator: {}", e);
+            if let Err(e) = escape_coordinator.unregister_all_users(app_handle).await {
+                warn!("[StopCoordinator] Failed to unregister all escape key users: {}", e);
             } else {
                 cleanup_results.push("Escape key released to other applications".to_string());
             }
@@ -278,8 +281,14 @@ impl StopCoordinator {
         // Set emergency flag
         self.emergency_stop_active.store(true, Ordering::SeqCst);
 
-        // Force immediate cleanup regardless of timing
-        self.cleanup_in_progress.store(false, Ordering::SeqCst); // Reset to allow emergency cleanup
+        // Force immediate cleanup regardless of any prior state
+        self.cleanup_in_progress.store(false, Ordering::SeqCst);
+
+        // Clear active_operations so cleanup steps aren't blocked by stale entries
+        {
+            let mut operations = self.active_operations.write().await;
+            operations.clear();
+        }
 
         let result = self.stop_all_operations(app_handle, &format!("EMERGENCY: {}", reason)).await;
 
