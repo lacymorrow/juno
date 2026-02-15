@@ -454,10 +454,12 @@ impl AnthropicBrain {
                                                         &mut tts_content,
                                                     );
 
-                                                // Only emit stream_start and text chunks if we have actual display text
-                                                // This ensures thinking messages appear BEFORE the response message
-                                                if !display_text.is_empty() {
-                                                    // Emit stream_start on first actual text chunk
+                                                // Emit chunks when we have display text OR TTS content.
+                                                // We delay stream_start until after thinking messages for proper ordering,
+                                                // but TTS-only responses still need streaming events so the frontend
+                                                // can show the TTS content in the conversation.
+                                                if !display_text.is_empty() || !extracted_tts_list.is_empty() {
+                                                    // Emit stream_start on first chunk (text or TTS-only)
                                                     if !response_stream_started {
                                                         if let (Some(handle), Some(ref msg_id)) = (app_handle, &message_id) {
                                                             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
@@ -1368,14 +1370,17 @@ impl AgentBrain for AnthropicBrain {
 
             let final_display_text = accumulated_text;
 
-            // Only emit stream_end if stream_start was emitted (i.e., we had actual display text)
-            if stream_was_started {
-                crate::agent::tool_logger::emit_stream_end(
-                    &app_handle,
-                    message_id,
-                    final_display_text.clone(),
-                );
+            // Always emit stream_start + stream_end so the frontend knows a response happened.
+            // For TTS-only responses, display_text is empty but we still need to notify the
+            // frontend so it can show a "Complete" indicator rather than appearing to hang.
+            if !stream_was_started {
+                crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
             }
+            crate::agent::tool_logger::emit_stream_end(
+                &app_handle,
+                message_id,
+                final_display_text.clone(),
+            );
 
             // Process stop reason and return appropriate action
             match stop_reason.as_str() {

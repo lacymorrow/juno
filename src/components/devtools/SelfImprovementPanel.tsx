@@ -99,6 +99,7 @@ const SelfImprovementPanel: React.FC = () => {
   const [configJson, setConfigJson] = useState("");
   const [selectedBenchmark, setSelectedBenchmark] = useState<string>("quick");
   const [isInitialized, setIsInitialized] = useState(false);
+  const [backendAvailable, setBackendAvailable] = useState(true);
 
   // Clear messages after timeout
   useEffect(() => {
@@ -143,15 +144,20 @@ const SelfImprovementPanel: React.FC = () => {
 
   // Get current status
   const refreshStatus = useCallback(async () => {
-    if (!DEVELOPMENT_MODE_ONLY) return;
+    if (!DEVELOPMENT_MODE_ONLY || !backendAvailable) return;
 
     try {
       const statusData = await invoke("get_self_improvement_status");
       setStatus(statusData as SelfImprovementStatus);
     } catch (err) {
+      // If the command doesn't exist, stop polling to avoid console spam
+      if (typeof err === "string" && err.includes("not found")) {
+        setBackendAvailable(false);
+        return;
+      }
       console.error("Failed to get status:", err);
     }
-  }, []);
+  }, [backendAvailable]);
 
   // Start improvement cycle
   const startImprovementCycle = useCallback(async () => {
@@ -328,13 +334,13 @@ const SelfImprovementPanel: React.FC = () => {
     }
   }, [activeTab, refreshStatus, getArchive, getSystemHealth]);
 
-  // Auto-refresh status every 30 seconds when active
+  // Auto-refresh status every 30 seconds when active (only if backend commands exist)
   useEffect(() => {
-    if (!DEVELOPMENT_MODE_ONLY || activeTab !== "overview") return;
+    if (!DEVELOPMENT_MODE_ONLY || activeTab !== "overview" || !backendAvailable) return;
 
     const interval = setInterval(refreshStatus, 30000);
     return () => clearInterval(interval);
-  }, [activeTab, refreshStatus]);
+  }, [activeTab, refreshStatus, backendAvailable]);
 
   // Development mode warning
   if (!DEVELOPMENT_MODE_ONLY) {
