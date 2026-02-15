@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutEvent, ShortcutState};
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info};
 
@@ -41,28 +41,32 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     };
 
-    // Create shortcut objects from current configuration
-    let escape_shortcut = Shortcut::new(None, Code::Escape);
-
-    // Parse shortcuts from configuration
+    // Parse all shortcuts from configuration (including stop_current_task)
+    let stop_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.stop_current_task);
     let agent_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
     let dictation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.open_settings);
-    
+
     // Debug logging
     println!("[DEBUG] Current shortcuts from state:");
+    println!("  Stop: {} -> {:?}", current_shortcuts.stop_current_task, stop_shortcut);
     println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode_toggle, agent_shortcut);
     println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
     println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
     println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
-    if *shortcut == escape_shortcut {
-        handle_escape_key_shortcut(app, event);
-    } else if let Some(agent_shortcut_obj) = agent_shortcut {
+    if let Some(stop_shortcut_obj) = stop_shortcut {
+        if *shortcut == stop_shortcut_obj {
+            handle_escape_key_shortcut(app, event);
+        }
+    }
+
+    if let Some(agent_shortcut_obj) = agent_shortcut {
         if *shortcut == agent_shortcut_obj {
             handle_agent_mode_shortcut(app, event);
         }
@@ -105,11 +109,34 @@ fn handle_settings_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 }
 
 /// Handle escape key shortcut - universal "cancel anything" button
-/// Uses the new escape key coordinator to prevent race conditions
+/// Uses the new escape key coordinator to prevent race conditions.
+/// Always emits a visual feedback event; only triggers stop when not in onboarding.
 fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
-    if event.state() == ShortcutState::Pressed {
-        info!("[Escape Key] Pressed - initiating coordinated stop");
+    let shortcut_state = match event.state() {
+        ShortcutState::Pressed => "pressed",
+        ShortcutState::Released => "released",
+    };
 
+    // Always emit visual feedback event (for onboarding UI)
+    if let Err(e) = app.emit(
+        events::shortcuts::ESCAPE_KEY,
+        serde_json::json!({
+            "state": shortcut_state,
+            "shortcut": "escape_key"
+        }),
+    ) {
+        error!("[Escape Key] Failed to emit shortcut detection event: {}", e);
+    }
+
+    if event.state() == ShortcutState::Pressed {
+        // During onboarding, only provide visual feedback — don't trigger stop
+        let app_state = app.state::<state::AppState>();
+        if app_state.is_onboarding_active() {
+            info!("[Escape Key] Pressed during onboarding - visual feedback only");
+            return;
+        }
+
+        info!("[Escape Key] Pressed - initiating coordinated stop");
         let app_handle_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
@@ -145,6 +172,13 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
             "[Agent Mode Shortcut] Failed to emit shortcut detection event: {}",
             e
         );
+    }
+
+    // During onboarding, only provide visual feedback — don't trigger agent mode
+    let app_state = app.state::<state::AppState>();
+    if app_state.is_onboarding_active() {
+        info!("[Agent Mode Shortcut] Pressed during onboarding - visual feedback only");
+        return;
     }
 
     // Unified behavior: forward both press and release to agent_monitor.
@@ -186,8 +220,14 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         );
     }
 
-    // FIXED: Check dictation trigger mode to determine behavior
+    // During onboarding, only provide visual feedback — don't trigger dictation
     let app_state = app.state::<state::AppState>();
+    if app_state.is_onboarding_active() {
+        info!("[Dictation Input Shortcut] Pressed during onboarding - visual feedback only");
+        return;
+    }
+
+    // FIXED: Check dictation trigger mode to determine behavior
     let trigger_mode = app_state
         .get_dictation_trigger_mode()
         .unwrap_or(state::DictationTriggerMode::Hold);

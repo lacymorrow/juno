@@ -264,6 +264,7 @@ pub mod dictation_state {
 pub mod shortcuts {
     pub const AGENT_MODE: &str = "shortcut-agent-mode";
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
+    pub const ESCAPE_KEY: &str = "shortcut-escape-key";
 }
 
 /// Tool choice events

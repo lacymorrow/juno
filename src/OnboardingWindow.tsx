@@ -21,6 +21,19 @@ export default function OnboardingWindow() {
     isDevelopmentMode
   );
 
+  // Notify backend that onboarding is active (registers escape key, suppresses agent/dictation actions)
+  useEffect(() => {
+    invoke("set_onboarding_active", { active: true }).catch((e) =>
+      console.warn("Failed to set onboarding active:", e)
+    );
+
+    return () => {
+      invoke("set_onboarding_active", { active: false }).catch((e) =>
+        console.warn("Failed to clear onboarding active:", e)
+      );
+    };
+  }, []);
+
   // Check permissions and onboarding info on mount
   useEffect(() => {
     const checkInitialData = async () => {

@@ -134,7 +134,7 @@ const getOnboardingSteps = (
           description:
             "Juno needs these permissions to automate tasks and interact with your Mac securely.",
           icon: <Shield className="w-12 h-12 text-green-500" />,
-          action: "Open System Preferences",
+          action: "Continue",
         },
       ]),
   {
@@ -148,6 +148,119 @@ const getOnboardingSteps = (
     action: "Start Using Juno",
   },
 ];
+
+// Single-key detector for the Escape key cancel step.
+// Uses dual detection: frontend keydown (fallback) + backend global shortcut event (primary).
+function EscapeKeyIndicator({
+  onEscapePressed,
+}: {
+  onEscapePressed: () => void;
+}) {
+  const [isPressed, setIsPressed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const onEscapePressedRef = useRef(onEscapePressed);
+  onEscapePressedRef.current = onEscapePressed;
+  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const triggerComplete = (mounted: boolean) => {
+    setIsPressed(true);
+    setIsComplete(true);
+    pendingTimers.current.push(
+      setTimeout(() => {
+        if (mounted) onEscapePressedRef.current();
+      }, 800)
+    );
+    pendingTimers.current.push(
+      setTimeout(() => {
+        if (mounted) setIsPressed(false);
+      }, 1200)
+    );
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+
+    // Frontend keydown detection (fallback if global shortcut doesn't fire)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsPressed(true);
+        if (!isComplete) {
+          triggerComplete(mounted);
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsPressed(false);
+      }
+    };
+
+    // Backend global shortcut detection (primary — matches how Option+D works)
+    const setupBackendListener = async () => {
+      try {
+        const fn = await listen(EVENTS.SHORTCUTS_ESCAPE_KEY, (event: any) => {
+          if (!mounted) return;
+          if (event.payload?.state === "pressed" && !isComplete) {
+            triggerComplete(mounted);
+          }
+        });
+
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (error) {
+        console.warn("Failed to setup backend escape key listener:", error);
+      }
+    };
+
+    setupBackendListener();
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      safeCleanupEventListener(unlisten);
+      for (const timer of pendingTimers.current) {
+        clearTimeout(timer);
+      }
+      pendingTimers.current = [];
+    };
+  }, [isComplete]);
+
+  return (
+    <div className="flex items-center justify-center gap-4 my-8 relative">
+      <motion.div
+        className={`relative flex items-center justify-center w-20 h-20 rounded-xl border-2 transition-all duration-200 ${
+          isPressed
+            ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
+            : "bg-white border-gray-300 text-gray-700 shadow-sm"
+        }`}
+        animate={isPressed ? { scale: 0.95 } : { scale: 1 }}
+      >
+        <span className="text-lg font-semibold">Esc</span>
+      </motion.div>
+
+      {isComplete && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="absolute -right-8 top-1/2 transform -translate-y-1/2"
+        >
+          <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+            <CheckCircle className="w-5 h-5 text-white" />
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
 
 // Keyboard shortcut component
 function KeyboardShortcut({
@@ -540,6 +653,7 @@ export default function OnboardingFlow({
 
   const [currentStep, setCurrentStep] = useState(0);
   const [shortcutPressed, setShortcutPressed] = useState(false);
+  const [escapePressed, setEscapePressed] = useState(false);
   const [_backendShortcutsWorking, setBackendShortcutsWorking] =
     useState(false);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
@@ -840,15 +954,13 @@ export default function OnboardingFlow({
                 {/* Cancel shortcut for cancel step */}
                 {step.id === "cancel" && (
                   <div className="relative">
-                    {/* Simple visual representation of Escape key */}
-                    <div className="flex justify-center my-6">
-                      <div className="flex items-center justify-center w-20 h-20 rounded-xl border-2 bg-white border-gray-300 text-gray-700 shadow-sm">
-                        <span className="text-lg font-semibold">Esc</span>
-                      </div>
-                    </div>
-
+                    <EscapeKeyIndicator
+                      onEscapePressed={() => setEscapePressed(true)}
+                    />
                     <p className="text-sm text-gray-500 mt-4 text-center">
-                      The Escape key is your universal "stop" button in Juno
+                      {escapePressed
+                        ? "Perfect! You've got it."
+                        : "Press the Escape key to try it out"}
                     </p>
                   </div>
                 )}

@@ -1,6 +1,6 @@
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use tauri::{AppHandle, Manager};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Check if we're running in development mode
 fn is_development_mode() -> bool {
@@ -36,7 +36,7 @@ pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
 /// Mark onboarding as completed
 #[tauri::command]
 pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
     let onboarding_settings = OnboardingSettings {
@@ -52,13 +52,24 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     info!("Onboarding marked as completed at {}", now);
+
+    // Safety net: clear onboarding active state and unregister escape key
+    if let Err(e) = set_onboarding_active(app.clone(), false).await {
+        warn!("Failed to clear onboarding active state on completion: {}", e);
+    }
+
+    // Show the main window now that onboarding is done
+    if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
+        warn!("Failed to show main window after onboarding completion: {}", e);
+    }
+
     Ok(())
 }
 
 /// Mark onboarding as skipped (still counts as completed)
 #[tauri::command]
 pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
     // Get current settings to preserve skip count
@@ -83,6 +94,17 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         "Onboarding skipped at {} (skip count: {})",
         now, onboarding_settings.skip_count
     );
+
+    // Safety net: clear onboarding active state and unregister escape key
+    if let Err(e) = set_onboarding_active(app.clone(), false).await {
+        warn!("Failed to clear onboarding active state on skip: {}", e);
+    }
+
+    // Show the main window now that onboarding is done (skipped)
+    if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
+        warn!("Failed to show main window after onboarding skip: {}", e);
+    }
+
     Ok(())
 }
 
@@ -227,6 +249,30 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
     Ok(agent_shortcut_valid && dictation_shortcut_valid)
 }
 
+/// Set onboarding as active and register the escape key for visual feedback.
+/// Called by the frontend when the onboarding component mounts.
+#[tauri::command]
+pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), String> {
+    let app_state = app.state::<crate::state::AppState>();
+    app_state.set_onboarding_active(active);
+
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    if active {
+        // Register escape key so the backend can detect it and emit visual feedback events
+        if let Err(e) = coordinator.register_escape_user(&app, "onboarding").await {
+            error!("[Onboarding] Failed to register escape key: {}", e);
+        }
+    } else {
+        // Unregister escape key when onboarding ends
+        if let Err(e) = coordinator.unregister_escape_user(&app, "onboarding").await {
+            error!("[Onboarding] Failed to unregister escape key: {}", e);
+        }
+    }
+
+    info!("[Onboarding] Active state set to: {}", active);
+    Ok(())
+}
+
 /// Initialize the onboarding system and check if onboarding should be shown
 pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), String> {
     info!("Initializing onboarding system...");
@@ -245,13 +291,24 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
             mode
         );
 
-        // Open the onboarding window
+        // Open the onboarding window and give it focus
         if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {
             warn!("Failed to open onboarding window: {}", e);
             return Err(format!("Failed to open onboarding window: {}", e));
         }
     } else {
-        info!("Onboarding already completed, skipping");
+        info!("Onboarding already completed, showing main window");
+
+        // Hide the onboarding window (it starts visible from tauri.conf.json)
+        if let Err(e) = crate::window_management::close_onboarding_window(app_handle.clone()).await
+        {
+            warn!("Failed to close onboarding window: {}", e);
+        }
+
+        // Show the main window now that we know onboarding is done
+        if let Err(e) = crate::window_management::open_main_window(app_handle.clone()).await {
+            warn!("Failed to open main window: {}", e);
+        }
     }
 
     Ok(())

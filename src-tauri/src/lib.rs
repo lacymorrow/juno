@@ -627,6 +627,7 @@ pub fn run() {
             commands::restart_onboarding,
             commands::get_onboarding_info,
             commands::test_global_shortcuts_working,
+            commands::set_onboarding_active,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
