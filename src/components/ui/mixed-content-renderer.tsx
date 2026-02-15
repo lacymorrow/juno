@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Response } from "@/components/ui/response";
+import { MessageResponse as Response } from "@/components/ai-elements/message";
 import { JsxMessageRenderer } from "@/components/ui/jsx-message-renderer";
 
 /**

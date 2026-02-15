@@ -142,8 +142,8 @@ const getOnboardingSteps = (
     title: "Ready to Go",
     subtitle: "Juno is now active",
     description: permissionsAlreadyGranted
-      ? "Juno is ready to go! Press ⌘J anytime to get started!"
-      : "You can always change these permissions later in System Preferences. Press ⌘J anytime to get started!",
+      ? "Juno is ready to go! Use the shortcut you just learned to activate Juno anytime."
+      : "You can always change these permissions later in System Preferences.",
     icon: <CheckCircle className="w-12 h-12 text-green-500" />,
     action: "Start Using Juno",
   },
@@ -978,8 +978,8 @@ export default function OnboardingFlow({
 
               {/* Actions */}
               <div className="flex gap-4">
-                {/* Show skip all button on final step */}
-                {[0, onboardingSteps.length - 1].includes(currentStep) ? (
+                {/* Skip button: "Skip All" on welcome, "Skip Step" on middle steps, hidden on final */}
+                {currentStep === onboardingSteps.length - 1 ? null : currentStep === 0 ? (
                   <button
                     onClick={handleSkip}
                     className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"

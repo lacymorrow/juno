@@ -8,9 +8,9 @@ import {
   MessageContent,
   MessageActions,
   MessageAction,
+  MessageResponse,
   MessageToolbar,
-} from "@/components/ui/message";
-import { Response } from "@/components/ui/response";
+} from "@/components/ai-elements/message";
 import {
   Code,
   Copy,
@@ -233,7 +233,7 @@ export function ChatMessageComponent({
         ) : msg.role === "assistant" && msg.content && (msg.isJsx || hasMixedContent(msg.content)) ? (
           <MixedContentRenderer content={msg.content} isStreaming={msg.isStreaming} />
         ) : msg.role === "assistant" && msg.content ? (
-          <Response>{msg.content}</Response>
+          <MessageResponse>{msg.content}</MessageResponse>
         ) : msg.role === "user" ? (
           <span>{msg.content}</span>
         ) : (

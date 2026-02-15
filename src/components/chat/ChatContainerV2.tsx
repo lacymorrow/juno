@@ -5,7 +5,7 @@ import {
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
-} from "@/components/ui/conversation";
+} from "@/components/ai-elements/conversation";
 import {
   ChatMessageComponent,
   type ChatMessage,
