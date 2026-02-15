@@ -66,7 +66,7 @@ interface ChatMessageProps {
   ) => void;
 }
 
-// Component for displaying TTS content decoratively
+// Compact accordion for TTS spoken content — closed by default, supplementary info
 function TTSContentDisplay({
   ttsMetadata,
 }: {
@@ -78,11 +78,15 @@ function TTSContentDisplay({
     return null;
   }
 
+  // Combine all parts into one spoken text for display
+  const spokenText = ttsMetadata.total_spoken_text?.trim()
+    || ttsMetadata.tts_parts.map((p) => p.trim()).join(" ");
+
   return (
-    <div className="mb-2 pb-2 border-b border-border/30">
+    <div className="mt-1">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group/tts"
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors"
       >
         {isExpanded ? (
           <ChevronDown className="h-3 w-3" />
@@ -90,50 +94,58 @@ function TTSContentDisplay({
           <ChevronRight className="h-3 w-3" />
         )}
         <Volume2 className="h-3 w-3" />
-        <span>
-          Spoken content ({ttsMetadata.tts_parts.length} part
-          {ttsMetadata.tts_parts.length > 1 ? "s" : ""})
-        </span>
-        <span className="text-muted-foreground/60 group-hover/tts:text-muted-foreground/80 transition-colors">
-          Click to {isExpanded ? "hide" : "show"}
-        </span>
+        <span>Spoken aloud</span>
       </button>
 
       {isExpanded && (
-        <div className="mt-2 space-y-2">
-          {ttsMetadata.tts_parts.map((ttsText, index) => (
-            <div
-              key={index}
-              className="pl-4 border-l-2 border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10 rounded-r-md p-2"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Volume2 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                  Spoken part {index + 1}
-                </span>
-              </div>
-              <div className="text-sm text-blue-800 dark:text-blue-200 italic leading-relaxed">
-                "{ttsText.trim()}"
-              </div>
-            </div>
-          ))}
-
-          {ttsMetadata.tts_parts.length > 1 && (
-            <div className="pl-4 border-l-2 border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-900/10 rounded-r-md p-2">
-              <div className="flex items-center gap-2 mb-1">
-                <Volume2 className="h-3 w-3 text-green-600 dark:text-green-400" />
-                <span className="text-xs font-medium text-green-700 dark:text-green-300">
-                  Combined spoken text
-                </span>
-              </div>
-              <div className="text-sm text-green-800 dark:text-green-200 italic leading-relaxed">
-                "{ttsMetadata.total_spoken_text.trim()}"
-              </div>
-            </div>
-          )}
+        <div className="mt-1 pl-5 text-xs text-muted-foreground/80 italic leading-relaxed">
+          {spokenText}
         </div>
       )}
     </div>
+  );
+}
+
+// Status badge for empty assistant messages (e.g., TTS-only or agent state changes)
+function AgentStatusBadge({ agentState }: { agentState?: string }) {
+  if (agentState === UI.AGENT_STATUS_FINISHED || agentState === UI.AGENT_STATUS_SUCCESS) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <CheckCircle className="h-3 w-3 text-green-600" />
+        <span>Complete</span>
+      </span>
+    );
+  }
+  if (agentState === UI.AGENT_STATUS_FAILED || agentState === UI.AGENT_STATUS_ERROR) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <XCircle className="h-3 w-3 text-red-500" />
+        <span>Failed</span>
+      </span>
+    );
+  }
+  if (agentState === UI.AGENT_STATUS_CANCELLED) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <XCircle className="h-3 w-3 text-yellow-500" />
+        <span>Cancelled</span>
+      </span>
+    );
+  }
+  if (agentState === UI.AGENT_STATUS_OFFLINE) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <WifiOff className="h-3 w-3" />
+        <span>Offline</span>
+      </span>
+    );
+  }
+  // Default: generic "done" for unknown or missing states
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+      <CheckCircle className="h-3 w-3 text-muted-foreground/50" />
+      <span>Done</span>
+    </span>
   );
 }
 
@@ -196,40 +208,10 @@ export function ChatMessageComponent({
   return (
     <Message key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
       <MessageContent>
-        {/* TTS Content Display - Show decoratively */}
-        {msg.role === "assistant" && !msg.isStreaming && (
-          <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
-        )}
+        {/* Main content rendering */}
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
-          <span className="text-muted-foreground italic flex items-center gap-2">
-            {msg.agent_state === UI.AGENT_STATUS_FINISHED ? (
-              <div className="flex items-center gap-1.5 text-green-600">
-                <CheckCircle className="h-3 w-3" />
-                <span className="text-xs">Complete</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_FAILED ? (
-              <div className="flex items-center gap-1.5 text-red-600">
-                <XCircle className="h-3 w-3" />
-                <span className="text-xs">Failed</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_CANCELLED ? (
-              <div className="flex items-center gap-1.5 text-gray-600">
-                <XCircle className="h-3 w-3" />
-                <span className="text-xs">Cancelled</span>
-              </div>
-            ) : msg.agent_state === UI.AGENT_STATUS_OFFLINE ? (
-              <div className="flex items-center gap-1.5 text-gray-600">
-                <WifiOff className="h-3 w-3" />
-                <span className="text-xs">Offline</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 text-green-600">
-                <CheckCircle className="h-3 w-3" />
-                <span className="text-xs">Complete</span>
-              </div>
-            )}
-          </span>
+          <AgentStatusBadge agentState={msg.agent_state} />
         ) : msg.role === "assistant" && msg.content && (msg.isJsx || hasMixedContent(msg.content)) ? (
           <MixedContentRenderer content={msg.content} isStreaming={msg.isStreaming} />
         ) : msg.role === "assistant" && msg.content ? (
@@ -238,6 +220,11 @@ export function ChatMessageComponent({
           <span>{msg.content}</span>
         ) : (
           msg.content
+        )}
+
+        {/* TTS spoken content — compact accordion, closed by default */}
+        {msg.role === "assistant" && !msg.isStreaming && (
+          <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
         )}
 
         {msg.screenshot_base64 && (
