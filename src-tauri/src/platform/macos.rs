@@ -192,8 +192,10 @@ fn setup_main_window(app_handle: &AppHandle) {
             }
         }
 
-        // Activate the main window after setup
-        activate_main_window(main_window);
+        // NOTE: Main window activation (show/focus) is handled by
+        // initialize_onboarding_system() in state_management, NOT here.
+        // This avoids a race where the main window appears on top of
+        // the onboarding window before the user completes onboarding.
     } else {
         error!("Warning: main window not found during macOS specific setup.");
     }
@@ -222,30 +224,9 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     });
 }
 
-/// Activate the main window with proper timing and focus handling
-#[cfg(target_os = "macos")]
-fn activate_main_window(main_window: tauri::WebviewWindow<tauri::Wry>) {
-    tauri::async_runtime::spawn(async move {
-        // Longer delay to ensure all window setup is complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-
-        // Ensure main window is visible and focused
-        if let Err(e) = main_window.show() {
-            warn!("{}", format_error(templates::FAILED_TO_PROCESS, "show main window", e));
-        }
-
-        if let Err(e) = main_window.set_focus() {
-            warn!("{}", format_error(templates::FAILED_TO_UPDATE, "focus on main window", e));
-        } else {
-            info!("Main window focus set successfully - clicks should now work immediately");
-        }
-
-        // Unminimize if needed
-        if let Err(e) = main_window.unminimize() {
-            warn!("{}", format_error(templates::FAILED_TO_PROCESS, "unminimize main window", e));
-        }
-    });
-}
+// NOTE: activate_main_window was removed — main window visibility is now
+// controlled by initialize_onboarding_system() to avoid showing the main
+// window on top of the onboarding window during first launch.
 
 /// Mouse tracking functionality for macOS windows
 #[cfg(target_os = "macos")]
