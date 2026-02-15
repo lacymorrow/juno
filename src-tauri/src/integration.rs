@@ -665,6 +665,11 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 150;
 
+    // Capture the generation at the time this handler was dispatched.
+    // If a cancel event fires while we're doing async work (permission checks, etc.),
+    // the generation will change and we'll know to abort before starting dictation.
+    let generation_at_start = crate::agent_monitor::current_agent_generation();
+
     // Verify voice controller is managed before entering retry loop
     if app_handle.try_state::<Arc<Mutex<VoiceController>>>().is_none() {
         warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
@@ -682,6 +687,16 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
 
     let mut last_error = String::new();
     for attempt in 0..MAX_RETRIES {
+        // Check if a cancel occurred while we were waiting (e.g., during retries or async work)
+        if crate::agent_monitor::current_agent_generation() != generation_at_start {
+            info!(
+                "[Agent Mode] Agent start aborted - session was cancelled during startup (generation {} -> {})",
+                generation_at_start,
+                crate::agent_monitor::current_agent_generation()
+            );
+            return;
+        }
+
         // Re-acquire state each iteration to avoid lifetime issues with tauri::State
         let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
             last_error = "Voice controller disappeared unexpectedly".to_string();
@@ -694,6 +709,24 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
         .await
         {
             Ok(()) => {
+                // Check generation again after async start_dictation completed.
+                // If a cancel arrived while we were inside start_dictation's async work
+                // (mic permission check, Whisper init, etc.), stop what we just started.
+                if crate::agent_monitor::current_agent_generation() != generation_at_start {
+                    info!(
+                        "[Agent Mode] Agent cancelled during startup - stopping dictation we just started (generation {} -> {})",
+                        generation_at_start,
+                        crate::agent_monitor::current_agent_generation()
+                    );
+                    if let Some(cs) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                            app_handle.clone(),
+                            cs,
+                        ).await;
+                    }
+                    return;
+                }
+
                 if attempt > 0 {
                     info!("[Agent Mode] Started agent transcription on retry {}", attempt);
                 } else {

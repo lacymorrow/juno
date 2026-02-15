@@ -1,7 +1,6 @@
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import {
   MixedContentRenderer,
-  hasMixedContent,
 } from "@/components/ui/mixed-content-renderer";
 import {
   Message,
@@ -212,7 +211,7 @@ export function ChatMessageComponent({
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
           <AgentStatusBadge agentState={msg.agent_state} />
-        ) : msg.role === "assistant" && msg.content && (msg.isJsx || hasMixedContent(msg.content)) ? (
+        ) : msg.role === "assistant" && msg.content && msg.isJsx ? (
           <MixedContentRenderer content={msg.content} isStreaming={msg.isStreaming} />
         ) : msg.role === "assistant" && msg.content ? (
           <MessageResponse>{msg.content}</MessageResponse>

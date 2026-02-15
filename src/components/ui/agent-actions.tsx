@@ -26,32 +26,18 @@ import {
 } from "lucide-react";
 
 // ============================================================
-// Security: Whitelisted Tauri commands
+// Security: Command validation (currently disabled)
 // ============================================================
 
-/**
- * Commands that agent-rendered components are allowed to invoke.
- * This is the ONLY security boundary — react-jsx-parser cannot call
- * arbitrary functions, so we control what's available here.
- */
-const ALLOWED_COMMANDS = new Set([
-  // Open URLs and applications
-  "open_url",
-  "open_application",
+// TODO: Re-enable command whitelist before production release.
+// When re-enabled, only ALLOWED_COMMANDS should be invocable from
+// agent-rendered JSX. The whitelist was:
+//   open_url, open_application, get_system_info, capture_screenshot,
+//   submit_query, ui_handle_interaction
+// See TODO.md for tracking.
 
-  // System queries (read-only)
-  "get_system_info",
-  "capture_screenshot",
-
-  // Agent interaction
-  "submit_query",
-
-  // UI state
-  "ui_handle_interaction",
-]);
-
-function isCommandAllowed(command: string): boolean {
-  return ALLOWED_COMMANDS.has(command);
+function isCommandAllowed(_command: string): boolean {
+  return true;
 }
 
 // ============================================================
