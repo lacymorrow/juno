@@ -341,11 +341,10 @@ impl DictationStateManager {
         }
 
         // Handle escape key registration/unregistration
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
         if is_active {
             // Register escape key when dictation becomes active
-            if let Err(e) =
-                crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
-            {
+            if let Err(e) = coordinator.register_escape_user(app_handle, "dictation_state").await {
                 warn!(
                     "[StateManager] Failed to register escape key for dictation: {}",
                     e
@@ -355,9 +354,7 @@ impl DictationStateManager {
             }
         } else {
             // Unregister escape key when dictation becomes inactive
-            if let Err(e) =
-                crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
-            {
+            if let Err(e) = coordinator.unregister_escape_user(app_handle, "dictation_state").await {
                 warn!(
                     "[StateManager] Failed to unregister escape key for dictation: {}",
                     e

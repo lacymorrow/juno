@@ -88,7 +88,7 @@ pub enum Commands {
         save_transcript: Option<String>,
 
         /// Model to use for the query
-        #[arg(long, help = "AI model to use (e.g., claude-sonnet-4-20250514)")]
+        #[arg(long, help = "AI model to use (e.g., claude-opus-4-6)")]
         model: Option<String>,
 
         /// Provider to use for the query

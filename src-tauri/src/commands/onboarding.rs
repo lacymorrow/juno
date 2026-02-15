@@ -251,26 +251,33 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 }
 
 /// Set onboarding as active and register the escape key for visual feedback.
-/// Called by the frontend when the onboarding component mounts.
+/// Called by the frontend when the onboarding component mounts, and also by
+/// `initialize_onboarding_system` in the backend. Idempotent — safe to call
+/// multiple times with the same `active` value.
 #[tauri::command]
 pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), String> {
     let app_state = app.state::<crate::state::AppState>();
+    let was_active = app_state.is_onboarding_active();
+
+    // Always update the flag
     app_state.set_onboarding_active(active);
 
+    // Only register/unregister escape key on actual state transitions to avoid
+    // double-registering (which inflates the coordinator's reference count).
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if active {
+    if active && !was_active {
         // Register escape key so the backend can detect it and emit visual feedback events
         if let Err(e) = coordinator.register_escape_user(&app, "onboarding").await {
             error!("[Onboarding] Failed to register escape key: {}", e);
         }
-    } else {
+    } else if !active && was_active {
         // Unregister escape key when onboarding ends
         if let Err(e) = coordinator.unregister_escape_user(&app, "onboarding").await {
             error!("[Onboarding] Failed to unregister escape key: {}", e);
         }
     }
 
-    info!("[Onboarding] Active state set to: {}", active);
+    info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
     Ok(())
 }
 
@@ -291,6 +298,14 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
             "Onboarding not completed in {} mode, opening onboarding window",
             mode
         );
+
+        // CRITICAL: Set onboarding_active in the backend BEFORE opening the window.
+        // This ensures shortcut handlers (dictation, agent) will see onboarding as active
+        // immediately, without waiting for the frontend to mount and call back via invoke().
+        // The frontend useEffect call to set_onboarding_active(true) is a no-op (idempotent).
+        if let Err(e) = set_onboarding_active(app_handle.clone(), true).await {
+            error!("[Onboarding] Failed to set onboarding active during init: {}", e);
+        }
 
         // Open the onboarding window and give it focus
         if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {

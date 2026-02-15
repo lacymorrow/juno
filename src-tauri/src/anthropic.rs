@@ -350,10 +350,11 @@ async fn execute_agent_internal(
     // Register escape key for cancellation during agent execution
     // Skip in headless mode — no keyboard to listen to
     if !crate::cli::headless::is_headless_mode() {
-        if let Err(e) =
-            crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
         {
-            warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
+            let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+            if let Err(e) = coordinator.register_escape_user(&app_handle, "agent_execution").await {
+                warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
+            }
         }
     }
 
@@ -509,7 +510,8 @@ async fn execute_agent_internal(
             {
                 let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
                 error!("{}", err_msg);
-                let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
                 state.mark_agent_execution_finished();
                 return Err(err_msg);
             }
@@ -589,7 +591,8 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
-                    let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -651,7 +654,8 @@ async fn execute_agent_internal(
             {
                 let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
                 error!("{}", err_msg);
-                let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
                 state.mark_agent_execution_finished();
                 return Err(err_msg);
             }
@@ -801,7 +805,8 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
-                    let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -878,10 +883,9 @@ async fn execute_agent_internal(
     // Unregister escape key as agent execution is complete
     // Skip in headless mode — escape key was never registered
     if !crate::cli::headless::is_headless_mode() {
-        if let Err(e) =
-            crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
-        {
-            warn!("Failed to configure unregister escape key after agent execution: {} - continuing anyway", e);
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+        if let Err(e) = coordinator.unregister_escape_user(&app_handle, "agent_execution").await {
+            warn!("Failed to unregister escape key after agent execution: {} - continuing anyway", e);
         }
     }
 

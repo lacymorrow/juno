@@ -748,9 +748,12 @@ export default function OnboardingFlow({
   );
 
   const handleNext = () => {
-    // Block navigation from shortcut step if shortcut hasn't been pressed
+    // Block navigation from keyboard shortcut steps if shortcut hasn't been pressed
     const currentStepData = onboardingSteps[currentStep];
     if (currentStepData?.id === "shortcut" && !shortcutPressed) {
+      return;
+    }
+    if (currentStepData?.id === "cancel" && !escapePressed) {
       return;
     }
 
@@ -853,7 +856,7 @@ export default function OnboardingFlow({
                       shortcutString={keyboardShortcuts?.agent_mode_toggle}
                       backendEvent={EVENTS.SHORTCUTS_AGENT_MODE}
                     />
-                    <p className="text-sm text-gray-500 mt-4">
+                    <p className="text-sm text-gray-500 mt-4 text-center">
                       {shortcutPressed
                         ? "Perfect! You've got it."
                         : keyboardShortcuts?.agent_mode_toggle
@@ -992,16 +995,23 @@ export default function OnboardingFlow({
                   </button>
                 )}
 
-                {/* Continue button - hide for shortcut step until completed */}
-                {(step.id !== "shortcut" || shortcutPressed) && (
-                  <button
-                    onClick={handleNext}
-                    className="flex-1 py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-                  >
-                    {step.action}
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                )}
+                {/* Continue button - disable for shortcut/cancel steps until completed */}
+                <button
+                  onClick={handleNext}
+                  disabled={
+                    (step.id === "shortcut" && !shortcutPressed) ||
+                    (step.id === "cancel" && !escapePressed)
+                  }
+                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${
+                    (step.id === "shortcut" && !shortcutPressed) ||
+                    (step.id === "cancel" && !escapePressed)
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl"
+                  }`}
+                >
+                  {step.action}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </motion.div>
           </AnimatePresence>
