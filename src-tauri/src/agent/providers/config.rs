@@ -4,7 +4,6 @@ use std::env;
 use tracing::{info, warn, debug};
 use crate::agent::core::AgentError;
 use crate::agent::prompts::manager::PromptManager;
-use crate::agent::providers::factory::model_ids;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -64,11 +63,13 @@ pub const DEFAULT_ACTIVE_PROVIDER: &str = "anthropic";
 
 /// Centralized list of default providers and models (single source of truth)
 pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
+    use crate::agent::providers::factory::Provider;
+
     vec![
         CentralizedProviderConfig {
             id: "anthropic".to_string(),
             api_key: None,
-            model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
+            model: Some(Provider::Anthropic.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
@@ -76,7 +77,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         CentralizedProviderConfig {
             id: "openai".to_string(),
             api_key: None,
-            model: Some(model_ids::OPENAI_CUA.to_string()),
+            model: Some(Provider::OpenAI.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
@@ -84,7 +85,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         CentralizedProviderConfig {
             id: "rig".to_string(),
             api_key: None, // Rig uses OpenAI's API key by default
-            model: Some(model_ids::OPENAI_CUA.to_string()),
+            model: Some(Provider::Rig.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
@@ -92,7 +93,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         CentralizedProviderConfig {
             id: "gemini".to_string(),
             api_key: None,
-            model: Some(model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW.to_string()),
+            model: Some(Provider::Gemini.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,

@@ -389,7 +389,8 @@ fn set_tts_playing(playing: bool) {
 
 // Register escape key for TTS cancellation - CENTRALIZED
 pub async fn register_tts_escape_key(app_handle: &AppHandle) {
-    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    if let Err(e) = coordinator.register_escape_user(app_handle, "tts_playback").await {
         warn!("[TTS] Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
     } else {
         info!("[TTS] Registered escape key for TTS cancellation");
@@ -398,7 +399,8 @@ pub async fn register_tts_escape_key(app_handle: &AppHandle) {
 
 // Unregister escape key after TTS completion - CENTRALIZED
 pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
-    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    if let Err(e) = coordinator.unregister_escape_user(app_handle, "tts_playback").await {
         warn!("[TTS] Failed to unregister escape key after TTS: {} - continuing anyway", e);
     } else {
         info!("[TTS] Unregistered escape key after TTS completion");

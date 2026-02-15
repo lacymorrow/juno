@@ -1,5 +1,4 @@
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
-import { Button } from "@/components/ui/button";
 import {
   MixedContentRenderer,
   hasMixedContent,
@@ -7,10 +6,11 @@ import {
 import {
   Message,
   MessageContent,
-  MessageAvatar,
+  MessageActions,
+  MessageAction,
+  MessageToolbar,
 } from "@/components/ui/message";
 import { Response } from "@/components/ui/response";
-import { cn } from "@/lib/utils";
 import {
   Code,
   Copy,
@@ -82,7 +82,7 @@ function TTSContentDisplay({
     <div className="mb-2 pb-2 border-b border-border/30">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group/tts"
       >
         {isExpanded ? (
           <ChevronDown className="h-3 w-3" />
@@ -94,7 +94,7 @@ function TTSContentDisplay({
           Spoken content ({ttsMetadata.tts_parts.length} part
           {ttsMetadata.tts_parts.length > 1 ? "s" : ""})
         </span>
-        <span className="text-muted-foreground/60 group-hover:text-muted-foreground/80 transition-colors">
+        <span className="text-muted-foreground/60 group-hover/tts:text-muted-foreground/80 transition-colors">
           Click to {isExpanded ? "hide" : "show"}
         </span>
       </button>
@@ -191,14 +191,11 @@ export function ChatMessageComponent({
     );
   }
 
-  // Use ElevenLabs components for user and assistant messages
   const from = msg.role === "user" ? "user" : "assistant";
-  const avatarSrc = msg.role === "user" ? "/user-avatar.png" : "/ai-avatar.png";
-  const avatarName = msg.role === "user" ? "User" : "AI";
 
   return (
     <Message key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
-      <MessageContent variant="flat">
+      <MessageContent>
         {/* TTS Content Display - Show decoratively */}
         {msg.role === "assistant" && !msg.isStreaming && (
           <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
@@ -256,7 +253,6 @@ export function ChatMessageComponent({
                 alt="Screenshot"
                 className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
             </div>
           </div>
         )}
@@ -266,88 +262,54 @@ export function ChatMessageComponent({
             |
           </span>
         )}
-
-        {/* Action buttons for assistant messages */}
-        {msg.role === "assistant" &&
-          msg.content &&
-          msg.content.trim() !== "" &&
-          !msg.isStreaming && (
-            <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
-              <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    copyingMessageId === `copy-${index}`
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
-                      : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
-                  )}
-                  onClick={() => onCopyResponse(msg.content, index)}
-                  disabled={copyingMessageId === `copy-${index}`}
-                  title={
-                    copyingMessageId === `copy-${index}`
-                      ? "Copying..."
-                      : "Copy response to clipboard"
-                  }
-                >
-                  {copyingMessageId === `copy-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Copy size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-html-${index}`
-                      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
-                      : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
-                  )}
-                  onClick={() => onSaveResponse(msg.content, "html", index)}
-                  disabled={savingMessageId === `save-html-${index}`}
-                  title={
-                    savingMessageId === `save-html-${index}`
-                      ? "Saving HTML..."
-                      : "Save as HTML file with professional styling"
-                  }
-                >
-                  {savingMessageId === `save-html-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Code size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-markdown-${index}`
-                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
-                      : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
-                  )}
-                  onClick={() => onSaveResponse(msg.content, "markdown", index)}
-                  disabled={savingMessageId === `save-markdown-${index}`}
-                  title={
-                    savingMessageId === `save-markdown-${index}`
-                      ? "Saving Markdown..."
-                      : "Save as Markdown file for documentation"
-                  }
-                >
-                  {savingMessageId === `save-markdown-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <FileText size={14} />
-                  )}
-                </Button>
-              </div>
-            </div>
-          )}
       </MessageContent>
-      <MessageAvatar src={avatarSrc} name={avatarName} />
+
+      {/* Action toolbar for assistant messages */}
+      {msg.role === "assistant" &&
+        msg.content &&
+        msg.content.trim() !== "" &&
+        !msg.isStreaming && (
+          <MessageToolbar className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <MessageActions>
+              <MessageAction
+                tooltip="Copy response"
+                onClick={() => onCopyResponse(msg.content, index)}
+                disabled={copyingMessageId === `copy-${index}`}
+                className="h-7 w-7"
+              >
+                {copyingMessageId === `copy-${index}` ? (
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Copy size={14} />
+                )}
+              </MessageAction>
+              <MessageAction
+                tooltip="Save as HTML"
+                onClick={() => onSaveResponse(msg.content, "html", index)}
+                disabled={savingMessageId === `save-html-${index}`}
+                className="h-7 w-7"
+              >
+                {savingMessageId === `save-html-${index}` ? (
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Code size={14} />
+                )}
+              </MessageAction>
+              <MessageAction
+                tooltip="Save as Markdown"
+                onClick={() => onSaveResponse(msg.content, "markdown", index)}
+                disabled={savingMessageId === `save-markdown-${index}`}
+                className="h-7 w-7"
+              >
+                {savingMessageId === `save-markdown-${index}` ? (
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <FileText size={14} />
+                )}
+              </MessageAction>
+            </MessageActions>
+          </MessageToolbar>
+        )}
     </Message>
   );
 }

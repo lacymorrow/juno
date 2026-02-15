@@ -104,7 +104,7 @@ use crate::commands::{
 
 // Import keyboard shortcuts commands explicitly
 use crate::commands::{
-    get_escape_key_status, get_keyboard_shortcuts, get_shortcut_best_practices,
+    get_keyboard_shortcuts, get_shortcut_best_practices,
     get_shortcut_suggestions, reset_keyboard_shortcuts, set_keyboard_shortcut,
     set_keyboard_shortcuts, validate_keyboard_shortcut,
 };
@@ -535,7 +535,7 @@ pub fn run() {
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,
-            get_escape_key_status,
+            commands::escape_key_coordinator::get_escape_key_coordinator_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
             commands::escape_key_coordinator::test_escape_key_flow,
             // Stop Coordinator Commands

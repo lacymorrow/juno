@@ -7,10 +7,6 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tracing::{debug, info, error, warn};
 use serde_json;
 
-// Global escape key management
-pub static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
 pub async fn get_keyboard_shortcuts(
@@ -361,44 +357,6 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
         "open_settings" => "Open Settings",
         _ => shortcut_name,
     }
-}
-
-/// Register the escape key for cancellation (only when something can be cancelled)
-/// This function now delegates to the centralized escape key coordinator
-pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    info!("[EscapeKey] Register escape key handler requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    coordinator.register_escape_user(&app_handle, "legacy_shortcut_handler").await
-}
-
-/// Unregister the escape key (when nothing needs to be cancelled)
-/// This function now delegates to the centralized escape key coordinator
-pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    info!("[EscapeKey] Unregister escape key handler requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    coordinator.unregister_escape_user(&app_handle, "legacy_shortcut_handler").await
-}
-
-/// Get current escape key registration status (for debugging)
-#[allow(dead_code)] // Internal helper function for escape key management
-fn get_escape_key_status_internal() -> (bool, u32) {
-    use std::sync::atomic::Ordering;
-    (
-        ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst),
-        ESCAPE_KEY_USERS.load(Ordering::SeqCst)
-    )
-}
-
-/// Get current escape key registration status (for debugging) - Tauri command
-/// This function now delegates to the centralized escape key coordinator
-#[tauri::command]
-pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
-    info!("[EscapeKey] Get escape key status requested - delegating to coordinator");
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    Ok(coordinator.get_status().await)
 }
 
 /// Register global shortcuts with proper error handling for missing permissions

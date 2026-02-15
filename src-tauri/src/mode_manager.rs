@@ -225,9 +225,10 @@ impl ModeManager {
     /// Start agent mode
     async fn start_agent_mode(&self, app_handle: &AppHandle) -> Result<(), String> {
         info!("Starting agent mode");
-        
+
         // Register escape key handler
-        crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await?;
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+        coordinator.register_escape_user(app_handle, "mode_agent").await?;
         
         // Start voice transcription for agent
         if let Some(controller) = app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
@@ -257,17 +258,19 @@ impl ModeManager {
         }
         
         // Unregister escape key
-        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
-        
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+        let _ = coordinator.unregister_escape_user(app_handle, "mode_agent").await;
+
         Ok(())
     }
 
     /// Start dictation mode
     async fn start_dictation_mode(&self, app_handle: &AppHandle) -> Result<(), String> {
         info!("Starting dictation mode");
-        
+
         // Register escape key handler
-        crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await?;
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+        coordinator.register_escape_user(app_handle, "mode_dictation").await?;
         
         // Start voice transcription for dictation
         if let Some(controller) = app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
@@ -293,8 +296,9 @@ impl ModeManager {
         }
         
         // Unregister escape key
-        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await;
-        
+        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+        let _ = coordinator.unregister_escape_user(app_handle, "mode_dictation").await;
+
         Ok(())
     }
 

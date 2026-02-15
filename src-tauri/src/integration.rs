@@ -135,26 +135,24 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 let app_state = app_handle_for_state.state::<crate::state::AppState>();
 
                                 // Register escape key when agent processing starts
-                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                                if let Err(e) = coordinator.register_escape_user(&app_handle_clone, "agent_voice_input").await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
                                 // Submit the query to the agent system
-                                match crate::anthropic::submit_query(
+                                let query_result = crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
                                     app_handle_clone.clone()
-                                ).await {
-                                    Ok(_) => {
-                                        // Unregister escape key after successful completion
-                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
-                                    }
-                                    Err(e) => {
-                                        // Unregister escape key after error
-                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
-                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
-                                    }
+                                ).await;
+
+                                // Unregister escape key after agent completes (success or error)
+                                let _ = coordinator.unregister_escape_user(&app_handle_clone, "agent_voice_input").await;
+
+                                if let Err(e) = query_result {
+                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
@@ -192,7 +190,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 if is_duplicate_submission(trimmed_query) {
                                     return;
                                 }
-                                
+
                                 info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
 
                                 // Emit user message event for frontend to add to conversation
@@ -212,26 +210,24 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 let app_state = app_handle_for_state.state::<crate::state::AppState>();
 
                                 // Register escape key when agent processing starts
-                                if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_clone.clone()).await {
+                                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                                if let Err(e) = coordinator.register_escape_user(&app_handle_clone, "agent_voice_input").await {
                                     warn!("[Agent Mode] Failed to register escape key for agent processing: {} - continuing without escape key cancellation", e);
                                 }
 
                                 // Submit the query to the agent system
-                                match crate::anthropic::submit_query(
+                                let query_result = crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
                                     app_state,
                                     app_handle_clone.clone()
-                                ).await {
-                                    Ok(_) => {
-                                        // Unregister escape key after successful completion
-                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
-                                    }
-                                    Err(e) => {
-                                        // Unregister escape key after error
-                                        let _ = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_clone.clone()).await;
-                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
-                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
-                                    }
+                                ).await;
+
+                                // Unregister escape key after agent completes (success or error)
+                                let _ = coordinator.unregister_escape_user(&app_handle_clone, "agent_voice_input").await;
+
+                                if let Err(e) = query_result {
+                                    error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                    crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
                                 }
                             } else {
                                 info!("[Agent Mode] Query text was empty - ignoring");
