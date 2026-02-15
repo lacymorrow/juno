@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tracing::{info, warn, error, debug};
@@ -31,13 +31,18 @@ impl EscapeKeyCoordinator {
 
     // Simplified - no complex timing or operation tracking needed
 
-    /// Register a user for escape key handling
+    /// Register a user for escape key handling (idempotent — safe to call multiple times)
     pub async fn register_escape_user(&self, app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
         debug!("[EscapeKeyCoordinator] Register escape user requested: {}", user_id);
 
-        // Add user to tracking
+        // Check if user is already registered — if so, just update timestamp (no count change)
         {
             let mut users = self.registered_users.write().await;
+            if users.contains_key(user_id) {
+                info!("[EscapeKeyCoordinator] User '{}' already registered, updating timestamp", user_id);
+                users.insert(user_id.to_string(), Instant::now());
+                return Ok(());
+            }
             users.insert(user_id.to_string(), Instant::now());
         }
 
@@ -48,7 +53,7 @@ impl EscapeKeyCoordinator {
         if new_count == 1 && !self.is_registered.load(Ordering::SeqCst) {
             if let Err(e) = self.register_global_shortcut(app_handle).await {
                 warn!("[EscapeKeyCoordinator] Failed to register global shortcut: {}", e);
-                // Rollback user count
+                // Rollback user count and HashMap entry
                 self.user_count.fetch_sub(1, Ordering::SeqCst);
                 let mut users = self.registered_users.write().await;
                 users.remove(user_id);
@@ -59,13 +64,17 @@ impl EscapeKeyCoordinator {
         Ok(())
     }
 
-    /// Unregister a user from escape key handling
+    /// Unregister a user from escape key handling (idempotent — safe to call if already unregistered)
     pub async fn unregister_escape_user(&self, app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
         debug!("[EscapeKeyCoordinator] Unregister escape user requested: {}", user_id);
 
-        // Remove user from tracking
+        // Check if user is actually registered — if not, no-op (prevents stale unregister from decrementing)
         {
             let mut users = self.registered_users.write().await;
+            if !users.contains_key(user_id) {
+                debug!("[EscapeKeyCoordinator] User '{}' not registered, skipping unregister", user_id);
+                return Ok(());
+            }
             users.remove(user_id);
         }
 
@@ -93,8 +102,8 @@ impl EscapeKeyCoordinator {
                 }
             }
             Err(current_count) => {
-                // Counter was already at 0, nothing to decrement
-                warn!("[EscapeKeyCoordinator] Attempted to unregister user '{}' but count was already 0 (current: {})", user_id, current_count);
+                // Counter was already at 0 despite HashMap having the user — count was out of sync
+                warn!("[EscapeKeyCoordinator] User '{}' was in HashMap but count was already 0 (current: {})", user_id, current_count);
             }
         }
 
@@ -153,6 +162,56 @@ impl EscapeKeyCoordinator {
         }
     }
 
+    /// Cooperatively unregister all users (safe for coordinated cleanup)
+    /// Each user is removed from HashMap first, so stale unregister calls from
+    /// those users will harmlessly no-op (Phase 1 idempotency).
+    pub async fn unregister_all_users(&self, app_handle: &AppHandle) -> Result<(), String> {
+        info!("[EscapeKeyCoordinator] Unregistering all users cooperatively");
+
+        // Collect user IDs to unregister (avoid holding write lock while calling unregister)
+        let user_ids: Vec<String> = {
+            let users = self.registered_users.read().await;
+            users.keys().cloned().collect()
+        };
+
+        if user_ids.is_empty() {
+            debug!("[EscapeKeyCoordinator] No users registered, nothing to unregister");
+            // Defensive: if count is out of sync, force it to 0 and unregister shortcut
+            let count = self.user_count.load(Ordering::SeqCst);
+            if count > 0 {
+                warn!("[EscapeKeyCoordinator] No users in HashMap but count={}, forcing to 0", count);
+                self.user_count.store(0, Ordering::SeqCst);
+                if self.is_registered.load(Ordering::SeqCst) {
+                    if let Err(e) = self.unregister_global_shortcut(app_handle).await {
+                        warn!("[EscapeKeyCoordinator] Failed to unregister global shortcut during defensive cleanup: {}", e);
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        for user_id in &user_ids {
+            if let Err(e) = self.unregister_escape_user(app_handle, user_id).await {
+                warn!("[EscapeKeyCoordinator] Failed to unregister user '{}': {}", user_id, e);
+            }
+        }
+
+        // Defensive fallback: if count > 0 after all users removed, force it to 0
+        let remaining_count = self.user_count.load(Ordering::SeqCst);
+        if remaining_count > 0 {
+            warn!("[EscapeKeyCoordinator] Count still {} after unregister_all_users, forcing to 0", remaining_count);
+            self.user_count.store(0, Ordering::SeqCst);
+            if self.is_registered.load(Ordering::SeqCst) {
+                if let Err(e) = self.unregister_global_shortcut(app_handle).await {
+                    warn!("[EscapeKeyCoordinator] Failed to unregister global shortcut during fallback: {}", e);
+                }
+            }
+        }
+
+        info!("[EscapeKeyCoordinator] All users unregistered cooperatively");
+        Ok(())
+    }
+
     /// Force reset the escape key state (for emergency cleanup)
     pub async fn force_reset(&self, app_handle: &AppHandle) -> Result<(), String> {
         warn!("[EscapeKeyCoordinator] Force reset requested");
@@ -172,6 +231,30 @@ impl EscapeKeyCoordinator {
 
         info!("[EscapeKeyCoordinator] Force reset completed");
         Ok(())
+    }
+
+    /// Check for and clean up stale registrations older than max_age
+    pub async fn check_and_cleanup_stale(&self, app_handle: &AppHandle, max_age: Duration) {
+        let stale_users: Vec<String> = {
+            let users = self.registered_users.read().await;
+            users.iter()
+                .filter(|(_, registered_at)| registered_at.elapsed() > max_age)
+                .map(|(user_id, _)| user_id.clone())
+                .collect()
+        };
+
+        if stale_users.is_empty() {
+            return;
+        }
+
+        warn!("[EscapeKeyCoordinator] Found {} stale registrations (older than {:?}): {:?}",
+            stale_users.len(), max_age, stale_users);
+
+        for user_id in &stale_users {
+            if let Err(e) = self.unregister_escape_user(app_handle, user_id).await {
+                warn!("[EscapeKeyCoordinator] Failed to clean up stale user '{}': {}", user_id, e);
+            }
+        }
     }
 
     /// Get coordinator status for debugging
