@@ -154,6 +154,118 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
         }));
       });
 
+      // Dictation active flag — simple boolean, most reliable signal
+      await addListener<boolean>(EVENTS.DICTATION_ACTIVE, (event) => {
+        const isActive = event.payload;
+        setVoiceState((prev) => ({
+          ...prev,
+          isListening: isActive,
+          mode: isActive ? UI.VOICE_MODES_DICTATION : UI.VOICE_MODES_IDLE,
+          ...(isActive ? { error: undefined } : {}),
+        }));
+      });
+
+      // Dictation state changes — handles both payload formats:
+      // 1. ui_commands.rs: { new_state: "dictation" | "idle" | "always_listening" } (String)
+      // 2. dictation_state_manager.rs: { new_state: "Idle" | "Starting" | { Active: ... } } (Rust enum)
+      await addListener<{
+        previous_state: unknown;
+        new_state: unknown;
+        timestamp: number;
+        reason: string;
+        component: string;
+      }>(EVENTS.DICTATION_STATE_CHANGED, (event) => {
+        const { new_state } = event.payload;
+
+        // String format from ui_commands.rs (lowercase voice mode names)
+        if (new_state === "dictation") {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: true,
+            mode: UI.VOICE_MODES_DICTATION,
+            error: undefined,
+          }));
+        } else if (new_state === "idle") {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: false,
+            mode: UI.VOICE_MODES_IDLE,
+          }));
+        } else if (new_state === "agent") {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: true,
+            mode: UI.VOICE_MODES_AGENT,
+            error: undefined,
+          }));
+        } else if (new_state === "always_listening") {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: true,
+            error: undefined,
+          }));
+        // Rust enum format from dictation_state_manager.rs (capitalized variants)
+        } else if (typeof new_state === "object" && new_state !== null && "Active" in new_state) {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: true,
+            mode: UI.VOICE_MODES_DICTATION,
+            error: undefined,
+          }));
+        } else if (new_state === "Idle" || new_state === "Stopping" || new_state === "ForceResetting") {
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: false,
+            mode: UI.VOICE_MODES_IDLE,
+          }));
+        } else if (new_state === "Starting") {
+          setVoiceState((prev) => ({
+            ...prev,
+            mode: UI.VOICE_MODES_DICTATION,
+          }));
+        } else if (typeof new_state === "object" && new_state !== null && "Error" in new_state) {
+          const errorObj = new_state as { Error: { message: string } };
+          setVoiceState((prev) => ({
+            ...prev,
+            isListening: false,
+            error: errorObj.Error.message,
+          }));
+        }
+      });
+
+      // Fallback: direct dictation start/stop events
+      await addListener(EVENTS.DICTATION_STARTED, () => {
+        setVoiceState((prev) => ({
+          ...prev,
+          isListening: true,
+          mode: UI.VOICE_MODES_DICTATION,
+        }));
+      });
+
+      await addListener(EVENTS.VOICE_TRANSCRIPTION_DICTATION_STOPPED, () => {
+        setVoiceState((prev) => ({
+          ...prev,
+          isListening: false,
+          mode: UI.VOICE_MODES_IDLE,
+        }));
+      });
+
+      // Always-listening mode
+      await addListener(EVENTS.ALWAYS_LISTENING_STARTED, () => {
+        setVoiceState((prev) => ({
+          ...prev,
+          isListening: true,
+        }));
+      });
+
+      await addListener(EVENTS.ALWAYS_LISTENING_STOPPED, () => {
+        setVoiceState((prev) => ({
+          ...prev,
+          isListening: false,
+          mode: UI.VOICE_MODES_IDLE,
+        }));
+      });
+
       // Agent-specific events
       await addListener(EVENTS.AGENT_ACTIVE, () => {
         setAgentState((prev) => ({

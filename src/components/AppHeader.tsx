@@ -1,5 +1,10 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { cn } from "@/lib/utils";
 import {
@@ -36,16 +41,27 @@ export function AppHeader({
           <DogIcon size={16} className="text-blue-500" />
           <span className="text-sm font-semibold">Juno AI</span>
           <div className="flex items-center gap-1">
-            <div
-              className={cn(
-                "w-1.5 h-1.5 rounded-full",
-                serverStatus === "connected"
-                  ? "bg-green-500"
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full cursor-default",
+                    serverStatus === "connected"
+                      ? "bg-green-500"
+                      : serverStatus === "error"
+                      ? "bg-red-500"
+                      : "bg-yellow-500"
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}>
+                {serverStatus === "connected"
+                  ? "Backend connected"
                   : serverStatus === "error"
-                  ? "bg-red-500"
-                  : "bg-yellow-500"
-              )}
-            />
+                  ? "Backend connection error — check logs"
+                  : "Connecting to backend..."}
+              </TooltipContent>
+            </Tooltip>
             {isProcessing && (
               <div className="text-xs text-muted-foreground">
                 <AgentExecutionProgressIndicator

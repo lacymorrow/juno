@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, User, Users } from "lucide-react";
+import React, { useCallback, useMemo, useState } from "react";
+import { Check, Plus, User, Users } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatStatus } from "ai";
 import {
@@ -9,23 +9,22 @@ import {
   PromptInputTools,
   PromptInputButton,
   PromptInputSubmit,
-  PromptInputSelect,
-  PromptInputSelectTrigger,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectValue,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import {
+  ModelSelector,
+  ModelSelectorTrigger,
+  ModelSelectorContent,
+  ModelSelectorInput,
+  ModelSelectorList,
+  ModelSelectorGroup,
+  ModelSelectorItem,
+  ModelSelectorEmpty,
+  ModelSelectorLogo,
+  ModelSelectorName,
+} from "@/components/ai-elements/model-selector";
 import { useSettings } from "@/hooks/useSettings";
-import { useEventListener } from "@/hooks/useEventListener";
-import { EVENTS, COMMANDS } from "@/lib/constants.generated";
-
-interface ModelInfo {
-  id: string;
-  name: string;
-  supports_computer_use: boolean;
-  is_recommended: boolean;
-}
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface ChatInputProps {
   query: string;
@@ -47,65 +46,59 @@ export const ChatInput = React.memo(function ChatInput({
   onNewChat,
 }: ChatInputProps) {
   const settings = useSettings();
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const loadRequestRef = useRef(0);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   const chatStatus: ChatStatus = isProcessing ? "streaming" : "ready";
-
-  // Load models for the active provider
-  const loadModelsForProvider = useCallback(async (providerId: string) => {
-    const requestId = ++loadRequestRef.current;
-    setLoadingModels(true);
-    try {
-      const models = await invoke<ModelInfo[]>(
-        COMMANDS.PROVIDERS_GET_PROVIDER_MODELS,
-        { providerId }
-      );
-      if (requestId !== loadRequestRef.current) return;
-      setAvailableModels(models);
-    } catch (error) {
-      if (requestId !== loadRequestRef.current) return;
-      console.error("ChatInput: Failed to load models:", error);
-      setAvailableModels([]);
-    } finally {
-      if (requestId === loadRequestRef.current) {
-        setLoadingModels(false);
-      }
-    }
-  }, []);
-
-  // Load models when active provider changes
-  useEffect(() => {
-    if (settings.activeProvider && !settings.isLoading) {
-      loadModelsForProvider(settings.activeProvider);
-    }
-  }, [settings.activeProvider, settings.isLoading, loadModelsForProvider]);
-
-  // Refresh models on provider settings changes
-  useEventListener(EVENTS.SYSTEM_PROVIDER_SETTINGS_CHANGED, () => {
-    if (settings.activeProvider) {
-      loadModelsForProvider(settings.activeProvider);
-    }
-  });
 
   const currentModelId =
     settings.formData.model || settings.providerSettings?.model || "";
 
-  const handleModelChange = useCallback(
-    async (value: string) => {
+  // Build a sorted provider list: active provider first, then others with models
+  const sortedProviders = useMemo(() => {
+    const withModels = settings.providers.filter(
+      (p) => p.model_info && p.model_info.length > 0
+    );
+    const active = withModels.filter((p) => p.id === settings.activeProvider);
+    const rest = withModels.filter((p) => p.id !== settings.activeProvider);
+    return [...active, ...rest];
+  }, [settings.providers, settings.activeProvider]);
+
+  // Find the currently selected model across all providers
+  const selectedModel = useMemo(() => {
+    for (const provider of settings.providers) {
+      const found = provider.model_info?.find((m) => m.id === currentModelId);
+      if (found) return { model: found, providerId: provider.id };
+    }
+    return null;
+  }, [settings.providers, currentModelId]);
+
+  const modelDisplayName = selectedModel
+    ? selectedModel.model.name
+    : settings.isLoading
+      ? "Loading..."
+      : "Select model";
+
+  const handleModelSelect = useCallback(
+    async (providerId: string, modelId: string) => {
+      setModelSelectorOpen(false);
       try {
+        // If switching providers, change the active provider first
+        if (providerId !== settings.activeProvider) {
+          await settings.handleActiveProviderChange(providerId);
+        }
+
+        // Validate and set the model
         const isValid = await invoke<boolean>(
           COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL,
-          { providerId: settings.activeProvider, modelId: value }
+          { providerId, modelId }
         );
         if (!isValid) return;
 
-        settings.setFormData((prev) => ({ ...prev, model: value }));
+        settings.setFormData((prev) => ({ ...prev, model: modelId }));
 
         await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
-          providerId: settings.activeProvider,
-          model: value,
+          providerId,
+          model: modelId,
         });
       } catch (error) {
         console.error("ChatInput: Failed to change model:", error);
@@ -120,7 +113,7 @@ export const ChatInput = React.memo(function ChatInput({
     [settings]
   );
 
-  // Agent mode toggle (single ↔ multi)
+  // Agent mode toggle (single <-> multi)
   const handleAgentModeToggle = useCallback(async () => {
     const newMode = settings.agentMode === "single" ? "multi" : "single";
     try {
@@ -139,12 +132,7 @@ export const ChatInput = React.memo(function ChatInput({
     [onSubmit]
   );
 
-  const selectedModel = availableModels.find((m) => m.id === currentModelId);
-  const modelDisplayName = selectedModel
-    ? selectedModel.name.replace(/Claude\s*/i, "")
-    : loadingModels
-      ? "Loading..."
-      : "Select model";
+  const hasModels = sortedProviders.length > 0;
 
   return (
     <PromptInput onSubmit={handleSubmit}>
@@ -182,33 +170,64 @@ export const ChatInput = React.memo(function ChatInput({
           </PromptInputButton>
         </PromptInputTools>
 
-        {/* Model selector */}
-        {availableModels.length > 0 && (
-          <PromptInputSelect
-            value={currentModelId}
-            onValueChange={handleModelChange}
-          >
-            <PromptInputSelectTrigger className="h-7 w-auto max-w-[180px] text-xs">
-              <PromptInputSelectValue placeholder="Select model">
-                {modelDisplayName}
-              </PromptInputSelectValue>
-            </PromptInputSelectTrigger>
-            <PromptInputSelectContent>
-              {availableModels.map((model) => (
-                <PromptInputSelectItem key={model.id} value={model.id}>
-                  <span className="mr-1">
-                    {model.supports_computer_use ? "\uD83D\uDDA5\uFE0F" : "\uD83D\uDCAC"}
-                  </span>
-                  {model.name}
-                  {model.is_recommended && (
-                    <span className="ml-1 text-xs text-green-600">
-                      Recommended
-                    </span>
-                  )}
-                </PromptInputSelectItem>
-              ))}
-            </PromptInputSelectContent>
-          </PromptInputSelect>
+        {/* Model selector — shows all providers' models */}
+        {hasModels && (
+          <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
+            <ModelSelectorTrigger asChild>
+              <PromptInputButton tooltip="Change model" disabled={isProcessing || settings.isLoading}>
+                {selectedModel && (
+                  <ModelSelectorLogo provider={selectedModel.providerId} />
+                )}
+                <span className="max-w-[140px] truncate text-xs">{modelDisplayName}</span>
+              </PromptInputButton>
+            </ModelSelectorTrigger>
+            <ModelSelectorContent>
+              <ModelSelectorInput placeholder="Search models..." />
+              <ModelSelectorList>
+                <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
+                {sortedProviders.map((provider) => (
+                  <ModelSelectorGroup
+                    key={provider.id}
+                    heading={
+                      <span className="flex items-center gap-1.5">
+                        <ModelSelectorLogo provider={provider.id} className="size-3" />
+                        {provider.name}
+                        {!provider.is_available && (
+                          <span className="text-[10px] text-muted-foreground/60">
+                            — setup required
+                          </span>
+                        )}
+                      </span>
+                    }
+                    className={!provider.is_available ? "opacity-50" : undefined}
+                  >
+                    {provider.model_info.map((model) => {
+                      const isActive =
+                        model.id === currentModelId &&
+                        provider.id === settings.activeProvider;
+                      return (
+                        <ModelSelectorItem
+                          key={`${provider.id}:${model.id}`}
+                          value={`${provider.id} ${model.id} ${model.name}`}
+                          onSelect={() => handleModelSelect(provider.id, model.id)}
+                        >
+                          <ModelSelectorLogo provider={provider.id} />
+                          <ModelSelectorName>{model.name}</ModelSelectorName>
+                          {model.is_recommended && (
+                            <span className="text-xs text-green-600">Recommended</span>
+                          )}
+                          {model.supports_computer_use && (
+                            <span className="text-xs text-blue-600">Computer Use</span>
+                          )}
+                          {isActive && <Check className="size-4 text-primary" />}
+                        </ModelSelectorItem>
+                      );
+                    })}
+                  </ModelSelectorGroup>
+                ))}
+              </ModelSelectorList>
+            </ModelSelectorContent>
+          </ModelSelector>
         )}
 
         <PromptInputSubmit
