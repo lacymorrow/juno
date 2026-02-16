@@ -159,32 +159,17 @@ async function main() {
   const dmgName = dmgPath.split("/").pop()!;
   console.log(`  ✓ Found: ${dmgName}\n`);
 
-  // 6. Copy DMG to juno-www as a zip for direct download
+  // 6. Update juno-www release metadata to point to GitHub Release
   if (existsSync(JUNO_WWW)) {
-    console.log("📦 Packaging for juno-www...");
+    console.log("📦 Updating juno-www release metadata...");
     const downloadDir = `${JUNO_WWW}/public/downloads`;
     await exec(`mkdir -p "${downloadDir}"`);
 
-    // Remove old downloads
-    const oldFiles = existsSync(downloadDir)
-      ? (await readdir(downloadDir)).filter(
-          (f) => f.endsWith(".zip") || f.endsWith(".dmg")
-        )
-      : [];
-    for (const f of oldFiles) {
-      await exec(`rm "${downloadDir}/${f}"`);
-    }
-
-    // Create zip containing the DMG
-    const zipName = `Juno_${newVersion}_universal.zip`;
-    await exec(
-      `cd "$(dirname "${dmgPath}")" && zip -j "${downloadDir}/${zipName}" "${dmgPath}"`
-    );
-
-    // Write release metadata
+    // Point to GitHub Release download URL (Vercel can't serve large LFS files)
+    const githubDownloadUrl = `https://github.com/lacymorrow/juno/releases/download/v${newVersion}/${dmgName}`;
     const releaseMeta = {
       version: `v${newVersion}`,
-      file: `/downloads/${zipName}`,
+      file: githubDownloadUrl,
       releasedAt: new Date().toISOString(),
     };
     await Bun.write(
@@ -192,15 +177,12 @@ async function main() {
       JSON.stringify(releaseMeta, null, 2) + "\n"
     );
 
-    console.log(`  ✓ Copied to juno-www/public/downloads/${zipName}`);
-    console.log(
-      `  ✓ Updated juno-www/public/downloads/release.json\n`
-    );
+    console.log(`  ✓ Updated release.json → ${githubDownloadUrl}\n`);
 
     // Auto-commit and push juno-www
     console.log("🌐 Deploying juno-www...");
     await exec(
-      `cd "${JUNO_WWW}" && git add public/downloads/release.json public/downloads/${zipName} && git commit -m "release: update download to Juno v${newVersion}"`
+      `cd "${JUNO_WWW}" && git add public/downloads/release.json && git commit -m "release: update download to Juno v${newVersion}"`
     );
     await exec(`cd "${JUNO_WWW}" && git push origin main`);
     console.log("  ✓ juno-www committed and pushed (Vercel will auto-deploy)\n");
