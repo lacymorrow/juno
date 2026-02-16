@@ -21,8 +21,15 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import {
+  Confirmation,
+  ConfirmationRequest,
+  ConfirmationAccepted,
+  ConfirmationRejected,
+  ConfirmationActions,
+  ConfirmationAction,
+} from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { Button } from "@/components/ui/button";
 import {
   Code,
   Copy,
@@ -36,7 +43,6 @@ import {
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
 
 export type { ChatMessage } from "@/types/chat";
@@ -148,19 +154,15 @@ export function ChatMessageComponent({
   onSaveResponse,
   onApprovalUpdate,
 }: ChatMessageProps) {
-  // Inline tool approval handlers
+  // Inline tool approval handlers — visual feedback via Confirmation component
   const handleApprove = useCallback(async (toolId: string) => {
     try {
       const success = await invoke<boolean>("approve_tool_execution", { toolId });
       if (success) {
-        toast.success("Tool approved");
         onApprovalUpdate?.(toolId, "approved");
-      } else {
-        toast.error("Failed to approve tool execution");
       }
     } catch (error) {
       console.error("Error approving tool:", error);
-      toast.error("Failed to approve tool execution");
     }
   }, [onApprovalUpdate]);
 
@@ -168,14 +170,10 @@ export function ChatMessageComponent({
     try {
       const success = await invoke<boolean>("deny_tool_execution", { toolId });
       if (success) {
-        toast.success("Tool denied");
         onApprovalUpdate?.(toolId, "denied");
-      } else {
-        toast.error("Failed to deny tool execution");
       }
     } catch (error) {
       console.error("Error denying tool:", error);
-      toast.error("Failed to deny tool execution");
     }
   }, [onApprovalUpdate]);
 
@@ -210,24 +208,29 @@ export function ChatMessageComponent({
           />
           <ToolContent>
             {msg.tool_args && <ToolInput input={msg.tool_args} />}
-            {msg.approval_state === "pending" && msg.tool_id && (
-              <div className="flex items-center gap-2 pt-2 border-t">
-                <Button
-                  size="sm"
-                  onClick={() => handleApprove(msg.tool_id!)}
-                >
-                  <CheckCircle className="mr-1.5 h-4 w-4" />
-                  Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleDeny(msg.tool_id!)}
-                >
-                  <XCircle className="mr-1.5 h-4 w-4" />
-                  Deny
-                </Button>
-              </div>
+            {msg.tool_id && (
+              <Confirmation
+                state={
+                  msg.approval_state === "pending"
+                    ? "approval-requested"
+                    : msg.approval_state === "denied"
+                      ? "output-denied"
+                      : "approval-responded"
+                }
+              >
+                <ConfirmationRequest>
+                  <ConfirmationActions>
+                    <ConfirmationAction onClick={() => handleApprove(msg.tool_id!)}>
+                      Approve
+                    </ConfirmationAction>
+                    <ConfirmationAction variant="outline" onClick={() => handleDeny(msg.tool_id!)}>
+                      Deny
+                    </ConfirmationAction>
+                  </ConfirmationActions>
+                </ConfirmationRequest>
+                <ConfirmationAccepted>Tool execution approved</ConfirmationAccepted>
+                <ConfirmationRejected>Tool execution denied</ConfirmationRejected>
+              </Confirmation>
             )}
           </ToolContent>
         </Tool>

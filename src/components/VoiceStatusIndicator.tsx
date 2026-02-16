@@ -85,7 +85,9 @@ export function VoiceStatusIndicator({
           ? "text-blue-500 border-blue-200 bg-blue-50"
           : "text-muted-foreground border-muted bg-muted/20";
       default:
-        return "text-muted-foreground border-muted bg-muted/20";
+        return voiceState.isListening || voiceState.isTranscribing
+          ? "text-green-500 border-green-200 bg-green-50"
+          : "text-muted-foreground border-muted bg-muted/20";
     }
   };
 
