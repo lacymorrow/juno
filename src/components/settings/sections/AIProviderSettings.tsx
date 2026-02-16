@@ -1,3 +1,11 @@
+import {
+  EnvironmentVariables,
+  EnvironmentVariablesHeader,
+  EnvironmentVariablesTitle,
+  EnvironmentVariablesToggle,
+  EnvironmentVariablesContent,
+  EnvironmentVariable,
+} from "@/components/ai-elements/environment-variables";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -135,21 +143,25 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="api-key">API Key</Label>
-              <Input
-                id="api-key"
-                type="password"
-                value={settings.formData.apiKey}
-                onChange={(e) =>
-                  settings.setFormData((prev) => ({
-                    ...prev,
-                    apiKey: e.target.value,
-                  }))
-                }
-                placeholder="Enter your API key"
-              />
-            </div>
+            <EnvironmentVariables>
+              <EnvironmentVariablesHeader>
+                <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
+                <EnvironmentVariablesToggle />
+              </EnvironmentVariablesHeader>
+              <EnvironmentVariablesContent>
+                <EnvironmentVariable
+                  name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
+                  value={settings.formData.apiKey}
+                  onChange={(val) =>
+                    settings.setFormData((prev) => ({
+                      ...prev,
+                      apiKey: val,
+                    }))
+                  }
+                  required
+                />
+              </EnvironmentVariablesContent>
+            </EnvironmentVariables>
 
             <div className="space-y-2">
               <Label htmlFor="model">
