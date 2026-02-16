@@ -1,4 +1,3 @@
-import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import {
   MixedContentRenderer,
 } from "@/components/ui/mixed-content-renderer";
@@ -11,6 +10,20 @@ import {
   MessageToolbar,
 } from "@/components/ai-elements/message";
 import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "@/components/ai-elements/reasoning";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
+import {
   Code,
   Copy,
   FileText,
@@ -21,36 +34,13 @@ import {
   XCircle,
   WifiOff,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
-import { ThinkingMessage } from "./ThinkingMessage";
 
-// Type for conversation messages — same as original ChatMessage
-export type ChatMessage = {
-  role:
-    | "user"
-    | "assistant"
-    | "system"
-    | "tool_call_request"
-    | "tool_call_result"
-    | "thinking";
-  content: string;
-  isJsx?: boolean;
-  screenshot_base64?: string;
-  tool_name?: string;
-  tool_args?: any;
-  tool_output?: any;
-  success?: boolean;
-  timestamp?: number;
-  isStreaming?: boolean;
-  messageId?: string;
-  agent_state?: string;
-  tts_metadata?: {
-    has_spoken_content: boolean;
-    tts_parts: string[];
-    total_spoken_text: string;
-  };
-};
+export type { ChatMessage } from "@/types/chat";
+import type { ChatMessage } from "@/types/chat";
 
 interface ChatMessageProps {
   msg: ChatMessage;
@@ -63,6 +53,7 @@ interface ChatMessageProps {
     format: "html" | "markdown",
     index: number
   ) => void;
+  onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
 }
 
 // Compact accordion for TTS spoken content — closed by default, supplementary info
@@ -155,49 +146,126 @@ export function ChatMessageComponent({
   savingMessageId,
   onCopyResponse,
   onSaveResponse,
+  onApprovalUpdate,
 }: ChatMessageProps) {
-  // Handle special message types with existing components
+  // Inline tool approval handlers
+  const handleApprove = useCallback(async (toolId: string) => {
+    try {
+      const success = await invoke<boolean>("approve_tool_execution", { toolId });
+      if (success) {
+        toast.success("Tool approved");
+        onApprovalUpdate?.(toolId, "approved");
+      } else {
+        toast.error("Failed to approve tool execution");
+      }
+    } catch (error) {
+      console.error("Error approving tool:", error);
+      toast.error("Failed to approve tool execution");
+    }
+  }, [onApprovalUpdate]);
+
+  const handleDeny = useCallback(async (toolId: string) => {
+    try {
+      const success = await invoke<boolean>("deny_tool_execution", { toolId });
+      if (success) {
+        toast.success("Tool denied");
+        onApprovalUpdate?.(toolId, "denied");
+      } else {
+        toast.error("Failed to deny tool execution");
+      }
+    } catch (error) {
+      console.error("Error denying tool:", error);
+      toast.error("Failed to deny tool execution");
+    }
+  }, [onApprovalUpdate]);
+
+  // Thinking messages — Reasoning component with auto-open/close and duration tracking
   if (msg.role === "thinking") {
     return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} isStreaming={msg.isStreaming} />
+      <div className="flex justify-start w-full">
+        <Reasoning isStreaming={msg.isStreaming}>
+          <ReasoningTrigger />
+          <ReasoningContent>{msg.content}</ReasoningContent>
+        </Reasoning>
       </div>
     );
   }
 
+  // Tool call requests — with inline approval if pending
   if (msg.role === "tool_call_request") {
+    const toolState = msg.approval_state === "pending"
+      ? "approval-requested" as const
+      : msg.approval_state === "denied"
+        ? "output-denied" as const
+        : "input-available" as const;
+
     return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ToolCallRequest
-          toolName={msg.tool_name || "unknown"}
-          toolArgs={msg.tool_args}
-          content={msg.content}
-          timestamp={msg.timestamp}
-        />
+      <div className="flex justify-start w-full">
+        <Tool>
+          <ToolHeader
+            type="dynamic-tool"
+            state={toolState}
+            toolName={msg.tool_name || "unknown"}
+            title={msg.tool_name}
+          />
+          <ToolContent>
+            {msg.tool_args && <ToolInput input={msg.tool_args} />}
+            {msg.approval_state === "pending" && msg.tool_id && (
+              <div className="flex items-center gap-2 pt-2 border-t">
+                <Button
+                  size="sm"
+                  onClick={() => handleApprove(msg.tool_id!)}
+                >
+                  <CheckCircle className="mr-1.5 h-4 w-4" />
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDeny(msg.tool_id!)}
+                >
+                  <XCircle className="mr-1.5 h-4 w-4" />
+                  Deny
+                </Button>
+              </div>
+            )}
+          </ToolContent>
+        </Tool>
       </div>
     );
   }
 
+  // Tool call results
   if (msg.role === "tool_call_result") {
+    const resultState = (msg.success ?? true)
+      ? "output-available" as const
+      : "output-error" as const;
+
     return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ToolCallResult
-          toolName={msg.tool_name || "unknown"}
-          toolOutput={msg.tool_output}
-          success={msg.success ?? true}
-          content={msg.content}
-          screenshot_base64={msg.screenshot_base64}
-          timestamp={msg.timestamp}
-        />
+      <div className="flex justify-start w-full">
+        <Tool>
+          <ToolHeader
+            type="dynamic-tool"
+            state={resultState}
+            toolName={msg.tool_name || "unknown"}
+            title={msg.tool_name}
+          />
+          <ToolContent>
+            <ToolOutput
+              output={msg.tool_output}
+              errorText={(msg.success ?? true) ? undefined : msg.content}
+            />
+            {msg.screenshot_base64 && (
+              <div className="mt-2">
+                <img
+                  src={`data:image/png;base64,${msg.screenshot_base64}`}
+                  alt="Tool screenshot"
+                  className="max-h-[300px] rounded border border-border"
+                />
+              </div>
+            )}
+          </ToolContent>
+        </Tool>
       </div>
     );
   }
@@ -244,9 +312,7 @@ export function ChatMessageComponent({
         )}
 
         {msg.isStreaming && (
-          <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-            |
-          </span>
+          <Shimmer as="span" duration={1.5}>...</Shimmer>
         )}
       </MessageContent>
 

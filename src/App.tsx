@@ -17,7 +17,7 @@ import { ChatContainer, ChatInput } from "@/components/chat";
 import ClickVisualizer from "@/components/ClickVisualizer";
 import CommandOverlay from "@/components/CommandOverlay";
 import KeyPressOverlay from "@/components/KeyPressOverlay";
-import ToolApprovalModal from "@/components/ToolApprovalModal";
+// Inline tool approval handled in ChatMessageV2
 
 // Custom hooks
 import { useAppState } from "@/hooks/useAppState";
@@ -53,18 +53,16 @@ function App() {
   // We still provide a no-op throttledAutoScroll for useBackendEvents compatibility.
   const noopScroll = React.useCallback(() => {}, []);
 
-  // Enhanced submit handler
+  // Enhanced submit handler — receives text directly from PromptInput
   const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!appState.canSubmit || !conversation.query.trim()) return;
+    async (text: string) => {
+      if (!appState.canSubmit || !text) return;
 
-      const trimmedQuery = conversation.query.trim();
-      console.log("🚀 Submitting query:", trimmedQuery);
+      console.log("🚀 Submitting query:", text);
 
       // IMMEDIATE FEEDBACK: Notify floating bar immediately
       try {
-        await invoke("notify_query_submitted", { query: trimmedQuery });
+        await invoke("notify_query_submitted", { query: text });
       } catch (error) {
         console.warn(
           "Failed to notify floating bar of query submission:",
@@ -73,11 +71,11 @@ function App() {
       }
 
       appState.setIsProcessing(true);
-      conversation.addUserMessage(trimmedQuery);
+      conversation.addUserMessage(text);
       conversation.setQuery("");
 
       try {
-        await invoke("submit_query", { query: trimmedQuery });
+        await invoke("submit_query", { query: text });
         console.log("✅ Query submitted successfully");
       } catch (error) {
         console.error("❌ Failed to submit query:", error);
@@ -88,7 +86,6 @@ function App() {
     },
     [
       appState.canSubmit,
-      conversation.query,
       appState.setIsProcessing,
       conversation.addUserMessage,
       conversation.setQuery,
@@ -97,10 +94,9 @@ function App() {
     ]
   );
 
-  // Enhanced stop handler
+  // Enhanced stop handler — called directly by PromptInputSubmit onStop
   const handleStop = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
+    async () => {
       console.log("🛑 Stop requested by user");
 
       try {
@@ -391,6 +387,18 @@ function App() {
     [conversation.handleSaveResponse, appState.setSavingMessageId]
   );
 
+  // Inline tool approval handler — updates message approval_state in conversation
+  const handleApprovalUpdate = useCallback(
+    (toolId: string, state: "approved" | "denied") => {
+      conversation.setConversationWithPruning((prev) =>
+        prev.map((msg) =>
+          msg.tool_id === toolId ? { ...msg, approval_state: state } : msg
+        )
+      );
+    },
+    [conversation.setConversationWithPruning]
+  );
+
   // Render main UI
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -421,6 +429,7 @@ function App() {
                       onCopyResponse={handleCopyResponse}
                       onSaveResponse={handleSaveResponse}
                       onExamplePromptSelect={handleExamplePromptSelect}
+                      onApprovalUpdate={handleApprovalUpdate}
                     />
 
                     <ChatInput
@@ -456,7 +465,7 @@ function App() {
       <ClickVisualizer />
       <CommandOverlay />
       <KeyPressOverlay />
-      <ToolApprovalModal />
+      {/* Inline tool approval is now handled in ChatMessageV2 */}
 
       {/* Modal System - Fixed to match expected props */}
       <ModalSystem

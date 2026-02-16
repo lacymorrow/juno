@@ -5,6 +5,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
@@ -16,6 +17,7 @@ import "./styles/globals.css";
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <VoiceProvider>
+      <TooltipProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
@@ -29,6 +31,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
         </Routes>
       </BrowserRouter>
+      </TooltipProvider>
       {/* Toast notifications */}
       <Toaster
         position="top-center"

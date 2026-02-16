@@ -1,9 +1,6 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator";
 import { Button } from "@/components/ui/button";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
-import { ModelSelector } from "@/components/ModelSelector";
-import { AgentModeSelector } from "@/components/AgentModeSelector";
-import { ProviderSelector } from "@/components/ProviderSelector";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -60,16 +57,7 @@ export function AppHeader({
           </div>
         </div>
 
-        {/* AI Configuration Selectors - only show in chat view */}
-        {currentView === "chat" && (
-          <div className="flex items-center gap-1 ml-2 border-l border-border pl-2 flex-shrink-0">
-            <ProviderSelector variant="compact" />
-            <div className="w-px h-4 bg-border" />
-            <ModelSelector variant="compact" />
-            <div className="w-px h-4 bg-border" />
-            <AgentModeSelector variant="compact" />
-          </div>
-        )}
+        {/* Model/provider selectors moved to ChatInput footer */}
       </div>
 
       {/* Voice Status Indicator - only show in chat view */}

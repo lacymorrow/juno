@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatMessage } from "@/components/ChatMessage";
+import type { ChatMessage } from "@/types/chat";
 import { LIMITS } from "@/lib/constants.generated";
 
 export function useConversation() {

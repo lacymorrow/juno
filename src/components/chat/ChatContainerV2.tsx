@@ -6,10 +6,8 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import {
-  ChatMessageComponent,
-  type ChatMessage,
-} from "@/components/ChatMessageV2";
+import { ChatMessageComponent } from "@/components/ChatMessageV2";
+import type { ChatMessage } from "@/types/chat";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
@@ -68,6 +66,7 @@ interface ChatContainerProps {
     messageIndex: number
   ) => void;
   onExamplePromptSelect: (prompt: string) => void;
+  onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
 }
 
 export const ChatContainerV2 = React.memo(function ChatContainerV2({
@@ -77,6 +76,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   onCopyResponse,
   onSaveResponse,
   onExamplePromptSelect,
+  onApprovalUpdate,
 }: ChatContainerProps) {
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
@@ -106,6 +106,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
               savingMessageId={savingMessageId}
               onCopyResponse={onCopyResponse}
               onSaveResponse={onSaveResponse}
+              onApprovalUpdate={onApprovalUpdate}
             />
           </div>
         );
@@ -116,6 +117,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
       savingMessageId,
       onCopyResponse,
       onSaveResponse,
+      onApprovalUpdate,
     ]
   );
 

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
-import type { ChatMessage } from "@/components/ChatMessage";
+import type { ChatMessage } from "@/types/chat";
 import { EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 
@@ -400,6 +400,33 @@ export function useBackendEvents({
 			if (type === "tool_call_result" || type === "tool_call_request" || type === "thinking") {
 				throttledAutoScroll();
 			}
+		}
+	);
+
+	// Listen for tool-approval-request — add inline approval message to conversation
+	useEventListener<{
+		tool_name: string;
+		tool_id: string;
+		tool_input: any;
+		description: string;
+		timestamp: number;
+	}>(
+		"tool-approval-request",
+		(payload) => {
+			console.log("Tool approval request received (inline):", payload);
+			setConversationWithPruning((prev) => [
+				...prev,
+				{
+					role: "tool_call_request",
+					content: payload.description,
+					tool_name: payload.tool_name,
+					tool_args: payload.tool_input,
+					tool_id: payload.tool_id,
+					approval_state: "pending",
+					timestamp: payload.timestamp,
+				},
+			]);
+			throttledAutoScroll();
 		}
 	);
 

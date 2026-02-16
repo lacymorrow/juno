@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { ChatMessage } from "@/components/ChatMessage";
+import type { ChatMessage } from "@/types/chat";
 
 // Simple debounce function for throttling scroll
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
