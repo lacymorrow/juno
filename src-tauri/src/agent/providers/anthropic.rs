@@ -14,7 +14,7 @@ use chrono;
 
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
-use crate::agent::providers::factory::Provider;
+use crate::agent::providers::types::Provider;
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
@@ -64,6 +64,34 @@ enum ApiContent {
     Blocks(Vec<ApiContentBlock>),
 }
 
+/// Content for tool_result blocks — either a plain string or structured blocks (text + image)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum ApiToolResultContent {
+    Text(String),
+    Blocks(Vec<ApiToolResultBlock>),
+}
+
+/// A single block within a tool_result content array (text or image)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ApiToolResultBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<ApiImageSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+}
+
+/// Base64 image source for Anthropic API image content blocks
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ApiImageSource {
+    #[serde(rename = "type")]
+    source_type: String,
+    media_type: String,
+    data: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct ApiContentBlock {
     #[serde(rename = "type")]
@@ -79,7 +107,7 @@ struct ApiContentBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_use_id: Option<String>, // For tool result blocks
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>, // For tool_result content
+    content: Option<ApiToolResultContent>, // For tool_result content (text or image blocks)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -96,10 +124,25 @@ struct AnthropicMessageResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct ApiTool {
-    name: String,
-    description: String,
-    input_schema: Value,
+#[serde(untagged)]
+enum ApiTool {
+    /// Anthropic built-in tools (computer, bash, text_editor)
+    /// Format: {"type": "computer_20250124", "name": "computer", "display_width_px": 1280, "display_height_px": 800}
+    BuiltIn {
+        #[serde(rename = "type")]
+        tool_type: String,
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display_width_px: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display_height_px: Option<u32>,
+    },
+    /// Regular function-calling tools
+    Custom {
+        name: String,
+        description: String,
+        input_schema: Value,
+    },
 }
 
 // Streaming event structures for parsing SSE events - removed unused structs
@@ -130,7 +173,7 @@ impl AnthropicBrain {
         max_tokens: Option<u32>,
         system_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
-        use crate::agent::providers::factory::Provider;
+        use crate::agent::providers::types::Provider;
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::Anthropic.default_model().to_string());
@@ -154,20 +197,16 @@ impl AnthropicBrain {
         })
     }
 
-    /// Creates a new AnthropicBrain using the API key from the environment variables.
-    pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            AgentError::ConfigurationError(
-                "ANTHROPIC_API_KEY environment variable not set".to_string(),
-            )
-        })?;
-
-        let model = env::var("ANTHROPIC_MODEL").ok();
-        let max_tokens = env::var("ANTHROPIC_MAX_TOKENS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok());
-
-        Self::new(api_key, model, max_tokens, None)
+    /// Creates a new AnthropicBrain from a CentralizedProviderConfig struct.
+    /// Falls back to the ANTHROPIC_API_KEY env var if the config has no api_key
+    /// (e.g., when keys come from a .env file rather than the Tauri Store).
+    pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
+        let api_key = config.api_key.clone()
+            .or_else(|| env::var("ANTHROPIC_API_KEY").ok())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into()
+            ))?;
+        Self::new(api_key, config.model.clone(), config.max_tokens, config.system_prompt.clone())
     }
 
     fn format_anthropic_http_error_for_user(
@@ -531,7 +570,7 @@ impl AnthropicBrain {
                             if let Some((id, name, json_str)) = current_tool_call.take() {
                                 // Check if we have any JSON content before parsing
                                 if json_str.trim().is_empty() {
-                                    log::warn!("Tool call {} ({}) has empty JSON input, using empty object", name, id);
+                                    log::debug!("Tool call {} ({}) has empty JSON input, using empty object", name, id);
                                     // Use empty object as fallback
                                     tool_calls.push(ToolCall {
                                         id,
@@ -1151,45 +1190,92 @@ impl AgentBrain for AnthropicBrain {
                     }
 
                     let tool_result_content = message.content.clone();
+                    let tool_name = message.name.as_deref().unwrap_or("");
 
-                    // Parse the tool result content to extract just the text that needs to be passed
-                    let formatted_content =
+                    // Build the tool_result content — special handling for computer tool screenshots
+                    let result_content: ApiToolResultContent =
                         match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
                             Ok(json_value) => {
+                                // Check for computer tool with base64 screenshot data
+                                if tool_name == "computer" {
+                                    if let Some(base64_data) =
+                                        json_value.get("base64_image").and_then(|v| v.as_str())
+                                    {
+                                        // Return image content block so the model can see the screenshot
+                                        let mut blocks = vec![ApiToolResultBlock {
+                                            block_type: "image".to_string(),
+                                            source: Some(ApiImageSource {
+                                                source_type: "base64".to_string(),
+                                                media_type: "image/png".to_string(),
+                                                data: base64_data.to_string(),
+                                            }),
+                                            text: None,
+                                        }];
+                                        // Include any text output alongside the image
+                                        if let Some(output_text) =
+                                            json_value.get("output").and_then(|v| v.as_str())
+                                        {
+                                            if !output_text.is_empty() {
+                                                blocks.push(ApiToolResultBlock {
+                                                    block_type: "text".to_string(),
+                                                    source: None,
+                                                    text: Some(output_text.to_string()),
+                                                });
+                                            }
+                                        }
+                                        log::debug!(
+                                            "Computer tool result: image content block ({} bytes base64)",
+                                            base64_data.len()
+                                        );
+                                        ApiToolResultContent::Blocks(blocks)
+                                    } else {
+                                        // Computer tool result without screenshot (e.g., click, type)
+                                        let text = json_value
+                                            .get("output")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Action completed")
+                                            .to_string();
+                                        ApiToolResultContent::Text(text)
+                                    }
+                                }
                                 // Extract stdout for command results
-                                if let Some(stdout) =
+                                else if let Some(stdout) =
                                     json_value.get("stdout").and_then(|v| v.as_str())
                                 {
-                                    stdout.trim().to_string()
+                                    ApiToolResultContent::Text(stdout.trim().to_string())
                                 }
                                 // Extract content for file reads
                                 else if let Some(content) =
                                     json_value.get("content").and_then(|v| v.as_str())
                                 {
-                                    content.trim().to_string()
+                                    ApiToolResultContent::Text(content.trim().to_string())
                                 }
                                 // For error messages
                                 else if let Some(error) =
                                     json_value.get("error").and_then(|v| v.as_str())
                                 {
-                                    format!("Error: {}", error.trim())
+                                    ApiToolResultContent::Text(
+                                        format!("Error: {}", error.trim()),
+                                    )
                                 }
-                                // If we can't extract a specific field, return a simplified string
+                                // Fallback: find first string value or use generic message
                                 else {
-                                    // Anthropic requires simple string content for tool_result
-                                    // We'll use a fallback to the first string value we can find
                                     let simplified = json_value.as_object().and_then(|obj| {
                                         obj.values()
                                             .find_map(|v| v.as_str().map(|s| s.trim().to_string()))
                                     });
-
-                                    simplified
-                                        .unwrap_or_else(|| "Tool executed successfully".to_string())
+                                    ApiToolResultContent::Text(
+                                        simplified.unwrap_or_else(|| {
+                                            "Tool executed successfully".to_string()
+                                        }),
+                                    )
                                 }
                             }
                             Err(_) => {
                                 // If content is not JSON, use it directly (trimmed)
-                                tool_result_content.trim().to_string()
+                                ApiToolResultContent::Text(
+                                    tool_result_content.trim().to_string(),
+                                )
                             }
                         };
 
@@ -1197,12 +1283,12 @@ impl AgentBrain for AnthropicBrain {
                         role: "user".to_string(), // Tool results have role "user"
                         content: ApiContent::Blocks(vec![ApiContentBlock {
                             block_type: "tool_result".to_string(),
-                            tool_use_id: Some(tool_call_id), // Use tool_use_id instead of id
-                            text: None,                      // Remove text field
-                            id: None,                        // Not used for tool_result
+                            tool_use_id: Some(tool_call_id),
+                            text: None,
+                            id: None,
                             name: None,
                             input: None,
-                            content: Some(formatted_content), // Add content field
+                            content: Some(result_content),
                         }]),
                     });
                 }
@@ -1239,16 +1325,54 @@ impl AgentBrain for AnthropicBrain {
         let api_tools = if available_tools.is_empty() {
             None
         } else {
-            Some(
-                available_tools
-                    .iter()
-                    .map(|t| ApiTool {
-                        name: t.name.clone(),
-                        description: t.description.clone(),
-                        input_schema: t.input_schema.clone(),
-                    })
-                    .collect(),
-            )
+            let tools: Vec<ApiTool> = available_tools
+                .iter()
+                .filter_map(|t| {
+                    if let Some(api_type) = &t.api_type {
+                        // Built-in Anthropic tool (computer, bash, text_editor)
+                        let (dw, dh) = if t.name == "computer" {
+                            match crate::utils::coordinates::get_current_standard_resolution() {
+                                Ok((w, h)) if w > 0 && h > 0 => {
+                                    log::info!(
+                                        "Computer tool configured with display_width_px={}, display_height_px={}",
+                                        w, h
+                                    );
+                                    (Some(w), Some(h))
+                                }
+                                Ok((w, h)) => {
+                                    log::warn!(
+                                        "Standard resolution not yet initialized ({}x{}), skipping computer tool to prevent coordinate mismatch",
+                                        w, h
+                                    );
+                                    return None;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Cannot determine display resolution: {}, skipping computer tool to prevent coordinate mismatch",
+                                        e
+                                    );
+                                    return None;
+                                }
+                            }
+                        } else {
+                            (None, None)
+                        };
+                        Some(ApiTool::BuiltIn {
+                            tool_type: api_type.clone(),
+                            name: t.name.clone(),
+                            display_width_px: dw,
+                            display_height_px: dh,
+                        })
+                    } else {
+                        Some(ApiTool::Custom {
+                            name: t.name.clone(),
+                            description: t.description.clone(),
+                            input_schema: t.input_schema.clone(),
+                        })
+                    }
+                })
+                .collect();
+            if tools.is_empty() { None } else { Some(tools) }
         };
 
         let mut request_payload = AnthropicRequest {

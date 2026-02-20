@@ -566,7 +566,7 @@ async fn execute_agent_internal(
                     .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
-                BrainFactory::create_brain_with_system_prompt(system_prompt)
+                BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let brain = match brain_result {
                 Ok(brain) => brain,
@@ -780,7 +780,7 @@ async fn execute_agent_internal(
                     .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
-                BrainFactory::create_brain_with_system_prompt(system_prompt)
+                BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let orchestrator_brain = match orchestrator_brain_result {
                 Ok(brain) => brain,
@@ -1369,7 +1369,7 @@ async fn execute_specialized_agent_task(
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
-    let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt) {
+    let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle)) {
         Ok(brain) => brain,
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };

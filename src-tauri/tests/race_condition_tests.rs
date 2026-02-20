@@ -208,7 +208,7 @@ async fn test_cancellation_token_races() {
     let exec_handle = tokio::spawn(async move {
         tokio::select! {
             _ = async {
-                for i in 0..100 {
+                for _i in 0..100 {
                     if exec_token.is_cancelled() {
                         break;
                     }

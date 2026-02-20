@@ -115,7 +115,7 @@ impl GeminiBrain {
         system_prompt: Option<String>,
         temperature: Option<f32>,
     ) -> Result<Self, AgentError> {
-        use crate::agent::providers::factory::Provider;
+        use crate::agent::providers::types::Provider;
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::Gemini.default_model().to_string());
@@ -135,23 +135,17 @@ impl GeminiBrain {
         })
     }
 
-    pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("GEMINI_API_KEY").map_err(|_| {
-            AgentError::ConfigurationError(
-                "GEMINI_API_KEY environment variable not set".to_string(),
-            )
-        })?;
-
-        let model = env::var("GEMINI_MODEL").ok();
-        let max_tokens = env::var("GEMINI_MAX_TOKENS")
-            .ok()
-            .and_then(|s| s.parse::<i32>().ok());
-        let system_prompt = env::var("GEMINI_SYSTEM_PROMPT").ok();
-        let temperature = env::var("GEMINI_TEMPERATURE")
-            .ok()
-            .and_then(|s| s.parse::<f32>().ok());
-
-        Self::new(api_key, model, max_tokens, system_prompt, temperature)
+    /// Creates a new GeminiBrain from a CentralizedProviderConfig struct.
+    /// Falls back to the GEMINI_API_KEY env var if the config has no api_key.
+    /// Note: GeminiBrain uses i32 for max_tokens, CentralizedProviderConfig uses u32.
+    pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
+        let api_key = config.api_key.clone()
+            .or_else(|| env::var("GEMINI_API_KEY").ok())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                "Gemini API key not found in settings or GEMINI_API_KEY env var".into()
+            ))?;
+        let max_tokens = config.max_tokens.map(|t| t as i32);
+        Self::new(api_key, config.model.clone(), max_tokens, config.system_prompt.clone(), config.temperature)
     }
 
     fn convert_message_to_gemini(message: &Message) -> Result<GeminiContent, AgentError> {

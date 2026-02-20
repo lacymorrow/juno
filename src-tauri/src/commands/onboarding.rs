@@ -262,20 +262,11 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
     // Always update the flag
     app_state.set_onboarding_active(active);
 
-    // Only register/unregister escape key on actual state transitions to avoid
-    // double-registering (which inflates the coordinator's reference count).
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if active && !was_active {
-        // Register escape key so the backend can detect it and emit visual feedback events
-        if let Err(e) = coordinator.register_escape_user(&app, "onboarding").await {
-            error!("[Onboarding] Failed to register escape key: {}", e);
-        }
-    } else if !active && was_active {
-        // Unregister escape key when onboarding ends
-        if let Err(e) = coordinator.unregister_escape_user(&app, "onboarding").await {
-            error!("[Onboarding] Failed to unregister escape key: {}", e);
-        }
-    }
+    // NOTE: We intentionally do NOT register the escape key as a global shortcut
+    // during onboarding. Global shortcuts consume the key at the OS level, which
+    // prevents it from reaching HTML elements (dropdowns, inputs) and other apps.
+    // The frontend's KeyboardShortcut component uses a DOM keydown listener to
+    // detect Escape for the visual feedback checkmark, which doesn't consume the key.
 
     info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
     Ok(())

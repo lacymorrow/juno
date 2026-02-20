@@ -213,9 +213,16 @@ pub fn initialize_string_cache() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// All tests that touch the global STRING_CACHE must hold this lock.
+    /// Rust runs tests in parallel, so without serialization, concurrent
+    /// clear()/insert()/get_stats() calls cause non-deterministic failures.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_template_error_formatting() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear cache for clean test
         StringCache::clear();
 
@@ -230,6 +237,7 @@ mod tests {
 
     #[test]
     fn test_template_error_caching() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear cache for clean test
         StringCache::clear();
 
@@ -261,6 +269,7 @@ mod tests {
 
     #[test]
     fn test_format_error_cached_function() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear cache for clean test
         StringCache::clear();
 
@@ -275,6 +284,7 @@ mod tests {
 
     #[test]
     fn test_cache_initialization() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear cache and reinitialize
         StringCache::clear();
         let (count_before, _) = StringCache::get_stats();
@@ -296,6 +306,7 @@ mod tests {
 
     #[test]
     fn test_context_with_braces_edge_case() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Failed to access {}: {}";
@@ -309,6 +320,7 @@ mod tests {
 
     #[test]
     fn test_error_with_braces_edge_case() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Failed to parse {}: {}";
@@ -321,6 +333,7 @@ mod tests {
 
     #[test]
     fn test_multiple_placeholder_pairs() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         // Test template with multiple {} pairs
@@ -335,6 +348,7 @@ mod tests {
 
     #[test]
     fn test_caching_effectiveness() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Failed to connect to {}: {}";
@@ -376,6 +390,7 @@ mod tests {
 
     #[test]
     fn test_empty_context_and_error() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Failed to access {}: {}";
@@ -385,6 +400,7 @@ mod tests {
 
     #[test]
     fn test_template_without_placeholders() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "System error occurred";
@@ -395,6 +411,7 @@ mod tests {
 
     #[test]
     fn test_template_with_single_placeholder() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Error in {}: no details available";
@@ -405,6 +422,7 @@ mod tests {
 
     #[test]
     fn test_performance_under_load() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         StringCache::clear();
 
         let template = "Operation {} failed: {}";

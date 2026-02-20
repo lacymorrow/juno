@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::constants::settings::defaults;
-use crate::agent::providers::config::{default_provider_entries, DEFAULT_ACTIVE_PROVIDER};
+use crate::agent::providers::config::{default_provider_entries, DEFAULT_PROVIDER};
 use crate::constants::ui;
 
 pub mod manager;
@@ -291,7 +291,7 @@ impl Default for AgentSettings {
 impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
-            active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
+            active_provider: DEFAULT_PROVIDER.id().to_string(),
             providers: default_provider_entries(),
         }
     }

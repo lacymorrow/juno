@@ -1995,7 +1995,7 @@ mod tests {
         #[derive(Clone, Debug, PartialEq)]
         struct TestComponent {
             value: String,
-        };
+        }
 
         let test_component = TestComponent {
             value: "test_value".to_string(),

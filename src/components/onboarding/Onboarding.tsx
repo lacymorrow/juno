@@ -875,7 +875,6 @@ export default function OnboardingFlow({
                     <KeyboardShortcut
                       onShortcutPressed={() => setEscapePressed(true)}
                       shortcutString={keyboardShortcuts?.stop_current_task}
-                      backendEvent={EVENTS.SHORTCUTS_ESCAPE_KEY}
                       defaultShortcut="Escape"
                     />
                     <p className="text-sm text-gray-500 mt-4 text-center">
