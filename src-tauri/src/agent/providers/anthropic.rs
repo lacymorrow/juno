@@ -260,6 +260,13 @@ impl AnthropicBrain {
         Provider::Anthropic.computer_use_beta_flag(&self.model)
     }
 
+    /// Resolve the correct tool API type for the selected model.
+    /// Opus 4.5+ models require newer tool type identifiers (e.g. computer_20251124,
+    /// text_editor_20250728) while older models use the registered defaults.
+    fn resolve_tool_api_type(&self, tool_name: &str, registered_type: &str) -> String {
+        Provider::Anthropic.resolve_tool_type(tool_name, registered_type, &self.model)
+    }
+
     /// Sanitize log content by removing or truncating base64 data to prevent console spam
     fn sanitize_for_logging(value: &serde_json::Value) -> serde_json::Value {
         match value {
@@ -881,20 +888,11 @@ impl AnthropicBrain {
                     chars_to_consume = i;
                     continue;
                 } else if remaining_len < 6 && self.could_be_partial_closing_tag(&remaining_str) {
-                    // Potential partial closing tag at end of buffer
-                    // AGGRESSIVE FIX: If we have substantial TTS content and this looks like a closing tag,
-                    // extract the TTS content immediately instead of waiting for the full tag
-                    if !tts_content.trim().is_empty() && remaining_str.starts_with("</") {
-                        log::info!("🚀 IMMEDIATE: Extracting TTS content on partial closing tag: '{}'", tts_content);
-                        extracted_tts_list.push(tts_content.clone());
-                        *in_tts_tag = false;
-                        tts_content.clear();
-                        // Skip the partial closing tag characters we've seen
-                        i += remaining_str.len();
-                        chars_to_consume = i;
-                        continue;
-                    }
-                    // Otherwise, stop processing here and wait for more data
+                    // Potential partial closing tag at end of buffer — wait for the
+                    // next chunk so we can match the complete "</TTS>" tag.
+                    // We must NOT extract TTS content early here because the remaining
+                    // tag characters (e.g. "TS>") would leak into the next chunk's
+                    // display text once in_tts_tag is set to false.
                     break;
                 } else {
                     // Content inside TTS tag - add to TTS content only (not to display)
@@ -1358,7 +1356,7 @@ impl AgentBrain for AnthropicBrain {
                             (None, None)
                         };
                         Some(ApiTool::BuiltIn {
-                            tool_type: api_type.clone(),
+                            tool_type: self.resolve_tool_api_type(&t.name, api_type),
                             name: t.name.clone(),
                             display_width_px: dw,
                             display_height_px: dh,

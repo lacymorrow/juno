@@ -121,7 +121,12 @@ pub struct AudioSettings {
 
 /// Tool enable/disable configurations
 /// Replaces: tool_config.json
+///
+/// WARNING: This struct is written by multiple subsystems (ToolConfigManager, mouse settings, etc.).
+/// When adding new fields, ensure all writers preserve fields they don't own.
+/// See `ToolConfigManager::save_to_centralized_settings()` for the read-modify-write pattern.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ToolSettings {
     pub tools: HashMap<String, ToolConfig>,
     pub category_enabled: HashMap<String, bool>,

@@ -83,10 +83,6 @@ interface UseBackendEventsProps {
 	// State management
 	setIsProcessing: (processing: boolean) => void;
 	setServerStatus: (status: "connected" | "error" | "connecting") => void;
-	setUserHasScrolledUp: (scrolled: boolean) => void;
-
-	// Auto-scroll function
-	throttledAutoScroll: () => void;
 }
 
 // Simple debounce function
@@ -108,7 +104,6 @@ export function useBackendEvents({
 	stopCurrentAudio,
 	setIsProcessing,
 	setServerStatus,
-	throttledAutoScroll,
 }: UseBackendEventsProps) {
 	const hasCheckedServer = useRef(false);
 
@@ -396,10 +391,6 @@ export function useBackendEvents({
 					break;
 			}
 
-			// Auto-scroll to show new messages
-			if (type === "tool_call_result" || type === "tool_call_request" || type === "thinking") {
-				throttledAutoScroll();
-			}
 		}
 	);
 
@@ -426,7 +417,6 @@ export function useBackendEvents({
 					timestamp: payload.timestamp,
 				},
 			]);
-			throttledAutoScroll();
 		}
 	);
 
@@ -474,8 +464,6 @@ export function useBackendEvents({
 					return msg;
 				})
 			);
-
-			throttledAutoScroll();
 		}
 	);
 
@@ -541,8 +529,6 @@ export function useBackendEvents({
 					return msg;
 				})
 			);
-
-			throttledAutoScroll();
 		}
 	);
 

@@ -14,8 +14,13 @@ pub mod model_ids {
     pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
     pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
 
-    /// Models that require the 2025-11-24 computer-use beta flag
+    /// Models that require the 2025-11-24 computer-use beta flag AND
+    /// new computer type (computer_20251124) + new editor (text_editor_20250728)
     pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6];
+
+    /// Models that use the old computer type (computer_20250124) but require
+    /// the new editor (text_editor_20250728). These sit between Opus 4.5+ and legacy.
+    pub const MODELS_NEEDING_NEW_EDITOR: &[&str] = &[CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5];
 
     // OpenAI Models
     pub const OPENAI_CUA: &str = "computer-use-preview";
@@ -126,6 +131,41 @@ impl Provider {
         }
     }
 
+    /// Resolve the correct tool API type for the given model.
+    ///
+    /// Three tiers of Anthropic model behavior:
+    /// - **Opus 4.5+**: new computer (`computer_20251124`) + new editor (`text_editor_20250728`)
+    /// - **Sonnet 4.5 / Haiku 4.5**: old computer (`computer_20250124`) + new editor (`text_editor_20250728`)
+    /// - **Legacy**: old computer + old editor (passthrough)
+    pub fn resolve_tool_type(&self, tool_name: &str, registered_type: &str, model: &str) -> String {
+        use crate::constants::api::computer_use_api_types;
+
+        match self {
+            Provider::Anthropic => {
+                if model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) {
+                    // Tier 1: Opus 4.5+ — both computer and editor are new versions
+                    match tool_name {
+                        "computer" => {
+                            return computer_use_api_types::COMPUTER_20251124.to_string()
+                        }
+                        "str_replace_based_edit_tool" => {
+                            return computer_use_api_types::EDIT_TOOL_20250728.to_string()
+                        }
+                        _ => {}
+                    }
+                } else if model_ids::MODELS_NEEDING_NEW_EDITOR.contains(&model) {
+                    // Tier 2: Sonnet 4.5, Haiku 4.5 — old computer, new editor
+                    if tool_name == "str_replace_based_edit_tool" {
+                        return computer_use_api_types::EDIT_TOOL_20250728.to_string();
+                    }
+                }
+                // Tier 3: Legacy models — passthrough
+                registered_type.to_string()
+            }
+            _ => registered_type.to_string(),
+        }
+    }
+
     /// Get model definitions for the provider
     pub fn model_definitions(&self) -> &'static [ModelDefinition] {
         match self {
@@ -149,8 +189,8 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_HAIKU_4_5,
                         name: "Claude Haiku 4.5",
-                        category: ModelCategory::GeneralChat,
-                        supports_computer_use: false,
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
                         is_recommended: false,
                     },
                     // Legacy models
@@ -289,5 +329,127 @@ impl Provider {
         self.model_definitions()
             .iter()
             .any(|def| def.supports_computer_use)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_tool_type_opus_4_5_remaps_computer() {
+        let result = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_OPUS_4_5,
+        );
+        assert_eq!(result, "computer_20251124");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_opus_4_5_remaps_editor() {
+        let result = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_OPUS_4_5,
+        );
+        assert_eq!(result, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_opus_4_6_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_OPUS_4_6,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_OPUS_4_6,
+        );
+        assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_older_model_passes_through() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_SONNET_4,
+        );
+        assert_eq!(computer, "computer_20250124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_SONNET_4,
+        );
+        assert_eq!(editor, "text_editor_20250429");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_bash_unchanged_for_all_models() {
+        let opus_45 = Provider::Anthropic.resolve_tool_type(
+            "bash",
+            "bash_20250124",
+            model_ids::CLAUDE_OPUS_4_5,
+        );
+        assert_eq!(opus_45, "bash_20250124");
+
+        let sonnet = Provider::Anthropic.resolve_tool_type(
+            "bash",
+            "bash_20250124",
+            model_ids::CLAUDE_SONNET_4,
+        );
+        assert_eq!(sonnet, "bash_20250124");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_sonnet_4_5_remaps_editor_only() {
+        // Sonnet 4.5 needs new editor but keeps old computer type
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_SONNET_4_5,
+        );
+        assert_eq!(computer, "computer_20250124", "Sonnet 4.5 should keep old computer type");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_SONNET_4_5,
+        );
+        assert_eq!(editor, "text_editor_20250728", "Sonnet 4.5 should use new editor type");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_haiku_4_5_remaps_editor_only() {
+        // Haiku 4.5 needs new editor but keeps old computer type
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_HAIKU_4_5,
+        );
+        assert_eq!(computer, "computer_20250124", "Haiku 4.5 should keep old computer type");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_HAIKU_4_5,
+        );
+        assert_eq!(editor, "text_editor_20250728", "Haiku 4.5 should use new editor type");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_non_anthropic_passes_through() {
+        let result = Provider::OpenAI.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            "some-model",
+        );
+        assert_eq!(result, "computer_20250124");
     }
 }

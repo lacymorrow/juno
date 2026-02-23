@@ -53,7 +53,7 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 
     info!("Onboarding marked as completed at {}", now);
 
-    // Safety net: clear onboarding active state and unregister escape key
+    // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
         warn!("Failed to clear onboarding active state on completion: {}", e);
     }
@@ -95,7 +95,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         now, onboarding_settings.skip_count
     );
 
-    // Safety net: clear onboarding active state and unregister escape key
+    // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
         warn!("Failed to clear onboarding active state on skip: {}", e);
     }
@@ -250,7 +250,14 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
     Ok(agent_shortcut_valid && dictation_shortcut_valid)
 }
 
-/// Set onboarding as active and register the escape key for visual feedback.
+/// Set onboarding as active and start a listen-only escape key monitor.
+/// Controls whether shortcut handlers suppress their normal actions (agent mode,
+/// dictation, stop) and only emit visual feedback.
+///
+/// Uses a `CGEventTap` with `kCGEventTapOptionListenOnly` instead of a global
+/// shortcut. This lets the Rust backend detect escape while the key still passes
+/// through to HTML dropdowns, dialogs, and other applications.
+///
 /// Called by the frontend when the onboarding component mounts, and also by
 /// `initialize_onboarding_system` in the backend. Idempotent — safe to call
 /// multiple times with the same `active` value.
@@ -259,14 +266,17 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
     let app_state = app.state::<crate::state::AppState>();
     let was_active = app_state.is_onboarding_active();
 
-    // Always update the flag
+    // Update the flag — shortcut handlers check this to suppress actions during onboarding
     app_state.set_onboarding_active(active);
 
-    // NOTE: We intentionally do NOT register the escape key as a global shortcut
-    // during onboarding. Global shortcuts consume the key at the OS level, which
-    // prevents it from reaching HTML elements (dropdowns, inputs) and other apps.
-    // The frontend's KeyboardShortcut component uses a DOM keydown listener to
-    // detect Escape for the visual feedback checkmark, which doesn't consume the key.
+    // Start/stop the listen-only escape key monitor on state transitions
+    if active && !was_active {
+        if let Err(e) = crate::platform::escape_key_monitor::start(&app) {
+            error!("[Onboarding] Failed to start escape key monitor: {}", e);
+        }
+    } else if !active && was_active {
+        crate::platform::escape_key_monitor::stop();
+    }
 
     info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
     Ok(())

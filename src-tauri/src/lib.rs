@@ -780,6 +780,47 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Display Resolution for Computer Use ---
+            // Must happen early so the computer tool is available from the first agent run.
+            // Without this, SCREENSHOT_SCALE stays at 0x0 and the computer tool is filtered out.
+            #[cfg(target_os = "macos")]
+            {
+                use computer_use_ai_sdk::platforms::macos::display::get_main_display;
+                use crate::constants::ui::standard_resolutions;
+                use crate::utils::coordinates;
+
+                match get_main_display() {
+                    Ok(display) => {
+                        let display_width = display.bounds.size.width as u32;
+                        let display_height = display.bounds.size.height as u32;
+                        if display_width > 0 && display_height > 0 {
+                            let (standard_width, standard_height) =
+                                standard_resolutions::select_best_resolution(display_width, display_height);
+                            // Initialize with standard resolution as screenshot size (will be
+                            // updated to actual screenshot dimensions on first capture)
+                            coordinates::update_standard_resolution_scaling(
+                                display_width,
+                                display_height,
+                                standard_width,
+                                standard_height,
+                            );
+                            tracing::info!(
+                                "Display resolution initialized: {}x{} → standard {}x{}",
+                                display_width, display_height, standard_width, standard_height
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Main display returned invalid dimensions: {}x{}",
+                                display_width, display_height
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not get main display for resolution init: {}", e);
+                    }
+                }
+            }
+
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
