@@ -82,6 +82,7 @@ pub struct OpenAIBrain {
     model: String,
     max_tokens: u32,
     temperature: f32,
+    system_prompt: Option<String>,
 }
 
 impl OpenAIBrain {
@@ -91,8 +92,9 @@ impl OpenAIBrain {
         model: Option<String>,
         max_tokens: Option<u32>,
         temperature: Option<f32>,
+        system_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
-        use crate::agent::providers::factory::Provider;
+        use crate::agent::providers::types::Provider;
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::OpenAI.default_model().to_string());
@@ -108,26 +110,19 @@ impl OpenAIBrain {
             model,
             max_tokens,
             temperature,
+            system_prompt,
         })
     }
 
-    /// Creates a new OpenAIBrain using the API key from the environment variables.
-    pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("OPENAI_API_KEY").map_err(|_| {
-            AgentError::ConfigurationError(
-                "OPENAI_API_KEY environment variable not set".to_string(),
-            )
-        })?;
-
-        let model = env::var("OPENAI_MODEL").ok();
-        let max_tokens = env::var("OPENAI_MAX_TOKENS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok());
-        let temperature = env::var("OPENAI_TEMPERATURE")
-            .ok()
-            .and_then(|s| s.parse::<f32>().ok());
-
-        Self::new(api_key, model, max_tokens, temperature)
+    /// Creates a new OpenAIBrain from a CentralizedProviderConfig struct.
+    /// Falls back to the OPENAI_API_KEY env var if the config has no api_key.
+    pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
+        let api_key = config.api_key.clone()
+            .or_else(|| env::var("OPENAI_API_KEY").ok())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                "OpenAI API key not found in settings or OPENAI_API_KEY env var".into()
+            ))?;
+        Self::new(api_key, config.model.clone(), config.max_tokens, config.temperature, config.system_prompt.clone())
     }
 
     /// Sanitize log content by removing or truncating base64 data to prevent console spam
@@ -235,6 +230,18 @@ impl AgentBrain for OpenAIBrain {
     ) -> Result<AgentAction, AgentError> {
         // Convert messages to OpenAI format
         let mut openai_messages = Vec::new();
+
+        // Prepend system prompt if configured
+        if let Some(system) = &self.system_prompt {
+            openai_messages.push(OpenAIMessage {
+                role: "system".to_string(),
+                content: Some(system.clone()),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+
         for message in messages {
             match self.convert_message_to_openai(message) {
                 Ok(msg) => openai_messages.push(msg),

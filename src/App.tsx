@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
@@ -48,10 +48,6 @@ function App() {
 
   // Use voice sounds hook
   useVoiceSounds();
-
-  // Scrolling management — use-stick-to-bottom in ChatContainerV2 handles auto-scroll.
-  // We still provide a no-op throttledAutoScroll for useBackendEvents compatibility.
-  const noopScroll = React.useCallback(() => {}, []);
 
   // Enhanced submit handler — receives text directly from PromptInput
   const handleSubmit = useCallback(
@@ -155,8 +151,6 @@ function App() {
     stopCurrentAudio: audioPlayback.stopCurrentAudio,
     setIsProcessing: appState.setIsProcessing,
     setServerStatus: appState.setServerStatus,
-    setUserHasScrolledUp: appState.setUserHasScrolledUp,
-    throttledAutoScroll: noopScroll,
   });
 
   // Menu events integration

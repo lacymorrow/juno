@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use std::env;
 use tracing::{info, warn, debug};
 use crate::agent::core::AgentError;
-use crate::agent::prompts::manager::PromptManager;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use super::types::Provider;
 
 // Add centralized settings support
 use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
@@ -58,16 +58,14 @@ pub struct ProviderConfig {
     pub providers: Vec<CentralizedProviderConfig>,
 }
 
-/// Default active provider across the app
-pub const DEFAULT_ACTIVE_PROVIDER: &str = "anthropic";
+/// The default AI provider. Use `.id()` when a string is needed.
+pub const DEFAULT_PROVIDER: Provider = Provider::Anthropic;
 
 /// Centralized list of default providers and models (single source of truth)
 pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
-    use crate::agent::providers::factory::Provider;
-
     vec![
         CentralizedProviderConfig {
-            id: "anthropic".to_string(),
+            id: Provider::Anthropic.id().to_string(),
             api_key: None,
             model: Some(Provider::Anthropic.default_model().to_string()),
             max_tokens: Some(4096),
@@ -75,7 +73,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             system_prompt: None,
         },
         CentralizedProviderConfig {
-            id: "openai".to_string(),
+            id: Provider::OpenAI.id().to_string(),
             api_key: None,
             model: Some(Provider::OpenAI.default_model().to_string()),
             max_tokens: Some(4096),
@@ -83,7 +81,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             system_prompt: None,
         },
         CentralizedProviderConfig {
-            id: "rig".to_string(),
+            id: Provider::Rig.id().to_string(),
             api_key: None, // Rig uses OpenAI's API key by default
             model: Some(Provider::Rig.default_model().to_string()),
             max_tokens: Some(4096),
@@ -91,7 +89,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             system_prompt: None,
         },
         CentralizedProviderConfig {
-            id: "gemini".to_string(),
+            id: Provider::Gemini.id().to_string(),
             api_key: None,
             model: Some(Provider::Gemini.default_model().to_string()),
             max_tokens: Some(4096),
@@ -104,7 +102,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
 impl Default for ProviderConfig {
     fn default() -> Self {
         ProviderConfig {
-            active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
+            active_provider: DEFAULT_PROVIDER.id().to_string(),
             agent_mode: AgentMode::Multi,
             providers: default_provider_entries(),
         }
@@ -164,7 +162,7 @@ impl ProviderConfig {
 
     /// Convert from centralized ProviderSettings to ProviderConfig.
     /// Handles schema differences between the two formats.
-    fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
+    pub(crate) fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
         let providers = settings.providers.clone();
 
         // Ensure all default providers are present for backwards compatibility
@@ -251,175 +249,56 @@ impl ProviderConfig {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
-
-}
-
-/// Apply provider settings to environment variables (convenience method)
-/// Note: This creates a default configuration without app handle support
-pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
-    let config = ProviderConfig::default();
-    let prompt_manager = crate::agent::prompts::PromptManager::new();
-    apply_provider_settings_internal(&config, &prompt_manager)
-}
-
-/// Apply provider settings to environment variables from a given app handle
-/// NEW: Uses centralized settings instead of direct JSON store access.
-/// Uses the centralized prompt manager for default prompts
-pub async fn apply_provider_settings_to_env_with_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
-    let config = ProviderConfig::load_from_centralized_settings(settings_manager).await?;
-
-    // Load prompt manager for default prompts - this will need to be updated in a future step
-    let prompt_manager = crate::agent::prompts::PromptManager::new();
-
-    apply_provider_settings_internal(&config, &prompt_manager)
-}
-
-
-
-/// Internal function to apply provider settings to environment variables
-fn apply_provider_settings_internal(config: &ProviderConfig, prompt_manager: &PromptManager) -> Result<(), AgentError> {
-    // Determine which provider's settings to apply.
-    // Priority: AI_PROVIDER env var, then config.active_provider as fallback.
-    let provider_id_to_apply = env::var("AI_PROVIDER")
-        .unwrap_or_else(|_| {
-            info!("AI_PROVIDER env var not set, using active_provider from config: {}", &config.active_provider);
-            config.active_provider.clone()
-        });
-
-    info!("Applying environment settings for provider: {}", provider_id_to_apply);
-
-    if let Some(settings) = config.providers.iter().find(|p| p.id == provider_id_to_apply) {
-        match settings.id.as_str() {
-            "anthropic" => {
-                if let Some(api_key) = &settings.api_key {
-                    env::set_var("ANTHROPIC_API_KEY", api_key);
-                }
-                if let Some(model) = &settings.model {
-                    env::set_var("ANTHROPIC_MODEL", model);
-                }
-                if let Some(max_tokens) = settings.max_tokens {
-                    env::set_var("ANTHROPIC_MAX_TOKENS", max_tokens.to_string());
-                }
-                // Use prompt manager for default system prompt
-                let default_prompt = prompt_manager.get_default_system_prompt();
-                let prompt_to_set = settings.system_prompt.as_deref()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&default_prompt);
-                env::set_var("ANTHROPIC_SYSTEM_PROMPT", prompt_to_set);
-            },
-            "openai" => {
-                if let Some(api_key) = &settings.api_key {
-                    env::set_var("OPENAI_API_KEY", api_key);
-                }
-                if let Some(model) = &settings.model {
-                    env::set_var("OPENAI_MODEL", model);
-                }
-                if let Some(max_tokens) = settings.max_tokens {
-                    env::set_var("OPENAI_MAX_TOKENS", max_tokens.to_string());
-                }
-                if let Some(temperature) = settings.temperature {
-                    env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
-                }
-                // Use prompt manager for default system prompt
-                let default_prompt = prompt_manager.get_default_system_prompt();
-                let prompt_to_set = settings.system_prompt.as_deref()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&default_prompt);
-                env::set_var("OPENAI_SYSTEM_PROMPT", prompt_to_set);
-            },
-            "rig" => {
-                let mut rig_api_key_set = false;
-                if let Some(api_key) = &settings.api_key {
-                    env::set_var("OPENAI_API_KEY", api_key);
-                    rig_api_key_set = true;
-                    info!("Applied Rig's specific API key for OPENAI_API_KEY.");
-                }
-
-                if !rig_api_key_set {
-                    if let Some(openai_settings) = config.providers.iter().find(|p| p.id == "openai") {
-                        if let Some(api_key) = &openai_settings.api_key {
-                            env::set_var("OPENAI_API_KEY", api_key);
-                            info!("Applied OpenAI provider's API key for Rig's OPENAI_API_KEY.");
-                        }
-                    }
-                }
-
-                if let Some(model) = &settings.model {
-                    env::set_var("OPENAI_MODEL", model);
-                }
-                if let Some(max_tokens) = settings.max_tokens {
-                    env::set_var("OPENAI_MAX_TOKENS", max_tokens.to_string());
-                }
-                if let Some(temperature) = settings.temperature {
-                    env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
-                }
-                // Use prompt manager for default system prompt
-                let default_prompt = prompt_manager.get_default_system_prompt();
-                let prompt_to_set = settings.system_prompt.as_deref()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&default_prompt);
-                env::set_var("RIG_SYSTEM_PROMPT", prompt_to_set);
-            },
-            "gemini" => {
-                if let Some(api_key) = &settings.api_key {
-                    env::set_var("GEMINI_API_KEY", api_key);
-                }
-                if let Some(model) = &settings.model {
-                    env::set_var("GEMINI_MODEL", model);
-                }
-                if let Some(max_tokens) = settings.max_tokens {
-                    env::set_var("GEMINI_MAX_TOKENS", max_tokens.to_string());
-                }
-                if let Some(temperature) = settings.temperature {
-                    env::set_var("GEMINI_TEMPERATURE", temperature.to_string());
-                }
-                // Use prompt manager for default system prompt
-                let default_prompt = prompt_manager.get_default_system_prompt();
-                let prompt_to_set = settings.system_prompt.as_deref()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&default_prompt);
-                env::set_var("GEMINI_SYSTEM_PROMPT", prompt_to_set);
-            },
-            _ => {
-                warn!("Attempted to apply settings for an unknown provider ID: {}", settings.id);
+    /// Get resolved config for a specific provider.
+    /// Returns a cloned config with special-case fallbacks applied:
+    /// - Rig provider falls back to OpenAI's API key if its own is missing.
+    pub fn resolve_provider(&self, provider: Provider) -> Option<CentralizedProviderConfig> {
+        let provider_id = provider.id();
+        let mut config = self.providers.iter().find(|p| p.id == provider_id)?.clone();
+        // Rig special case: fall back to OpenAI's API key
+        if provider == Provider::Rig && config.api_key.is_none() {
+            if let Some(openai) = self.providers.iter().find(|p| p.id == Provider::OpenAI.id()) {
+                config.api_key = openai.api_key.clone();
             }
         }
-    } else {
-        warn!("Could not find settings for provider: {}. No specific settings applied.", provider_id_to_apply);
+        Some(config)
     }
-
-    Ok(())
 }
 
-/// Load provider configuration from centralized settings
-/// NEW: Uses centralized settings instead of direct JSON store access.
-/// Used by: Application startup and provider configuration initialization
-///
-/// # Arguments
-/// * `settings_manager` - Centralized settings manager
-pub async fn load_provider_config_from_centralized_settings(
-    settings_manager: &crate::settings::manager::SettingsManager,
-) -> Result<ProviderConfig, String> {
-    let loaded_config = ProviderConfig::load_from_centralized_settings(settings_manager).await
-        .map_err(|e| format!("Failed to load provider config: {}", e))?;
-
-    info!("Loaded provider configuration from centralized settings on startup");
-    Ok(loaded_config)
+/// Load provider configuration from Tauri Store (or defaults if no AppHandle).
+/// This is the primary entry point for getting provider configuration.
+/// Replaces the old apply_provider_settings() / load_config_from_store() flow
+/// that used unsafe env::set_var() as an intermediary.
+pub fn load_provider_config(app_handle: Option<&tauri::AppHandle>) -> ProviderConfig {
+    match app_handle {
+        Some(handle) => {
+            match load_config_from_store_internal(handle) {
+                Ok(config) => {
+                    info!("Loaded provider configuration from Tauri Store");
+                    config
+                }
+                Err(e) => {
+                    warn!("Failed to load provider settings from store: {}. Using defaults.", e);
+                    ProviderConfig::default()
+                }
+            }
+        }
+        None => ProviderConfig::default(),
+    }
 }
 
-/// Save provider configuration to centralized settings
-/// NEW: Uses centralized settings instead of direct JSON store access.
-/// Used by: Application shutdown and provider configuration changes
-///
-/// # Arguments
-/// * `settings_manager` - Centralized settings manager
-/// * `config` - Provider configuration to save
-pub async fn save_provider_config_to_centralized_settings(
-    settings_manager: &crate::settings::manager::SettingsManager,
-    config: &ProviderConfig
-) -> Result<(), String> {
-    config.save_to_centralized_settings(settings_manager).await
-        .map_err(|e| format!("Failed to save provider config: {}", e))?;
-    info!("Saved provider configuration to centralized settings");
-    Ok(())
+/// Load ProviderConfig directly from Tauri Store (sync, internal helper).
+fn load_config_from_store_internal(app_handle: &tauri::AppHandle) -> Result<ProviderConfig, AgentError> {
+    use tauri_plugin_store::StoreExt;
+    use crate::constants::settings::{SETTINGS_STORE_FILE, store_keys};
+
+    let store = app_handle.store(SETTINGS_STORE_FILE)
+        .map_err(|e| AgentError::ConfigurationError(format!("Failed to access settings store: {}", e)))?;
+
+    let provider_settings: CentralizedProviderSettings = store.get(store_keys::PROVIDERS)
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    ProviderConfig::from_centralized_settings(&provider_settings)
 }
+

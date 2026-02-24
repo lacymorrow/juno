@@ -213,7 +213,7 @@ impl Default for UISettings {
             notification_position: "bottom-right".to_string(),
             notification_show_icons: true,
             notification_persist_important: true,
-            smooth_mouse_movement: false, // Default to immediate movement for performance
+            smooth_mouse_movement: true, // Default to smooth movement for better UX
         }
     }
 }
@@ -1995,7 +1995,7 @@ mod tests {
         #[derive(Clone, Debug, PartialEq)]
         struct TestComponent {
             value: String,
-        };
+        }
 
         let test_component = TestComponent {
             value: "test_value".to_string(),

@@ -3,9 +3,7 @@
 
 #[cfg(test)]
 mod fix_verification_tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_compilation_successful() {
@@ -46,14 +44,14 @@ mod fix_verification_tests {
 
         // Mock the basic voice system initialization pattern
         struct MockVoiceSystem {
-            initialized: bool,
+            _initialized: bool,
         }
 
         impl MockVoiceSystem {
             fn new() -> Result<Self, String> {
                 // Safe initialization without .unwrap() calls
                 Ok(MockVoiceSystem {
-                    initialized: true,
+                    _initialized: true,
                 })
             }
         }

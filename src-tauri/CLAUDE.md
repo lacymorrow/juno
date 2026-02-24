@@ -432,6 +432,14 @@ let client = Client::builder()
 - Add comprehensive audit logging for security events
 - See `SECURITY_AUDIT.md` in project root for 32 tracked vulnerabilities (2026-02-08)
 
+### Shared Settings: Read-Modify-Write
+`ToolSettings` in `settings/mod.rs` is written by multiple subsystems (ToolConfigManager, mouse settings UI, etc.). When saving, each subsystem MUST:
+1. Read the existing `ToolSettings` from the store first
+2. Update only the fields it owns
+3. Write back the merged result
+
+Never construct a fresh `ToolSettings` and save it — this clobbers fields owned by other subsystems. See `ToolConfigManager::save_to_centralized_settings()` for the correct pattern.
+
 ### Code Deduplication
 - `parse_shortcut_string` lives in `src/shortcuts.rs` — do not duplicate in `lib.rs`
 - `format_error` helper is `pub` in `lib.rs` — use `crate::format_error` instead of local copies

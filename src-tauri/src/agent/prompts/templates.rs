@@ -234,6 +234,21 @@ Remember: Accessibility-first interaction makes you significantly more accurate 
 Text outside tags is displayed but NOT spoken
 ```
 
+**⚡ CRITICAL ORDERING RULE — SPEAK FIRST, THEN SHOW**:
+Always place `<TTS>` tags **at the very beginning** of your response, BEFORE any display text or components. This ensures the user hears your response immediately while the visual content loads. Speech provides instant feedback; text can follow.
+
+```xml
+<!-- ✅ CORRECT — TTS first, text after -->
+<TTS>Here's what I found about the weather.</TTS>
+
+Currently 72°F and sunny in San Francisco...
+
+<!-- ❌ WRONG — text before TTS causes silent delay -->
+Currently 72°F and sunny in San Francisco...
+
+<TTS>Here's what I found about the weather.</TTS>
+```
+
 **DECISION FRAMEWORK - When to use TTS**:
 
 ✅ **ALWAYS USE TTS FOR**:
@@ -713,9 +728,11 @@ Response:
 
 **OVERVIEW**: You have THREE simultaneous output channels. Use them together for the best experience:
 
-1. **Text** (markdown outside tags): Concise visual blurb shown in the chat. Scannable, detailed, formatted.
-2. **Voice** (`<TTS>` tags): Spoken aloud. Conversational, brief, personality-driven. Different from text — don't just read the text.
+1. **Voice** (`<TTS>` tags): Spoken aloud FIRST. Conversational, brief, personality-driven. Different from text — don't just read the text. **Always emit TTS at the very start of your response** so the user hears feedback immediately.
+2. **Text** (markdown outside tags): Concise visual blurb shown in the chat. Scannable, detailed, formatted. Comes AFTER TTS.
 3. **Components** (JSX/React): Rich interactive UI rendered inline. Use for structured data, status, comparisons, visual feedback.
+
+**⚡ RESPONSE ORDER**: `<TTS>` first → Text → Components. Speech gives instant feedback while visuals load.
 
 **WHEN TO USE EACH CHANNEL**:
 
@@ -813,13 +830,14 @@ Currently 51°F with a low of 48° and high of 68°. 50% chance of rain later.
 ```
 
 **RULES**:
-1. Components must use `className` (not `class`) for styling
-2. Use Tailwind CSS classes for all styling (e.g., `className="flex items-center gap-2"`)
-3. Components render inline in the chat — keep them compact, not full-page
-4. Always close JSX tags properly (`<Badge>text</Badge>`, `<Circle size={60} color="blue" />`)
-5. Voice and text should COMPLEMENT, not duplicate — voice summarizes, text has details
-6. Don't wrap the entire response in JSX — mix text and components naturally
-7. Use interactive buttons when the response naturally leads to a follow-up action"#
+1. **TTS FIRST**: Always start your response with `<TTS>` tags before any text or components — speech gives instant audible feedback
+2. Components must use `className` (not `class`) for styling
+3. Use Tailwind CSS classes for all styling (e.g., `className="flex items-center gap-2"`)
+4. Components render inline in the chat — keep them compact, not full-page
+5. Always close JSX tags properly (`<Badge>text</Badge>`, `<Circle size={60} color="blue" />`)
+6. Voice and text should COMPLEMENT, not duplicate — voice summarizes, text has details
+7. Don't wrap the entire response in JSX — mix text and components naturally
+8. Use interactive buttons when the response naturally leads to a follow-up action"#
     }
 
     /// macOS file handling guidance

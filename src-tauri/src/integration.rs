@@ -732,6 +732,15 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 } else {
                     info!("[Agent Mode] Started agent transcription successfully");
                 }
+
+                // Register escape key so the user can cancel during the listening phase.
+                // Without this, escape is not a registered global shortcut and pressing it
+                // does nothing until the query is submitted to the agent.
+                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                if let Err(e) = coordinator.register_escape_user(app_handle, "agent_transcription").await {
+                    warn!("[Agent Mode] Failed to register escape key for agent transcription: {} - continuing anyway", e);
+                }
+
                 if let Err(e) = utils::synchronize_component_state(
                     app_handle,
                     "agent",
@@ -791,12 +800,22 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
+
+                    // Unregister the escape key we registered during transcription start.
+                    // The agent query submission path will re-register its own escape user.
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+
                     // Note: We don't call synchronize_component_state(false) here because the agent will continue
                     // processing the transcribed text. The agent-active false will be handled
                     // after the agent completes processing the query.
                 }
                 Err(e) => {
                     error!("[Agent Mode] Failed to stop transcription: {}", e);
+
+                    // Unregister escape key on failure path
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
 
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
@@ -816,6 +835,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
         None => {
             warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
 
+            // Unregister escape key on failure path
+            let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+            let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
@@ -834,6 +857,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 
 /// Handle agent cancel (cancelled before threshold)
 async fn handle_agent_cancel(app_handle: &AppHandle) {
+    // Unregister escape key registered during transcription start
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+
     // Cancel agent mode using voice transcription
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
@@ -897,6 +924,10 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
 
 /// Handle agent force stop (timeout or stuck)
 async fn handle_agent_force_stop(app_handle: &AppHandle) {
+    // Unregister escape key registered during transcription start
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+
     // Force stop agent mode
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {

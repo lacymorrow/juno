@@ -2,7 +2,7 @@ use tauri::{
     AppHandle,
     Emitter,
     Manager,
-    menu::{Menu, SubmenuBuilder, MenuItemBuilder}
+    menu::{Menu, SubmenuBuilder, MenuItemBuilder, AboutMetadata}
 };
 use tracing::{info, error};
 use crate::constants;
@@ -18,10 +18,14 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     info!("🍎 Setting up application menu...");
 
-    // Juno Application Menu
-    let about_menu_item = MenuItemBuilder::new("About Juno")
-        .id(constants::app_menu_ids::ABOUT)
-        .build(app)?;
+    // Juno Application Menu — About uses native macOS about panel
+    let about_metadata = AboutMetadata {
+        name: Some("Juno".to_string()),
+        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        copyright: Some("Copyright \u{00a9} 2026 Lacy Morrow".to_string()),
+        comments: Some("AI-powered desktop automation for macOS".to_string()),
+        ..Default::default()
+    };
 
     let check_updates_menu_item = MenuItemBuilder::new("Check for Updates...")
         .id(constants::app_menu_ids::CHECK_FOR_UPDATES)
@@ -33,7 +37,7 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .build(app)?;
 
     let app_submenu = SubmenuBuilder::new(app, "Juno")
-        .item(&about_menu_item)
+        .about(Some(about_metadata))
         .separator()
         .item(&check_updates_menu_item)
         .separator()
@@ -106,9 +110,28 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+Ctrl+F")
         .build(app)?;
 
+    let zoom_in_menu_item = MenuItemBuilder::new("Zoom In")
+        .id(constants::app_menu_ids::ZOOM_IN)
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+
+    let zoom_out_menu_item = MenuItemBuilder::new("Zoom Out")
+        .id(constants::app_menu_ids::ZOOM_OUT)
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+
+    let actual_size_menu_item = MenuItemBuilder::new("Actual Size")
+        .id(constants::app_menu_ids::ACTUAL_SIZE)
+        .accelerator("CmdOrCtrl+0")
+        .build(app)?;
+
     let view_submenu = SubmenuBuilder::new(app, "View")
         .item(&toggle_floating_bar_menu_item)
         .item(&toggle_dev_panel_menu_item)
+        .separator()
+        .item(&zoom_in_menu_item)
+        .item(&zoom_out_menu_item)
+        .item(&actual_size_menu_item)
         .separator()
         .item(&show_devtools_menu_item)
         .item(&show_permissions_menu_item)
@@ -182,13 +205,7 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
 /// Handle menu events for the application
 pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
     match event_id {
-        // Juno Menu
-        constants::app_menu_ids::ABOUT => {
-            info!("[Menu] About menu item clicked");
-            if let Err(e) = app_handle.emit(events::menu::ABOUT_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "about", e));
-            }
-        }
+        // Juno Menu — About is handled natively via PredefinedMenuItem::about()
         constants::app_menu_ids::CHECK_FOR_UPDATES => {
             info!("[Menu] Check for Updates menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::UPDATE_CHECK_REQUESTED, ()) {
@@ -254,6 +271,29 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             }
         }
 
+        // View Menu - Zoom controls
+        constants::app_menu_ids::ZOOM_IN => {
+            info!("[Menu] Zoom In menu item clicked");
+            if let Err(e) = app_handle.emit(events::menu::ZOOM_IN, ()) {
+                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "zoom in", e));
+            }
+            // Also apply zoom directly to the focused webview
+            apply_zoom_to_focused_window(&app_handle, ZoomAction::In);
+        }
+        constants::app_menu_ids::ZOOM_OUT => {
+            info!("[Menu] Zoom Out menu item clicked");
+            if let Err(e) = app_handle.emit(events::menu::ZOOM_OUT, ()) {
+                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "zoom out", e));
+            }
+            apply_zoom_to_focused_window(&app_handle, ZoomAction::Out);
+        }
+        constants::app_menu_ids::ACTUAL_SIZE => {
+            info!("[Menu] Actual Size menu item clicked");
+            if let Err(e) = app_handle.emit(events::menu::RESET_ZOOM, ()) {
+                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "reset zoom", e));
+            }
+            apply_zoom_to_focused_window(&app_handle, ZoomAction::Reset);
+        }
 
         // Window Menu - handled by window management module
         constants::app_menu_ids::MINIMIZE |
@@ -270,25 +310,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // Help Menu
         constants::app_menu_ids::HELP => {
             info!("[Menu] Help menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "general") {
+            if let Err(e) = app_handle.emit(constants::events::menu::SHOW_HELP, "general") {
                 error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "help", e));
             }
         }
         constants::app_menu_ids::KEYBOARD_SHORTCUTS => {
             info!("[Menu] Keyboard Shortcuts menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "shortcuts") {
+            if let Err(e) = app_handle.emit(constants::events::menu::SHOW_HELP, "shortcuts") {
                 error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "keyboard shortcuts", e));
             }
         }
         constants::app_menu_ids::SEND_FEEDBACK => {
             info!("[Menu] Send Feedback menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "feedback") {
+            if let Err(e) = app_handle.emit(constants::events::menu::SHOW_FEEDBACK, "feedback") {
                 error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "feedback", e));
             }
         }
         constants::app_menu_ids::REPORT_ISSUE => {
             info!("[Menu] Report Issue menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "issue") {
+            if let Err(e) = app_handle.emit(constants::events::menu::SHOW_FEEDBACK, "issue") {
                 error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "report issue", e));
             }
         }
@@ -313,6 +353,57 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
 
         _ => {
             info!("[Menu] Unhandled menu event: {:?}", event_id);
+        }
+    }
+}
+
+/// Zoom action for webview zoom control
+enum ZoomAction {
+    In,
+    Out,
+    Reset,
+}
+
+/// Apply zoom to the currently focused webview window using JavaScript
+fn apply_zoom_to_focused_window(app_handle: &AppHandle, action: ZoomAction) {
+    // Try the main window first, then settings — these are the zoomable windows
+    let window_labels = ["main", "settings"];
+    for label in window_labels {
+        if let Some(window) = app_handle.get_webview_window(label) {
+            if window.is_focused().unwrap_or(false) {
+                let js = match action {
+                    ZoomAction::In => {
+                        "document.documentElement.style.zoom = String(Math.min(parseFloat(document.documentElement.style.zoom || '1') + 0.1, 3.0))"
+                    }
+                    ZoomAction::Out => {
+                        "document.documentElement.style.zoom = String(Math.max(parseFloat(document.documentElement.style.zoom || '1') - 0.1, 0.3))"
+                    }
+                    ZoomAction::Reset => {
+                        "document.documentElement.style.zoom = '1'"
+                    }
+                };
+                if let Err(e) = window.eval(js) {
+                    error!("[Menu] Failed to apply zoom to window '{}': {}", label, e);
+                }
+                return;
+            }
+        }
+    }
+    // If no focused window found, apply to main as a fallback
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let js = match action {
+            ZoomAction::In => {
+                "document.documentElement.style.zoom = String(Math.min(parseFloat(document.documentElement.style.zoom || '1') + 0.1, 3.0))"
+            }
+            ZoomAction::Out => {
+                "document.documentElement.style.zoom = String(Math.max(parseFloat(document.documentElement.style.zoom || '1') - 0.1, 0.3))"
+            }
+            ZoomAction::Reset => {
+                "document.documentElement.style.zoom = '1'"
+            }
+        };
+        if let Err(e) = window.eval(js) {
+            error!("[Menu] Failed to apply zoom to main window: {}", e);
         }
     }
 }
