@@ -62,13 +62,13 @@ pub struct ProviderInfo {
 pub struct BrainFactory;
 
 impl BrainFactory {
-    /// Initialize and validate provider configuration.
+    /// Warm up provider configuration by loading it once.
     /// Pass an AppHandle to read the user's saved API keys from the Tauri Store.
     /// Pass None for early startup before the Tauri app is initialized.
-    pub fn init(app_handle: Option<&tauri::AppHandle>) -> Result<(), AgentError> {
-        // Just validate that config is loadable — no env var setting needed
+    /// Note: This always succeeds — load_provider_config falls back to defaults.
+    /// Actual validation happens in create_brain() when a provider is first used.
+    pub fn init(app_handle: Option<&tauri::AppHandle>) {
         let _config = load_provider_config(app_handle);
-        Ok(())
     }
 
     /// Create a multi-agent orchestrator system
@@ -319,9 +319,11 @@ impl BrainFactory {
             Some(prompt_manager.get_default_system_prompt())
         };
 
-        // Override system prompt in the config if we loaded one
-        if let Some(sp) = system_prompt {
-            provider_config.system_prompt = Some(sp);
+        // Use PromptManager default only if the user hasn't configured a custom system prompt
+        if provider_config.system_prompt.is_none() {
+            if let Some(sp) = system_prompt {
+                provider_config.system_prompt = Some(sp);
+            }
         }
 
         match provider {

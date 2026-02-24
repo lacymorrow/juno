@@ -191,19 +191,13 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     result
 }
 
-/// Initialize AI provider settings
-pub fn init_ai_providers() -> Result<(), String> {
-    match agent::providers::factory::BrainFactory::init(None) {
-        Ok(()) => {
-            info!("Provider settings initialized from configuration");
-            Ok(())
-        }
-        Err(e) => {
-            warn!("Failed to initialize AI provider settings: {}", e);
-            info!("Continuing with environment variables or fallback defaults");
-            Err(e.to_string())
-        }
-    }
+/// Initialize AI provider settings.
+/// This warms up the provider config cache. It always succeeds because
+/// load_provider_config falls back to defaults. Actual provider validation
+/// happens lazily in create_brain() when a provider is first used.
+pub fn init_ai_providers() {
+    agent::providers::factory::BrainFactory::init(None);
+    info!("Provider settings initialized from configuration");
 }
 
 /// Clear permission cache to force re-check (useful after permission changes)
@@ -366,7 +360,7 @@ impl StartupSequence {
         let desktop_arc = Self::init_desktop();
 
         // Step 4: Initialize AI providers
-        let _ = Self::init_providers(); // Non-fatal if this fails
+        Self::init_providers();
 
         // Step 5: Handle CLI commands (may exit early)
         match Self::handle_cli(&desktop_arc) {
@@ -401,9 +395,9 @@ impl StartupSequence {
         init_desktop_engine()
     }
 
-    fn init_providers() -> Result<(), String> {
+    fn init_providers() {
         info!("🧠 Initializing AI providers...");
-        init_ai_providers()
+        init_ai_providers();
     }
 
     fn handle_cli(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
@@ -423,7 +417,7 @@ pub fn quick_startup() -> Result<(Option<Arc<Desktop>>, state::AppState), String
     init_tracing();
     init_environment();
     let desktop_arc = init_desktop_engine();
-    let _ = init_ai_providers();
+    init_ai_providers();
     let app_state = init_app_state(desktop_arc.clone());
     Ok((desktop_arc, app_state))
 }
