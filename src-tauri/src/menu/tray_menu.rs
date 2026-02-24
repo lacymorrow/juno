@@ -280,8 +280,8 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .show_menu_on_left_click(false)
         .icon(default_icon)
         .tooltip("Juno - Ready")
-        .on_tray_icon_event(|_tray, event| {
-            handle_tray_icon_event(event);
+        .on_tray_icon_event(|tray, event| {
+            handle_tray_icon_event(tray.app_handle(), event);
         })
         .build(app)?;
 
@@ -578,9 +578,16 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
     match event_id {
         tray_menu_ids::SHOW_HIDE => {
             info!("[TrayMenu] Show/Hide menu item clicked");
-            // For now, just trigger settings until we have the proper event
-            if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
-                error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "settings", e));
+            // Toggle main window visibility
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let is_visible = window.is_visible().unwrap_or(false);
+                if is_visible {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
             }
         }
         tray_menu_ids::NEW_CHAT => {
@@ -623,7 +630,7 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
-pub fn handle_tray_icon_event(event: tauri::tray::TrayIconEvent) {
+pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIconEvent) {
     match event {
         tauri::tray::TrayIconEvent::Click {
             button: MouseButton::Left,
@@ -631,7 +638,20 @@ pub fn handle_tray_icon_event(event: tauri::tray::TrayIconEvent) {
             ..
         } => {
             info!("[TrayIcon] Left click detected on tray icon");
-            // Implement left click behavior if needed
+            // Show/focus the main window when tray icon is left-clicked
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let is_visible = window.is_visible().unwrap_or(false);
+                let is_focused = window.is_focused().unwrap_or(false);
+                if is_visible && is_focused {
+                    // Window is visible and focused — hide it (toggle behavior)
+                    let _ = window.hide();
+                } else {
+                    // Window is hidden or not focused — show and focus it
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
         }
         tauri::tray::TrayIconEvent::Click {
             button: MouseButton::Right,

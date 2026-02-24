@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
@@ -15,9 +14,11 @@ import {
   AlertCircle,
   Info,
   Mic,
+  PanelTop,
+  Wand2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useEventListener } from "@/hooks/useEventListener";
 import AudioVisualizer from "../bar/audio-visualizer";
 
 // Permission status interface matching backend (snake_case)
@@ -124,6 +125,24 @@ const getOnboardingSteps = (
     ),
     action: "Continue",
   },
+  {
+    id: "floating-bar",
+    title: "The Floating Bar",
+    subtitle: "Your always-available AI companion",
+    description:
+      "The floating bar stays on your screen to show Juno\u2019s status and give you quick access to controls. Toggle it anytime with \u2318B.",
+    icon: <PanelTop className="w-12 h-12 text-primary" />,
+    action: "Continue",
+  },
+  {
+    id: "capabilities",
+    title: "What Juno Can Do",
+    subtitle: "AI-powered desktop automation",
+    description:
+      "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need and Juno handles the rest.",
+    icon: <Wand2 className="w-12 h-12 text-primary" />,
+    action: "Continue",
+  },
   ...(permissionsAlreadyGranted
     ? []
     : [
@@ -149,22 +168,22 @@ const getOnboardingSteps = (
   },
 ];
 
-// Generic keyboard shortcut component — works for any shortcut (agent mode, cancel, etc.)
-// backendEvent: the Tauri event name emitted by the backend when the global shortcut fires
-function KeyboardShortcut({
-  onShortcutPressed,
+/**
+ * Visual keyboard shortcut display.
+ * This component is PURELY visual — it renders key boxes and animates them.
+ * Shortcut detection is handled by the parent via backend Tauri events,
+ * since global shortcuts (Option+D) are captured at the OS level and never
+ * reach the webview as keydown events.
+ */
+function KeyboardShortcutDisplay({
   shortcutString,
-  backendEvent,
   defaultShortcut = "Option+D",
+  isActivated,
 }: {
-  onShortcutPressed: () => void;
   shortcutString?: string;
-  backendEvent?: string;
   defaultShortcut?: string;
+  isActivated: boolean;
 }) {
-  const [isComplete, setIsComplete] = useState(false);
-  const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
-
   const parseShortcut = (shortcut: string) => {
     const parts = shortcut.split("+").map((part) => part.trim().toLowerCase());
     const modifiers = parts.slice(0, -1);
@@ -172,172 +191,29 @@ function KeyboardShortcut({
     return { modifiers, key };
   };
 
-  const shortcut = parseShortcut(shortcutString || defaultShortcut);
-  const { modifiers, key } = shortcut;
+  const { modifiers, key } = parseShortcut(shortcutString || defaultShortcut);
 
-  // Use refs to avoid re-creating listeners on every keystroke
-  const pressedKeysRef = useRef(pressedKeys);
-  pressedKeysRef.current = pressedKeys;
-  const onShortcutPressedRef = useRef(onShortcutPressed);
-  onShortcutPressedRef.current = onShortcutPressed;
-  const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  // Listen for both frontend key events and backend shortcut detection
-  useEffect(() => {
-    let mounted = true;
-    let unlisten: (() => void) | undefined;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const newPressedKeys = new Set(pressedKeysRef.current);
-
-      // Check for modifiers
-      if (
-        e.altKey &&
-        (modifiers.includes("option") || modifiers.includes("alt"))
-      ) {
-        newPressedKeys.add("option");
-      }
-      if (
-        e.metaKey &&
-        (modifiers.includes("cmd") ||
-          modifiers.includes("command") ||
-          modifiers.includes("commandorcontrol"))
-      ) {
-        newPressedKeys.add("cmd");
-      }
-      if (
-        e.ctrlKey &&
-        (modifiers.includes("ctrl") ||
-          modifiers.includes("control") ||
-          modifiers.includes("commandorcontrol"))
-      ) {
-        newPressedKeys.add("ctrl");
-      }
-      if (e.shiftKey && modifiers.includes("shift")) {
-        newPressedKeys.add("shift");
-      }
-
-      // Check for key
-      if (e.key.toLowerCase() === key) {
-        newPressedKeys.add(key);
-      }
-
-      setPressedKeys(newPressedKeys);
-
-      // Check if correct combination is pressed (frontend detection)
-      const modifierPressed = modifiers.every((mod) => {
-        switch (mod) {
-          case "option":
-          case "alt":
-            return e.altKey;
-          case "cmd":
-          case "command":
-            return e.metaKey;
-          case "ctrl":
-          case "control":
-            return e.ctrlKey;
-          case "commandorcontrol":
-            return e.metaKey || e.ctrlKey;
-          case "shift":
-            return e.shiftKey;
-          default:
-            return false;
-        }
-      });
-
-      if (modifierPressed && e.key.toLowerCase() === key) {
-        e.preventDefault();
-        setIsComplete(true);
-        pendingTimers.current.push(setTimeout(() => {
-          if (mounted) onShortcutPressedRef.current();
-        }, 800));
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const newPressedKeys = new Set(pressedKeysRef.current);
-
-      if (!e.altKey) newPressedKeys.delete("option");
-      if (!e.metaKey) newPressedKeys.delete("cmd");
-      if (!e.ctrlKey) newPressedKeys.delete("ctrl");
-      if (!e.shiftKey) newPressedKeys.delete("shift");
-      if (e.key.toLowerCase() === key) newPressedKeys.delete(key);
-
-      setPressedKeys(newPressedKeys);
-    };
-
-    // Listen for backend shortcut detection events (if a backend event name is provided)
-    const setupBackendListener = async () => {
-      const eventName = backendEvent;
-      if (!eventName) return; // No backend event to listen for
-      try {
-        const fn = await listen(eventName, (event: any) => {
-          if (!mounted) return;
-          if (event.payload?.state === "pressed") {
-            setIsComplete(true);
-            const allShortcutKeys = new Set([...modifiers, key]);
-            setPressedKeys(allShortcutKeys);
-
-            pendingTimers.current.push(setTimeout(() => {
-              if (mounted) onShortcutPressedRef.current();
-            }, 800));
-
-            pendingTimers.current.push(setTimeout(() => {
-              if (mounted) setPressedKeys(new Set());
-            }, 1200));
-          }
-        });
-
-        if (mounted) {
-          unlisten = fn;
-        } else {
-          safeCleanupEventListener(fn);
-        }
-      } catch (error) {
-        console.warn("Failed to setup backend shortcut listener:", error);
-      }
-    };
-
-    setupBackendListener();
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      mounted = false;
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      safeCleanupEventListener(unlisten);
-      for (const timer of pendingTimers.current) {
-        clearTimeout(timer);
-      }
-      pendingTimers.current = [];
-    };
-  }, [modifiers, key, backendEvent]);
-
-  // Display the shortcut keys
   const displayKeys = () => {
     const modifierKeys = modifiers.map((mod) => {
       switch (mod) {
         case "option":
         case "alt":
-          return "⌥";
+          return "\u2325";
         case "cmd":
         case "command":
-          return "⌘";
+          return "\u2318";
         case "ctrl":
         case "control":
-          return "⌃";
+          return "\u2303";
         case "commandorcontrol":
-          return "⌘";
+          return "\u2318";
         case "shift":
-          return "⇧";
+          return "\u21E7";
         default:
           return mod.toUpperCase();
       }
     });
 
-    // Map special key names to shorter display labels
     const displayKey = (() => {
       switch (key) {
         case "escape":
@@ -365,35 +241,25 @@ function KeyboardShortcut({
 
   return (
     <div className="flex items-center justify-center gap-4 my-8 relative">
-      {keys.map((keySymbol, index) => {
-        const isLastKey = index === keys.length - 1;
-        const isPressed =
-          (keySymbol === "⌥" && pressedKeys.has("option")) ||
-          (keySymbol === "⌘" && pressedKeys.has("cmd")) ||
-          (keySymbol === "⌃" && pressedKeys.has("ctrl")) ||
-          (keySymbol === "⇧" && pressedKeys.has("shift")) ||
-          (isLastKey && pressedKeys.has(key));
+      {keys.map((keySymbol, index) => (
+        <div key={index} className="flex items-center">
+          <motion.div
+            className={`relative flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all duration-200 ${
+              isActivated
+                ? "bg-primary border-primary text-primary-foreground shadow-lg scale-95"
+                : "bg-card border-border text-card-foreground shadow-sm"
+            }`}
+            animate={isActivated ? { scale: 0.95 } : { scale: 1 }}
+          >
+            <span className="text-lg font-semibold">{keySymbol}</span>
+          </motion.div>
+          {index < keys.length - 1 && (
+            <div className="text-2xl font-light text-muted-foreground mx-2">+</div>
+          )}
+        </div>
+      ))}
 
-        return (
-          <div key={index} className="flex items-center">
-            <motion.div
-              className={`relative flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all duration-200 ${
-                isPressed
-                  ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
-                  : "bg-white border-gray-300 text-gray-700 shadow-sm"
-              }`}
-              animate={isPressed ? { scale: 0.95 } : { scale: 1 }}
-            >
-              <span className="text-lg font-semibold">{keySymbol}</span>
-            </motion.div>
-            {index < keys.length - 1 && (
-              <div className="text-2xl font-light text-gray-400 mx-2">+</div>
-            )}
-          </div>
-        );
-      })}
-
-      {isComplete && (
+      {isActivated && (
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -443,10 +309,10 @@ function PermissionCard({
     <div
       className={`p-4 rounded-xl border-2 transition-all duration-200 ${
         granted
-          ? "border-green-200 bg-green-50/30"
+          ? "border-green-200 bg-green-50/30 dark:border-green-800 dark:bg-green-950/30"
           : isRequired
-          ? "border-red-200 bg-red-50/30"
-          : "border-yellow-200 bg-yellow-50/30"
+          ? "border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-red-950/30"
+          : "border-yellow-200 bg-yellow-50/30 dark:border-yellow-800 dark:bg-yellow-950/30"
       }`}
     >
       <div className="flex items-start gap-4">
@@ -455,10 +321,10 @@ function PermissionCard({
           <div
             className={`w-10 h-10 rounded-full flex items-center justify-center ${
               granted
-                ? "bg-green-100 text-green-600"
+                ? "bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400"
                 : isRequired
-                ? "bg-red-100 text-red-600"
-                : "bg-yellow-100 text-yellow-600"
+                ? "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400"
+                : "bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-400"
             }`}
           >
             {granted ? (
@@ -475,26 +341,26 @@ function PermissionCard({
         {/* Content */}
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-semibold text-gray-900">{permission.title}</h4>
+            <h4 className="font-semibold text-foreground">{permission.title}</h4>
             {isRequired && (
-              <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium">
+              <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 px-2 py-1 rounded-full font-medium">
                 Required
               </span>
             )}
             {granted && (
-              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+              <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 px-2 py-1 rounded-full font-medium">
                 Granted
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-600 mb-3">{permission.description}</p>
+          <p className="text-sm text-muted-foreground mb-3">{permission.description}</p>
 
           {!granted && permissionStatus && (
             <div
               className={`text-xs p-2 rounded-md mb-3 ${
                 isRequired
-                  ? "bg-red-50 border border-red-200 text-red-700"
-                  : "bg-yellow-50 border border-yellow-200 text-yellow-700"
+                  ? "bg-red-50 border border-red-200 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300"
+                  : "bg-yellow-50 border border-yellow-200 text-yellow-700 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300"
               }`}
             >
               <div className="flex items-start gap-1">
@@ -516,8 +382,8 @@ function PermissionCard({
                 disabled={isRequesting}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                   isRequired
-                    ? "bg-blue-600 hover:bg-blue-700 text-white"
-                    : "bg-gray-600 hover:bg-gray-700 text-white"
+                    ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    : "bg-muted-foreground hover:bg-muted-foreground/90 text-background"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {isRequesting ? (
@@ -536,7 +402,7 @@ function PermissionCard({
           )}
 
           {granted && (
-            <div className="flex items-center gap-2 text-sm text-green-700">
+            <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-300">
               <CheckCircle className="w-4 h-4" />
               <span className="font-medium">Ready to use</span>
             </div>
@@ -600,17 +466,29 @@ export default function OnboardingFlow({
     };
   }, []);
 
-  console.log(
-    "OnboardingFlow: State - currentStep:",
-    currentStep,
-    "isComplete:",
-    isComplete,
-    "shortcutPressed:",
-    shortcutPressed,
-    "actualPermissionsGranted:",
-    actualPermissionsGranted,
-    "permissionsAlreadyGranted prop:",
-    permissionsAlreadyGranted
+  // ── Backend-driven shortcut detection ──
+  // Global shortcuts (Option+D, Escape) are captured at the OS level by
+  // tauri_plugin_global_shortcut — they NEVER reach the webview as keydown events.
+  // The backend always emits these events even during onboarding (visual feedback mode).
+  // We use useEventListener (the project's canonical Tauri event hook) to detect them.
+  useEventListener<{ state: string; shortcut: string }>(
+    EVENTS.SHORTCUTS_AGENT_MODE,
+    (payload) => {
+      if (payload.state === "pressed" && !shortcutPressed) {
+        console.log("[Onboarding] Agent mode shortcut detected via backend event");
+        setShortcutPressed(true);
+      }
+    }
+  );
+
+  useEventListener<{ state: string; shortcut: string }>(
+    EVENTS.SHORTCUTS_ESCAPE_KEY,
+    (payload) => {
+      if (payload.state === "pressed" && !escapePressed) {
+        console.log("[Onboarding] Escape key detected via backend event");
+        setEscapePressed(true);
+      }
+    }
   );
 
   // Function to check current permissions status
@@ -629,6 +507,15 @@ export default function OnboardingFlow({
       setPermissionsError(error as string);
       return false;
     }
+  };
+
+  // Check if required permissions (accessibility + screen recording) are granted
+  const areRequiredPermissionsGranted = (): boolean => {
+    if (!permissionsState) return false;
+    return (
+      permissionsState.accessibility.granted &&
+      permissionsState.screen_recording.granted
+    );
   };
 
   // Individual permission request functions
@@ -747,13 +634,17 @@ export default function OnboardingFlow({
     onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
   );
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     // Block navigation from keyboard shortcut steps if shortcut hasn't been pressed
     const currentStepData = onboardingSteps[currentStep];
     if (currentStepData?.id === "shortcut" && !shortcutPressed) {
       return;
     }
     if (currentStepData?.id === "cancel" && !escapePressed) {
+      return;
+    }
+    // Block navigation from permissions step if required permissions not granted
+    if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
       return;
     }
 
@@ -763,11 +654,7 @@ export default function OnboardingFlow({
       setIsComplete(true);
       onComplete();
     }
-  };
-
-  const handleShortcutPressed = () => {
-    setShortcutPressed(true);
-  };
+  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, onComplete]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
@@ -799,23 +686,52 @@ export default function OnboardingFlow({
     }
   };
 
+  // Keyboard navigation: Enter key advances steps
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleNext();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleNext]);
+
   if (isComplete) {
     return null;
   }
 
   const step = onboardingSteps[currentStep];
 
+  // Determine if continue button should be disabled
+  const isContinueDisabled =
+    (step.id === "shortcut" && !shortcutPressed) ||
+    (step.id === "cancel" && !escapePressed) ||
+    (step.id === "permissions" && !areRequiredPermissionsGranted());
+
+  // Determine if skip should be hidden (permissions step with required perms not granted)
+  const isSkipHidden =
+    currentStep === onboardingSteps.length - 1 ||
+    (step.id === "permissions" && !areRequiredPermissionsGranted());
+
   return (
     <>
       <div className="fixed inset-0 flex items-center justify-center z-50">
-        <div className="bg-white/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto p-10">
+        <div className="bg-background/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto p-10">
           {/* Progress indicator */}
-          <div className="flex gap-2 mb-10">
+          <div
+            className="flex gap-2 mb-10"
+            role="progressbar"
+            aria-valuenow={currentStep + 1}
+            aria-valuemax={onboardingSteps.length}
+            aria-label={`Step ${currentStep + 1} of ${onboardingSteps.length}`}
+          >
             {onboardingSteps.map((_, index) => (
               <div
                 key={index}
                 className={`h-1 flex-1 rounded-full transition-all duration-500 ${
-                  index <= currentStep ? "bg-blue-500" : "bg-gray-200"
+                  index <= currentStep ? "bg-primary" : "bg-muted"
                 }`}
               />
             ))}
@@ -836,27 +752,26 @@ export default function OnboardingFlow({
               {/* Content */}
               <div className="space-y-4 mb-10">
                 <div>
-                  <h2 className="text-3xl font-light text-gray-900 mb-3">
+                  <h2 className="text-3xl font-light text-foreground mb-3">
                     {step.title}
                   </h2>
-                  <p className="text-sm text-blue-600 font-medium mb-4">
+                  <p className="text-sm text-primary font-medium mb-4">
                     {step.subtitle}
                   </p>
                 </div>
 
-                <p className="text-gray-600 leading-relaxed text-base">
+                <p className="text-muted-foreground leading-relaxed text-base">
                   {step.description}
                 </p>
 
-                {/* Keyboard shortcut for shortcut step */}
+                {/* Keyboard shortcut for shortcut step — visual only, detection via backend */}
                 {step.id === "shortcut" && (
                   <div className="relative">
-                    <KeyboardShortcut
-                      onShortcutPressed={handleShortcutPressed}
+                    <KeyboardShortcutDisplay
                       shortcutString={keyboardShortcuts?.agent_mode_toggle}
-                      backendEvent={EVENTS.SHORTCUTS_AGENT_MODE}
+                      isActivated={shortcutPressed}
                     />
-                    <p className="text-sm text-gray-500 mt-4 text-center">
+                    <p className="text-sm text-muted-foreground mt-4 text-center">
                       {shortcutPressed
                         ? "Perfect! You've got it."
                         : keyboardShortcuts?.agent_mode_toggle
@@ -869,16 +784,15 @@ export default function OnboardingFlow({
                   </div>
                 )}
 
-                {/* Cancel shortcut for cancel step */}
+                {/* Cancel shortcut for cancel step — visual only, detection via backend */}
                 {step.id === "cancel" && (
                   <div className="relative">
-                    <KeyboardShortcut
-                      onShortcutPressed={() => setEscapePressed(true)}
+                    <KeyboardShortcutDisplay
                       shortcutString={keyboardShortcuts?.stop_current_task}
-                      backendEvent={EVENTS.SHORTCUTS_ESCAPE_KEY}
                       defaultShortcut="Escape"
+                      isActivated={escapePressed}
                     />
-                    <p className="text-sm text-gray-500 mt-4 text-center">
+                    <p className="text-sm text-muted-foreground mt-4 text-center">
                       {escapePressed
                         ? "Perfect! You've got it."
                         : keyboardShortcuts?.stop_current_task
@@ -896,16 +810,16 @@ export default function OnboardingFlow({
                   <div className="space-y-4 mt-8 text-left">
                     {/* Header */}
                     <div className="text-center mb-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      <h3 className="text-lg font-semibold text-foreground mb-2">
                         Grant Permissions
                       </h3>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-muted-foreground">
                         Click "Grant Permission" for each item below to enable
                         full functionality
                       </p>
                       {permissionsError && (
-                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
-                          <p className="text-sm text-red-700">
+                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
+                          <p className="text-sm text-red-700 dark:text-red-300">
                             Error: {permissionsError}
                           </p>
                         </div>
@@ -943,28 +857,29 @@ export default function OnboardingFlow({
 
                     {/* Summary */}
                     {permissionsState && (
-                      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                      <div className="mt-6 p-4 bg-muted rounded-lg">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {permissionsState.all_granted ? (
+                            {areRequiredPermissionsGranted() ? (
                               <>
-                                <CheckCircle className="w-5 h-5 text-green-600" />
-                                <span className="font-medium text-green-800">
+                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                <span className="font-medium text-green-800 dark:text-green-300">
                                   All required permissions granted!
                                 </span>
                               </>
                             ) : (
                               <>
-                                <AlertCircle className="w-5 h-5 text-orange-600" />
-                                <span className="font-medium text-orange-800">
-                                  Some permissions still needed
+                                <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                                <span className="font-medium text-orange-800 dark:text-orange-300">
+                                  Accessibility and Screen Recording are required to continue.
                                 </span>
                               </>
                             )}
                           </div>
                           <button
                             onClick={checkPermissionsStatus}
-                            className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                            className="text-sm text-primary hover:text-primary/80 flex items-center gap-1"
+                            aria-label="Refresh permission status"
                           >
                             <RefreshCw className="w-4 h-4" />
                             Refresh
@@ -978,36 +893,35 @@ export default function OnboardingFlow({
 
               {/* Actions */}
               <div className="flex gap-4">
-                {/* Skip button: "Skip All" on welcome, "Skip Step" on middle steps, hidden on final */}
-                {currentStep === onboardingSteps.length - 1 ? null : currentStep === 0 ? (
+                {/* Skip button: hidden on final step and on permissions step when required perms not granted */}
+                {isSkipHidden ? null : currentStep === 0 ? (
                   <button
                     onClick={handleSkip}
-                    className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    aria-label="Skip onboarding"
                   >
                     Skip
                   </button>
                 ) : (
                   <button
                     onClick={handleSkipStep}
-                    className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    aria-label="Skip this step"
                   >
                     Skip
                   </button>
                 )}
 
-                {/* Continue button - disable for shortcut/cancel steps until completed */}
+                {/* Continue button - disable for shortcut/cancel/permissions steps until conditions met */}
                 <button
                   onClick={handleNext}
-                  disabled={
-                    (step.id === "shortcut" && !shortcutPressed) ||
-                    (step.id === "cancel" && !escapePressed)
-                  }
+                  disabled={isContinueDisabled}
                   className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${
-                    (step.id === "shortcut" && !shortcutPressed) ||
-                    (step.id === "cancel" && !escapePressed)
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl"
+                    isContinueDisabled
+                      ? "bg-muted text-muted-foreground cursor-not-allowed"
+                      : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl"
                   }`}
+                  aria-label={step.action}
                 >
                   {step.action}
                   <ChevronRight className="w-4 h-4" />

@@ -42,7 +42,7 @@ use serde_json::json;
 /// - `browser_screenshot`: Take page or element screenshots
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let browser_tools = get_browser_tool_definitions();
 /// for tool in browser_tools {
 ///     provider.register_tool(tool).await;

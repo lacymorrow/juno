@@ -199,7 +199,14 @@ impl ToolConfigManager {
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and application shutdown for persistence.
     pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), String> {
-        let tool_settings = self.to_centralized_settings()?;
+        // Read existing settings to preserve fields that ToolConfigManager doesn't own
+        // (e.g., smooth_mouse_movement is a UI setting, not a tool config concern)
+        let existing_smooth = settings_manager.get_tool_settings().await
+            .map(|s| s.smooth_mouse_movement)
+            .unwrap_or(true);
+
+        let mut tool_settings = self.to_centralized_settings()?;
+        tool_settings.smooth_mouse_movement = existing_smooth;
         settings_manager.set_tool_settings(&tool_settings).await?;
         info!("Saved tool configuration to centralized settings");
         Ok(())
@@ -267,6 +274,11 @@ impl ToolConfigManager {
 
     /// Convert from ToolConfigManager to centralized ToolSettings.
     /// Handles schema differences between the two formats.
+    ///
+    /// WARNING: This only populates fields owned by ToolConfigManager (tools, categories, MCP servers).
+    /// Fields owned by other subsystems (e.g., `smooth_mouse_movement`) get default values.
+    /// Callers MUST use `save_to_centralized_settings()` which preserves existing values
+    /// via read-modify-write. Do NOT call this directly and save the result.
     fn to_centralized_settings(&self) -> Result<ToolSettings, String> {
         let mut tools = HashMap::new();
         let mut category_enabled = HashMap::new();
@@ -311,7 +323,7 @@ impl ToolConfigManager {
             tools,
             category_enabled,
             mcp_servers,
-            smooth_mouse_movement: false, // Default to false for new installations
+            smooth_mouse_movement: true, // Default to true — callers should preserve existing value when updating
         })
     }
 

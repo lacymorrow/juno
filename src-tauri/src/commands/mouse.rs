@@ -404,7 +404,7 @@ pub(crate) async fn mouse_move(
         validators::valid_coordinates(x, y)?;
     }
 
-    // Check if smooth mouse movement is enabled
+    // Check if smooth mouse movement is enabled (default: true)
     let use_smooth_movement = {
         // Try to get from centralized settings first
         if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
@@ -412,11 +412,11 @@ pub(crate) async fn mouse_move(
                 tool_settings.smooth_mouse_movement
             } else {
                 // Fallback to runtime state
-                state.get_smooth_mouse_movement().unwrap_or(false)
+                state.get_smooth_mouse_movement().unwrap_or(true)
             }
         } else {
             // Fallback to runtime state
-            state.get_smooth_mouse_movement().unwrap_or(false)
+            state.get_smooth_mouse_movement().unwrap_or(true)
         }
     };
 

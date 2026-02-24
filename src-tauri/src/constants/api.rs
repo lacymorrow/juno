@@ -33,14 +33,20 @@ pub mod computer_use_api_types {
     /// Computer Use API Version 2024-10-22
     pub const COMPUTER_20241022: &str = "computer_20241022";
 
-    /// Computer Use API Version 2025-01-24 (Latest)
+    /// Computer Use API Version 2025-01-24
     pub const COMPUTER_20250124: &str = "computer_20250124";
 
+    /// Computer Use API Version 2025-11-24 (Opus 4.5+)
+    pub const COMPUTER_20251124: &str = "computer_20251124";
+
     /// Text Editor API Type
-    pub const EDIT_TOOL_20250124: &str = "str_replace_based_edit_tool_20250124";
+    pub const EDIT_TOOL_20250124: &str = "text_editor_20250124";
 
     /// Enhanced Text Editor API Type with undo support
-    pub const EDIT_TOOL_20250429: &str = "str_replace_based_edit_tool_20250429";
+    pub const EDIT_TOOL_20250429: &str = "text_editor_20250429";
+
+    /// Text Editor API Type for Opus 4.5+ models
+    pub const EDIT_TOOL_20250728: &str = "text_editor_20250728";
 
     /// Bash Command Execution API Type
     pub const BASH_20250124: &str = "bash_20250124";
@@ -72,10 +78,17 @@ pub mod tool_version_groups {
         BASH_20250124,
     ];
 
-    /// Tools available in computer use 2025-01-24 (Latest)
+    /// Tools available in computer use 2025-01-24
     pub const COMPUTER_USE_2025_01_24_TOOLS: &[&str] = &[
         COMPUTER_20250124,
         EDIT_TOOL_20250429,
+        BASH_20250124,
+    ];
+
+    /// Tools available in computer use 2025-11-24 (Opus 4.5+)
+    pub const COMPUTER_USE_2025_11_24_TOOLS: &[&str] = &[
+        COMPUTER_20251124,
+        EDIT_TOOL_20250728,
         BASH_20250124,
     ];
 }

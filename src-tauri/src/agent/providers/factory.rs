@@ -6,7 +6,7 @@ use crate::agent::implementations::agent_runner::DefaultAgentRunner;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
-use crate::agent::providers::config::{apply_provider_settings_to_env, AgentMode, ProviderConfig};
+use crate::agent::providers::config::{load_provider_config, AgentMode, ProviderConfig};
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
@@ -16,74 +16,13 @@ use crate::agent::tools::accessibility_tools::AccessibilityTools;
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::state::AppState;
 
-// Model ID Constants - Single source of truth
-pub mod model_ids {
-    // Anthropic Claude Models — Current Generation
-    pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
-    pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
-    pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
-
-    // Anthropic Claude Models — Legacy
-    pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
-    pub const CLAUDE_OPUS_4_1: &str = "claude-opus-4-1-20250805";
-    pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
-    pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
-
-    /// Models that require the 2025-11-24 computer-use beta flag
-    pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6];
-
-    // OpenAI Models
-    pub const OPENAI_CUA: &str = "computer-use-preview";
-    pub const OPENAI_CODEX_5_3: &str = "gpt-5.3-codex";
-
-    // Google Gemini Models
-    pub const GEMINI_2_5_COMPUTER_USE_PREVIEW: &str = "gemini-2.5-computer-use-preview-10-2025";
-}
+use super::types::{Provider, ModelInfo};
 
 /// Unified agent runtime - can be either single or multi-agent
 #[allow(clippy::large_enum_variant)]
 pub enum AgentRuntime {
     Single(Box<dyn AgentRunnable + Send + Sync>),
     Multi(MultiAgentOrchestrator),
-}
-
-/// Model categories based on capabilities
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub enum ModelCategory {
-    ComputerUse, // Models that support computer automation
-    GeneralChat, // Models for general conversation and text generation
-}
-
-/// Model definition with all metadata
-#[derive(Debug, Clone)]
-pub struct ModelDefinition {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub category: ModelCategory,
-    pub supports_computer_use: bool,
-    pub is_recommended: bool,
-}
-
-/// Model information for serialization (UI display)
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub category: ModelCategory,
-    pub supports_computer_use: bool,
-    pub is_recommended: bool,
-}
-
-impl From<&ModelDefinition> for ModelInfo {
-    fn from(def: &ModelDefinition) -> Self {
-        ModelInfo {
-            id: def.id.to_string(),
-            name: def.name.to_string(),
-            category: def.category.clone(),
-            supports_computer_use: def.supports_computer_use,
-            is_recommended: def.is_recommended,
-        }
-    }
 }
 
 impl AgentRuntime {
@@ -105,234 +44,6 @@ impl AgentRuntime {
     }
 }
 
-/// Enumeration of available AI providers
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Provider {
-    Anthropic,
-    OpenAI,
-    Rig,
-    Gemini,
-    // Add other providers as needed
-}
-
-impl Provider {
-    /// Convert a string to a Provider enum
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "anthropic" => Some(Provider::Anthropic),
-            "openai" => Some(Provider::OpenAI),
-            "rig" => Some(Provider::Rig),
-            "gemini" => Some(Provider::Gemini),
-            // Add other provider matches as needed
-            _ => None,
-        }
-    }
-
-    /// Get display name for the provider
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Provider::Anthropic => "Anthropic Claude",
-            Provider::OpenAI => "OpenAI GPT",
-            Provider::Rig => "Rig AI Agent",
-            Provider::Gemini => "Google Gemini",
-        }
-    }
-
-    /// Get description for the provider
-    pub fn description(&self) -> &'static str {
-        match self {
-            Provider::Anthropic => {
-                "High-performance AI assistant with advanced reasoning capabilities"
-            }
-            Provider::OpenAI => "OpenAI's GPT models for conversational AI and text generation",
-            Provider::Rig => "Rig framework for building AI agents with structured outputs",
-            Provider::Gemini => "Google's Gemini models for multimodal AI capabilities",
-        }
-    }
-
-    /// Get the correct computer-use beta flag for the given model
-    pub fn computer_use_beta_flag(&self, model: &str) -> &'static str {
-        use crate::constants::api::beta_flags;
-
-        match self {
-            Provider::Anthropic => {
-                if model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) {
-                    beta_flags::COMPUTER_USE_2025_11_24
-                } else {
-                    beta_flags::COMPUTER_USE_2025_01_24
-                }
-            }
-            _ => "",
-        }
-    }
-
-    /// Get model definitions for the provider
-    pub fn model_definitions(&self) -> &'static [ModelDefinition] {
-        match self {
-            Provider::Anthropic => {
-                &[
-                    // Current generation
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4_6,
-                        name: "Claude Opus 4.6",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: true,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_SONNET_4_5,
-                        name: "Claude Sonnet 4.5",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_HAIKU_4_5,
-                        name: "Claude Haiku 4.5",
-                        category: ModelCategory::GeneralChat,
-                        supports_computer_use: false,
-                        is_recommended: false,
-                    },
-                    // Legacy models
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4_5,
-                        name: "Claude Opus 4.5",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4_1,
-                        name: "Claude Opus 4.1",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_SONNET_4,
-                        name: "Claude Sonnet 4",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4,
-                        name: "Claude Opus 4",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                ]
-            }
-            Provider::OpenAI => &[
-                ModelDefinition {
-                    id: model_ids::OPENAI_CODEX_5_3,
-                    name: "GPT-5.3 Codex",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::OPENAI_CUA,
-                    name: "Computer-Using Agent (CUA)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-            ],
-            Provider::Rig => &[
-                ModelDefinition {
-                    id: model_ids::OPENAI_CUA,
-                    name: "Computer-Using Agent (CUA) via Rig",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
-            Provider::Gemini => &[
-                ModelDefinition {
-                    id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
-                    name: "Gemini 2.5 Computer Use (Preview)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
-        }
-    }
-
-    /// Get available models for the provider (derived from model definitions)
-    pub fn models(&self) -> Vec<String> {
-        self.model_definitions()
-            .iter()
-            .map(|def| def.id.to_string())
-            .collect()
-    }
-
-    /// Check if a model supports computer use capabilities
-    pub fn model_supports_computer_use(&self, model: &str) -> bool {
-        self.model_definitions()
-            .iter()
-            .find(|def| def.id == model)
-            .map(|def| def.supports_computer_use)
-            .unwrap_or(false)
-    }
-
-    /// Get model category (ComputerUse or GeneralChat)
-    pub fn get_model_category(&self, model: &str) -> ModelCategory {
-        self.model_definitions()
-            .iter()
-            .find(|def| def.id == model)
-            .map(|def| def.category.clone())
-            .unwrap_or(ModelCategory::GeneralChat)
-    }
-
-    /// Get default model for the provider
-    pub fn default_model(&self) -> &'static str {
-        // Find the first recommended model, or fallback to the first model
-        self.model_definitions()
-            .iter()
-            .find(|def| def.is_recommended)
-            .or_else(|| self.model_definitions().first())
-            .map(|def| def.id)
-            .unwrap_or_else(|| {
-                // Fallback constants if no definitions exist (shouldn't happen)
-                match self {
-                    Provider::Anthropic => model_ids::CLAUDE_OPUS_4_6,
-                    Provider::OpenAI => model_ids::OPENAI_CUA,
-                    Provider::Rig => model_ids::OPENAI_CUA,
-                    Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
-                }
-            })
-    }
-
-    /// Get provider ID string
-    pub fn id(&self) -> &'static str {
-        match self {
-            Provider::Anthropic => "anthropic",
-            Provider::OpenAI => "openai",
-            Provider::Rig => "rig",
-            Provider::Gemini => "gemini",
-        }
-    }
-
-    /// Get detailed model information with capabilities (derived from model definitions)
-    pub fn get_model_info(&self) -> Vec<ModelInfo> {
-        self.model_definitions()
-            .iter()
-            .map(ModelInfo::from)
-            .collect()
-    }
-
-    /// Check if provider supports computer use capabilities
-    pub fn supports_computer_use(&self) -> bool {
-        self.model_definitions()
-            .iter()
-            .any(|def| def.supports_computer_use)
-    }
-}
-
 /// Struct containing provider information for UI display
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProviderInfo {
@@ -351,9 +62,13 @@ pub struct ProviderInfo {
 pub struct BrainFactory;
 
 impl BrainFactory {
-    /// Initialize configuration and apply settings to environment
-    pub fn init() -> Result<(), AgentError> {
-        apply_provider_settings_to_env()
+    /// Initialize and validate provider configuration.
+    /// Pass an AppHandle to read the user's saved API keys from the Tauri Store.
+    /// Pass None for early startup before the Tauri app is initialized.
+    pub fn init(app_handle: Option<&tauri::AppHandle>) -> Result<(), AgentError> {
+        // Just validate that config is loadable — no env var setting needed
+        let _config = load_provider_config(app_handle);
+        Ok(())
     }
 
     /// Create a multi-agent orchestrator system
@@ -482,7 +197,7 @@ impl BrainFactory {
     /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            "anthropic".to_string() // Default to Anthropic for new app
+            super::config::DEFAULT_PROVIDER.id().to_string()
         });
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
@@ -523,7 +238,7 @@ impl BrainFactory {
                         env::var("OPENAI_API_KEY").is_ok()
                             || config
                                 .as_ref()
-                                .and_then(|c| c.get_provider_settings("openai"))
+                                .and_then(|c| c.get_provider_settings(Provider::OpenAI.id()))
                                 .and_then(|s| s.api_key.as_ref())
                                 .is_some()
                             || config
@@ -561,141 +276,127 @@ impl BrainFactory {
         Self::create_brain_with_app_handle(None).await
     }
 
-    /// Create an AgentBrain implementation with app handle for proper prompt loading
+    /// Create an AgentBrain implementation with app handle for proper prompt loading.
+    /// Configuration flows: Store → ProviderConfig struct → from_config() constructor.
+    /// No env::set_var() calls — reading env vars is safe and used only as fallback for api_key.
     pub async fn create_brain_with_app_handle(
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            "anthropic".to_string() // Default to Anthropic for new app
-        });
-        info!("Attempting to use AI provider: {}", provider_str);
-        env::set_var("AI_PROVIDER", &provider_str);
-        apply_provider_settings_to_env()?;
+        let config = load_provider_config(app_handle);
+
+        // Determine active provider: AI_PROVIDER env var overrides stored config
+        let provider_id_str = env::var("AI_PROVIDER")
+            .unwrap_or_else(|_| config.active_provider.clone());
+        let provider = Provider::from_str(&provider_id_str)
+            .ok_or_else(|| AgentError::ConfigurationError(
+                format!("Unknown provider: '{}'", provider_id_str)
+            ))?;
+        info!("Attempting to use AI provider: {}", provider.id());
+
+        let mut provider_config = config.resolve_provider(provider.clone())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                format!("Provider '{}' not found in config", provider.id())
+            ))?;
 
         // Load system prompt from prompt manager if app_handle is available
         let system_prompt = if let Some(handle) = app_handle {
-            // Create settings manager from app handle
-            let settings_manager =
-                match crate::settings::manager::SettingsManager::new(handle.clone()) {
-                    Ok(manager) => manager,
-                    Err(e) => {
-                        warn!("Failed to create settings manager: {}. Using defaults.", e);
-                        // Use default prompt instead of returning
-                        let prompt_manager = crate::agent::prompts::PromptManager::new();
-                        return Ok(Box::new(AnthropicBrain::new(
-                            env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
-                            None,
-                            None,
-                            Some(prompt_manager.get_default_system_prompt()),
-                        )?)
-                            as Box<dyn AgentBrain + Send + Sync>);
-                    }
-                };
-
-            // Load prompt manager with centralized settings
-            let prompt_manager = crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
-                warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
-                crate::agent::prompts::PromptManager::new()
-            });
-            Some(prompt_manager.get_default_system_prompt())
+            match crate::settings::manager::SettingsManager::new(handle.clone()) {
+                Ok(settings_manager) => {
+                    let prompt_manager = crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
+                        warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
+                        crate::agent::prompts::PromptManager::new()
+                    });
+                    Some(prompt_manager.get_default_system_prompt())
+                }
+                Err(e) => {
+                    warn!("Failed to create settings manager: {}. Using default prompt.", e);
+                    let prompt_manager = crate::agent::prompts::PromptManager::new();
+                    Some(prompt_manager.get_default_system_prompt())
+                }
+            }
         } else {
-            // Fallback to environment variable or default prompt
-            env::var("ANTHROPIC_SYSTEM_PROMPT").ok().or_else(|| {
-                // Use default prompt manager to get the template
-                let prompt_manager = crate::agent::prompts::PromptManager::new();
-                Some(prompt_manager.get_default_system_prompt())
-            })
+            let prompt_manager = crate::agent::prompts::PromptManager::new();
+            Some(prompt_manager.get_default_system_prompt())
         };
 
-        match Provider::from_str(&provider_str) {
-            Some(Provider::Anthropic) => {
-                info!("Initializing Anthropic brain with system prompt...");
-                let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
-                    AgentError::ConfigurationError(
-                        "ANTHROPIC_API_KEY environment variable not set".to_string(),
-                    )
-                })?;
-                let model = env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = env::var("ANTHROPIC_MAX_TOKENS")
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok());
+        // Override system prompt in the config if we loaded one
+        if let Some(sp) = system_prompt {
+            provider_config.system_prompt = Some(sp);
+        }
 
-                AnthropicBrain::new(api_key, model, max_tokens, system_prompt)
+        match provider {
+            Provider::Anthropic => {
+                info!("Initializing Anthropic brain with system prompt...");
+                AnthropicBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::OpenAI) => {
+            Provider::OpenAI => {
                 info!("Initializing OpenAI brain...");
-                OpenAIBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                OpenAIBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::Rig) => {
+            Provider::Rig => {
                 info!("Initializing Rig brain...");
-                RigBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                RigBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::Gemini) => {
+            Provider::Gemini => {
                 info!("Initializing Gemini brain...");
-                GeminiBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                GeminiBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            None => Err(AgentError::ConfigurationError(format!(
-                "Unknown AI provider: {}",
-                provider_str
-            ))),
         }
     }
 
-    /// Create an AgentBrain implementation with a custom system prompt
+    /// Create an AgentBrain implementation with a custom system prompt.
+    /// When `app_handle` is provided, reads the user's API keys from the Tauri Store.
+    /// Without it, falls back to environment variables only.
     pub fn create_brain_with_system_prompt(
         system_prompt: String,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            "anthropic".to_string() // Default to Anthropic for new app
-        });
+        let config = load_provider_config(app_handle);
+
+        let provider_id_str = env::var("AI_PROVIDER")
+            .unwrap_or_else(|_| config.active_provider.clone());
+        let provider = Provider::from_str(&provider_id_str)
+            .ok_or_else(|| AgentError::ConfigurationError(
+                format!("Unknown provider: '{}'", provider_id_str)
+            ))?;
         info!(
             "Attempting to use AI provider: {} with custom system prompt",
-            provider_str
+            provider.id()
         );
-        apply_provider_settings_to_env()?;
 
-        match Provider::from_str(&provider_str) {
-            Some(Provider::Anthropic) => {
+        let mut provider_config = config.resolve_provider(provider.clone())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                format!("Provider '{}' not found in config", provider.id())
+            ))?;
+
+        // Override with custom system prompt
+        provider_config.system_prompt = Some(system_prompt);
+
+        match provider {
+            Provider::Anthropic => {
                 info!("Initializing Anthropic brain with custom system prompt...");
-                let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-                    AgentError::ConfigurationError(
-                        "ANTHROPIC_API_KEY environment variable not set".to_string(),
-                    )
-                })?;
-                let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS")
-                    .ok()
-                    .and_then(|s| s.parse::<u32>().ok());
-
-                AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
+                AnthropicBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::OpenAI) => {
+            Provider::OpenAI => {
                 info!("Initializing OpenAI brain with custom system prompt...");
-                // TODO: Implement custom system prompt for OpenAI
-                Err(AgentError::ConfigurationError(
-                    "Custom system prompts not yet implemented for OpenAI".to_string(),
-                ))
+                OpenAIBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::Rig) => {
+            Provider::Rig => {
                 info!("Initializing Rig brain with custom system prompt...");
-                // TODO: Implement custom system prompt for Rig
-                Err(AgentError::ConfigurationError(
-                    "Custom system prompts not yet implemented for Rig".to_string(),
-                ))
+                RigBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            Some(Provider::Gemini) => {
+            Provider::Gemini => {
                 info!("Initializing Gemini brain with custom system prompt...");
-                // TODO: Implement custom system prompt for Gemini
-                Err(AgentError::ConfigurationError(
-                    "Custom system prompts not yet implemented for Gemini".to_string(),
-                ))
+                GeminiBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
-            None => Err(AgentError::ConfigurationError(format!(
-                "Unknown AI provider: {}",
-                provider_str
-            ))),
         }
     }
 

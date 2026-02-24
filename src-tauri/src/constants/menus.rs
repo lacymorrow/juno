@@ -36,6 +36,9 @@ pub mod app_menu_ids {
     pub const SHOW_DEVTOOLS: &str = "show-devtools";
     pub const SHOW_PERMISSIONS: &str = "show-permissions";
     pub const TOGGLE_FULLSCREEN: &str = "toggle-fullscreen";
+    pub const ZOOM_IN: &str = "zoom-in";
+    pub const ZOOM_OUT: &str = "zoom-out";
+    pub const ACTUAL_SIZE: &str = "actual-size";
 
     // Window Menu
     pub const MINIMIZE: &str = "minimize";

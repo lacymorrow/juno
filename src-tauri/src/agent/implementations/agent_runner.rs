@@ -523,7 +523,17 @@ where
             role: crate::agent::core::Role::Tool,
             content: match &tool_result {
                 Ok(result) => {
-                    crate::agents::base_agent::format_task_output(&result.output)
+                    // For computer tool with screenshot data, preserve the full JSON
+                    // so the Anthropic provider can extract the base64 image later
+                    if tool_call.name == "computer"
+                        && result.output.get("base64_image").is_some()
+                    {
+                        serde_json::to_string(&result.output).unwrap_or_else(|_| {
+                            crate::agents::base_agent::format_task_output(&result.output)
+                        })
+                    } else {
+                        crate::agents::base_agent::format_task_output(&result.output)
+                    }
                 }
                 Err(e) => format!("Error: {}", e),
             },
@@ -996,13 +1006,8 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::Value;
 
-    // Create a simple mock app handle for testing
-    fn mock_app_handle() -> tauri::AppHandle {
-        // Use a simple test-specific implementation or skip this for unit tests
-        panic!("This test requires a proper Tauri app context")
-    }
-
     // Simple mock implementations for testing
+    #[allow(dead_code)]
     struct MockToolProvider;
 
     #[async_trait]
@@ -1019,6 +1024,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     struct MockBrain;
 
     #[async_trait]
@@ -1046,6 +1052,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     struct MockMemoryManagerTest;
 
     #[async_trait]

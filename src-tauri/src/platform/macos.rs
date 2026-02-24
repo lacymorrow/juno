@@ -445,6 +445,42 @@ pub mod mouse_tracking {
     }
 }
 
+/// Escape key monitor stub for onboarding.
+///
+/// During onboarding, the global shortcut handler in `shortcuts.rs` already
+/// detects escape presses and emits visual feedback events (via
+/// `handle_escape_key_shortcut`). When `is_onboarding_active()` is true,
+/// it emits the event and returns early without triggering stop operations.
+///
+/// A previous implementation used a CGEventTap with `kCGEventTapOptionListenOnly`
+/// to observe escape without capturing it (allowing HTML dropdowns and other
+/// apps to also receive the key). That approach was removed because
+/// `CGEventTapCreate` can segfault on certain macOS versions/permission states,
+/// causing a full process crash during onboarding initialization.
+///
+/// The current approach: escape IS captured by the global shortcut during
+/// onboarding (preventing passthrough to other apps), but since the user is
+/// in a focused onboarding wizard, this trade-off is acceptable.
+pub mod escape_key_monitor {
+    use tauri::AppHandle;
+    use tracing::info;
+
+    /// No-op: escape detection during onboarding is handled by the global
+    /// shortcut handler in `shortcuts.rs`.
+    pub fn start(_app_handle: &AppHandle) -> Result<(), String> {
+        info!("[EscapeKeyMonitor] Using global shortcut handler for escape detection during onboarding");
+        Ok(())
+    }
+
+    /// No-op cleanup.
+    pub fn stop() {}
+
+    /// Always returns false — no separate monitor running.
+    pub fn is_running() -> bool {
+        false
+    }
+}
+
 // Non-macOS platforms get stub implementations
 #[cfg(not(target_os = "macos"))]
 pub fn apply_macos_setup(_app_handle: &AppHandle) {

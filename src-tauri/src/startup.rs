@@ -193,7 +193,7 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
 
 /// Initialize AI provider settings
 pub fn init_ai_providers() -> Result<(), String> {
-    match agent::providers::factory::BrainFactory::init() {
+    match agent::providers::factory::BrainFactory::init(None) {
         Ok(()) => {
             info!("Provider settings initialized from configuration");
             Ok(())

@@ -4,7 +4,7 @@
 use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // Settings manager import
 use crate::settings::manager::SettingsManager;
@@ -780,6 +780,47 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Display Resolution for Computer Use ---
+            // Must happen early so the computer tool is available from the first agent run.
+            // Without this, SCREENSHOT_SCALE stays at 0x0 and the computer tool is filtered out.
+            #[cfg(target_os = "macos")]
+            {
+                use computer_use_ai_sdk::platforms::macos::display::get_main_display;
+                use crate::constants::ui::standard_resolutions;
+                use crate::utils::coordinates;
+
+                match get_main_display() {
+                    Ok(display) => {
+                        let display_width = display.bounds.size.width as u32;
+                        let display_height = display.bounds.size.height as u32;
+                        if display_width > 0 && display_height > 0 {
+                            let (standard_width, standard_height) =
+                                standard_resolutions::select_best_resolution(display_width, display_height);
+                            // Initialize with standard resolution as screenshot size (will be
+                            // updated to actual screenshot dimensions on first capture)
+                            coordinates::update_standard_resolution_scaling(
+                                display_width,
+                                display_height,
+                                standard_width,
+                                standard_height,
+                            );
+                            tracing::info!(
+                                "Display resolution initialized: {}x{} → standard {}x{}",
+                                display_width, display_height, standard_width, standard_height
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Main display returned invalid dimensions: {}x{}",
+                                display_width, display_height
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not get main display for resolution init: {}", e);
+                    }
+                }
+            }
+
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -840,9 +881,37 @@ pub fn run() {
             Ok(())
         });
 
-    // Enhanced error handling to prevent crashes due to permission issues
-    match builder.run(get_tauri_context()) {
-        Ok(()) => {
+    // Build the app, then run with event callback for dock click (RunEvent::Reopen) support
+    match builder.build(get_tauri_context()) {
+        Ok(app) => {
+            // Run with callback to handle macOS dock icon click and window lifecycle events
+            app.run(|app_handle, event| {
+                match event {
+                    tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                        // macOS: User clicked the dock icon — show the main window
+                        if !has_visible_windows {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                    tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
+                        // Clean up escape key registration when onboarding window is closed
+                        // (e.g., user clicks the red X instead of completing/skipping)
+                        if label.as_str() == "onboarding" {
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = commands::set_onboarding_active(app_handle, false).await {
+                                    warn!("Failed to clean up onboarding state on window close: {}", e);
+                                }
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            });
             info!("Tauri application exited successfully");
         }
         Err(e) => {

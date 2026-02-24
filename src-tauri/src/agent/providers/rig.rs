@@ -7,7 +7,7 @@ use crate::agent::{
     core::{AgentAction, AgentError, Message, Role, ToolDefinition},
     traits::AgentBrain,
 };
-use crate::agent::providers::factory::model_ids;
+use crate::agent::providers::types::model_ids;
 
 /// Implementation of AgentBrain using Rig library
 pub struct RigBrain {
@@ -17,18 +17,22 @@ pub struct RigBrain {
 }
 
 impl RigBrain {
-    /// Create a new RigBrain instance from environment variables
-    pub fn from_env() -> Result<Self, AgentError> {
-        let openai_api_key = env::var("OPENAI_API_KEY")
-            .map_err(|_| AgentError::ConfigurationError("OPENAI_API_KEY not found in environment".to_string()))?;
-
-        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| model_ids::OPENAI_CUA.to_string());
-        let system_prompt = env::var("RIG_SYSTEM_PROMPT").ok();
-
+    /// Creates a new RigBrain from a CentralizedProviderConfig struct.
+    /// The api_key is expected to be pre-resolved by `ProviderConfig::resolve_provider()`
+    /// (which handles the Rig → OpenAI key fallback). Falls back to OPENAI_API_KEY env var.
+    pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
+        // api_key already resolved by resolve_provider() (Rig → OpenAI fallback)
+        let openai_api_key = config.api_key.clone()
+            .or_else(|| env::var("OPENAI_API_KEY").ok())
+            .ok_or_else(|| AgentError::ConfigurationError(
+                "OpenAI API key not found for Rig provider".into()
+            ))?;
+        let model = config.model.clone()
+            .unwrap_or_else(|| model_ids::OPENAI_CUA.to_string());
         Ok(Self {
             openai_api_key,
             model,
-            system_prompt,
+            system_prompt: config.system_prompt.clone(),
         })
     }
 

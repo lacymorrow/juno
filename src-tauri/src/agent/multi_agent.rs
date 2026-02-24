@@ -102,15 +102,27 @@ impl MultiAgentOrchestrator {
             crate::agent::prompts::PromptManager::new()
         };
 
+        // Load provider config once for all specialists
+        use crate::agent::providers::types::Provider;
+        let config = crate::agent::providers::config::load_provider_config(app_handle);
+
         // Create orchestrator (Gemini Flash for fast routing decisions)
-        let orchestrator_brain = Arc::new(GeminiBrain::from_env()?);
+        let gemini_config = config.resolve_provider(Provider::Gemini)
+            .ok_or_else(|| AgentError::ConfigurationError("Gemini provider not configured".into()))?;
+        let orchestrator_brain = Arc::new(GeminiBrain::from_config(&gemini_config)?);
 
         // Create expert agents with different models
         let mut experts = HashMap::new();
 
+        // Resolve provider configs for specialists
+        let anthropic_config = config.resolve_provider(Provider::Anthropic)
+            .ok_or_else(|| AgentError::ConfigurationError("Anthropic provider not configured".into()))?;
+        let openai_config = config.resolve_provider(Provider::OpenAI)
+            .ok_or_else(|| AgentError::ConfigurationError("OpenAI provider not configured".into()))?;
+
         // Browser Expert - Use Anthropic for vision and web understanding
         let browser_tools = Self::get_tools_for_agent(&AgentType::BrowserExpert, &tool_provider).await;
-        let browser_brain = Arc::new(AnthropicBrain::from_env()?);
+        let browser_brain = Arc::new(AnthropicBrain::from_config(&anthropic_config)?);
         experts.insert(
             AgentType::BrowserExpert,
             ExpertAgent::new(AgentType::BrowserExpert, browser_brain, browser_tools, &prompt_manager)
@@ -118,7 +130,7 @@ impl MultiAgentOrchestrator {
 
         // Coding Expert - Use OpenAI for code generation
         let coding_tools = Self::get_tools_for_agent(&AgentType::CodingExpert, &tool_provider).await;
-        let coding_brain = Arc::new(OpenAIBrain::from_env()?);
+        let coding_brain = Arc::new(OpenAIBrain::from_config(&openai_config)?);
         experts.insert(
             AgentType::CodingExpert,
             ExpertAgent::new(AgentType::CodingExpert, coding_brain, coding_tools, &prompt_manager)
@@ -126,7 +138,7 @@ impl MultiAgentOrchestrator {
 
         // Desktop Expert - Use Anthropic for complex desktop automation
         let desktop_tools = Self::get_tools_for_agent(&AgentType::DesktopExpert, &tool_provider).await;
-        let desktop_brain = Arc::new(AnthropicBrain::from_env()?);
+        let desktop_brain = Arc::new(AnthropicBrain::from_config(&anthropic_config)?);
         experts.insert(
             AgentType::DesktopExpert,
             ExpertAgent::new(AgentType::DesktopExpert, desktop_brain, desktop_tools, &prompt_manager)
@@ -134,7 +146,7 @@ impl MultiAgentOrchestrator {
 
         // General Expert - Use Gemini Pro for general tasks
         let general_tools = Self::get_tools_for_agent(&AgentType::GeneralExpert, &tool_provider).await;
-        let general_brain = Arc::new(GeminiBrain::from_env()?);
+        let general_brain = Arc::new(GeminiBrain::from_config(&gemini_config)?);
         experts.insert(
             AgentType::GeneralExpert,
             ExpertAgent::new(AgentType::GeneralExpert, general_brain, general_tools, &prompt_manager)
