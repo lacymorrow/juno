@@ -62,13 +62,16 @@ interface ChatMessageProps {
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
 }
 
-// Compact accordion for TTS spoken content — closed by default, supplementary info
+// Compact accordion for TTS spoken content
+// Expanded by default when TTS is the only response content, collapsed otherwise
 function TTSContentDisplay({
   ttsMetadata,
+  defaultExpanded = false,
 }: {
   ttsMetadata: ChatMessage["tts_metadata"];
+  defaultExpanded?: boolean;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   if (!ttsMetadata?.has_spoken_content || !ttsMetadata.tts_parts.length) {
     return null;
@@ -292,9 +295,12 @@ export function ChatMessageComponent({
           msg.content
         )}
 
-        {/* TTS spoken content — compact accordion, closed by default */}
+        {/* TTS spoken content — expanded when it's the only response */}
         {msg.role === "assistant" && !msg.isStreaming && (
-          <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
+          <TTSContentDisplay
+            ttsMetadata={msg.tts_metadata}
+            defaultExpanded={!msg.content || msg.content.trim() === ""}
+          />
         )}
 
         {msg.screenshot_base64 && (

@@ -14,8 +14,10 @@ use std::collections::HashMap;
 pub enum ApiVersion {
     /// Computer Use API 2024-10-22
     Computer20241022,
-    /// Computer Use API 2025-01-24 (Latest)
+    /// Computer Use API 2025-01-24
     Computer20250124,
+    /// Computer Use API 2025-11-24 (Opus 4.5+)
+    Computer20251124,
 }
 
 impl ApiVersion {
@@ -24,6 +26,7 @@ impl ApiVersion {
         match self {
             ApiVersion::Computer20241022 => computer_use_api_types::COMPUTER_20241022,
             ApiVersion::Computer20250124 => computer_use_api_types::COMPUTER_20250124,
+            ApiVersion::Computer20251124 => computer_use_api_types::COMPUTER_20251124,
         }
     }
 
@@ -32,6 +35,7 @@ impl ApiVersion {
         match self {
             ApiVersion::Computer20241022 => beta_flags::COMPUTER_USE_2024_10_22,
             ApiVersion::Computer20250124 => beta_flags::COMPUTER_USE_2025_01_24,
+            ApiVersion::Computer20251124 => beta_flags::COMPUTER_USE_2025_11_24,
         }
     }
 
@@ -40,6 +44,7 @@ impl ApiVersion {
         match self {
             ApiVersion::Computer20241022 => tool_version_groups::COMPUTER_USE_2024_10_22_TOOLS,
             ApiVersion::Computer20250124 => tool_version_groups::COMPUTER_USE_2025_01_24_TOOLS,
+            ApiVersion::Computer20251124 => tool_version_groups::COMPUTER_USE_2025_11_24_TOOLS,
         }
     }
 }
@@ -102,12 +107,18 @@ impl ToolVersionConfig {
             (ApiVersion::Computer20250124, "computer") => {
                 Some(computer_use_api_types::COMPUTER_20250124.to_string())
             }
+            (ApiVersion::Computer20251124, "computer") => {
+                Some(computer_use_api_types::COMPUTER_20251124.to_string())
+            }
             (_, "bash") => Some(computer_use_api_types::BASH_20250124.to_string()),
             (ApiVersion::Computer20241022, "str_replace_based_edit_tool") => {
                 Some(computer_use_api_types::EDIT_TOOL_20250124.to_string())
             }
             (ApiVersion::Computer20250124, "str_replace_based_edit_tool") => {
                 Some(computer_use_api_types::EDIT_TOOL_20250429.to_string())
+            }
+            (ApiVersion::Computer20251124, "str_replace_based_edit_tool") => {
+                Some(computer_use_api_types::EDIT_TOOL_20250728.to_string())
             }
             _ => None,
         }

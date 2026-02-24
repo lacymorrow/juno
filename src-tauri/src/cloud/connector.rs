@@ -1488,7 +1488,6 @@ PhysMem: 8192M used (1234M wired), 567M unused.
 
     // Tests for authentication response parsing logic
     mod authentication_tests {
-        use super::*;
 
         #[test]
         fn test_parse_auth_response_failure_logic() {
@@ -1564,8 +1563,6 @@ PhysMem: 8192M used (1234M wired), 567M unused.
 
     #[cfg(test)]
     mod websocket_race_condition_tests {
-        use super::*;
-
         #[test]
         fn test_message_buffering_during_authentication() {
             // Test the logic that buffers non-auth messages during authentication
@@ -1574,7 +1571,7 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             // Simulate receiving various message types during authentication
             let command_message = r#"{"type": "command", "data": {"id": "test", "command_type": "screenshot"}, "timestamp": 1234567890}"#;
             let heartbeat_message = r#"{"type": "heartbeat", "data": {"timestamp": 1234567890}, "timestamp": 1234567890}"#;
-            let auth_success_message =
+            let _auth_success_message =
                 r#"{"type": "auth", "data": {"success": true}, "timestamp": 1234567890}"#;
 
             // Messages received before auth response should be buffered

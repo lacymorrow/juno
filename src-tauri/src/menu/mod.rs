@@ -61,7 +61,6 @@ fn handle_menu_event(app_handle: AppHandle, event_id: &str) {
 /// Check if an event ID belongs to the app menu
 fn is_app_menu_event(event_id: &str) -> bool {
     matches!(event_id,
-        constants::app_menu_ids::ABOUT |
         constants::app_menu_ids::CHECK_FOR_UPDATES |
         constants::app_menu_ids::SETTINGS |
         constants::app_menu_ids::NEW_CHAT |
@@ -72,6 +71,9 @@ fn is_app_menu_event(event_id: &str) -> bool {
         constants::app_menu_ids::SHOW_DEVTOOLS |
         constants::app_menu_ids::SHOW_PERMISSIONS |
         constants::app_menu_ids::TOGGLE_FULLSCREEN |
+        constants::app_menu_ids::ZOOM_IN |
+        constants::app_menu_ids::ZOOM_OUT |
+        constants::app_menu_ids::ACTUAL_SIZE |
         constants::app_menu_ids::MINIMIZE |
         constants::app_menu_ids::ZOOM |
         constants::app_menu_ids::BRING_ALL_TO_FRONT |

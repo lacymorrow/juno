@@ -11,7 +11,8 @@ use tokio::time::timeout;
 use tracing::info;
 use tauri::{AppHandle, Manager, Listener, EventId};
 use serde_json::{json, Value};
-use crate::agent::providers::factory::{BrainFactory, Provider};
+use crate::agent::providers::factory::BrainFactory;
+use crate::agent::providers::types::Provider;
 use crate::settings::manager::SettingsManager;
 
 use crate::cli::{Cli, OutputFormat};
@@ -589,7 +590,12 @@ impl HeadlessRuntime {
         match command {
             SystemCommands::Info { hardware: _, permissions: _, performance: _ } => {
                 let state = self.app_handle.state::<AppState>();
-                let api_key_present = std::env::var("ANTHROPIC_API_KEY").is_ok();
+                // Check config + env var for API key presence
+                let config = crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
+                let api_key_present = config.resolve_provider(Provider::Anthropic)
+                    .and_then(|c| c.api_key)
+                    .is_some()
+                    || std::env::var("ANTHROPIC_API_KEY").is_ok();
 
                 let output = json!({
                     "platform": std::env::consts::OS,
@@ -611,7 +617,12 @@ impl HeadlessRuntime {
             }
             SystemCommands::Health { detailed: _, benchmark: _ } => {
                 let state = self.app_handle.state::<AppState>();
-                let api_key_present = std::env::var("ANTHROPIC_API_KEY").is_ok();
+                // Check config + env var for API key presence
+                let config = crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
+                let api_key_present = config.resolve_provider(Provider::Anthropic)
+                    .and_then(|c| c.api_key)
+                    .is_some()
+                    || std::env::var("ANTHROPIC_API_KEY").is_ok();
                 let desktop_available = state.is_desktop_available();
 
                 let output = json!({

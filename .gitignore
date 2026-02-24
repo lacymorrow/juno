@@ -274,6 +274,7 @@ Thumbs.db:encryptable
 ehthumbs.db
 ehthumbs_vista.db
 *.tmp
+*.tmp.*
 *.temp
 Desktop.ini
 $RECYCLE.BIN/

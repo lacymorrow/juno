@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::constants::settings::defaults;
-use crate::agent::providers::config::{default_provider_entries, DEFAULT_ACTIVE_PROVIDER};
+use crate::agent::providers::config::{default_provider_entries, DEFAULT_PROVIDER};
 use crate::constants::ui;
 
 pub mod manager;
@@ -121,7 +121,12 @@ pub struct AudioSettings {
 
 /// Tool enable/disable configurations
 /// Replaces: tool_config.json
+///
+/// WARNING: This struct is written by multiple subsystems (ToolConfigManager, mouse settings, etc.).
+/// When adding new fields, ensure all writers preserve fields they don't own.
+/// See `ToolConfigManager::save_to_centralized_settings()` for the read-modify-write pattern.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ToolSettings {
     pub tools: HashMap<String, ToolConfig>,
     pub category_enabled: HashMap<String, bool>,
@@ -291,7 +296,7 @@ impl Default for AgentSettings {
 impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
-            active_provider: DEFAULT_ACTIVE_PROVIDER.to_string(),
+            active_provider: DEFAULT_PROVIDER.id().to_string(),
             providers: default_provider_entries(),
         }
     }

@@ -129,7 +129,8 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     }
 
     if event.state() == ShortcutState::Pressed {
-        // During onboarding, only provide visual feedback — don't trigger stop
+        // During onboarding, only provide visual feedback — don't trigger stop.
+        // The visual feedback event was already emitted above (line 121).
         let app_state = app.state::<state::AppState>();
         if app_state.is_onboarding_active() {
             info!("[Escape Key] Pressed during onboarding - visual feedback only");

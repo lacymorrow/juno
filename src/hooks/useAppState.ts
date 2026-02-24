@@ -21,10 +21,6 @@ export interface AppState {
     copyingMessageId: string | null;
     savingMessageId: string | null;
 
-    // UI state
-    userHasScrolledUp: boolean;
-    lastScrollTime: number;
-
     // Voice/Agent state
     isAgentModeActive: boolean;
     isDictationActive: boolean;
@@ -74,10 +70,6 @@ export function useAppState() {
         };
     }, []);
 
-    // Scroll management
-    const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
-    const [lastScrollTime, setLastScrollTime] = useState(0);
-
     // Voice/Agent state
     const [isAgentModeActive, setIsAgentModeActive] = useState(false);
     const [isDictationActive, setIsDictationActive] = useState(false);
@@ -124,8 +116,6 @@ export function useAppState() {
         isCheckingUpdate,
         copyingMessageId,
         savingMessageId,
-        userHasScrolledUp,
-        lastScrollTime,
         isAgentModeActive,
         isDictationActive,
         dictationState,
@@ -148,8 +138,6 @@ export function useAppState() {
         setSavingMessageId,
         resetCopyingState,
         resetSavingState,
-        setUserHasScrolledUp,
-        setLastScrollTime,
         setIsAgentModeActive,
         setIsDictationActive,
         setDictationState,

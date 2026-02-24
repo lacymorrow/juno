@@ -186,7 +186,6 @@ pub async fn save_autostart_to_centralized_settings_helper(app: AppHandle, enabl
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::settings::AppSettings;
 
     #[test]
