@@ -649,7 +649,10 @@ pub async fn bash_command(
     let shell_sessions = state.get::<ShellSessions>()
         .ok_or_else(|| "Shell session state not initialized".to_string())?;
     let sessions_arc = shell_sessions.clone();
-    let mut sessions = sessions_arc.lock().map_err(|e| format!("Failed to lock shell sessions: {}", e))?;
+    let mut sessions = sessions_arc.lock().unwrap_or_else(|e| {
+        tracing::warn!("Shell sessions lock was poisoned, recovering: {}", e);
+        e.into_inner()
+    });
 
     // Handle restart or initialize if needed
     if effective_restart || !sessions.contains_key(&session_id) {
@@ -731,7 +734,8 @@ pub async fn bash_command(
 
             if debug_config.send_notifications {
                 let preview = if result.len() > 100 {
-                    format!("{}... (truncated)", &result[..100])
+                    let truncated: String = result.chars().take(100).collect();
+                    format!("{}... (truncated)", truncated)
                 } else {
                     result.clone()
                 };

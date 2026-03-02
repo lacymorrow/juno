@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Check, Plus, User, Users } from "lucide-react";
+import { Check, User, Users } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatStatus } from "ai";
 import {
@@ -33,7 +33,6 @@ interface ChatInputProps {
   onQueryChange: (value: string) => void;
   onSubmit: (text: string) => void;
   onStop: () => void;
-  onNewChat: () => void;
 }
 
 export const ChatInput = React.memo(function ChatInput({
@@ -43,7 +42,6 @@ export const ChatInput = React.memo(function ChatInput({
   onQueryChange,
   onSubmit,
   onStop,
-  onNewChat,
 }: ChatInputProps) {
   const settings = useSettings();
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
@@ -140,35 +138,26 @@ export const ChatInput = React.memo(function ChatInput({
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         placeholder={
-          isProcessing ? "Processing..." : "What would you like to know?"
+          isProcessing ? "Processing..." : "Ask anything..."
         }
         disabled={isProcessing || !canSubmit}
       />
       <PromptInputFooter>
         <PromptInputTools>
           <PromptInputButton
-            tooltip="New Chat"
-            onClick={onNewChat}
-            disabled={isProcessing}
-          >
-            <Plus className="size-4" />
-            <span className="text-xs">New</span>
-          </PromptInputButton>
-          <PromptInputButton
             tooltip={`Agent Mode: ${settings.agentMode === "multi" ? "Multi" : "Single"} (click to toggle)`}
             onClick={handleAgentModeToggle}
             disabled={isProcessing || settings.isLoading}
           >
             {settings.agentMode === "multi" ? (
-              <Users className="size-4" />
+              <Users className="size-3.5" />
             ) : (
-              <User className="size-4" />
+              <User className="size-3.5" />
             )}
-            <span className="text-xs">
+            <span className="text-[11px] text-muted-foreground/70">
               {settings.agentMode === "multi" ? "Multi" : "Single"}
             </span>
           </PromptInputButton>
-        </PromptInputTools>
 
         {/* Model selector — shows all providers' models */}
         {hasModels && (
@@ -178,7 +167,7 @@ export const ChatInput = React.memo(function ChatInput({
                 {selectedModel && (
                   <ModelSelectorLogo provider={selectedModel.providerId} />
                 )}
-                <span className="max-w-[140px] truncate text-xs">{modelDisplayName}</span>
+                <span className="max-w-[140px] truncate text-[11px] text-muted-foreground/70">{modelDisplayName}</span>
               </PromptInputButton>
             </ModelSelectorTrigger>
             <ModelSelectorContent>
@@ -229,11 +218,13 @@ export const ChatInput = React.memo(function ChatInput({
             </ModelSelectorContent>
           </ModelSelector>
         )}
+        </PromptInputTools>
 
         <PromptInputSubmit
           disabled={!isProcessing && (!canSubmit || !query.trim())}
           status={chatStatus}
           onStop={onStop}
+          className="rounded-full"
         />
       </PromptInputFooter>
     </PromptInput>
