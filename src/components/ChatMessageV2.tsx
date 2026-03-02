@@ -202,7 +202,7 @@ export function ChatMessageComponent({
 
     return (
       <div className="flex justify-start w-full">
-        <Tool>
+        <Tool className="border-border/40">
           <ToolHeader
             type="dynamic-tool"
             state={toolState}
@@ -249,7 +249,7 @@ export function ChatMessageComponent({
 
     return (
       <div className="flex justify-start w-full">
-        <Tool>
+        <Tool className="border-border/40">
           <ToolHeader
             type="dynamic-tool"
             state={resultState}
@@ -266,7 +266,7 @@ export function ChatMessageComponent({
                 <img
                   src={`data:image/png;base64,${msg.screenshot_base64}`}
                   alt="Tool screenshot"
-                  className="max-h-[300px] rounded border border-border"
+                  className="max-h-[300px] rounded-lg border border-border/30"
                 />
               </div>
             )}
@@ -279,8 +279,14 @@ export function ChatMessageComponent({
   const from = msg.role === "user" ? "user" : "assistant";
 
   return (
-    <Message key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
-      <MessageContent>
+    <Message
+      key={`msg-${index}-${msg.timestamp || Date.now()}`}
+      from={from}
+      className={from === "user" ? "max-w-[80%]" : undefined}
+    >
+      <MessageContent
+        className={from === "user" ? "rounded-2xl" : undefined}
+      >
         {/* Main content rendering */}
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
@@ -314,7 +320,7 @@ export function ChatMessageComponent({
               <img
                 src={`data:image/png;base64,${msg.screenshot_base64}`}
                 alt="Screenshot"
-                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                className="rounded-lg w-full object-contain max-h-[300px] border border-border/30"
               />
             </div>
           </div>

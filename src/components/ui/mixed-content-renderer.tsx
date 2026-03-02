@@ -1,6 +1,7 @@
 import * as React from "react";
 import { MessageResponse as Response } from "@/components/ai-elements/message";
 import { JsxMessageRenderer } from "@/components/ui/jsx-message-renderer";
+import { cn } from "@/lib/utils";
 
 /**
  * Content segment — either markdown text or a JSX component block.
@@ -241,7 +242,7 @@ export const MixedContentRenderer = React.memo(
     }
 
     return (
-      <div className={className}>
+      <div className={cn("space-y-3", className)}>
         {segments.map((seg, i) =>
           seg.type === "text" ? (
             <Response key={i}>{seg.content}</Response>

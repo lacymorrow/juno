@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import {
   Code,
-  MessageSquare,
   Search,
   FileText,
-  Settings,
   Globe,
   Zap,
   Target,
   Palette,
   Monitor,
-  Music,
   Camera,
   Mouse,
   Gamepad2,
@@ -22,6 +18,7 @@ import {
   MousePointer2,
   RotateCcw,
   Grid3X3,
+  Settings,
 } from "lucide-react";
 import { isDevelopment } from "@/lib";
 
@@ -32,17 +29,15 @@ interface ExamplePromptsProps {
 export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
   onPromptSelect,
 }) => {
-  const [isDevMode, setIsDevMode] = useState(false); // Use sync fallback for immediate rendering
+  const [isDevMode, setIsDevMode] = useState(false);
 
   useEffect(() => {
-    // Check async development mode on mount
     const checkDevMode = async () => {
       try {
         const devMode = await isDevelopment();
         setIsDevMode(devMode);
       } catch (error) {
         console.warn("Failed to check development mode:", error);
-        // Keep the sync fallback value
       }
     };
 
@@ -71,11 +66,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt: "Help me understand the current project structure",
     },
     {
-      icon: Music,
-      title: "Play Music",
-      prompt: "Open Spotify and play some focus music",
-    },
-    {
       icon: Camera,
       title: "Describe Screen",
       prompt: "Take a screenshot and describe what's on my screen",
@@ -85,15 +75,9 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       title: "Research",
       prompt: "Research the benefits of AI-human collaboration",
     },
-    {
-      icon: MessageSquare,
-      title: "General Chat",
-      prompt: "What can you help me with today?",
-    },
   ];
 
   const developmentPrompts = [
-    // Mouse Movement & Control Tests
     {
       icon: Mouse,
       title: "Mouse Square",
@@ -118,8 +102,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt:
         "Move your mouse in an expanding spiral pattern from center outward",
     },
-
-    // Keyboard & Typing Tests
     {
       icon: Keyboard,
       title: "Type Test",
@@ -132,8 +114,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt:
         "Open a text editor and type a simple 'Hello World' function in Python with proper indentation",
     },
-
-    // Application Control Tests
     {
       icon: Calculator,
       title: "Calculator Test",
@@ -152,8 +132,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt:
         "Let's play chess! Open Chess.com or a chess app, start a new game, and make the first move as white",
     },
-
-    // Visual & Screenshot Tests
     {
       icon: Camera,
       title: "Desktop Scan",
@@ -172,8 +150,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt:
         "Take a screenshot and describe the screen layout using a 3x3 grid system (top-left, center, bottom-right, etc.)",
     },
-
-    // Complex Multi-Step Tests
     {
       icon: Zap,
       title: "Quick Tasks",
@@ -198,16 +174,12 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       prompt:
         "Open a drawing or design app (like Preview or Photoshop), create a simple shape, change its color, and save the file",
     },
-
-    // File Operations Tests
     {
       icon: FileText,
       title: "File Manager",
       prompt:
         "Create a new folder on Desktop called 'JunoTest', create a text file inside it, write some content, and take a screenshot",
     },
-
-    // Precision & Coordination Tests
     {
       icon: Target,
       title: "Precision Test",
@@ -219,41 +191,26 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
   const prompts = isDevMode ? developmentPrompts : productionPrompts;
 
   return (
-    <div className="space-y-1">
+    <div className="w-full max-w-lg mx-auto">
       {isDevMode && (
-        <div className="text-xs text-amber-600 dark:text-amber-400 mb-2 text-center font-medium">
-          🧪 Development Test Commands
+        <div className="text-xs text-amber-600 dark:text-amber-400 mb-3 text-center font-medium">
+          Development Test Commands
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2 max-w-lg mx-auto">
+      <div className="flex flex-wrap justify-center gap-2">
         {prompts.map((example, index) => (
-          <Button
+          <button
             key={index}
-            variant="outline"
-            className="h-auto p-2 justify-start text-left hover:bg-accent"
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs bg-secondary/50 hover:bg-secondary border border-border/40 text-foreground/80 hover:text-foreground transition-colors cursor-pointer"
             onClick={() => onPromptSelect(example.prompt)}
           >
-            <div className="flex items-center gap-2 w-full">
-              <div
-                className={`p-1 rounded flex-shrink-0 ${
-                  isDevMode
-                    ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                    : "bg-primary/10 text-primary"
-                }`}
-              >
-                <example.icon size={10} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-foreground truncate">
-                  {example.title}
-                </div>
-              </div>
-            </div>
-          </Button>
+            <example.icon size={12} className="opacity-60 flex-shrink-0" />
+            <span>{example.title}</span>
+          </button>
         ))}
       </div>
       {isDevMode && (
-        <div className="text-xs text-muted-foreground text-center mt-2">
+        <div className="text-xs text-muted-foreground text-center mt-3">
           Click any command to test agent capabilities
         </div>
       )}
