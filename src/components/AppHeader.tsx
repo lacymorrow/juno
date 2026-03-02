@@ -1,17 +1,19 @@
-import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator";
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { cn } from "@/lib/utils";
+import { isDevelopment } from "@/lib";
 import {
   ArrowLeft,
-  DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
+  SquarePen,
 } from "lucide-react";
 
 // Type for view state
@@ -24,6 +26,7 @@ interface AppHeaderProps {
   isDevPanelOpen: boolean;
   onViewChange: (view: AppView) => void;
   onToggleDevPanel: () => void;
+  onNewChat?: () => void;
 }
 
 export function AppHeader({
@@ -33,65 +36,69 @@ export function AppHeader({
   isDevPanelOpen,
   onViewChange,
   onToggleDevPanel,
+  onNewChat,
 }: AppHeaderProps) {
-  return (
-    <header className="flex items-center py-1 px-2 border-b min-h-[40px]">
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <DogIcon size={16} className="text-blue-500" />
-          <span className="text-sm font-semibold">Juno AI</span>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full cursor-default",
-                    serverStatus === "connected"
-                      ? "bg-green-500"
-                      : serverStatus === "error"
-                      ? "bg-red-500"
-                      : "bg-yellow-500"
-                  )}
-                />
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}>
-                {serverStatus === "connected"
-                  ? "Backend connected"
-                  : serverStatus === "error"
-                  ? "Backend connection error — check logs"
-                  : "Connecting to backend..."}
-              </TooltipContent>
-            </Tooltip>
-            {isProcessing && (
-              <div className="text-xs text-muted-foreground">
-                <AgentExecutionProgressIndicator
-                  compact
-                  className="text-muted-foreground"
-                />
-              </div>
-            )}
-          </div>
-        </div>
+  const [isDevMode, setIsDevMode] = useState(false);
 
-        {/* Model/provider selectors moved to ChatInput footer */}
+  useEffect(() => {
+    isDevelopment().then(setIsDevMode).catch(() => setIsDevMode(false));
+  }, []);
+
+  const handleOpenSettings = () => {
+    invoke("open_settings_window").catch((err) =>
+      console.error("Failed to open settings:", err),
+    );
+  };
+
+  return (
+    <header className="flex items-center justify-between py-1 px-3 border-b border-border/50 min-h-[36px]">
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="text-sm font-medium tracking-tight text-foreground/80">
+            Juno
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className={cn(
+                  "w-1.5 h-1.5 rounded-full cursor-default",
+                  serverStatus === "connected"
+                    ? "bg-green-500"
+                    : serverStatus === "error"
+                    ? "bg-red-500"
+                    : "bg-yellow-500"
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}>
+              {serverStatus === "connected"
+                ? "Backend connected"
+                : serverStatus === "error"
+                ? "Backend connection error — check logs"
+                : "Connecting to backend..."}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
-      {/* Voice Status Indicator - only show in chat view */}
-      {currentView === "chat" && (
-        <div className="flex items-center justify-center mx-2 min-w-0">
-          <VoiceStatusIndicator
-            variant="compact"
-            className="flex-shrink-0"
-            showText={false}
-          />
-        </div>
-      )}
-
       <div className="flex items-center gap-1 flex-shrink-0">
+        {/* New Chat Button - only show in chat view */}
+        {currentView === "chat" && onNewChat && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onNewChat}
+            title="New Chat"
+            className="h-7 w-7 p-0"
+            disabled={isProcessing}
+          >
+            <SquarePen size={14} />
+          </Button>
+        )}
         {/* Back Button - show for devtools, permissions views */}
         {(currentView === "devtools" || currentView === "permissions") && (
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => onViewChange("chat")}
             title="Back to Chat"
@@ -100,10 +107,22 @@ export function AppHeader({
             <ArrowLeft size={14} />
           </Button>
         )}
-        {/* Toggle Dev Panel Button - only show in chat view */}
+        {/* Settings Button */}
         {currentView === "chat" && (
           <Button
-            variant="outline"
+            variant="ghost"
+            size="sm"
+            onClick={handleOpenSettings}
+            title="Settings"
+            className="h-7 w-7 p-0"
+          >
+            <Settings size={14} />
+          </Button>
+        )}
+        {/* Toggle Dev Panel Button - dev mode only */}
+        {isDevMode && currentView === "chat" && (
+          <Button
+            variant="ghost"
             size="sm"
             onClick={onToggleDevPanel}
             title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}

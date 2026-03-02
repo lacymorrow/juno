@@ -1,5 +1,4 @@
 import React from "react";
-import { DogIcon } from "lucide-react";
 import {
   Conversation,
   ConversationContent,
@@ -87,11 +86,11 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
 
         return (
           <div key={`msg-container-${index}-${msg.timestamp || Date.now()}`}>
-            {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
+            {/* Timestamp header - minimal text-only */}
             {showTimestamp && msg.timestamp && (
-              <div className="flex justify-center my-4">
+              <div className="flex justify-center my-3">
                 <span
-                  className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
+                  className="text-[11px] text-muted-foreground/60 cursor-default"
                   title={formatFullTimestamp(msg.timestamp)}
                 >
                   {formatMessageTimestamp(msg.timestamp)}
@@ -122,28 +121,24 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   );
 
   return (
-    <Conversation className="flex-1 min-h-0 mb-2">
+    <Conversation className="flex-1 min-h-0">
       {conversation.length === 0 ? (
-        <ConversationEmptyState
-          icon={<DogIcon size={16} className="text-blue-500" />}
-          title="Juno AI"
-          description="AI desktop assistant"
-        >
-          <div className="space-y-1">
-            <DogIcon size={16} className="text-blue-500 mx-auto" />
-            <div>
-              <h2 className="text-sm font-semibold">Juno AI</h2>
-              <p className="text-xs text-muted-foreground">
-                AI desktop assistant
+        <ConversationEmptyState>
+          <div className="flex flex-col items-center justify-center space-y-6 py-12">
+            <div className="space-y-2 text-center">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                What can I help you with?
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Desktop automation, web browsing, file management, and more.
               </p>
             </div>
-          </div>
 
-          {/* Compact Example Prompts */}
-          <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+            <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+          </div>
         </ConversationEmptyState>
       ) : (
-        <ConversationContent className="p-0">
+        <ConversationContent className="gap-6 px-6 py-4">
           {messageList}
         </ConversationContent>
       )}

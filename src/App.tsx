@@ -62,7 +62,7 @@ function App() {
       } catch (error) {
         console.warn(
           "Failed to notify floating bar of query submission:",
-          error
+          error,
         );
       }
 
@@ -87,26 +87,23 @@ function App() {
       conversation.setQuery,
       conversation.addSystemMessage,
       playError,
-    ]
+    ],
   );
 
   // Enhanced stop handler — called directly by PromptInputSubmit onStop
-  const handleStop = useCallback(
-    async () => {
-      console.log("🛑 Stop requested by user");
+  const handleStop = useCallback(async () => {
+    console.log("🛑 Stop requested by user");
 
-      try {
-        await audioPlayback.stopAllAudio();
-        await invoke("stop_all_operations");
-        console.log("✅ All operations stopped successfully");
-        conversation.addSystemMessage("🛑 All operations stopped by user");
-      } catch (error) {
-        console.error("❌ Error stopping operations:", error);
-        conversation.addSystemMessage(`❌ Error stopping operations: ${error}`);
-      }
-    },
-    [audioPlayback.stopAllAudio, conversation.addSystemMessage]
-  );
+    try {
+      await audioPlayback.stopAllAudio();
+      await invoke("stop_all_operations");
+      console.log("✅ All operations stopped successfully");
+      conversation.addSystemMessage("🛑 All operations stopped by user");
+    } catch (error) {
+      console.error("❌ Error stopping operations:", error);
+      conversation.addSystemMessage(`❌ Error stopping operations: ${error}`);
+    }
+  }, [audioPlayback.stopAllAudio, conversation.addSystemMessage]);
 
   // Update check handler
   const handleUpdateCheck = useCallback(async () => {
@@ -166,15 +163,18 @@ function App() {
 
   // Shortcut events integration
   useShortcutEvents({
-    onAgentModeShortcut: useCallback((payload: any) => {
-      console.log("Agent mode shortcut event received:", payload);
-      if (payload.state === "pressed" && !payload.test_mode) {
-        appState.setIsAgentModeActive(true);
-        toast.info("Agent mode activated");
-      } else if (payload.state === "released") {
-        appState.setIsAgentModeActive(false);
-      }
-    }, [appState]),
+    onAgentModeShortcut: useCallback(
+      (payload: any) => {
+        console.log("Agent mode shortcut event received:", payload);
+        if (payload.state === "pressed" && !payload.test_mode) {
+          appState.setIsAgentModeActive(true);
+          toast.info("Agent mode activated");
+        } else if (payload.state === "released") {
+          appState.setIsAgentModeActive(false);
+        }
+      },
+      [appState],
+    ),
     onDictationInputShortcut: useCallback((payload: any) => {
       console.log("Dictation input shortcut event received:", payload);
       if (payload.state === "pressed" && !payload.test_mode) {
@@ -188,23 +188,29 @@ function App() {
 
   // Dictation state events integration
   useDictationStateEvents({
-    onStateChanged: useCallback((event: any) => {
-      console.log("Dictation state changed:", event);
-      appState.setDictationState(event.new_state);
-      
-      // Update UI based on dictation state changes
-      if (event.new_state === "active") {
-        appState.setIsDictationActive(true);
-      } else if (event.new_state === "idle") {
+    onStateChanged: useCallback(
+      (event: any) => {
+        console.log("Dictation state changed:", event);
+        appState.setDictationState(event.new_state);
+
+        // Update UI based on dictation state changes
+        if (event.new_state === "active") {
+          appState.setIsDictationActive(true);
+        } else if (event.new_state === "idle") {
+          appState.setIsDictationActive(false);
+        }
+      },
+      [appState],
+    ),
+    onForceReset: useCallback(
+      (reason: any) => {
+        console.log("Dictation force reset:", reason);
+        appState.setDictationState("idle");
         appState.setIsDictationActive(false);
-      }
-    }, [appState]),
-    onForceReset: useCallback((reason: any) => {
-      console.log("Dictation force reset:", reason);
-      appState.setDictationState("idle");
-      appState.setIsDictationActive(false);
-      toast.error(`Dictation reset: ${reason}`);
-    }, [appState]),
+        toast.error(`Dictation reset: ${reason}`);
+      },
+      [appState],
+    ),
     onInputChanged: useCallback((state: any) => {
       console.log("Dictation input state changed:", state);
       // Update input state tracking - could be used for visual feedback
@@ -260,16 +266,21 @@ function App() {
           appState.setIsDictationActive(isActive);
 
           const now = Date.now();
-          if (currentDictationState !== isActive && (now - lastToastTime) > MIN_TOAST_INTERVAL) {
+          if (
+            currentDictationState !== isActive &&
+            now - lastToastTime > MIN_TOAST_INTERVAL
+          ) {
             currentDictationState = isActive;
             lastToastTime = now;
 
-            const toastId = `dictation-${isActive ? 'on' : 'off'}`;
-            toast.dismiss('dictation-on');
-            toast.dismiss('dictation-off');
+            const toastId = `dictation-${isActive ? "on" : "off"}`;
+            toast.dismiss("dictation-on");
+            toast.dismiss("dictation-off");
             toast.info(
-              isActive ? "Dictation mode activated" : "Dictation mode deactivated",
-              { id: toastId, duration: 2000 }
+              isActive
+                ? "Dictation mode activated"
+                : "Dictation mode deactivated",
+              { id: toastId, duration: 2000 },
             );
           }
 
@@ -292,8 +303,8 @@ function App() {
     return () => {
       mounted = false;
       unlisten?.();
-      toast.dismiss('dictation-on');
-      toast.dismiss('dictation-off');
+      toast.dismiss("dictation-on");
+      toast.dismiss("dictation-off");
     };
   }, [appState.setIsDictationActive, appState.setDictationState]);
 
@@ -320,31 +331,33 @@ function App() {
       conversation.setQuery(trimmedPrompt);
 
       // Auto-submit after a brief delay to show the query in the input
-      pendingTimers.current.push(setTimeout(async () => {
-        // IMMEDIATE FEEDBACK: Notify floating bar immediately
-        try {
-          await invoke("notify_query_submitted", { query: trimmedPrompt });
-        } catch (error) {
-          console.warn(
-            "Failed to notify floating bar of query submission:",
-            error
-          );
-        }
+      pendingTimers.current.push(
+        setTimeout(async () => {
+          // IMMEDIATE FEEDBACK: Notify floating bar immediately
+          try {
+            await invoke("notify_query_submitted", { query: trimmedPrompt });
+          } catch (error) {
+            console.warn(
+              "Failed to notify floating bar of query submission:",
+              error,
+            );
+          }
 
-        appState.setIsProcessing(true);
-        conversation.addUserMessage(trimmedPrompt);
-        conversation.setQuery("");
+          appState.setIsProcessing(true);
+          conversation.addUserMessage(trimmedPrompt);
+          conversation.setQuery("");
 
-        try {
-          await invoke("submit_query", { query: trimmedPrompt });
-          console.log("✅ Example prompt submitted successfully");
-        } catch (error) {
-          console.error("❌ Failed to submit example prompt:", error);
-          conversation.addSystemMessage(`Failed to submit prompt: ${error}`);
-          appState.setIsProcessing(false);
-          playError();
-        }
-      }, 100)); // Brief delay to show the prompt in the input field
+          try {
+            await invoke("submit_query", { query: trimmedPrompt });
+            console.log("✅ Example prompt submitted successfully");
+          } catch (error) {
+            console.error("❌ Failed to submit example prompt:", error);
+            conversation.addSystemMessage(`Failed to submit prompt: ${error}`);
+            appState.setIsProcessing(false);
+            playError();
+          }
+        }, 100),
+      ); // Brief delay to show the prompt in the input field
     },
     [
       appState.canSubmit,
@@ -353,7 +366,7 @@ function App() {
       conversation.addUserMessage,
       conversation.addSystemMessage,
       playError,
-    ]
+    ],
   );
 
   // Copy response handler
@@ -362,10 +375,10 @@ function App() {
       conversation.handleCopyResponse(
         content,
         messageIndex,
-        appState.setCopyingMessageId
+        appState.setCopyingMessageId,
       );
     },
-    [conversation.handleCopyResponse, appState.setCopyingMessageId]
+    [conversation.handleCopyResponse, appState.setCopyingMessageId],
   );
 
   // Save response handler
@@ -375,10 +388,10 @@ function App() {
         content,
         format,
         messageIndex,
-        appState.setSavingMessageId
+        appState.setSavingMessageId,
       );
     },
-    [conversation.handleSaveResponse, appState.setSavingMessageId]
+    [conversation.handleSaveResponse, appState.setSavingMessageId],
   );
 
   // Inline tool approval handler — updates message approval_state in conversation
@@ -386,16 +399,16 @@ function App() {
     (toolId: string, state: "approved" | "denied") => {
       conversation.setConversationWithPruning((prev) =>
         prev.map((msg) =>
-          msg.tool_id === toolId ? { ...msg, approval_state: state } : msg
-        )
+          msg.tool_id === toolId ? { ...msg, approval_state: state } : msg,
+        ),
       );
     },
-    [conversation.setConversationWithPruning]
+    [conversation.setConversationWithPruning],
   );
 
   // Render main UI
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
+    <div className="flex flex-col h-screen bg-background overflow-hidden antialiased">
       {/* Header - Fixed to include required props for model/agent selection */}
       <AppHeader
         currentView={appState.currentView}
@@ -404,6 +417,7 @@ function App() {
         serverStatus={appState.serverStatus}
         isProcessing={appState.isProcessing}
         isDevPanelOpen={appState.isDevPanelOpen}
+        onNewChat={conversation.startNewChat}
       />
 
       {/* Main Content */}
@@ -413,9 +427,9 @@ function App() {
           <ResizablePanel defaultSize={appState.isDevPanelOpen ? 70 : 100}>
             <div className="flex flex-col h-full">
               {/* Content Area */}
-              <div className="flex-1 min-h-0 p-4">
+              <div className="flex-1 min-h-0 px-0 pt-0 pb-4">
                 {appState.currentView === "chat" && (
-                  <div className="flex flex-col h-full space-y-2">
+                  <div className="flex flex-col h-full">
                     <ChatContainer
                       conversation={conversation.conversation}
                       copyingMessageId={appState.copyingMessageId}
@@ -426,15 +440,16 @@ function App() {
                       onApprovalUpdate={handleApprovalUpdate}
                     />
 
-                    <ChatInput
-                      query={conversation.query}
-                      isProcessing={appState.isProcessing}
-                      canSubmit={appState.canSubmit}
-                      onQueryChange={conversation.setQuery}
-                      onSubmit={handleSubmit}
-                      onStop={handleStop}
-                      onNewChat={conversation.startNewChat}
-                    />
+                    <div className="px-3">
+                      <ChatInput
+                        query={conversation.query}
+                        isProcessing={appState.isProcessing}
+                        canSubmit={appState.canSubmit}
+                        onQueryChange={conversation.setQuery}
+                        onSubmit={handleSubmit}
+                        onStop={handleStop}
+                      />
+                    </div>
                   </div>
                 )}
 
