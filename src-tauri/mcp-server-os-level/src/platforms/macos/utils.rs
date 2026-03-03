@@ -503,6 +503,28 @@ fn encode_imagebuffer_to_base64_png(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> 
     Ok(base64_string)
 }
 
+/// Encodes an ImageBuffer into a base64 JPEG string at the specified quality (1-100).
+/// JPEG is ~60% smaller than PNG for UI screenshots with negligible quality loss at quality >= 80.
+pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>, quality: u8) -> Result<String, AutomationError> {
+    // JPEG doesn't support alpha — convert RGBA to RGB
+    let (width, height) = buffer.dimensions();
+    let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+    for pixel in buffer.pixels() {
+        rgb_data.push(pixel[0]); // R
+        rgb_data.push(pixel[1]); // G
+        rgb_data.push(pixel[2]); // B
+    }
+    let rgb_buffer: ImageBuffer<image::Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgb_data)
+        .ok_or_else(|| AutomationError::PlatformError("Failed to create RGB buffer for JPEG encoding".to_string()))?;
+
+    let mut jpeg_data = Cursor::new(Vec::new());
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_data, quality);
+    rgb_buffer.write_with_encoder(encoder)
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to encode JPEG: {}", e)))?;
+    let base64_string = BASE64_STANDARD.encode(jpeg_data.into_inner());
+    Ok(base64_string)
+}
+
 /// Captures a screenshot of the specified display using ScreenCaptureKit (macOS 14.0+).
 /// Returns raw RGBA pixel data as an ImageBuffer, which is faster and more efficient
 /// than the legacy CGDisplay::screenshot() path.

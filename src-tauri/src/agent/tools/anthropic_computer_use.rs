@@ -24,6 +24,54 @@ use crate::utils::coordinate_validation::{
     validate_coordinate_pair,
     CoordinateValidationError
 };
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Minimum milliseconds between consecutive UI-modifying actions (click, type, key).
+/// Prevents "clicked too fast" failures when the UI is still loading/animating.
+const ACTION_COOLDOWN_MS: u64 = 300;
+
+/// Timestamp (ms since epoch) of the last UI-modifying action.
+static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Returns true if the action modifies the UI (click, type, key, scroll, drag).
+/// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
+fn is_ui_modifying_action(action: &str) -> bool {
+    matches!(action,
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" |
+        "key" | "hold_key" | "type" | "scroll"
+    )
+}
+
+/// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
+/// Records the current time for the next cooldown check.
+async fn enforce_action_cooldown(action: &str) {
+    if !is_ui_modifying_action(action) {
+        return;
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_millis() as u64;
+
+    let last_ms = LAST_UI_ACTION_MS.load(Ordering::Relaxed);
+    if last_ms > 0 {
+        let elapsed = now_ms.saturating_sub(last_ms);
+        if elapsed < ACTION_COOLDOWN_MS {
+            let wait = ACTION_COOLDOWN_MS - elapsed;
+            tracing::debug!("Action cooldown: waiting {}ms before {} ({}ms since last action)", wait, action, elapsed);
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+        }
+    }
+
+    // Record this action's timestamp
+    let final_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_millis() as u64;
+    LAST_UI_ACTION_MS.store(final_ms, Ordering::Relaxed);
+}
 
 // --- Security and Validation Helpers ---
 
@@ -400,6 +448,9 @@ pub async fn execute_computer_tool(
         Some(format!("Executing computer action: {}", action)),
         Some(&*state_manager),
     ).await;
+
+    // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures
+    enforce_action_cooldown(action).await;
 
     // Execute action
     let execution_start = std::time::Instant::now();
