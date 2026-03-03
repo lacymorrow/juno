@@ -177,7 +177,8 @@ export default function FloatingPanel() {
 
   return (
     <div
-      className="w-screen h-screen bg-transparent overflow-hidden"
+      className="w-screen h-screen bg-transparent overflow-hidden cursor-move"
+      data-tauri-drag-region
       style={{
         // Enable pointer events for the entire window area
         pointerEvents: "auto",

@@ -818,6 +818,7 @@ const styles = \`
   return (
     <div
       className={`voice-ai-bar-container ${className}`}
+      data-tauri-drag-region
       style={
         {
           "--response-width": `${contentDimensions.width}px`,
@@ -828,7 +829,7 @@ const styles = \`
       }
     >
       {/* Floating Voice Control Bar */}
-      <div className={getBarClass()}>
+      <div className={getBarClass()} data-tauri-drag-region>
         {/* Text Input Field - Only visible in input state */}
         {barState.barState === UI.BAR_STATES_INPUT && (
           <form onSubmit={handleInputSubmit} className="input-form">

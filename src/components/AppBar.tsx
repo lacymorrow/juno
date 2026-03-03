@@ -276,7 +276,7 @@ export function AppBar() {
   };
 
   return (
-    <div className="relative">
+    <div className="relative" data-tauri-drag-region>
       <button
         type="button"
         aria-label="Activate assistant"
