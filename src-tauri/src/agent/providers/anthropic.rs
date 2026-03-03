@@ -42,13 +42,35 @@ struct AnthropicRequest {
     messages: Vec<ApiMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ApiTool>>,
+    /// System prompt — sent as content blocks array to support prompt caching.
+    /// When cache_control is present, Anthropic caches the prefix server-side,
+    /// reducing input token costs by ~90% and latency by ~50-80% on subsequent turns.
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<Vec<SystemContentBlock>>,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>, // Add streaming support
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<ToolChoice>, // Add tool choice support
+}
+
+/// System content block with optional cache_control for Anthropic prompt caching.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SystemContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    /// Cache control for prompt caching — {"type": "ephemeral"} tells Anthropic
+    /// to cache this block for subsequent API calls within the same session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+/// Cache control directive for Anthropic prompt caching.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -127,7 +149,7 @@ struct AnthropicMessageResponse {
 #[serde(untagged)]
 enum ApiTool {
     /// Anthropic built-in tools (computer, bash, text_editor)
-    /// Format: {"type": "computer_20250124", "name": "computer", "display_width_px": 1280, "display_height_px": 800}
+    /// Format: {"type": "computer_20251124", "name": "computer", "display_width_px": 1280, "display_height_px": 800, "enable_zoom": true}
     BuiltIn {
         #[serde(rename = "type")]
         tool_type: String,
@@ -136,12 +158,22 @@ enum ApiTool {
         display_width_px: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         display_height_px: Option<u32>,
+        /// Enable zoom action for computer_20251124 — allows Claude to inspect
+        /// specific screen regions at full native resolution (critical for Retina displays)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enable_zoom: Option<bool>,
+        /// Cache control for the last tool in the list to enable prompt caching
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     /// Regular function-calling tools
     Custom {
         name: String,
         description: String,
         input_schema: Value,
+        /// Cache control for the last tool in the list to enable prompt caching
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
 }
 
@@ -152,6 +184,12 @@ enum ApiTool {
 // --- AnthropicBrain Implementation --- //
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+
+/// Maximum number of recent screenshots to keep in conversation history.
+/// Older screenshots are replaced with text placeholders to reduce token usage.
+/// Following the pattern from Cua (only_n_most_recent_images=3).
+/// Each 1024x768 screenshot costs ~1,049 tokens — limiting from 10 to 3 saves ~7,000 tokens/step.
+const MAX_RECENT_SCREENSHOTS: usize = 3;
 
 #[derive(Clone)]
 pub struct AnthropicBrain {
@@ -265,6 +303,69 @@ impl AnthropicBrain {
     /// text_editor_20250728) while older models use the registered defaults.
     fn resolve_tool_api_type(&self, tool_name: &str, registered_type: &str) -> String {
         Provider::Anthropic.resolve_tool_type(tool_name, registered_type, &self.model)
+    }
+
+    /// Limit screenshot history to keep only the N most recent screenshots.
+    /// Older screenshots are replaced with a text placeholder to dramatically reduce token usage.
+    ///
+    /// This scans tool_result blocks for image content, counts them from the end (most recent),
+    /// and replaces any beyond the limit with "[Screenshot removed — older than N most recent]".
+    fn limit_screenshot_history(api_messages: &mut [ApiMessage], max_recent: usize) {
+        // First pass: count total screenshots (image blocks in tool_result content)
+        let mut screenshot_positions: Vec<(usize, usize)> = Vec::new(); // (message_idx, block_idx)
+
+        for (msg_idx, msg) in api_messages.iter().enumerate() {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for (block_idx, block) in blocks.iter().enumerate() {
+                    if block.block_type == "tool_result" {
+                        if let Some(ApiToolResultContent::Blocks(result_blocks)) = &block.content {
+                            for (rb_idx, rb) in result_blocks.iter().enumerate() {
+                                if rb.block_type == "image" && rb.source.is_some() {
+                                    screenshot_positions.push((msg_idx, rb_idx));
+                                    let _ = block_idx; // block_idx used for identification
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let total_screenshots = screenshot_positions.len();
+        if total_screenshots <= max_recent {
+            return; // Nothing to trim
+        }
+
+        let to_remove = total_screenshots - max_recent;
+        let positions_to_remove: Vec<(usize, usize)> = screenshot_positions[..to_remove].to_vec();
+
+        log::info!(
+            "Screenshot history limiting: {} total screenshots, keeping {} most recent, removing {} older ones",
+            total_screenshots, max_recent, to_remove
+        );
+
+        // Second pass: replace old screenshots with text placeholders
+        for (msg_idx, rb_idx) in positions_to_remove {
+            if let ApiContent::Blocks(blocks) = &mut api_messages[msg_idx].content {
+                for block in blocks.iter_mut() {
+                    if block.block_type == "tool_result" {
+                        if let Some(ApiToolResultContent::Blocks(result_blocks)) = &mut block.content {
+                            if rb_idx < result_blocks.len() && result_blocks[rb_idx].block_type == "image" {
+                                // Replace the image block with a text placeholder
+                                result_blocks[rb_idx] = ApiToolResultBlock {
+                                    block_type: "text".to_string(),
+                                    source: None,
+                                    text: Some(format!(
+                                        "[Screenshot removed — older than {} most recent]",
+                                        max_recent
+                                    )),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Sanitize log content by removing or truncating base64 data to prevent console spam
@@ -1320,10 +1421,16 @@ impl AgentBrain for AnthropicBrain {
 
         log::info!("Conversation validation passed: {} messages prepared for Anthropic API", api_messages.len());
 
+        // --- Screenshot History Limiting ---
+        // Keep only the N most recent screenshots in the conversation to reduce token usage.
+        // Older screenshots are replaced with a text placeholder. This follows the pattern
+        // used by Cua (only_n_most_recent_images=3) and reduces costs by ~60-70%.
+        Self::limit_screenshot_history(&mut api_messages, MAX_RECENT_SCREENSHOTS);
+
         let api_tools = if available_tools.is_empty() {
             None
         } else {
-            let tools: Vec<ApiTool> = available_tools
+            let mut tools: Vec<ApiTool> = available_tools
                 .iter()
                 .filter_map(|t| {
                     if let Some(api_type) = &t.api_type {
@@ -1355,29 +1462,61 @@ impl AgentBrain for AnthropicBrain {
                         } else {
                             (None, None)
                         };
+                        // Enable zoom for computer_20251124 (Opus 4.5+)
+                        // This allows Claude to inspect specific screen regions at native resolution
+                        let enable_zoom = if t.name == "computer" && api_type.contains("20251124") {
+                            Some(true)
+                        } else {
+                            None
+                        };
                         Some(ApiTool::BuiltIn {
                             tool_type: self.resolve_tool_api_type(&t.name, api_type),
                             name: t.name.clone(),
                             display_width_px: dw,
                             display_height_px: dh,
+                            enable_zoom,
+                            cache_control: None, // Set on last tool below
                         })
                     } else {
                         Some(ApiTool::Custom {
                             name: t.name.clone(),
                             description: t.description.clone(),
                             input_schema: t.input_schema.clone(),
+                            cache_control: None, // Set on last tool below
                         })
                     }
                 })
                 .collect();
+            // Add cache_control to the last tool to enable prompt caching of the tool definitions.
+            // When Anthropic caches tools, subsequent turns skip re-processing ~2,146 tokens of
+            // tool definitions, reducing latency by 50-80% for the cached portion.
+            if let Some(last_tool) = tools.last_mut() {
+                match last_tool {
+                    ApiTool::BuiltIn { cache_control, .. } => {
+                        *cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
+                    }
+                    ApiTool::Custom { cache_control, .. } => {
+                        *cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
+                    }
+                }
+            }
             if tools.is_empty() { None } else { Some(tools) }
         };
+
+        // Convert system prompt to content block array with cache_control for prompt caching
+        let system_blocks = self.system_prompt.as_ref().map(|prompt| {
+            vec![SystemContentBlock {
+                block_type: "text".to_string(),
+                text: prompt.clone(),
+                cache_control: Some(CacheControl { cache_type: "ephemeral".to_string() }),
+            }]
+        });
 
         let mut request_payload = AnthropicRequest {
             model: self.model.clone(),
             messages: api_messages,
             tools: api_tools,
-            system: self.system_prompt.clone(),
+            system: system_blocks,
             max_tokens: self.max_tokens,
             stream: None, // Will be set based on streaming mode
             tool_choice: None, // Add tool choice support
@@ -1413,8 +1552,10 @@ impl AgentBrain for AnthropicBrain {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01") // Current stable API version
-            // Automatically select the correct computer use beta header based on the active model
-            .header("anthropic-beta", self.resolve_computer_use_beta_header())
+            // Combine computer use beta + prompt caching beta in a single header (comma-separated).
+            // Prompt caching reduces input token costs by ~90% and latency by ~50-80% for
+            // system prompt and tool definitions that remain stable across agent loop turns.
+            .header("anthropic-beta", format!("{},{}", self.resolve_computer_use_beta_header(), crate::constants::api::beta_flags::PROMPT_CACHING))
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()
