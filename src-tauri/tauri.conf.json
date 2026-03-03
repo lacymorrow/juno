@@ -16,6 +16,8 @@
         "title": "Juno",
         "width": 600,
         "height": 700,
+        "minWidth": 380,
+        "minHeight": 500,
         "visible": false,
         "decorations": true,
         "transparent": false,
@@ -29,6 +31,8 @@
         "url": "/floating-panel",
         "width": 180,
         "height": 100,
+        "minWidth": 120,
+        "minHeight": 60,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
@@ -100,7 +104,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: https://asset.localhost; font-src 'self' data:; connect-src 'self' wss://juno-cloud-backend.fly.dev https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.elevenlabs.io https://api.replicate.com; media-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: https://asset.localhost https://storage.googleapis.com; font-src 'self' data:; connect-src 'self' wss://juno-cloud-backend.fly.dev https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.elevenlabs.io https://api.replicate.com https://storage.googleapis.com https://ejiidnob33g9ap1r.public.blob.vercel-storage.com; media-src 'self' blob:"
     }
   },
   "bundle": {
