@@ -460,9 +460,10 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
   // === RENDER LOGIC ===
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden cursor-move flex items-center justify-center p-6">
+    <div className="w-screen h-screen relative overflow-hidden cursor-move flex items-center justify-center p-6" data-tauri-drag-region>
       <div
         className={getContainerStyles()}
+        data-tauri-drag-region
         style={{
           width: `${currentWidth}px`,
           height: `${currentHeight}px`,
