@@ -85,9 +85,10 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
       ref={panelRef}
       className={`
         fixed top-4 right-4 z-50 rounded-lg border backdrop-blur-sm
-        transition-all duration-300 ease-out
+        transition-all duration-300 ease-out cursor-move
         ${isHovered ? "shadow-lg" : "shadow-md"}
       `}
+      data-tauri-drag-region
       style={{
         width: dimensions.width,
         height: dimensions.height,
@@ -99,7 +100,7 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Panel Header */}
-      <div className="flex items-center justify-between p-3 border-b border-white/20">
+      <div className="flex items-center justify-between p-3 border-b border-white/20" data-tauri-drag-region>
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${

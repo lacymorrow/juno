@@ -636,8 +636,8 @@ const AIFloatingChatbot = ({
   }, [currentWidgetData.id]);
 
   return (
-    <div className="h-full w-full relative p-6">
-      <div className="flex items-center justify-center h-full">
+    <div className="h-full w-full relative p-6" data-tauri-drag-region>
+      <div className="flex items-center justify-center h-full" data-tauri-drag-region>
         <button
           type="button"
           onClick={handleIslandClick}
@@ -664,7 +664,7 @@ const AIFloatingChatbot = ({
 export function DynamicBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   return (
     <DynamicIslandProvider initialSize={"default"}>
-      <div className="h-full w-full bg-transparent">
+      <div className="h-full w-full bg-transparent" data-tauri-drag-region>
         <AIFloatingChatbot barAppearance={barAppearance} />
       </div>
     </DynamicIslandProvider>
