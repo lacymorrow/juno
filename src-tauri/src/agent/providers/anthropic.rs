@@ -1305,7 +1305,7 @@ impl AgentBrain for AnthropicBrain {
                                             block_type: "image".to_string(),
                                             source: Some(ApiImageSource {
                                                 source_type: "base64".to_string(),
-                                                media_type: "image/png".to_string(),
+                                                media_type: "image/jpeg".to_string(),
                                                 data: base64_data.to_string(),
                                             }),
                                             text: None,
