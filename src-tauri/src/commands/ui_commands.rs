@@ -263,8 +263,10 @@ impl UIManager {
         // Determine the route based on bar appearance
         let route = match self.bar_config.bar_appearance.as_str() {
             ui::bar_appearances::APP => "/app-bar",
-            ui::bar_appearances::VOICE_AI => "/voice-bar", 
+            ui::bar_appearances::VOICE_AI => "/voice-bar",
             ui::bar_appearances::DYNAMIC => "/dynamic-bar",
+            ui::bar_appearances::ORB => "/orb-bar",
+            ui::bar_appearances::PERSONA => "/persona-bar",
             _ => "/floating-bar",
         };
         

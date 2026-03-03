@@ -247,6 +247,12 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
                   Dynamic
                 </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_ORB}>
+                  Orb (3D)
+                </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
+                  Persona (AI Avatar)
+                </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-gray-500">

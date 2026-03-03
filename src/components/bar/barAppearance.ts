@@ -5,7 +5,8 @@ export type BarAppearance =
   | typeof UI.BAR_APPEARANCES_APP
   | typeof UI.BAR_APPEARANCES_VOICE_AI
   | typeof UI.BAR_APPEARANCES_DYNAMIC
-  | "elevenlabs";
+  | typeof UI.BAR_APPEARANCES_ORB
+  | typeof UI.BAR_APPEARANCES_PERSONA;
 
 export function getBarLayoutWindowLabel(appearance: BarAppearance): string {
   switch (appearance) {

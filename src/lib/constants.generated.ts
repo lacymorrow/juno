@@ -351,6 +351,8 @@ export const UI = {
   BAR_APPEARANCES_APP: 'app',
   BAR_APPEARANCES_VOICE_AI: 'voice_ai',
   BAR_APPEARANCES_DYNAMIC: 'dynamic',
+  BAR_APPEARANCES_ORB: 'orb',
+  BAR_APPEARANCES_PERSONA: 'persona',
   BAR_STATES_DEFAULT: 'default',
   BAR_STATES_EXPANDING: 'expanding',
   BAR_STATES_INPUT: 'input',

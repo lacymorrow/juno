@@ -29,6 +29,8 @@ pub mod bar_appearances {
     pub const APP: &str = "app";
     pub const VOICE_AI: &str = "voice_ai";
     pub const DYNAMIC: &str = "dynamic";
+    pub const ORB: &str = "orb";
+    pub const PERSONA: &str = "persona";
 }
 
 /// UI state constants for bar state management

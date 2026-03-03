@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { UI, EVENTS, TIMEOUTS } from "@/lib/constants.generated";
@@ -8,7 +8,15 @@ import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
-import { ElevenLabsBar } from "@/components/bar/elevenlabs-bar";
+// Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
+const OrbBar = lazy(() =>
+  import("@/components/bar/orb-bar").then((m) => ({ default: m.OrbBar }))
+);
+const PersonaBar = lazy(() =>
+  import("@/components/bar/persona-bar").then((m) => ({
+    default: m.PersonaBar,
+  }))
+);
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
@@ -68,8 +76,18 @@ export function BarHost() {
         return () => <VoiceAIBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_DYNAMIC:
         return () => <DynamicBar barAppearance={appearance} />;
-      case "elevenlabs":
-        return () => <ElevenLabsBar barAppearance={appearance} />;
+      case UI.BAR_APPEARANCES_ORB:
+        return () => (
+          <Suspense fallback={null}>
+            <OrbBar barAppearance={appearance} />
+          </Suspense>
+        );
+      case UI.BAR_APPEARANCES_PERSONA:
+        return () => (
+          <Suspense fallback={null}>
+            <PersonaBar barAppearance={appearance} />
+          </Suspense>
+        );
       case UI.BAR_APPEARANCES_FLOATING:
       default:
         return () => <FloatingBar barAppearance={appearance} />;
@@ -78,5 +96,3 @@ export function BarHost() {
 
   return <Component />;
 }
-
-
