@@ -5,6 +5,8 @@ import {
   CheckCircle,
   ChevronRight,
   Eye,
+  EyeOff,
+  Key,
   Keyboard,
   Monitor,
   Shield,
@@ -141,6 +143,15 @@ const getOnboardingSteps = (
     description:
       "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need and Juno handles the rest.",
     icon: <Wand2 className="w-12 h-12 text-primary" />,
+    action: "Continue",
+  },
+  {
+    id: "api-key",
+    title: "Connect Your AI Provider",
+    subtitle: "Paste your API key to get started",
+    description:
+      "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
+    icon: <Key className="w-12 h-12 text-primary" />,
     action: "Continue",
   },
   ...(permissionsAlreadyGranted
@@ -444,6 +455,17 @@ export default function OnboardingFlow({
     false
   );
 
+  // API key state
+  const [apiKey, setApiKey] = useState("");
+  const [detectedProvider, setDetectedProvider] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeySaved, setApiKeySaved] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+
   // New state for granular permissions
   const [permissionsState, setPermissionsState] =
     useState<PermissionsState | null>(null);
@@ -562,6 +584,58 @@ export default function OnboardingFlow({
     }
   };
 
+  // Auto-detect provider from API key prefix
+  const detectProvider = useCallback(
+    (key: string): { id: string; name: string } | null => {
+      const trimmed = key.trim();
+      // Anthropic keys: sk-ant-api03-...
+      if (trimmed.startsWith("sk-ant-")) {
+        return { id: "anthropic", name: "Anthropic" };
+      }
+      // OpenAI keys: sk-proj-... (current) or sk-... (legacy, but not sk-ant-)
+      if (trimmed.startsWith("sk-proj-") || (trimmed.startsWith("sk-") && !trimmed.startsWith("sk-ant-"))) {
+        return { id: "openai", name: "OpenAI" };
+      }
+      // Google Gemini keys: AIza...
+      if (trimmed.startsWith("AIza")) {
+        return { id: "gemini", name: "Google Gemini" };
+      }
+      return null;
+    },
+    []
+  );
+
+  const handleApiKeyChange = useCallback(
+    (value: string) => {
+      setApiKey(value);
+      setApiKeySaved(false);
+      setApiKeyError(null);
+      setDetectedProvider(detectProvider(value));
+    },
+    [detectProvider]
+  );
+
+  const saveApiKey = useCallback(async () => {
+    if (!detectedProvider || !apiKey.trim()) return;
+    try {
+      setApiKeySaving(true);
+      setApiKeyError(null);
+      await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_API_KEY, {
+        providerId: detectedProvider.id,
+        apiKey: apiKey.trim(),
+      });
+      await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, {
+        providerId: detectedProvider.id,
+      });
+      setApiKeySaved(true);
+    } catch (error) {
+      console.error("Failed to save API key:", error);
+      setApiKeyError(error as string);
+    } finally {
+      setApiKeySaving(false);
+    }
+  }, [detectedProvider, apiKey]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -634,7 +708,7 @@ export default function OnboardingFlow({
     onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
   );
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback(async () => {
     // Block navigation from keyboard shortcut steps if shortcut hasn't been pressed
     const currentStepData = onboardingSteps[currentStep];
     if (currentStepData?.id === "shortcut" && !shortcutPressed) {
@@ -647,6 +721,10 @@ export default function OnboardingFlow({
     if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
       return;
     }
+    // Save API key before advancing from api-key step
+    if (currentStepData?.id === "api-key" && detectedProvider && !apiKeySaved) {
+      await saveApiKey();
+    }
 
     if (currentStep < onboardingSteps.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -654,7 +732,7 @@ export default function OnboardingFlow({
       setIsComplete(true);
       onComplete();
     }
-  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, onComplete]);
+  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
@@ -708,7 +786,9 @@ export default function OnboardingFlow({
   const isContinueDisabled =
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
-    (step.id === "permissions" && !areRequiredPermissionsGranted());
+    (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
+    (step.id === "api-key" && !detectedProvider) ||
+    (step.id === "api-key" && apiKeySaving);
 
   // Determine if skip should be hidden (permissions step with required perms not granted)
   const isSkipHidden =
@@ -802,6 +882,104 @@ export default function OnboardingFlow({
                           )} to stop Juno`
                         : "Press the key above to stop Juno"}
                     </p>
+                  </div>
+                )}
+
+                {/* API key input interface */}
+                {step.id === "api-key" && (
+                  <div className="space-y-4 mt-8 text-left">
+                    {/* API key input with show/hide toggle */}
+                    <div className="relative">
+                      <input
+                        type={showApiKey ? "text" : "password"}
+                        value={apiKey}
+                        onChange={(e) => handleApiKeyChange(e.target.value)}
+                        placeholder="Paste your API key here..."
+                        className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+                        autoFocus
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                      >
+                        {showApiKey ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Provider detection badge */}
+                    {detectedProvider && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
+                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                            {detectedProvider.name} detected
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Unknown key warning */}
+                    {apiKey.trim().length > 0 && !detectedProvider && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-50 border border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800">
+                          <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+                          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
+                            Unrecognized key format
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Save confirmation */}
+                    {apiKeySaved && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
+                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                            API key saved! {detectedProvider?.name} set as active provider.
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Error message */}
+                    {apiKeyError && (
+                      <div className="p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
+                        <p className="text-sm text-red-700 dark:text-red-300">
+                          Failed to save: {apiKeyError}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Supported providers info */}
+                    <div className="text-center pt-2">
+                      <p className="text-xs text-muted-foreground">
+                        Supported: Anthropic (sk-ant-...) · OpenAI (sk-proj-...) · Google Gemini (AIza...)
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        You can skip this step and add your key later in Settings.
+                      </p>
+                    </div>
                   </div>
                 )}
 
