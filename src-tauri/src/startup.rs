@@ -90,8 +90,9 @@ pub fn validate_environment_variables() {
     let mut missing_vars = Vec::new();
 
     for var in critical_vars.iter() {
-        if env::var(var).is_err() {
-            missing_vars.push(*var);
+        match env::var(var) {
+            Ok(val) if !val.is_empty() => {} // Key exists and is non-empty
+            _ => missing_vars.push(*var),     // Missing or empty
         }
     }
 
