@@ -218,7 +218,15 @@ fn output(format: &OutputFormat, value: Value) {
     }
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        let err = json!({ "error": format!("{:#}", e) });
+        eprintln!("{}", serde_json::to_string(&err).unwrap_or_else(|_| format!("{{\"error\":\"{}\"}}", e)));
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Init tracing
