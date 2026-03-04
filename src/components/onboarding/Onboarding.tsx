@@ -16,8 +16,6 @@ import {
   AlertCircle,
   Info,
   Mic,
-  PanelTop,
-  Wand2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -97,7 +95,7 @@ const getOnboardingSteps = (
     title: "Learn the Magic Keys",
     subtitle: "Quick shortcuts to control Juno",
     description:
-      "Try the agent mode shortcut below! This will activate Juno's AI assistant from anywhere on your Mac.",
+      "Try the agent mode shortcut below! This activates Juno from anywhere on your Mac. Watch the floating bar react — toggle it anytime with \u2318B.",
     icon: (
       <AudioVisualizer
         appState="listening"
@@ -115,7 +113,7 @@ const getOnboardingSteps = (
     title: "Escape to Cancel",
     subtitle: "Stop any operation with a single key",
     description:
-      "Sometimes you need to stop what Juno is doing. Press Escape to stop Juno.",
+      "Sometimes you need to stop what Juno is doing. Press Escape and the floating bar will confirm it stopped.",
     icon: (
       <AudioVisualizer
         appState="error"
@@ -126,24 +124,6 @@ const getOnboardingSteps = (
         animationStyle="organic"
       />
     ),
-    action: "Continue",
-  },
-  {
-    id: "floating-bar",
-    title: "The Floating Bar",
-    subtitle: "Your always-available AI companion",
-    description:
-      "The floating bar stays on your screen to show Juno\u2019s status and give you quick access to controls. Toggle it anytime with \u2318B.",
-    icon: <PanelTop className="w-12 h-12 text-primary" />,
-    action: "Continue",
-  },
-  {
-    id: "capabilities",
-    title: "What Juno Can Do",
-    subtitle: "AI-powered desktop automation",
-    description:
-      "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need and Juno handles the rest.",
-    icon: <Wand2 className="w-12 h-12 text-primary" />,
     action: "Continue",
   },
   ...(apiKeysAvailable
@@ -175,10 +155,10 @@ const getOnboardingSteps = (
   {
     id: "complete",
     title: "Ready to Go",
-    subtitle: "Juno is now active",
+    subtitle: "AI-powered desktop automation",
     description: permissionsAlreadyGranted
-      ? "Juno is ready to go! Use the shortcut you just learned to activate Juno anytime."
-      : "You can always change these permissions later in System Preferences.",
+      ? "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need — use the shortcut you learned to activate Juno anytime."
+      : "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. You can always change permissions later in System Preferences.",
     icon: <CheckCircle className="w-12 h-12 text-green-500" />,
     action: "Start Using Juno",
   },
