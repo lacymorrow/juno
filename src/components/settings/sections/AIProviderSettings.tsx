@@ -6,6 +6,17 @@ import {
   EnvironmentVariablesContent,
   EnvironmentVariable,
 } from "@/components/ai-elements/environment-variables";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorLogo,
+  ModelSelectorName,
+} from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,59 +36,74 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Save, CheckCircle, Brain, Cpu } from "lucide-react";
+import { Save, Check, CheckCircle } from "lucide-react";
 import { SettingsSectionProps } from "../types";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-
-interface ModelInfo {
-  id: string;
-  name: string;
-  supports_computer_use: boolean;
-  is_recommended: boolean;
-}
+import { COMMANDS } from "@/lib/constants.generated";
 
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const loadRequestRef = useRef(0);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   const currentProvider = settings.providers?.find(
     (p) => p.id === settings.activeProvider
   );
 
-  const loadModelsForProvider = useCallback(async (providerId: string) => {
-    const requestId = ++loadRequestRef.current;
-    setLoadingModels(true);
-    try {
-      const models = await invoke<ModelInfo[]>("get_provider_models", {
-        providerId,
-      });
-      // Only apply results if this is still the latest request (prevents race condition)
-      if (requestId === loadRequestRef.current) {
-        setAvailableModels(models);
-      }
-    } catch (error) {
-      console.error("Failed to load models for provider:", error);
-      if (requestId === loadRequestRef.current) {
-        setAvailableModels([]);
-      }
-    } finally {
-      if (requestId === loadRequestRef.current) {
-        setLoadingModels(false);
-      }
-    }
-  }, []);
+  // Build sorted provider list: active provider first, then others with models
+  const sortedProviders = useMemo(() => {
+    const withModels = settings.providers.filter(
+      (p) => p.model_info && p.model_info.length > 0
+    );
+    const active = withModels.filter((p) => p.id === settings.activeProvider);
+    const rest = withModels.filter((p) => p.id !== settings.activeProvider);
+    return [...active, ...rest];
+  }, [settings.providers, settings.activeProvider]);
 
-  // Load models when active provider changes
-  useEffect(() => {
-    if (settings.activeProvider && !settings.isLoading) {
-      loadModelsForProvider(settings.activeProvider);
-    }
-  }, [settings.activeProvider, settings.isLoading, loadModelsForProvider]);
+  // Find selected model across all providers
+  const currentModelId =
+    settings.formData.model || settings.providerSettings?.model || "";
 
-  const selectedModel = availableModels.find(
-    (m) => m.id === settings.formData.model
+  const selectedModel = useMemo(() => {
+    for (const provider of settings.providers) {
+      const found = provider.model_info?.find((m) => m.id === currentModelId);
+      if (found) return { model: found, providerId: provider.id };
+    }
+    return null;
+  }, [settings.providers, currentModelId]);
+
+  const modelDisplayName = selectedModel
+    ? selectedModel.model.name
+    : settings.isLoading
+      ? "Loading..."
+      : "Select model";
+
+  const handleModelSelect = useCallback(
+    async (providerId: string, modelId: string) => {
+      setModelSelectorOpen(false);
+      try {
+        // If switching providers, change the active provider first
+        if (providerId !== settings.activeProvider) {
+          await settings.handleActiveProviderChange(providerId);
+        }
+
+        // Validate and set the model
+        const isValid = await invoke<boolean>(
+          COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL,
+          { providerId, modelId }
+        );
+        if (!isValid) return;
+
+        settings.setFormData((prev) => ({ ...prev, model: modelId }));
+
+        await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
+          providerId,
+          model: modelId,
+        });
+      } catch (error) {
+        console.error("AIProviderSettings: Failed to change model:", error);
+      }
+    },
+    [settings]
   );
 
   return (
@@ -144,6 +170,93 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               </div>
             )}
           </div>
+
+          {/* Model selector — same component as chat input */}
+          <div className="space-y-2">
+            <Label>Model</Label>
+            <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
+              <Button
+                variant="outline"
+                className="w-full justify-between font-normal"
+                onClick={() => setModelSelectorOpen(true)}
+                disabled={settings.isLoading}
+              >
+                <span className="flex items-center gap-2">
+                  {selectedModel && (
+                    <ModelSelectorLogo provider={selectedModel.providerId} />
+                  )}
+                  <span className="truncate">{modelDisplayName}</span>
+                </span>
+              </Button>
+              <ModelSelectorContent>
+                <ModelSelectorInput placeholder="Search models..." />
+                <ModelSelectorList>
+                  <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
+                  {sortedProviders.map((provider) => (
+                    <ModelSelectorGroup
+                      key={provider.id}
+                      heading={
+                        <span className="flex items-center gap-1.5">
+                          <ModelSelectorLogo provider={provider.id} className="size-3" />
+                          {provider.name}
+                          {!provider.is_available && (
+                            <span className="text-[10px] text-muted-foreground/60">
+                              — No API key
+                            </span>
+                          )}
+                        </span>
+                      }
+                      className={!provider.is_available ? "opacity-50" : undefined}
+                    >
+                      {provider.model_info.map((model) => {
+                        const isActive =
+                          model.id === currentModelId &&
+                          provider.id === settings.activeProvider;
+                        return (
+                          <ModelSelectorItem
+                            key={`${provider.id}:${model.id}`}
+                            value={`${provider.id} ${model.id} ${model.name}`}
+                            onSelect={() => {
+                              if (!provider.is_available) return;
+                              handleModelSelect(provider.id, model.id);
+                            }}
+                            disabled={!provider.is_available}
+                            className={!provider.is_available ? "opacity-50 cursor-not-allowed" : undefined}
+                          >
+                            <ModelSelectorLogo provider={provider.id} />
+                            <ModelSelectorName>{model.name}</ModelSelectorName>
+                            {!provider.is_available && (
+                              <span className="text-xs text-muted-foreground">No API key</span>
+                            )}
+                            {provider.is_available && model.is_recommended && (
+                              <span className="text-xs text-green-600">Recommended</span>
+                            )}
+                            {provider.is_available && model.supports_computer_use && (
+                              <span className="text-xs text-blue-600">Computer Use</span>
+                            )}
+                            {isActive && <Check className="size-4 text-primary" />}
+                          </ModelSelectorItem>
+                        );
+                      })}
+                    </ModelSelectorGroup>
+                  ))}
+                </ModelSelectorList>
+              </ModelSelectorContent>
+            </ModelSelector>
+            {selectedModel && (
+              <div className="text-xs text-muted-foreground">
+                {selectedModel.model.supports_computer_use ? (
+                  <span className="text-green-700">
+                    ✅ This model supports computer use automation
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    ⚠️ This model is for general chat only
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -175,136 +288,6 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                 />
               </EnvironmentVariablesContent>
             </EnvironmentVariables>
-
-            <div className="space-y-2">
-              <Label htmlFor="model">
-                Model
-                {currentProvider?.computer_use_supported && (
-                  <span className="text-xs text-muted-foreground ml-2">
-                    (🖥️ = Computer Use)
-                  </span>
-                )}
-              </Label>
-              {loadingModels ? (
-                <div className="flex items-center gap-2 p-2 border rounded">
-                  <div className="w-4 h-4 bg-muted animate-pulse rounded" />
-                  <span className="text-sm text-muted-foreground">
-                    Loading models...
-                  </span>
-                </div>
-              ) : (
-                <Select
-                  value={settings.formData.model}
-                  onValueChange={async (value) => {
-                    // Validate model before setting
-                    try {
-                      const isValid = await invoke<boolean>(
-                        "validate_provider_model",
-                        {
-                          providerId: settings.activeProvider,
-                          modelId: value,
-                        }
-                      );
-
-                      if (isValid) {
-                        settings.setFormData((prev) => ({
-                          ...prev,
-                          model: value,
-                        }));
-                      } else {
-                        console.warn(
-                          `Model ${value} is not valid for provider ${settings.activeProvider}`
-                        );
-                      }
-                    } catch (error) {
-                      console.error("Failed to validate model:", error);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Computer Use Models */}
-                    {availableModels.filter(
-                      (model) => model.supports_computer_use
-                    ).length > 0 && (
-                      <>
-                        <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
-                          <div className="flex items-center gap-1">
-                            <Cpu size={12} />
-                            Computer Use Models
-                          </div>
-                        </div>
-                        {availableModels
-                          .filter((model) => model.supports_computer_use)
-                          .map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              <div className="flex items-center gap-2">
-                                <span>🖥️</span>
-                                <span>{model.name}</span>
-                                {model.is_recommended && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs bg-green-50 text-green-700 border-green-200"
-                                  >
-                                    Recommended
-                                  </Badge>
-                                )}
-                              </div>
-                            </SelectItem>
-                          ))}
-                      </>
-                    )}
-
-                    {/* General Chat Models */}
-                    {availableModels.filter(
-                      (model) => !model.supports_computer_use
-                    ).length > 0 && (
-                      <>
-                        <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
-                          <div className="flex items-center gap-1">
-                            <Brain size={12} />
-                            General Chat Models
-                          </div>
-                        </div>
-                        {availableModels
-                          .filter((model) => !model.supports_computer_use)
-                          .map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              <div className="flex items-center gap-2">
-                                <span>💬</span>
-                                <span>{model.name}</span>
-                                {model.is_recommended && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs bg-green-50 text-green-700 border-green-200"
-                                  >
-                                    Recommended
-                                  </Badge>
-                                )}
-                              </div>
-                            </SelectItem>
-                          ))}
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-              )}
-              {selectedModel && (
-                <div className="text-xs text-muted-foreground">
-                  {selectedModel.supports_computer_use ? (
-                    <span className="text-green-700">
-                      ✅ This model supports computer use automation
-                    </span>
-                  ) : (
-                    <span className="text-amber-700">
-                      ⚠️ This model is for general chat only
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
