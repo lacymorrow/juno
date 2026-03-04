@@ -96,16 +96,7 @@ const getOnboardingSteps = (
     subtitle: "Quick shortcuts to control Juno",
     description:
       "Try the agent mode shortcut below! This activates Juno from anywhere on your Mac. Watch the floating bar react — toggle it anytime with \u2318B.",
-    icon: (
-      <AudioVisualizer
-        appState="listening"
-        width={350}
-        height={60}
-        enableMicrophone={false}
-        intensity={1.2}
-        animationStyle="organic"
-      />
-    ),
+    icon: null, // Floating bar rendered persistently outside AnimatePresence
     action: "Continue",
   },
   {
@@ -114,16 +105,7 @@ const getOnboardingSteps = (
     subtitle: "Stop any operation with a single key",
     description:
       "Sometimes you need to stop what Juno is doing. Press Escape and the floating bar will confirm it stopped.",
-    icon: (
-      <AudioVisualizer
-        appState="error"
-        width={350}
-        height={60}
-        enableMicrophone={false}
-        intensity={1.8}
-        animationStyle="organic"
-      />
-    ),
+    icon: null, // Floating bar rendered persistently outside AnimatePresence
     action: "Continue",
   },
   ...(apiKeysAvailable
@@ -818,6 +800,35 @@ export default function OnboardingFlow({
             ))}
           </div>
 
+          {/* Persistent floating bar preview across shortcut & cancel steps */}
+          <AnimatePresence>
+            {(step.id === "shortcut" || step.id === "cancel") && (
+              <motion.div
+                key="floating-bar-preview"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+                className="flex justify-center mb-8"
+              >
+                <AudioVisualizer
+                  appState={
+                    step.id === "cancel" && escapePressed
+                      ? "error"
+                      : shortcutPressed || step.id === "cancel"
+                      ? "listening"
+                      : "idle"
+                  }
+                  width={350}
+                  height={60}
+                  enableMicrophone={false}
+                  intensity={step.id === "cancel" ? 1.8 : 1.2}
+                  animationStyle="organic"
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait">
             <motion.div
               key={step.id}
@@ -827,8 +838,8 @@ export default function OnboardingFlow({
               transition={{ duration: 0.4, ease: "easeOut" }}
               className="text-center"
             >
-              {/* Icon */}
-              <div className="flex justify-center mb-8">{step.icon}</div>
+              {/* Icon (null for shortcut/cancel — floating bar is above) */}
+              {step.icon && <div className="flex justify-center mb-8">{step.icon}</div>}
 
               {/* Content */}
               <div className="space-y-4 mb-10">
