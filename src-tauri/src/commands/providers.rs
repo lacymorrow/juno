@@ -14,8 +14,8 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 
 /// Get the list of available providers
 #[tauri::command]
-pub(crate) async fn get_providers() -> Result<Vec<ProviderInfo>, String> {
-    Ok(BrainFactory::list_providers())
+pub(crate) async fn get_providers(app_handle: tauri::AppHandle) -> Result<Vec<ProviderInfo>, String> {
+    Ok(BrainFactory::list_providers_with_app_handle(Some(&app_handle)))
 }
 
 /// Get the current active provider

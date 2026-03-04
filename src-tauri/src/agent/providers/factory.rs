@@ -204,6 +204,12 @@ impl BrainFactory {
 
     /// Get list of all available providers with their status
     pub fn list_providers() -> Vec<ProviderInfo> {
+        Self::list_providers_with_app_handle(None)
+    }
+
+    /// List providers with optional app handle to read store-saved API keys.
+    /// Without an app handle, only env vars are checked for availability.
+    pub fn list_providers_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
         let providers = vec![
             Provider::Anthropic,
@@ -211,7 +217,7 @@ impl BrainFactory {
             Provider::Rig,
             Provider::Gemini,
         ];
-        let config = Some(ProviderConfig::default()); // Use default config for new app
+        let config = Some(load_provider_config(app_handle));
 
         providers
             .into_iter()

@@ -99,10 +99,23 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               </SelectTrigger>
               <SelectContent>
                 {settings.providers.map((provider) => (
-                  <SelectItem key={provider.id} value={provider.id}>
+                  <SelectItem
+                    key={provider.id}
+                    value={provider.id}
+                    disabled={!provider.is_available}
+                    className={!provider.is_available ? "opacity-50" : undefined}
+                  >
                     <div className="flex items-center gap-2">
                       <span>{provider.name}</span>
-                      {provider.computer_use_supported && (
+                      {!provider.is_available && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-muted-foreground"
+                        >
+                          No API key
+                        </Badge>
+                      )}
+                      {provider.is_available && provider.computer_use_supported && (
                         <Badge
                           variant="secondary"
                           className="text-xs bg-blue-100 text-blue-800"
