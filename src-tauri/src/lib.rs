@@ -399,6 +399,7 @@ pub fn run() {
             get_provider_models,
             get_provider_settings,
             update_provider_api_key,
+            check_api_keys_available,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,

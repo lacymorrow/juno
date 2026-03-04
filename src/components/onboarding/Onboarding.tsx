@@ -75,7 +75,8 @@ const permissions = [
 
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
-  isDevelopmentMode: boolean = false
+  isDevelopmentMode: boolean = false,
+  apiKeysAvailable: boolean = false
 ) => [
   {
     id: "welcome",
@@ -145,15 +146,19 @@ const getOnboardingSteps = (
     icon: <Wand2 className="w-12 h-12 text-primary" />,
     action: "Continue",
   },
-  {
-    id: "api-key",
-    title: "Connect Your AI Provider",
-    subtitle: "Paste your API key to get started",
-    description:
-      "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
-    icon: <Key className="w-12 h-12 text-primary" />,
-    action: "Continue",
-  },
+  ...(apiKeysAvailable
+    ? []
+    : [
+        {
+          id: "api-key",
+          title: "Connect Your AI Provider",
+          subtitle: "Paste your API key to get started",
+          description:
+            "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
+          icon: <Key className="w-12 h-12 text-primary" />,
+          action: "Continue",
+        },
+      ]),
   ...(permissionsAlreadyGranted
     ? []
     : [
@@ -456,6 +461,7 @@ export default function OnboardingFlow({
   );
 
   // API key state
+  const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [detectedProvider, setDetectedProvider] = useState<{
     id: string;
@@ -648,6 +654,20 @@ export default function OnboardingFlow({
         await checkPermissionsStatus();
         if (!mounted) return;
 
+        // Check if API keys are already available (from store or .env)
+        try {
+          const keysAvailable = await invoke<boolean>("check_api_keys_available");
+          if (mounted) {
+            setApiKeysAvailable(keysAvailable);
+            if (keysAvailable) {
+              console.log("OnboardingFlow: API keys already available, skipping API key step");
+            }
+          }
+        } catch (error) {
+          console.warn("Failed to check API keys availability:", error);
+        }
+        if (!mounted) return;
+
         // Load onboarding info and shortcuts
         const onboardingInfo = await invoke("get_onboarding_info");
         if (!mounted) return;
@@ -700,7 +720,8 @@ export default function OnboardingFlow({
 
   const onboardingSteps = getOnboardingSteps(
     actualPermissionsGranted,
-    isDevelopmentMode
+    isDevelopmentMode,
+    apiKeysAvailable
   );
 
   console.log(
