@@ -87,6 +87,16 @@ juno-cua --format pretty screenshot    # Pretty-printed JSON
 juno-cua --format quiet screenshot     # Silent (errors to stderr)
 ```
 
+## Error Handling
+
+On failure, `juno-cua` prints a JSON error to stderr and exits with code 1:
+
+```json
+{"error": "Failed to initialize Desktop engine. Check accessibility permissions."}
+```
+
+This makes it easy for callers to distinguish success (exit 0, JSON on stdout) from failure (exit 1, JSON error on stderr).
+
 ## OpenClaw Integration
 
 Once built and on PATH, OpenClaw can invoke tools directly:
