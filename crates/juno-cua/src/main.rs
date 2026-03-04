@@ -26,8 +26,37 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use computer_use_ai_sdk::Desktop;
 use serde_json::{json, Value};
-use std::io::Write;
 
+/// Click button type — validated at parse time by clap.
+#[derive(Clone, Debug, Copy, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ClickType {
+    Left,
+    Right,
+    Middle,
+    Double,
+    Triple,
+}
+
+/// Scroll direction — validated at parse time by clap.
+#[derive(Clone, Debug, Copy, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ScrollDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Modifier key — validated at parse time by clap.
+#[derive(Clone, Debug, Copy, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ModifierKey {
+    Cmd,
+    Ctrl,
+    Alt,
+    Shift,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -70,8 +99,8 @@ enum Commands {
         #[arg(long)]
         y: f64,
         /// Click type: left, right, middle, double, triple
-        #[arg(long, default_value = "left")]
-        button: String,
+        #[arg(long, value_enum, default_value = "left")]
+        button: ClickType,
     },
 
     /// Move mouse to coordinates
@@ -98,8 +127,8 @@ enum Commands {
         #[arg(long)]
         key: String,
         /// Modifier key (cmd, ctrl, alt, shift)
-        #[arg(long)]
-        modifier: Option<String>,
+        #[arg(long, value_enum)]
+        modifier: Option<ModifierKey>,
     },
 
     /// Hold a key down
@@ -126,8 +155,8 @@ enum Commands {
         #[arg(long)]
         y: f64,
         /// Direction: up, down, left, right
-        #[arg(long)]
-        direction: String,
+        #[arg(long, value_enum)]
+        direction: ScrollDirection,
         /// Scroll amount
         #[arg(long, default_value = "3")]
         amount: f64,
@@ -202,18 +231,14 @@ fn output(format: &OutputFormat, value: Value) {
     match format {
         OutputFormat::Json => {
             let out = serde_json::to_string(&value).unwrap_or_else(|_| "null".into());
-            let _ = std::io::stdout().write_all(out.as_bytes());
-            let _ = std::io::stdout().write_all(b"\n");
+            println!("{}", out);
         }
         OutputFormat::Pretty => {
             let out = serde_json::to_string_pretty(&value).unwrap_or_else(|_| "null".into());
             println!("{}", out);
         }
         OutputFormat::Quiet => {
-            // Only print errors to stderr; successful results are silent
-            if let Some(err) = value.get("error") {
-                eprintln!("{}", err);
-            }
+            // Successful results are silent in quiet mode
         }
     }
 }
@@ -251,13 +276,12 @@ fn run() -> Result<()> {
         }
 
         Commands::Click { x, y, button } => {
-            match button.as_str() {
-                "left" => desktop.left_click(x, y, None),
-                "right" => desktop.right_click(x, y, None),
-                "middle" => desktop.middle_click(x, y, None),
-                "double" => desktop.double_click(x, y, None),
-                "triple" => desktop.triple_click(x, y, None),
-                other => anyhow::bail!("Unknown click button: {}", other),
+            match button {
+                ClickType::Left => desktop.left_click(x, y, None),
+                ClickType::Right => desktop.right_click(x, y, None),
+                ClickType::Middle => desktop.middle_click(x, y, None),
+                ClickType::Double => desktop.double_click(x, y, None),
+                ClickType::Triple => desktop.triple_click(x, y, None),
             }
             .context("Click failed")?;
             json!({ "status": "success", "action": "click", "x": x, "y": y, "button": button })
@@ -279,8 +303,14 @@ fn run() -> Result<()> {
         }
 
         Commands::PressKey { key, modifier } => {
+            let mod_str = modifier.map(|m| match m {
+                ModifierKey::Cmd => "cmd",
+                ModifierKey::Ctrl => "ctrl",
+                ModifierKey::Alt => "alt",
+                ModifierKey::Shift => "shift",
+            });
             desktop
-                .press_key(&key, modifier.as_deref())
+                .press_key(&key, mod_str)
                 .context("Press key failed")?;
             json!({ "status": "success", "action": "press_key", "key": key, "modifier": modifier })
         }
@@ -303,8 +333,14 @@ fn run() -> Result<()> {
             direction,
             amount,
         } => {
+            let dir_str = match direction {
+                ScrollDirection::Up => "up",
+                ScrollDirection::Down => "down",
+                ScrollDirection::Left => "left",
+                ScrollDirection::Right => "right",
+            };
             desktop
-                .scroll_at_position(x, y, &direction, amount)
+                .scroll_at_position(x, y, dir_str, amount)
                 .context("Scroll failed")?;
             json!({ "status": "success", "action": "scroll", "x": x, "y": y, "direction": direction, "amount": amount })
         }
