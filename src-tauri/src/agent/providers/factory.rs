@@ -225,41 +225,41 @@ impl BrainFactory {
                 let provider_id = provider.id();
                 let is_available = match provider {
                     Provider::Anthropic => {
-                        env::var("ANTHROPIC_API_KEY").is_ok()
+                        env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::OpenAI => {
-                        env::var("OPENAI_API_KEY").is_ok()
+                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::Rig => {
-                        env::var("OPENAI_API_KEY").is_ok()
+                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(Provider::OpenAI.id()))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::Gemini => {
-                        env::var("GEMINI_API_KEY").is_ok()
+                        env::var("GEMINI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                 };
                 ProviderInfo {
