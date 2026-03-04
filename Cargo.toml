@@ -4,6 +4,7 @@ members = [
 	"src-tauri",
 	"src-tauri/mcp-server-os-level",    # Binary disabled, library still available
 	"tauri-plugin-voice-transcription",
+	"crates/juno-cua",                  # Headless CUA CLI — no Tauri/GUI required
 ]
 
 # Shared workspace dependencies to reduce duplication
