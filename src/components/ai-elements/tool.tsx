@@ -141,7 +141,18 @@ export const ToolOutput = ({
       <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
     );
   } else if (typeof output === "string") {
-    Output = <CodeBlock code={output} language="text" />;
+    // String output may not be valid JSON; render as preformatted text
+    let parsedAsJson = false;
+    try {
+      const parsed = JSON.parse(output);
+      Output = <CodeBlock code={JSON.stringify(parsed, null, 2)} language="json" />;
+      parsedAsJson = true;
+    } catch {
+      // Not JSON — render as plain text
+    }
+    if (!parsedAsJson) {
+      Output = <div className="whitespace-pre-wrap p-4 text-xs font-mono">{output}</div>;
+    }
   }
 
   return (

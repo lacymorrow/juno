@@ -9,7 +9,6 @@ import {
   type HTMLAttributes,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from "react";
 import { type BundledLanguage, codeToHtml, type ShikiTransformer } from "shiki";

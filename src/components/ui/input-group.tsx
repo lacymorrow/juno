@@ -2,9 +2,8 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { Button, type buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { VariantProps } from "class-variance-authority";
 
 export interface InputGroupProps extends React.HTMLAttributes<HTMLDivElement> {}
 

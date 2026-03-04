@@ -127,8 +127,9 @@ import { AIInput, AIInputTextarea } from "@/components/ui/kibo-ui/ai";
 import { 
   PromptInput,
   PromptInputTextarea,
-  PromptInputActions,
-  PromptInputAction 
+  PromptInputFooter,
+  PromptInputTools,
+  PromptInputSubmit 
 } from "@/components/ai-elements";
 
 <PromptInput onSubmit={handleSubmit}>
@@ -137,9 +138,10 @@ import {
     onChange={setInput}
     placeholder="Ask me anything..."
   />
-  <PromptInputActions>
-    <PromptInputAction type="submit" />
-  </PromptInputActions>
+  <PromptInputFooter>
+    <PromptInputTools />
+    <PromptInputSubmit />
+  </PromptInputFooter>
 </PromptInput>
 ```
 
@@ -152,14 +154,14 @@ import {
 
 **After:**
 ```tsx
-import { Tool, ToolIcon, ToolName, ToolResult } from "@/components/ai-elements";
+import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from "@/components/ai-elements";
 
 <Tool>
-  <ToolIcon>{getToolIcon(tool.name)}</ToolIcon>
-  <ToolName>{tool.name}</ToolName>
-  <ToolResult status={tool.status}>
-    {tool.result}
-  </ToolResult>
+  <ToolHeader title={tool.name} type={tool.type} state={tool.state} />
+  <ToolContent>
+    <ToolInput input={tool.input} />
+    <ToolOutput output={tool.output} errorText={tool.errorText} />
+  </ToolContent>
 </Tool>
 ```
 
@@ -172,14 +174,11 @@ import { Tool, ToolIcon, ToolName, ToolResult } from "@/components/ai-elements";
 
 **After:**
 ```tsx
-import { Reasoning, ReasoningStep, ReasoningContent } from "@/components/ai-elements";
+import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements";
 
-<Reasoning>
-  <ReasoningStep>
-    <ReasoningContent>
-      {thinking.content}
-    </ReasoningContent>
-  </ReasoningStep>
+<Reasoning content={thinking.content}>
+  <ReasoningTrigger />
+  <ReasoningContent />
 </Reasoning>
 ```
 
