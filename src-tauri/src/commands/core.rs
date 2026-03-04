@@ -22,13 +22,32 @@ pub struct ScreenshotResult {
     pub original_height: u32,
     pub resized_width: u32,
     pub resized_height: u32,
+    /// Cursor position in standard (API) coordinates, if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+}
+
+/// Get cursor position in standard (API) coordinates for inclusion in screenshot results.
+/// Returns a human-readable string like "Cursor at (523, 341)." or None if unavailable.
+#[cfg(target_os = "macos")]
+fn get_cursor_position_text() -> Option<String> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+    let event = CGEvent::new(event_source).ok()?;
+    let point = event.location();
+
+    // Transform from screen coordinates to standard (API) coordinates
+    let (std_x, std_y) = coordinates::transform_screen_to_standard_coordinates(point.x, point.y);
+    Some(format!("Cursor at ({}, {}).", std_x as i32, std_y as i32))
 }
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, AppState>) -> Result<ScreenshotResult, String> {
     use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
-    use image::{ImageReader, ImageFormat};
+    use image::ImageReader;
     use std::io::Cursor;
     use base64::Engine;
     
@@ -72,16 +91,22 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                                     image::imageops::FilterType::Lanczos3,
                                 );
 
-                                // Encode the scaled image back to base64
+                                // Encode the scaled image as JPEG (quality 85) — ~60% smaller than PNG
                                 let mut scaled_buffer = Cursor::new(Vec::new());
-                                scaled_img.write_to(&mut scaled_buffer, ImageFormat::Png)
-                                    .map_err(|e| format!("Failed to encode scaled image: {}", e))?;
+                                let jpeg_encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut scaled_buffer, 85);
+                                scaled_img.write_with_encoder(jpeg_encoder)
+                                    .map_err(|e| format!("Failed to encode scaled image as JPEG: {}", e))?;
 
                                 engine.encode(scaled_buffer.into_inner())
                             } else {
-                                info!("Screenshot already at standard resolution {}x{}, no scaling needed",
+                                info!("Screenshot already at standard resolution {}x{}, re-encoding as JPEG",
                                     original_width, original_height);
-                                base64_string
+                                // Re-encode as JPEG even when no scaling needed (saves ~60% vs PNG)
+                                let mut jpeg_buffer = Cursor::new(Vec::new());
+                                let jpeg_encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buffer, 85);
+                                img.write_with_encoder(jpeg_encoder)
+                                    .map_err(|e| format!("Failed to encode image as JPEG: {}", e))?;
+                                engine.encode(jpeg_buffer.into_inner())
                             };
 
                             // Update scaling information with standard resolution data AND display origin
@@ -110,6 +135,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                                 original_height: display_height,
                                 resized_width: standard_width,
                                 resized_height: standard_height,
+                                output: get_cursor_position_text(),
                             })
                         }
                         Err(e) => {
@@ -137,6 +163,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                                 original_height,
                                 resized_width: original_width, // Fallback: no resize
                                 resized_height: original_height,
+                                output: get_cursor_position_text(),
                             })
                         }
                     }
@@ -152,6 +179,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                             original_height: 0, // Unknown
                             resized_width: 0,
                             resized_height: 0,
+                            output: None,
                         })
                     }
                 } else {
@@ -166,6 +194,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                         original_height: 0, // Unknown
                         resized_width: 0,
                         resized_height: 0,
+                        output: None,
                     })
                 }
             } else {
@@ -180,6 +209,7 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                     original_height: 0, // Unknown
                     resized_width: 0,
                     resized_height: 0,
+                    output: None,
                 })
             }
         }

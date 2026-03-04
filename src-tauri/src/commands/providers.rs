@@ -14,8 +14,8 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 
 /// Get the list of available providers
 #[tauri::command]
-pub(crate) async fn get_providers() -> Result<Vec<ProviderInfo>, String> {
-    Ok(BrainFactory::list_providers())
+pub(crate) async fn get_providers(app_handle: tauri::AppHandle) -> Result<Vec<ProviderInfo>, String> {
+    Ok(BrainFactory::list_providers_with_app_handle(Some(&app_handle)))
 }
 
 /// Get the current active provider
@@ -166,6 +166,47 @@ pub(crate) async fn update_provider_api_key(
 
     info!("Updated API key for provider: {}", provider_id);
     Ok(())
+}
+
+/// Check if any AI provider API key is available (from store or environment variables).
+/// Used by onboarding to skip the API key step when keys are already configured.
+#[tauri::command]
+pub(crate) async fn check_api_keys_available(
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    use std::env;
+
+    // Check settings store for saved keys
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+
+    let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+        .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
+
+    // Check if any provider has an API key in the store
+    for provider in &config.providers {
+        if provider.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
+            info!("API key found in store for provider: {}", provider.id);
+            return Ok(true);
+        }
+    }
+
+    // Fallback: check environment variables (loaded from .env files at startup)
+    let env_keys = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+
+    for key in &env_keys {
+        if env::var(key).is_ok_and(|v| !v.is_empty()) {
+            info!("API key found in environment variable: {}", key);
+            return Ok(true);
+        }
+    }
+
+    info!("No API keys found in store or environment");
+    Ok(false)
 }
 
 /// Update model for a provider
