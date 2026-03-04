@@ -2,6 +2,9 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { Button, type buttonVariants } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import type { VariantProps } from "class-variance-authority";
 
 export interface InputGroupProps extends React.HTMLAttributes<HTMLDivElement> {}
 
@@ -44,3 +47,38 @@ export const InputGroupAddon = React.forwardRef<
   );
 });
 InputGroupAddon.displayName = "InputGroupAddon";
+
+export type InputGroupButtonProps = React.ComponentProps<typeof Button>;
+
+export const InputGroupButton = React.forwardRef<
+  HTMLButtonElement,
+  InputGroupButtonProps
+>(({ className, ...props }, ref) => {
+  return (
+    <Button
+      ref={ref}
+      className={cn("shrink-0", className)}
+      {...props}
+    />
+  );
+});
+InputGroupButton.displayName = "InputGroupButton";
+
+export type InputGroupTextareaProps = React.ComponentProps<typeof Textarea>;
+
+export const InputGroupTextarea = React.forwardRef<
+  HTMLTextAreaElement,
+  InputGroupTextareaProps
+>(({ className, ...props }, ref) => {
+  return (
+    <Textarea
+      ref={ref}
+      className={cn(
+        "flex-1 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 resize-none",
+        className
+      )}
+      {...props}
+    />
+  );
+});
+InputGroupTextarea.displayName = "InputGroupTextarea";
