@@ -226,7 +226,7 @@ export function useSettings() {
 						temperature?: number;
 						system_prompt?: string;
 					}[];
-				}>("provider_settings_changed", (event) => {
+				}>("provider_settings_changed", async (event) => {
 					if (!mounted) return;
 					console.log("useSettings: Received provider settings update:", event.payload);
 					const fullProviderSettings = event.payload;
@@ -259,6 +259,16 @@ export function useSettings() {
 
 					// Invalidate cache to force fresh data on next request
 					invalidateCache();
+
+					// Re-fetch providers to update is_available after API key changes
+					try {
+						const freshProviders = await invokeCommand<ProviderInfo[]>("get_providers");
+						if (mounted) {
+							setProviders(freshProviders);
+						}
+					} catch (err) {
+						console.warn("useSettings: Failed to refresh providers after settings change:", err);
+					}
 				});
 				if (mounted) {
 					unlisten = fn;

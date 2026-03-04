@@ -204,6 +204,12 @@ impl BrainFactory {
 
     /// Get list of all available providers with their status
     pub fn list_providers() -> Vec<ProviderInfo> {
+        Self::list_providers_with_app_handle(None)
+    }
+
+    /// List providers with optional app handle to read store-saved API keys.
+    /// Without an app handle, only env vars are checked for availability.
+    pub fn list_providers_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
         let providers = vec![
             Provider::Anthropic,
@@ -211,7 +217,7 @@ impl BrainFactory {
             Provider::Rig,
             Provider::Gemini,
         ];
-        let config = Some(ProviderConfig::default()); // Use default config for new app
+        let config = Some(load_provider_config(app_handle));
 
         providers
             .into_iter()
@@ -219,41 +225,41 @@ impl BrainFactory {
                 let provider_id = provider.id();
                 let is_available = match provider {
                     Provider::Anthropic => {
-                        env::var("ANTHROPIC_API_KEY").is_ok()
+                        env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::OpenAI => {
-                        env::var("OPENAI_API_KEY").is_ok()
+                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::Rig => {
-                        env::var("OPENAI_API_KEY").is_ok()
+                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(Provider::OpenAI.id()))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                     Provider::Gemini => {
-                        env::var("GEMINI_API_KEY").is_ok()
+                        env::var("GEMINI_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
-                                .is_some()
+                                .is_some_and(|k| !k.is_empty())
                     }
                 };
                 ProviderInfo {

@@ -24,6 +24,54 @@ use crate::utils::coordinate_validation::{
     validate_coordinate_pair,
     CoordinateValidationError
 };
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Minimum milliseconds between consecutive UI-modifying actions (click, type, key).
+/// Prevents "clicked too fast" failures when the UI is still loading/animating.
+const ACTION_COOLDOWN_MS: u64 = 300;
+
+/// Timestamp (ms since epoch) of the last UI-modifying action.
+static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Returns true if the action modifies the UI (click, type, key, scroll, drag).
+/// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
+fn is_ui_modifying_action(action: &str) -> bool {
+    matches!(action,
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |
+        "left_click_drag" | "mouse_move" | "left_mouse_down" | "left_mouse_up" |
+        "key" | "hold_key" | "type" | "scroll"
+    )
+}
+
+/// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
+/// Records the current time for the next cooldown check.
+async fn enforce_action_cooldown(action: &str) {
+    if !is_ui_modifying_action(action) {
+        return;
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_millis() as u64;
+
+    let last_ms = LAST_UI_ACTION_MS.load(Ordering::Relaxed);
+    if last_ms > 0 {
+        let elapsed = now_ms.saturating_sub(last_ms);
+        if elapsed < ACTION_COOLDOWN_MS {
+            let wait = ACTION_COOLDOWN_MS - elapsed;
+            tracing::debug!("Action cooldown: waiting {}ms before {} ({}ms since last action)", wait, action, elapsed);
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+        }
+    }
+
+    // Record this action's timestamp
+    let final_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_millis() as u64;
+    LAST_UI_ACTION_MS.store(final_ms, Ordering::Relaxed);
+}
 
 // --- Security and Validation Helpers ---
 
@@ -305,6 +353,21 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             let duration = input["duration"].as_u64().unwrap_or(1);
             format!("computer/wait({}s)", duration)
         },
+        "zoom" => {
+            if let Some(region) = input["region"].as_array() {
+                if region.len() == 4 {
+                    format!("computer/zoom([{},{},{},{}])",
+                        region[0].as_i64().unwrap_or(0),
+                        region[1].as_i64().unwrap_or(0),
+                        region[2].as_i64().unwrap_or(0),
+                        region[3].as_i64().unwrap_or(0))
+                } else {
+                    "computer/zoom".to_string()
+                }
+            } else {
+                "computer/zoom".to_string()
+            }
+        },
         _ => format!("computer/{}", action),
     }
 }
@@ -385,6 +448,9 @@ pub async fn execute_computer_tool(
         Some(format!("Executing computer action: {}", action)),
         Some(&*state_manager),
     ).await;
+
+    // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures
+    enforce_action_cooldown(action).await;
 
     // Execute action
     let execution_start = std::time::Instant::now();
@@ -707,6 +773,103 @@ pub async fn execute_computer_tool(
                 "success": true
             }))
         }
+        "zoom" => {
+            // Zoom action (computer_20251124): inspect a specific screen region at native resolution
+            // This is critical for Retina displays where the standard resolution downscaling
+            // makes small text and UI elements unreadable.
+            //
+            // Claude sends region: [x0, y0, x1, y1] in API (standard resolution) coordinate space.
+            // We scale to screen coordinates, capture a full-res screenshot, crop to the region,
+            // and return the crop WITHOUT downscaling (native Retina resolution).
+            handle_anthropic_result!(validate_permission(
+                app_handle,
+                RequiredPermission::ScreenRecording,
+                "computer (zoom)"
+            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+
+            let region = match input["region"].as_array() {
+                Some(arr) if arr.len() == 4 => {
+                    let coords: Result<Vec<i64>, _> = arr.iter().map(|v| {
+                        v.as_i64().ok_or_else(|| "Zoom region coordinates must be integers".to_string())
+                    }).collect();
+                    handle_anthropic_result!(coords)
+                }
+                Some(arr) => return Ok(create_anthropic_error_response(
+                    format!("Zoom region must have exactly 4 coordinates [x0, y0, x1, y1], got {}", arr.len())
+                )),
+                None => return Ok(create_anthropic_error_response(
+                    "Missing 'region' parameter for zoom action".to_string()
+                )),
+            };
+
+            let (api_x0, api_y0, api_x1, api_y1) = (region[0], region[1], region[2], region[3]);
+
+            // Validate region bounds
+            if api_x0 < 0 || api_y0 < 0 || api_x1 < 0 || api_y1 < 0 {
+                return Ok(create_anthropic_error_response(
+                    "Zoom region coordinates must be non-negative".to_string()
+                ));
+            }
+            if api_x0 >= api_x1 || api_y0 >= api_y1 {
+                return Ok(create_anthropic_error_response(
+                    format!("Invalid zoom region: top-left ({},{}) must be before bottom-right ({},{})",
+                        api_x0, api_y0, api_x1, api_y1)
+                ));
+            }
+
+            // Capture screenshot (already scaled to standard resolution by capture_screenshot_command)
+            let screenshot_result = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
+                app_handle.clone(),
+                state_manager.clone()
+            ).await.map_err(|e| format!("Zoom screenshot capture failed: {}", e)));
+
+            // Decode the base64 screenshot for cropping
+            use base64::Engine;
+            use image::ImageFormat;
+            use std::io::Cursor;
+            let engine = base64::engine::general_purpose::STANDARD;
+            let image_data = handle_anthropic_result!(engine.decode(&screenshot_result.base64_image)
+                .map_err(|e| format!("Failed to decode screenshot for zoom: {}", e)));
+
+            let img = handle_anthropic_result!(image::load_from_memory(&image_data)
+                .map_err(|e| format!("Failed to load screenshot image for zoom: {}", e)));
+
+            // The screenshot was already resized to standard resolution by capture_screenshot_command.
+            // We need to map the API coordinates to the screenshot pixel space.
+            // Since capture_screenshot_command resizes to standard_width x standard_height,
+            // and the API coordinates ARE in standard resolution space, we can crop directly
+            // using the API coordinates (they map 1:1 to screenshot pixels).
+            let crop_x = api_x0.max(0) as u32;
+            let crop_y = api_y0.max(0) as u32;
+            let crop_w = ((api_x1 - api_x0) as u32).min(img.width().saturating_sub(crop_x));
+            let crop_h = ((api_y1 - api_y0) as u32).min(img.height().saturating_sub(crop_y));
+
+            if crop_w == 0 || crop_h == 0 {
+                return Ok(create_anthropic_error_response(
+                    "Zoom region results in zero-size crop after bounds clamping".to_string()
+                ));
+            }
+
+            // Crop the image to the specified region
+            let cropped = img.crop_imm(crop_x, crop_y, crop_w, crop_h);
+
+            // Encode cropped region as PNG (no downscaling — return at native resolution)
+            let mut png_buffer = Cursor::new(Vec::new());
+            handle_anthropic_result!(cropped.write_to(&mut png_buffer, ImageFormat::Png)
+                .map_err(|e| format!("Failed to encode zoomed region: {}", e)));
+
+            let zoomed_base64 = engine.encode(png_buffer.into_inner());
+
+            info!("Zoom action: API region [{},{},{},{}] → crop {}x{} at ({},{}) from {}x{} screenshot",
+                api_x0, api_y0, api_x1, api_y1, crop_w, crop_h, crop_x, crop_y, img.width(), img.height());
+
+            Ok(json!({
+                "base64_image": zoomed_base64,
+                "region": [api_x0, api_y0, api_x1, api_y1],
+                "crop_width": crop_w,
+                "crop_height": crop_h
+            }))
+        }
         "cursor_position" => {
             // No permission validation needed for cursor position query
             let (x, y) = handle_anthropic_result!(crate::commands::mouse::get_cursor_position(
@@ -1011,6 +1174,7 @@ The computer tool accepts these actions:
 - scroll: Scroll at coordinates in specified direction
 - cursor_position: Get current mouse cursor position
 - wait: Wait for specified number of seconds
+- zoom: View a specific screen region at full native resolution (region: [x0, y0, x1, y1])
 
 Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
         api_type: None, // Will be set by version manager
@@ -1021,7 +1185,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait"]
+                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait", "zoom"]
                 },
                 "coordinate": {
                     "type": "array",
@@ -1055,6 +1219,11 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "seconds": {
                     "type": "number",
                     "description": "Number of seconds to wait. Preferred parameter name."
+                },
+                "region": {
+                    "type": "array",
+                    "description": "The [x0, y0, x1, y1] bounding box for zoom action. Coordinates define the top-left and bottom-right corners of the region to inspect at full resolution.",
+                    "items": {"type": "integer"}
                 }
             },
             "required": ["action"]

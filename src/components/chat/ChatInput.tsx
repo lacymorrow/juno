@@ -198,14 +198,22 @@ export const ChatInput = React.memo(function ChatInput({
                         <ModelSelectorItem
                           key={`${provider.id}:${model.id}`}
                           value={`${provider.id} ${model.id} ${model.name}`}
-                          onSelect={() => handleModelSelect(provider.id, model.id)}
+                          onSelect={() => {
+                            if (!provider.is_available) return;
+                            handleModelSelect(provider.id, model.id);
+                          }}
+                          disabled={!provider.is_available}
+                          className={!provider.is_available ? "opacity-50 cursor-not-allowed" : undefined}
                         >
                           <ModelSelectorLogo provider={provider.id} />
                           <ModelSelectorName>{model.name}</ModelSelectorName>
-                          {model.is_recommended && (
+                          {!provider.is_available && (
+                            <span className="text-xs text-muted-foreground">No API key</span>
+                          )}
+                          {provider.is_available && model.is_recommended && (
                             <span className="text-xs text-green-600">Recommended</span>
                           )}
-                          {model.supports_computer_use && (
+                          {provider.is_available && model.supports_computer_use && (
                             <span className="text-xs text-blue-600">Computer Use</span>
                           )}
                           {isActive && <Check className="size-4 text-primary" />}
