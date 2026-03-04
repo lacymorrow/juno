@@ -311,8 +311,8 @@ impl AnthropicBrain {
     /// This scans tool_result blocks for image content, counts them from the end (most recent),
     /// and replaces any beyond the limit with "[Screenshot removed — older than N most recent]".
     fn limit_screenshot_history(api_messages: &mut [ApiMessage], max_recent: usize) {
-        // First pass: count total screenshots (image blocks in tool_result content)
-        let mut screenshot_positions: Vec<(usize, usize)> = Vec::new(); // (message_idx, block_idx)
+        // First pass: find all screenshots and their exact locations
+        let mut screenshot_locations: Vec<(usize, usize, usize)> = Vec::new(); // (msg_idx, block_idx, result_block_idx)
 
         for (msg_idx, msg) in api_messages.iter().enumerate() {
             if let ApiContent::Blocks(blocks) = &msg.content {
@@ -321,8 +321,7 @@ impl AnthropicBrain {
                         if let Some(ApiToolResultContent::Blocks(result_blocks)) = &block.content {
                             for (rb_idx, rb) in result_blocks.iter().enumerate() {
                                 if rb.block_type == "image" && rb.source.is_some() {
-                                    screenshot_positions.push((msg_idx, rb_idx));
-                                    let _ = block_idx; // block_idx used for identification
+                                    screenshot_locations.push((msg_idx, block_idx, rb_idx));
                                 }
                             }
                         }
@@ -331,28 +330,28 @@ impl AnthropicBrain {
             }
         }
 
-        let total_screenshots = screenshot_positions.len();
+        let total_screenshots = screenshot_locations.len();
         if total_screenshots <= max_recent {
             return; // Nothing to trim
         }
 
-        let to_remove = total_screenshots - max_recent;
-        let positions_to_remove: Vec<(usize, usize)> = screenshot_positions[..to_remove].to_vec();
+        let to_remove_count = total_screenshots - max_recent;
+        let locations_to_remove = &screenshot_locations[..to_remove_count];
 
         log::info!(
             "Screenshot history limiting: {} total screenshots, keeping {} most recent, removing {} older ones",
-            total_screenshots, max_recent, to_remove
+            total_screenshots, max_recent, to_remove_count
         );
 
         // Second pass: replace old screenshots with text placeholders
-        for (msg_idx, rb_idx) in positions_to_remove {
-            if let ApiContent::Blocks(blocks) = &mut api_messages[msg_idx].content {
-                for block in blocks.iter_mut() {
-                    if block.block_type == "tool_result" {
+        // Use all three indices (msg_idx, block_idx, rb_idx) to target the exact image block
+        for &(msg_idx, block_idx, rb_idx) in locations_to_remove {
+            if let Some(msg) = api_messages.get_mut(msg_idx) {
+                if let ApiContent::Blocks(blocks) = &mut msg.content {
+                    if let Some(block) = blocks.get_mut(block_idx) {
                         if let Some(ApiToolResultContent::Blocks(result_blocks)) = &mut block.content {
-                            if rb_idx < result_blocks.len() && result_blocks[rb_idx].block_type == "image" {
-                                // Replace the image block with a text placeholder
-                                result_blocks[rb_idx] = ApiToolResultBlock {
+                            if let Some(result_block) = result_blocks.get_mut(rb_idx) {
+                                *result_block = ApiToolResultBlock {
                                     block_type: "text".to_string(),
                                     source: None,
                                     text: Some(format!(
