@@ -16,8 +16,6 @@ import {
   AlertCircle,
   Info,
   Mic,
-  PanelTop,
-  Wand2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -97,17 +95,8 @@ const getOnboardingSteps = (
     title: "Learn the Magic Keys",
     subtitle: "Quick shortcuts to control Juno",
     description:
-      "Try the agent mode shortcut below! This will activate Juno's AI assistant from anywhere on your Mac.",
-    icon: (
-      <AudioVisualizer
-        appState="listening"
-        width={350}
-        height={60}
-        enableMicrophone={false}
-        intensity={1.2}
-        animationStyle="organic"
-      />
-    ),
+      "Try the agent mode shortcut below! This activates Juno from anywhere on your Mac. Watch the floating bar react — toggle it anytime with \u2318B.",
+    icon: null, // Floating bar rendered persistently outside AnimatePresence
     action: "Continue",
   },
   {
@@ -115,35 +104,8 @@ const getOnboardingSteps = (
     title: "Escape to Cancel",
     subtitle: "Stop any operation with a single key",
     description:
-      "Sometimes you need to stop what Juno is doing. Press Escape to stop Juno.",
-    icon: (
-      <AudioVisualizer
-        appState="error"
-        width={350}
-        height={60}
-        enableMicrophone={false}
-        intensity={1.8}
-        animationStyle="organic"
-      />
-    ),
-    action: "Continue",
-  },
-  {
-    id: "floating-bar",
-    title: "The Floating Bar",
-    subtitle: "Your always-available AI companion",
-    description:
-      "The floating bar stays on your screen to show Juno\u2019s status and give you quick access to controls. Toggle it anytime with \u2318B.",
-    icon: <PanelTop className="w-12 h-12 text-primary" />,
-    action: "Continue",
-  },
-  {
-    id: "capabilities",
-    title: "What Juno Can Do",
-    subtitle: "AI-powered desktop automation",
-    description:
-      "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need and Juno handles the rest.",
-    icon: <Wand2 className="w-12 h-12 text-primary" />,
+      "Sometimes you need to stop what Juno is doing. Press Escape and the floating bar will confirm it stopped.",
+    icon: null, // Floating bar rendered persistently outside AnimatePresence
     action: "Continue",
   },
   ...(apiKeysAvailable
@@ -175,10 +137,10 @@ const getOnboardingSteps = (
   {
     id: "complete",
     title: "Ready to Go",
-    subtitle: "Juno is now active",
+    subtitle: "AI-powered desktop automation",
     description: permissionsAlreadyGranted
-      ? "Juno is ready to go! Use the shortcut you just learned to activate Juno anytime."
-      : "You can always change these permissions later in System Preferences.",
+      ? "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need — use the shortcut you learned to activate Juno anytime."
+      : "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. You can always change permissions later in System Preferences.",
     icon: <CheckCircle className="w-12 h-12 text-green-500" />,
     action: "Start Using Juno",
   },
@@ -838,6 +800,35 @@ export default function OnboardingFlow({
             ))}
           </div>
 
+          {/* Persistent floating bar preview across shortcut & cancel steps */}
+          <AnimatePresence>
+            {(step.id === "shortcut" || step.id === "cancel") && (
+              <motion.div
+                key="floating-bar-preview"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+                className="flex justify-center mb-8"
+              >
+                <AudioVisualizer
+                  appState={
+                    step.id === "cancel" && escapePressed
+                      ? "error"
+                      : shortcutPressed || step.id === "cancel"
+                      ? "listening"
+                      : "idle"
+                  }
+                  width={350}
+                  height={60}
+                  enableMicrophone={false}
+                  intensity={step.id === "cancel" ? 1.8 : 1.2}
+                  animationStyle="organic"
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait">
             <motion.div
               key={step.id}
@@ -847,8 +838,8 @@ export default function OnboardingFlow({
               transition={{ duration: 0.4, ease: "easeOut" }}
               className="text-center"
             >
-              {/* Icon */}
-              <div className="flex justify-center mb-8">{step.icon}</div>
+              {/* Icon (null for shortcut/cancel — floating bar is above) */}
+              {step.icon && <div className="flex justify-center mb-8">{step.icon}</div>}
 
               {/* Content */}
               <div className="space-y-4 mb-10">
