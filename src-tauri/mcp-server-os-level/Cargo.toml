@@ -1,6 +1,6 @@
 [package]
 name = "computer-use-ai-sdk"
-version = "0.4.9"
+version = "0.4.10"
 edition = "2021"
 description = "Desktop UI automation through accessibility APIs"
 authors = ["m13v, louis030195"]
@@ -40,7 +40,7 @@ image = { version = "0.25.1", features = ["png", "jpeg"] }
 libc = "0.2"
 objc = "0.2.7"
 once_cell = "1.19"
-screencapturekit = { version = "1.5", optional = true }
+screencapturekit = { version = "1.5.4", optional = true }
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
 # objc still needed for other platform interactions
