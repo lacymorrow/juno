@@ -112,8 +112,8 @@ const BAR_KEYFRAMES = `
   80%  { transform: translateX(1px); }
 }
 @keyframes bar-content-in {
-  0%   { opacity: 0; transform: translateY(4px) scale(0.98); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }
 `;
 
@@ -343,6 +343,12 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     streamContentRef.current = "";
   }, []);
 
+  // ── Window + island resize (declared early so stream listeners can use them) ──
+
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
+  const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Event listeners ──
 
   useEffect(() => {
@@ -497,10 +503,6 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   //   Growing  → resize window FIRST (immediately), then animate island into new space
   //   Shrinking → animate island FIRST, then shrink window after spring settles
 
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
-  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
-  const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
     // Skip when agent content is displayed — its own effect handles sizing.
     // Covers: streaming in, pinned after completion, or backend responding.
@@ -524,12 +526,18 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       shrinkTimerRef.current = null;
     }
 
+    let cancelled = false;
+
     if (isGrowing) {
-      // Growing: expand window immediately, island animates in parallel.
-      // overflow:hidden on html/body prevents any scrollbar flash from async gap.
-      resizeWindowIfChanged(next);
-      setSize(getIslandSize(barState.barState));
-      prevDimensionsRef.current = next;
+      // Growing: await window resize (Tauri IPC) THEN animate island.
+      // This prevents the island spring from overshooting into a still-small window.
+      const grow = async () => {
+        await resizeWindowIfChanged(next);
+        if (cancelled) return;
+        prevDimensionsRef.current = next;
+        setSize(getIslandSize(barState.barState));
+      };
+      grow();
     } else {
       // Shrinking: animate island first, then shrink window after spring settles
       setSize(getIslandSize(barState.barState));
@@ -538,6 +546,8 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
         prevDimensionsRef.current = next;
       }, SHRINK_DELAY_MS);
     }
+
+    return () => { cancelled = true; };
   }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent, isStreamingContent, componentPinned]);
 
   // Clean up shrink timer on unmount
@@ -654,12 +664,19 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const agentContentHeight = componentPinned ? 260 : 210;
 
   useEffect(() => {
-    if (showAgentContent) {
+    if (!showAgentContent) return;
+
+    let cancelled = false;
+    const resize = async () => {
       const next = { width: 371 + SHADOW_PADDING, height: agentContentHeight + SHADOW_PADDING };
-      resizeWindowIfChanged(next);
+      await resizeWindowIfChanged(next);
+      if (cancelled) return;
       prevDimensionsRef.current = next;
       setSize(componentPinned ? "tall" : "medium");
-    }
+    };
+    resize();
+
+    return () => { cancelled = true; };
   }, [showAgentContent, setSize, resizeWindowIfChanged, componentPinned, agentContentHeight]);
 
   // Focus inline input when component becomes pinned
@@ -685,7 +702,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   return (
     <div className="h-full w-full relative p-6 overflow-hidden" data-tauri-drag-region>
       <div
-        className="flex items-center justify-center h-full"
+        className="flex items-start justify-center h-full"
         data-tauri-drag-region
       >
         {isInputState ? (
@@ -745,11 +762,13 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
           >
             <DynamicIsland id="ai-chatbot-panel">
               {showAgentContent ? (
-                // Agent response — streamed progressively, pinned after completion
+                // Agent response — streamed progressively, pinned after completion.
+                // Delay matches spring settle time so content fades in AFTER
+                // the island finishes expanding (prevents FOUC).
                 <div
                   className="flex flex-col h-full"
                   style={{
-                    animation: "bar-content-in 0.3s ease-out 0.15s both",
+                    animation: `bar-content-in 0.25s ease-out ${SHRINK_DELAY_MS}ms both`,
                   }}
                 >
                   <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
