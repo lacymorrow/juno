@@ -221,6 +221,12 @@ enum Commands {
         #[arg(long, default_value = "{}")]
         args: String,
     },
+
+    /// Print a concise, LLM-readable tool catalog
+    Capabilities,
+
+    /// Start MCP (Model Context Protocol) server over stdio
+    ServeMcp,
 }
 
 fn init_desktop() -> Result<Desktop> {
@@ -263,6 +269,18 @@ fn run() -> Result<()> {
         tracing_subscriber::fmt()
             .with_env_filter("warn")
             .init();
+    }
+
+    // These commands don't need Desktop initialization
+    match &cli.command {
+        Commands::Capabilities => {
+            print_capabilities();
+            return Ok(());
+        }
+        Commands::ServeMcp => {
+            return run_mcp_server();
+        }
+        _ => {}
     }
 
     let desktop = init_desktop()?;
@@ -410,8 +428,270 @@ fn run() -> Result<()> {
                 .call_tool(&tool, parsed_args)
                 .context(format!("Tool '{}' failed", tool))?
         }
+
+        Commands::Capabilities | Commands::ServeMcp => unreachable!("handled above"),
     };
 
     output(&cli.format, result);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MCP Server (JSON-RPC 2.0 over stdio)
+// ---------------------------------------------------------------------------
+
+/// Tools that return screenshot data — their results need MCP image content blocks.
+const SCREENSHOT_TOOLS: &[&str] = &["captureScreenshot", "computer"];
+
+fn run_mcp_server() -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Failed to build tokio runtime")?;
+    rt.block_on(mcp_server_loop())
+}
+
+async fn mcp_server_loop() -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let stdin = tokio::io::stdin();
+    let mut stdout = tokio::io::stdout();
+    let mut reader = BufReader::new(stdin);
+
+    // Lazy-init Desktop on first tool use (initialize/ping respond without permissions)
+    let mut desktop: Option<Desktop> = None;
+
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line).await.context("stdin read")?;
+        if n == 0 {
+            break; // EOF
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let request: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(e) => {
+                let err_resp = jsonrpc_error(Value::Null, -32700, &format!("Parse error: {e}"));
+                write_jsonrpc(&mut stdout, &err_resp).await?;
+                continue;
+            }
+        };
+
+        // Notifications (no "id" field) — no response required
+        if request.get("id").is_none() {
+            continue;
+        }
+
+        let id = request["id"].clone();
+        let method = match request.get("method").and_then(|v| v.as_str()) {
+            Some(m) => m,
+            None => {
+                let err_resp =
+                    jsonrpc_error(id, -32600, "Invalid Request: missing or non-string 'method'");
+                write_jsonrpc(&mut stdout, &err_resp).await?;
+                continue;
+            }
+        };
+
+        let response = match method {
+            "initialize" => jsonrpc_ok(
+                id,
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "juno-cua",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }),
+            ),
+
+            "tools/list" => {
+                let desktop_ref = get_or_init_desktop(&mut desktop)?;
+                let tools = desktop_ref.list_tools();
+                let mcp_tools: Vec<Value> = tools
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "inputSchema": t.input_schema
+                        })
+                    })
+                    .collect();
+                jsonrpc_ok(id, json!({ "tools": mcp_tools }))
+            }
+
+            "tools/call" => {
+                let params = request.get("params").cloned().unwrap_or(json!({}));
+                let tool_name = params["name"].as_str().unwrap_or("");
+                let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+                if tool_name.is_empty() {
+                    jsonrpc_error(id, -32602, "Missing tool name in params.name")
+                } else {
+                    let desktop_ref = get_or_init_desktop(&mut desktop)?;
+                    match desktop_ref.call_tool(tool_name, tool_args) {
+                        Ok(result) => {
+                            let content = if is_screenshot_result(tool_name, &result) {
+                                extract_image_content(&result)
+                            } else {
+                                vec![json!({
+                                    "type": "text",
+                                    "text": serde_json::to_string(&result)
+                                        .unwrap_or_else(|_| "null".into())
+                                })]
+                            };
+                            jsonrpc_ok(id, json!({ "content": content }))
+                        }
+                        Err(e) => jsonrpc_ok(
+                            id,
+                            json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": format!("Error: {e}")
+                                }],
+                                "isError": true
+                            }),
+                        ),
+                    }
+                }
+            }
+
+            "ping" => jsonrpc_ok(id, json!({})),
+
+            _ => jsonrpc_error(id, -32601, &format!("Method not found: {method}")),
+        };
+
+        write_jsonrpc(&mut stdout, &response).await?;
+    }
+
+    Ok(())
+}
+
+fn get_or_init_desktop(desktop: &mut Option<Desktop>) -> Result<&Desktop> {
+    if desktop.is_none() {
+        *desktop = Some(init_desktop()?);
+    }
+    desktop
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Desktop initialization failed"))
+}
+
+fn is_screenshot_result(tool_name: &str, result: &Value) -> bool {
+    if SCREENSHOT_TOOLS.contains(&tool_name) {
+        return true;
+    }
+    // Also detect screenshot results from generic `call` or `computer` action=screenshot
+    result.get("screenshot_base64").is_some() || result.get("base64_image").is_some()
+}
+
+fn extract_image_content(result: &Value) -> Vec<Value> {
+    // Try known base64 fields
+    let b64 = result
+        .get("screenshot_base64")
+        .or_else(|| result.get("base64_image"))
+        .and_then(|v| v.as_str());
+
+    match b64 {
+        Some(data) => vec![json!({
+            "type": "image",
+            "data": data,
+            "mimeType": "image/png"
+        })],
+        None => vec![json!({
+            "type": "text",
+            "text": serde_json::to_string(result).unwrap_or_else(|_| "null".into())
+        })],
+    }
+}
+
+fn jsonrpc_ok(id: Value, result: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    })
+}
+
+fn jsonrpc_error(id: Value, code: i64, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    })
+}
+
+async fn write_jsonrpc(
+    stdout: &mut tokio::io::Stdout,
+    response: &Value,
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let line = serde_json::to_string(response).unwrap_or_else(|_| "{}".into());
+    stdout
+        .write_all(line.as_bytes())
+        .await
+        .context("stdout write")?;
+    stdout
+        .write_all(b"\n")
+        .await
+        .context("stdout newline")?;
+    stdout.flush().await.context("stdout flush")?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Capabilities output
+// ---------------------------------------------------------------------------
+
+fn print_capabilities() {
+    println!(
+        r#"# juno-cua — Computer Use Agent CLI
+# macOS desktop automation. All commands return JSON.
+
+## Screenshot & Vision
+  juno-cua screenshot                          Capture screen (base64 PNG JSON)
+  juno-cua ui-tree [--app NAME]                Get accessibility tree
+  juno-cua find-elements --selector SELECTOR   Find UI elements by AX selector
+  juno-cua focused-element                     Get focused element info
+
+## Mouse
+  juno-cua click --x X --y Y [--button left|right|middle|double|triple]
+  juno-cua mouse-move --x X --y Y
+  juno-cua cursor-position                     Get current cursor coordinates
+  juno-cua scroll --x X --y Y --direction up|down|left|right [--amount 3]
+
+## Keyboard
+  juno-cua type-text --text "..."              Type text via keystroke simulation
+  juno-cua press-key --key KEY [--modifier cmd|ctrl|alt|shift]
+  juno-cua hold-key --key KEY [--duration-ms MS]
+  juno-cua release-key --key KEY
+
+## System
+  juno-cua get-clipboard                       Read clipboard contents
+  juno-cua set-clipboard --content "..."       Set clipboard contents
+  juno-cua open-app --name "App Name"          Launch application
+  juno-cua open-url --url "https://..."        Open URL in default browser
+  juno-cua wait --ms 1000                      Wait for duration
+
+## Advanced
+  juno-cua list-tools                          Full JSON schemas for all tools
+  juno-cua call --tool NAME --args '{{...}}'     Generic tool invocation
+  juno-cua capabilities                        Print this catalog
+
+## Notes
+- Requires macOS accessibility permissions (System Settings → Privacy → Accessibility)
+- All output is JSON by default. Use --format pretty for formatted output.
+- Use --verbose for debug logging."#
+    );
 }
