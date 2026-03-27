@@ -11,6 +11,7 @@ use hound;
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 use crate::constants;
+use crate::utils::filter_transcription_text;
 
 use crate::error::{Error, Result};
 
@@ -29,30 +30,6 @@ fn sinc_resampling_params() -> SincInterpolationParameters {
     }
 }
 
-/// Clean up common Whisper artifacts from transcription text
-fn clean_whisper_artifacts(text: &str) -> String {
-    // Common Whisper artifacts to remove
-    const ARTIFACTS: &[&str] = &[
-        "[BLANK_AUDIO]",
-        "[MUSIC]",
-        "[NOISE]",
-        "[APPLAUSE]",
-        "[LAUGHTER]",
-        "(BLANK_AUDIO)",
-        "(MUSIC)",
-        "(NOISE)",
-        "*BLANK_AUDIO*",
-    ];
-
-    let mut cleaned = text.to_string();
-    for artifact in ARTIFACTS {
-        cleaned = cleaned.replace(artifact, "");
-    }
-
-    // Clean up extra whitespace that may result from removal
-    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    cleaned.trim().to_string()
-}
 
 enum AudioThreadMessage {
     Stop,
@@ -706,7 +683,7 @@ impl VoiceController {
                     }
 
                     // Clean up Whisper artifacts from transcription
-                    let transcription_text = clean_whisper_artifacts(&transcription_text);
+                    let transcription_text = filter_transcription_text(&transcription_text);
 
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
                     let _ = app_handle.emit(constants::voice_transcription::FINAL_RESULT,
