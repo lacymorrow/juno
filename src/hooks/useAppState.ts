@@ -29,7 +29,7 @@ export interface AppState {
     // App metadata
     appVersion: string | null;
     keyboardShortcuts: {
-        agent_mode_toggle: string;
+        agent_mode: string;
         dictation_input: string;
         stop_current_task: string;
         open_settings: string;
@@ -78,7 +78,7 @@ export function useAppState() {
     // App metadata
     const [appVersion, setAppVersion] = useState<string | null>(null);
     const [keyboardShortcuts, setKeyboardShortcuts] = useState<{
-        agent_mode_toggle: string;
+        agent_mode: string;
         dictation_input: string;
         stop_current_task: string;
         open_settings: string;

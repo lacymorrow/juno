@@ -43,7 +43,7 @@ fn format_error(template: &'static str, context: &str, error: impl std::fmt::Dis
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode_toggle: String, // Default: Alt+D (Option+D on macOS)
+    pub agent_mode: String, // Default: Alt+D (Option+D on macOS)
     pub dictation_input: String,   // Default: Alt+Space (Option+Space on macOS)
     pub stop_current_task: String, // Default: Escape
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
@@ -68,7 +68,7 @@ pub enum DictationTriggerMode {
 impl Default for KeyboardShortcuts {
     fn default() -> Self {
         Self {
-            agent_mode_toggle: defaults::AGENT_MODE_TOGGLE.to_string(),
+            agent_mode: defaults::AGENT_MODE.to_string(),
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
@@ -1752,14 +1752,14 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         {
-            assert_eq!(shortcuts.agent_mode_toggle, defaults::AGENT_MODE_TOGGLE);
+            assert_eq!(shortcuts.agent_mode, defaults::AGENT_MODE);
             assert_eq!(shortcuts.dictation_input, defaults::DICTATION_INPUT);
             assert_eq!(shortcuts.open_settings, defaults::OPEN_SETTINGS);
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            assert_eq!(shortcuts.agent_mode_toggle, defaults::AGENT_MODE_TOGGLE);
+            assert_eq!(shortcuts.agent_mode, defaults::AGENT_MODE);
             assert_eq!(shortcuts.dictation_input, defaults::DICTATION_INPUT);
             assert_eq!(shortcuts.open_settings, defaults::OPEN_SETTINGS);
         }
@@ -1773,7 +1773,7 @@ mod tests {
         let serialized = serde_json::to_string(&shortcuts).unwrap();
         let deserialized: KeyboardShortcuts = serde_json::from_str(&serialized).unwrap();
 
-        assert_eq!(shortcuts.agent_mode_toggle, deserialized.agent_mode_toggle);
+        assert_eq!(shortcuts.agent_mode, deserialized.agent_mode);
         assert_eq!(shortcuts.dictation_input, deserialized.dictation_input);
         assert_eq!(shortcuts.stop_current_task, deserialized.stop_current_task);
         assert_eq!(shortcuts.open_settings, deserialized.open_settings);

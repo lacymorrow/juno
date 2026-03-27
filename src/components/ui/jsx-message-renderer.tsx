@@ -5,6 +5,19 @@ import {
   CopyButton,
 } from "@/components/ui/agent-actions";
 import {
+  AnimatedCard,
+  AnimatedNumber,
+  AnimatedList,
+  AnimatedProgress,
+  GlowBadge,
+  ShimmerText,
+  Confetti,
+  PulseRing,
+  AnimatedDivider,
+  Stat,
+  MiniChart,
+} from "@/components/ui/animated-components";
+import {
   WeatherCard,
   FileListCard,
   SystemStatusCard,
@@ -33,6 +46,19 @@ import {
   X,
   XCircle,
   Zap,
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  Clock,
+  Calendar,
+  MapPin,
+  Music,
+  Film,
+  Coffee,
+  Flame,
+  Bookmark,
+  Globe,
+  Target,
 } from "lucide-react";
 import * as React from "react";
 import { Alert, AlertDescription, AlertTitle } from "./alert";
@@ -409,6 +435,34 @@ const availableComponents = {
   TimerCard,
   LinkCard,
   TaskSummaryCard,
+
+  // Animated components
+  AnimatedCard,
+  AnimatedNumber,
+  AnimatedList,
+  AnimatedProgress,
+  GlowBadge,
+  ShimmerText,
+  Confetti,
+  PulseRing,
+  AnimatedDivider,
+  Stat,
+  MiniChart,
+
+  // Additional icons
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  Clock,
+  Calendar,
+  MapPin,
+  Music,
+  Film,
+  Coffee,
+  Flame,
+  Bookmark,
+  Globe,
+  Target,
 
   // Interactive action components
   ActionButton,

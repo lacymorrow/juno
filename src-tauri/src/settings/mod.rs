@@ -45,7 +45,7 @@ pub struct AppSettings {
 /// Replaces: keyboard_shortcuts.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode_toggle: String,
+    pub agent_mode: String,
     pub dictation_input: String,
     pub stop_current_task: String,
     pub open_settings: String,
@@ -263,7 +263,7 @@ impl Default for AppSettings {
 impl Default for KeyboardShortcuts {
     fn default() -> Self {
         Self {
-            agent_mode_toggle: defaults::AGENT_MODE_TOGGLE.to_string(),
+            agent_mode: defaults::AGENT_MODE.to_string(),
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
@@ -288,7 +288,7 @@ impl Default for AgentSettings {
     fn default() -> Self {
         Self {
             trigger_mode: defaults::AGENT_TRIGGER_MODE.to_string(),
-            execution_mode: defaults::AGENT_MODE.to_string(),
+            execution_mode: defaults::AGENT_EXECUTION_MODE.to_string(),
         }
     }
 }

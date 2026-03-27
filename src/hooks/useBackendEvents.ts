@@ -5,6 +5,7 @@ import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/types/chat";
 import { EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
+import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
 
 // Type definitions for backend events
 type SubmitQueryResult = {
@@ -450,10 +451,16 @@ export function useBackendEvents({
 					if (msg.messageId === message_id && msg.isStreaming) {
 						const existingTtsContent = msg.tts_metadata?.tts_parts || [];
 						const newTtsContent = tts_content ? [...existingTtsContent, tts_content] : existingTtsContent;
+						const updatedContent = msg.content + chunk;
+
+						// Detect JSX during streaming so MixedContentRenderer kicks in immediately
+						// Once detected, stays true for the rest of the stream
+						const isJsx = msg.isJsx || hasMixedContent(updatedContent);
 
 						return {
 							...msg,
-							content: msg.content + chunk,
+							content: updatedContent,
+							isJsx,
 							tts_metadata: {
 								has_spoken_content: (msg.tts_metadata?.has_spoken_content || false) || !!tts_content,
 								tts_parts: newTtsContent,
@@ -482,7 +489,9 @@ export function useBackendEvents({
 							content: complete_text,
 							isStreaming: false,
 							agent_state,
-							isJsx: is_jsx ?? false,
+							// Preserve frontend JSX detection — backend can upgrade to true
+						// but never downgrade (prevents flash if backend payload omits is_jsx)
+						isJsx: is_jsx || msg.isJsx || false,
 						};
 					}
 					return msg;

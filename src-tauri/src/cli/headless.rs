@@ -550,6 +550,9 @@ impl HeadlessRuntime {
     /// Execute MCP subcommands
     async fn execute_mcp_command(&self, command: &crate::cli::McpCommands) -> Result<HeadlessResult, JunoError> {
         match command {
+            crate::cli::McpCommands::Serve => {
+                return self.run_mcp_stdio_server().await;
+            }
             crate::cli::McpCommands::AddServer { name, http_url, enabled, auto_start, timeout } => {
                 // Build config and call backend command to persist
                 use crate::agent::tools::MCPServerConfig;
@@ -581,6 +584,207 @@ impl HeadlessRuntime {
                 }
             }
         }
+    }
+
+    /// Run Juno as an MCP server over stdin/stdout (JSON-RPC 2.0).
+    ///
+    /// This exposes all computer use tools from `mcp-server-os-level` PLUS the
+    /// `query` tool which delegates to the full multi-agent orchestrator.
+    async fn run_mcp_stdio_server(&self) -> Result<HeadlessResult, JunoError> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use computer_use_ai_sdk::Desktop;
+
+        let stdin = tokio::io::stdin();
+        let mut stdout = tokio::io::stdout();
+        let mut reader = BufReader::new(stdin);
+
+        // Desktop for computer use tools (lazy-init on first tool call)
+        let mut desktop: Option<Desktop> = None;
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = reader
+                .read_line(&mut line)
+                .await
+                .map_err(|e| JunoError::ApplicationError(format!("stdin read: {e}")))?;
+            if n == 0 {
+                break; // EOF
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let request: Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(e) => {
+                    let err = json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":format!("Parse error: {e}")}});
+                    Self::write_jsonrpc_line(&mut stdout, &err).await?;
+                    continue;
+                }
+            };
+
+            // Notifications (no "id") — no response required
+            if request.get("id").is_none() {
+                continue;
+            }
+
+            let id = request["id"].clone();
+            let method = match request.get("method").and_then(|v| v.as_str()) {
+                Some(m) => m,
+                None => {
+                    let err = json!({"jsonrpc":"2.0","id":id,"error":{"code":-32600,"message":"Invalid Request: missing or non-string 'method'"}});
+                    Self::write_jsonrpc_line(&mut stdout, &err).await?;
+                    continue;
+                }
+            };
+
+            let response: Value = match method {
+                "initialize" => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": { "tools": {} },
+                        "serverInfo": {
+                            "name": "juno",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
+                    }
+                }),
+
+                "tools/list" => {
+                    let desktop_ref = Self::get_or_init_desktop(&mut desktop)?;
+                    let mut tools: Vec<Value> = desktop_ref
+                        .list_tools()
+                        .iter()
+                        .map(|t| json!({"name": t.name, "description": t.description, "inputSchema": t.input_schema}))
+                        .collect();
+
+                    // Add the `query` tool — the strategic moat
+                    tools.push(json!({
+                        "name": "query",
+                        "description": "Submit a natural language query to Juno's multi-agent orchestrator. Handles complex multi-step desktop tasks (e.g., 'open Safari and navigate to github.com'). The orchestrator coordinates Desktop, Browser, and File agents automatically.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "Natural language instruction for the AI agent"
+                                }
+                            },
+                            "required": ["text"]
+                        }
+                    }));
+
+                    json!({"jsonrpc":"2.0","id":id,"result":{"tools":tools}})
+                }
+
+                "tools/call" => {
+                    let params = request.get("params").cloned().unwrap_or(json!({}));
+                    let tool_name = params["name"].as_str().unwrap_or("");
+                    let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+                    if tool_name.is_empty() {
+                        json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":"Missing tool name in params.name"}})
+                    } else if tool_name == "query" {
+                        // Route to the full agent orchestrator
+                        let query_text = tool_args["text"].as_str().unwrap_or("").to_string();
+                        if query_text.is_empty() {
+                            json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":"Error: empty query text"}],"isError":true}})
+                        } else {
+                            match self.execute_query(query_text).await {
+                                Ok(result) => {
+                                    json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":result.output}]}})
+                                }
+                                Err(e) => {
+                                    json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":format!("Error: {e}")}],"isError":true}})
+                                }
+                            }
+                        }
+                    } else {
+                        // Route to Desktop computer use tools
+                        let desktop_ref = Self::get_or_init_desktop(&mut desktop)?;
+                        match desktop_ref.call_tool(tool_name, tool_args) {
+                            Ok(result) => {
+                                let content = if Self::is_screenshot_result(tool_name, &result) {
+                                    Self::extract_image_content(&result)
+                                } else {
+                                    vec![json!({"type":"text","text":serde_json::to_string(&result).unwrap_or_else(|_| "null".into())})]
+                                };
+                                json!({"jsonrpc":"2.0","id":id,"result":{"content":content}})
+                            }
+                            Err(e) => {
+                                json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":format!("Error: {e}")}],"isError":true}})
+                            }
+                        }
+                    }
+                }
+
+                "ping" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
+
+                _ => json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":format!("Method not found: {method}")}}),
+            };
+
+            Self::write_jsonrpc_line(&mut stdout, &response).await?;
+        }
+
+        Ok(HeadlessResult {
+            success: true,
+            output: "MCP server stopped".to_string(),
+            error: None,
+            execution_time: Duration::default(),
+            agent_state: Some("Completed".to_string()),
+            screenshot: None,
+        })
+    }
+
+    fn get_or_init_desktop(desktop: &mut Option<computer_use_ai_sdk::Desktop>) -> Result<&computer_use_ai_sdk::Desktop, JunoError> {
+        if desktop.is_none() {
+            *desktop = Some(
+                computer_use_ai_sdk::Desktop::new(false, true)
+                    .map_err(|e| JunoError::ApplicationError(format!("Failed to initialize Desktop: {e}")))?
+            );
+        }
+        desktop
+            .as_ref()
+            .ok_or_else(|| JunoError::ApplicationError("Desktop initialization failed".to_string()))
+    }
+
+    fn is_screenshot_result(tool_name: &str, result: &Value) -> bool {
+        matches!(tool_name, "captureScreenshot" | "computer")
+            || result.get("screenshot_base64").is_some()
+            || result.get("base64_image").is_some()
+    }
+
+    fn extract_image_content(result: &Value) -> Vec<Value> {
+        let b64 = result
+            .get("screenshot_base64")
+            .or_else(|| result.get("base64_image"))
+            .and_then(|v| v.as_str());
+        match b64 {
+            Some(data) => vec![json!({"type":"image","data":data,"mimeType":"image/png"})],
+            None => vec![json!({"type":"text","text":serde_json::to_string(result).unwrap_or_else(|_| "null".into())})],
+        }
+    }
+
+    async fn write_jsonrpc_line(stdout: &mut tokio::io::Stdout, response: &Value) -> Result<(), JunoError> {
+        use tokio::io::AsyncWriteExt;
+        let line = serde_json::to_string(response).unwrap_or_else(|_| "{}".into());
+        stdout
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| JunoError::ApplicationError(format!("stdout write: {e}")))?;
+        stdout
+            .write_all(b"\n")
+            .await
+            .map_err(|e| JunoError::ApplicationError(format!("stdout newline: {e}")))?;
+        stdout
+            .flush()
+            .await
+            .map_err(|e| JunoError::ApplicationError(format!("stdout flush: {e}")))?;
+        Ok(())
     }
 
     /// Execute system subcommands
