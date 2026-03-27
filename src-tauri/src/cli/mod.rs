@@ -415,25 +415,29 @@ pub enum McpCommands {
     #[command(about = "Add an MCP server (HTTP JSON-RPC)")]
     AddServer {
         /// Server name
-        #[arg(long, help = "Server name")] 
+        #[arg(long, help = "Server name")]
         name: String,
 
         /// HTTP endpoint URL
-        #[arg(long, help = "HTTP JSON-RPC endpoint URL")] 
+        #[arg(long, help = "HTTP JSON-RPC endpoint URL")]
         http_url: String,
 
         /// Enable the server
-        #[arg(long, default_value_t = true, help = "Enable server")] 
+        #[arg(long, default_value_t = true, help = "Enable server")]
         enabled: bool,
 
         /// Auto-start the server
-        #[arg(long, default_value_t = true, help = "Auto-start server")] 
+        #[arg(long, default_value_t = true, help = "Auto-start server")]
         auto_start: bool,
 
         /// Timeout seconds
-        #[arg(long, default_value_t = 30, help = "Timeout seconds")] 
+        #[arg(long, default_value_t = 30, help = "Timeout seconds")]
         timeout: u64,
     },
+
+    /// Start Juno as an MCP server (stdio JSON-RPC)
+    #[command(about = "Run Juno as an MCP server over stdin/stdout")]
+    Serve,
 }
 
 #[derive(Subcommand, Debug)]

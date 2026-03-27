@@ -1,0 +1,135 @@
+name: Release juno-cua
+
+on:
+  push:
+    tags:
+      - 'cua-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.4.11)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build arm64
+        run: cargo build -p juno-cua --release --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        run: cargo build -p juno-cua --release --target x86_64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            target/aarch64-apple-darwin/release/juno-cua \
+            target/x86_64-apple-darwin/release/juno-cua \
+            -output juno-cua
+
+      - name: Package archives
+        run: |
+          # Universal binary
+          tar czf juno-cua-darwin-universal.tar.gz juno-cua
+
+          # Arch-specific
+          cp target/aarch64-apple-darwin/release/juno-cua juno-cua-arm64
+          tar czf juno-cua-darwin-arm64.tar.gz -C target/aarch64-apple-darwin/release juno-cua
+
+          cp target/x86_64-apple-darwin/release/juno-cua juno-cua-x64
+          tar czf juno-cua-darwin-x64.tar.gz -C target/x86_64-apple-darwin/release juno-cua
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=cua-v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${GITHUB_REF#refs/tags/cua-v}"
+            echo "version=$TAG" >> "$GITHUB_OUTPUT"
+            echo "tag=cua-v$TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          echo "arm64=$(shasum -a 256 juno-cua-darwin-arm64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "x64=$(shasum -a 256 juno-cua-darwin-x64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "universal=$(shasum -a 256 juno-cua-darwin-universal.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: juno-cua ${{ steps.version.outputs.version }}
+          body: |
+            ## juno-cua ${{ steps.version.outputs.version }}
+
+            Headless Computer Use Agent CLI for macOS.
+
+            ### Install
+            ```bash
+            brew install lacymorrow/tap/juno-cua
+            ```
+
+            ### SHA256
+            | Archive | SHA256 |
+            |---------|--------|
+            | arm64 | `${{ steps.sha.outputs.arm64 }}` |
+            | x64 | `${{ steps.sha.outputs.x64 }}` |
+            | universal | `${{ steps.sha.outputs.universal }}` |
+          files: |
+            juno-cua-darwin-arm64.tar.gz
+            juno-cua-darwin-x64.tar.gz
+            juno-cua-darwin-universal.tar.gz
+          draft: false
+          prerelease: false
+
+      - name: Update Homebrew formula
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARM64_SHA="${{ steps.sha.outputs.arm64 }}"
+          X64_SHA="${{ steps.sha.outputs.x64 }}"
+
+          # Clone the tap repo and update formula
+          git clone https://x-access-token:${GH_TOKEN}@github.com/lacymorrow/homebrew-tap.git /tmp/tap
+          cd /tmp/tap
+
+          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Formula/juno-cua.rb
+          sed -i '' "s|releases/download/v[^/]*/|releases/download/v${VERSION}/|g" Formula/juno-cua.rb
+
+          # Update SHA256 for arm64 (first occurrence) and x64 (second occurrence)
+          python3 -c "
+          import re
+          with open('Formula/juno-cua.rb') as f:
+              content = f.read()
+          shas = ['${ARM64_SHA}', '${X64_SHA}']
+          idx = [0]
+          def replace_sha(m):
+              i = idx[0]
+              idx[0] += 1
+              return f'sha256 \"{shas[i]}\"' if i < len(shas) else m.group(0)
+          content = re.sub(r'sha256 \"[^\"]*\"', replace_sha, content)
+          with open('Formula/juno-cua.rb', 'w') as f:
+              f.write(content)
+          "
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/juno-cua.rb
+          git commit -m "Update juno-cua to ${VERSION}" || echo "No changes"
+          git push || echo "Push failed — token may need repo scope"

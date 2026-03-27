@@ -111,6 +111,10 @@ const BAR_KEYFRAMES = `
   60%  { transform: translateX(-1px); }
   80%  { transform: translateX(1px); }
 }
+@keyframes bar-content-in {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
 `;
 
 // ─── State indicator ─────────────────────────────────────
@@ -322,8 +326,22 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const [agentResponseContent, setAgentResponseContent] = useState<
     string | null
   >(null);
+  const [isStreamingContent, setIsStreamingContent] = useState(false);
+  // Display lifecycle decoupled from backend — component persists after
+  // stream-end until explicitly dismissed (close, escape, mode change).
+  const [componentPinned, setComponentPinned] = useState(false);
+  const streamContentRef = useRef("");
+  const rafRef = useRef(0);
   const [localInputValue, setLocalInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const pinnedInputRef = useRef<HTMLInputElement>(null);
+
+  const dismissComponent = useCallback(() => {
+    setAgentResponseContent(null);
+    setComponentPinned(false);
+    setIsStreamingContent(false);
+    streamContentRef.current = "";
+  }, []);
 
   // ── Event listeners ──
 
@@ -356,21 +374,100 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     };
   }, []);
 
+  // Stream start — clear old content, begin accumulating
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let mounted = true;
     const setup = async () => {
       try {
-        unlisten = await listen<{
+        const fn = await listen<{ message_id: string }>(
+          EVENTS.STREAMING_STREAM_START,
+          () => {
+            if (!mounted) return;
+            streamContentRef.current = "";
+            setAgentResponseContent(null);
+            setIsStreamingContent(true);
+            setComponentPinned(false);
+          },
+        );
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: stream-start listener failed:", e);
+      }
+    };
+    setup();
+    return () => {
+      mounted = false;
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  // Stream chunks — accumulate and render progressively (RAF-throttled)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    const setup = async () => {
+      try {
+        const fn = await listen<{ chunk: string }>(
+          EVENTS.STREAMING_TEXT_STREAM,
+          (event) => {
+            if (!mounted) return;
+            streamContentRef.current += event.payload.chunk;
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = requestAnimationFrame(() => {
+              setAgentResponseContent(streamContentRef.current);
+            });
+          },
+        );
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: text-stream listener failed:", e);
+      }
+    };
+    setup();
+    return () => {
+      mounted = false;
+      cancelAnimationFrame(rafRef.current);
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  // Stream end — finalize content, pin for persistence
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    const setup = async () => {
+      try {
+        const fn = await listen<{
           message_id: string;
           complete_text: string;
           is_jsx?: boolean;
           agent_state?: string;
         }>(EVENTS.STREAMING_STREAM_END, (event) => {
           if (!mounted) return;
-          if (event.payload.complete_text)
-            setAgentResponseContent(event.payload.complete_text);
+          const { complete_text } = event.payload;
+          if (complete_text) {
+            streamContentRef.current = complete_text;
+            setAgentResponseContent(complete_text);
+          }
+          setIsStreamingContent(false);
+          if (streamContentRef.current) {
+            setComponentPinned(true);
+          }
         });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
       } catch (e) {
         console.error("DynamicBar: stream-end listener failed:", e);
       }
@@ -382,11 +479,18 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     };
   }, []);
 
-  // Clear response on return to idle
+  // Dismiss on mode change (dictation, listening, input) — NOT on idle
   useEffect(() => {
-    if (barState.barState === UI.BAR_STATES_DEFAULT)
-      setAgentResponseContent(null);
-  }, [barState.barState]);
+    const s = barState.barState;
+    if (
+      s === UI.BAR_STATES_LISTENING ||
+      s === UI.BAR_STATES_DICTATING ||
+      s === UI.BAR_STATES_ALWAYS_LISTENING ||
+      s === UI.BAR_STATES_DICTATION_READY
+    ) {
+      dismissComponent();
+    }
+  }, [barState.barState, dismissComponent]);
 
   // ── Window + island resize ──
   // Key invariant: window must always be >= island size.
@@ -398,10 +502,13 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Skip when agent content override is active — its own effect handles sizing
+    // Skip when agent content is displayed — its own effect handles sizing.
+    // Covers: streaming in, pinned after completion, or backend responding.
     if (
       agentResponseContent &&
-      (barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
+      (isStreamingContent ||
+        componentPinned ||
+        barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
         barState.barState === UI.BAR_STATES_SUCCESS ||
         barState.barState === UI.BAR_STATES_FINISHING)
     )
@@ -418,12 +525,11 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     }
 
     if (isGrowing) {
-      // Growing: expand window immediately, then let island spring into new space
+      // Growing: expand window immediately, island animates in parallel.
+      // overflow:hidden on html/body prevents any scrollbar flash from async gap.
       resizeWindowIfChanged(next);
-      // Small delay so the window is ready before the island starts animating
-      const t = setTimeout(() => setSize(getIslandSize(barState.barState)), 30);
+      setSize(getIslandSize(barState.barState));
       prevDimensionsRef.current = next;
-      return () => clearTimeout(t);
     } else {
       // Shrinking: animate island first, then shrink window after spring settles
       setSize(getIslandSize(barState.barState));
@@ -432,7 +538,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
         prevDimensionsRef.current = next;
       }, SHRINK_DELAY_MS);
     }
-  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent]);
+  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent, isStreamingContent, componentPinned]);
 
   // Clean up shrink timer on unmount
   useEffect(() => {
@@ -510,37 +616,59 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
 
   // Keyboard shortcuts
   useEffect(() => {
-    if (barState.barState === UI.BAR_STATES_DEFAULT) return;
+    // Stay active when pinned (even if backend is idle)
+    if (barState.barState === UI.BAR_STATES_DEFAULT && !componentPinned) return;
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape")
-        sendInteraction(createInteraction(UI.INTERACTION_TYPES_ESCAPE));
+      if (e.key === "Escape") {
+        if (componentPinned) {
+          dismissComponent();
+        } else {
+          sendInteraction(createInteraction(UI.INTERACTION_TYPES_ESCAPE));
+        }
+      }
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
         sendInteraction(createInteraction(UI.INTERACTION_TYPES_ENTER));
     };
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [barState.barState]);
+  }, [barState.barState, componentPinned, dismissComponent, sendInteraction, createInteraction]);
 
   // ── Derived state ──
 
+  // Show when: streaming (with enough content to render), pinned, or backend responding.
+  // Minimum 20 chars during streaming avoids FOUC from early partial tokens.
+  const hasRenderableContent =
+    !!agentResponseContent &&
+    (!isStreamingContent || agentResponseContent.length >= 20);
   const showAgentContent =
-    agentResponseContent &&
-    (barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
+    hasRenderableContent &&
+    (isStreamingContent ||
+      componentPinned ||
+      barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
       barState.barState === UI.BAR_STATES_SUCCESS ||
       barState.barState === UI.BAR_STATES_FINISHING);
 
+  // Taller when pinned — room for content + inline input
+  const agentContentHeight = componentPinned ? 260 : 210;
+
   useEffect(() => {
     if (showAgentContent) {
-      const next = { width: 371 + SHADOW_PADDING, height: 210 + SHADOW_PADDING };
-      // Grow window first, then animate island into new space
+      const next = { width: 371 + SHADOW_PADDING, height: agentContentHeight + SHADOW_PADDING };
       resizeWindowIfChanged(next);
       prevDimensionsRef.current = next;
-      const t = setTimeout(() => setSize("medium"), 30);
+      setSize(componentPinned ? "tall" : "medium");
+    }
+  }, [showAgentContent, setSize, resizeWindowIfChanged, componentPinned, agentContentHeight]);
+
+  // Focus inline input when component becomes pinned
+  useEffect(() => {
+    if (componentPinned && pinnedInputRef.current) {
+      const t = setTimeout(() => pinnedInputRef.current?.focus(), 100);
       return () => clearTimeout(t);
     }
-  }, [showAgentContent, setSize, resizeWindowIfChanged]);
+  }, [componentPinned]);
 
   const isInputState =
     barState.barState === UI.BAR_STATES_INPUT ||
@@ -617,9 +745,81 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
           >
             <DynamicIsland id="ai-chatbot-panel">
               {showAgentContent ? (
-                // Agent response
-                <div className="p-4 overflow-y-auto max-h-[200px] text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
-                  <MixedContentRenderer content={agentResponseContent} />
+                // Agent response — streamed progressively, pinned after completion
+                <div
+                  className="flex flex-col h-full"
+                  style={{
+                    animation: "bar-content-in 0.3s ease-out 0.15s both",
+                  }}
+                >
+                  <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
+                    <MixedContentRenderer
+                      content={agentResponseContent}
+                      isStreaming={isStreamingContent}
+                    />
+                    {/* Close button */}
+                    {componentPinned && !isStreamingContent && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissComponent();
+                        }}
+                        className={cn(
+                          "sticky bottom-0 float-right w-5 h-5 flex items-center justify-center",
+                          "rounded-full bg-white/[0.08] text-white/30",
+                          "transition-all duration-200",
+                          "hover:bg-white/[0.15] hover:text-white/60",
+                          "-mt-5 mr-[-4px]",
+                        )}
+                        aria-label="Dismiss response"
+                      >
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                          <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {/* Inline input — visible when pinned */}
+                  {componentPinned && !isStreamingContent && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const v = localInputValue.trim();
+                        if (!v) return;
+                        sendInteraction(
+                          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: v }),
+                        );
+                        setLocalInputValue("");
+                      }}
+                      className="flex items-center gap-2 px-4 pb-3 pt-0"
+                    >
+                      <input
+                        ref={pinnedInputRef}
+                        type="text"
+                        value={localInputValue}
+                        onChange={(e) => setLocalInputValue(e.target.value)}
+                        className={cn(
+                          "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md",
+                          "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
+                          "outline-none focus:border-white/[0.15]",
+                          "tracking-[-0.01em] transition-colors duration-150",
+                        )}
+                        placeholder="follow up"
+                      />
+                      <span
+                        className={cn(
+                          "text-[10px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
+                          localInputValue.trim()
+                            ? "text-white/25 opacity-100"
+                            : "opacity-0",
+                        )}
+                      >
+                        return
+                      </span>
+                    </form>
+                  )}
                 </div>
               ) : barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
                 // Always-listening — two lines

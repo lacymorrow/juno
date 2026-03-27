@@ -3,7 +3,7 @@
 **Goal**: Allow any CLI coding agent (Claude Code, Codex, OpenCode, Gemini CLI, etc.) to discover and use Juno's capabilities — maximizing adoption across the agent ecosystem.
 
 **Date**: 2026-03-27
-**Status**: Planning
+**Status**: Phase 1+2 COMPLETE, Phase 3 in progress
 
 ---
 
@@ -30,6 +30,29 @@ All three should exist. The CLI is the foundation; MCP adds structure; skills ad
 | Cloud WebSocket | Working | Proprietary protocol |
 | Axum dependency | Unused | In Cargo.toml, never wired up |
 | Homebrew tap | Exists | `lacymorrow/tap` repo |
+
+---
+
+## Implementation Progress
+
+| Item | Status | Notes |
+|------|--------|-------|
+| `juno-cua capabilities` subcommand | DONE | LLM-readable tool catalog, no AX permissions needed |
+| `juno-cua serve-mcp` subcommand | DONE | JSON-RPC 2.0 over stdio, ~200 lines, image content blocks for screenshots |
+| SKILL.md (agent skill) | DONE | `.claude/skills/juno/SKILL.md` — tool reference, patterns, MCP instructions |
+| Skill symlink | DONE | `~/.claude/skills/juno` → repo |
+| Homebrew formula (`juno-cua.rb`) | DONE | `~/repo/homebrew-tap/Formula/juno-cua.rb` — SHA256 placeholders for CI |
+| npm package (`juno-cua`) | DONE | `packages/juno-cua/` — `npx juno-cua` detects agents, configures MCP + skill |
+| `juno mcp serve` (full Tauri) | DONE | MCP server in headless.rs with `query` tool + all CUA tools |
+| CI release workflow | DONE | `.github/workflows/release-cua.yml` — universal binary, Homebrew auto-update |
+| MCP Registry publication | TODO | `registry.modelcontextprotocol.io` |
+
+### Key files created/modified
+- `crates/juno-cua/src/main.rs` — `Capabilities` + `ServeMcp` subcommands
+- `crates/juno-cua/Cargo.toml` — added `tokio` for async MCP I/O
+- `.claude/skills/juno/SKILL.md` — agent skill
+- `packages/juno-cua/` — npm setup package (zero deps, 5.7KB)
+- `~/repo/homebrew-tap/Formula/juno-cua.rb` — Homebrew formula
 
 ---
 
