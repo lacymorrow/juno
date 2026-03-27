@@ -227,7 +227,7 @@ function App() {
 
         // Load keyboard shortcuts
         const shortcuts = (await invoke("get_keyboard_shortcuts")) as {
-          agent_mode_toggle: string;
+          agent_mode: string;
           dictation_input: string;
           stop_current_task: string;
           open_settings: string;

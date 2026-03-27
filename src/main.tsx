@@ -14,6 +14,13 @@ import { BarHost } from "./components/bar/BarHost";
 
 import "./styles/globals.css";
 
+// Prevent scrollbar flash during dynamic island transitions in production.
+// In dev, leave overflow visible so browser dev tools and layout inspection work normally.
+if (import.meta.env.PROD) {
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <VoiceProvider>

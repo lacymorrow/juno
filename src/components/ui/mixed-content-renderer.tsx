@@ -44,6 +44,18 @@ const JSX_COMPONENT_NAMES = [
   "QueryButton",
   "OpenButton",
   "CopyButton",
+  // Animated components
+  "AnimatedCard",
+  "AnimatedList",
+  "AnimatedProgress",
+  "GlowBadge",
+  "ShimmerText",
+  "Confetti",
+  "PulseRing",
+  "AnimatedDivider",
+  "Stat",
+  "MiniChart",
+  "AnimatedNumber",
 ] as const;
 
 /**
@@ -69,7 +81,7 @@ const JSX_OPEN_TAG_PATTERN = new RegExp(
  * These edge cases are acceptable because the agent is instructed to produce
  * well-formed JSX at the top level.
  */
-export function splitMixedContent(content: string): ContentSegment[] {
+export function splitMixedContent(content: string, isStreaming = false): ContentSegment[] {
   const segments: ContentSegment[] = [];
   let remaining = content;
 
@@ -117,8 +129,15 @@ export function splitMixedContent(content: string): ContentSegment[] {
     const jsxEnd = findJsxBlockEnd(remaining, jsxStart, componentName);
 
     if (jsxEnd === -1) {
-      // Can't find closing tag — treat the rest as text (possibly incomplete JSX during streaming)
-      segments.push({ type: "text", content: remaining.slice(jsxStart) });
+      if (isStreaming) {
+        // During streaming, treat incomplete JSX as a jsx segment —
+        // JsxRenderer with fixIncompleteJsx will auto-close tags,
+        // rendering the component progressively as chunks arrive
+        segments.push({ type: "jsx", content: remaining.slice(jsxStart) });
+      } else {
+        // After streaming, incomplete JSX is malformed — show as text
+        segments.push({ type: "text", content: remaining.slice(jsxStart) });
+      }
       break;
     }
 
@@ -228,8 +247,8 @@ export const MixedContentRenderer = React.memo(
     className,
   }: MixedContentRendererProps) {
     const segments = React.useMemo(
-      () => splitMixedContent(content),
-      [content],
+      () => splitMixedContent(content, isStreaming),
+      [content, isStreaming],
     );
 
     // Single segment optimization — no wrapper div needed
@@ -245,9 +264,13 @@ export const MixedContentRenderer = React.memo(
       <div className={cn("space-y-3", className)}>
         {segments.map((seg, i) =>
           seg.type === "text" ? (
-            <Response key={i}>{seg.content}</Response>
+            <div key={i} className="jsx-segment-enter">
+              <Response>{seg.content}</Response>
+            </div>
           ) : (
-            <JsxMessageRenderer key={i} jsx={seg.content} />
+            <div key={i} className="jsx-segment-enter">
+              <JsxMessageRenderer jsx={seg.content} />
+            </div>
           ),
         )}
         {isStreaming && (
