@@ -26,7 +26,7 @@ pub mod store_keys {
 
 /// Keyboard shortcut setting keys
 pub mod keyboard_keys {
-    pub const AGENT_MODE_TOGGLE: &str = "agent_mode_toggle";
+    pub const AGENT_MODE: &str = "agent_mode";
     pub const DICTATION_INPUT: &str = "dictation_input";
     pub const STOP_CURRENT_TASK: &str = "stop_current_task";
     pub const OPEN_SETTINGS: &str = "open_settings";
@@ -127,7 +127,7 @@ pub mod defaults {
     pub const ALWAYS_LISTENING_ACTIVE: bool = false;
     pub const ALWAYS_LISTENING_SENSITIVITY: f32 = 0.5;
     pub const PERFORMANCE_MONITORING_ENABLED: bool = true;
-    pub const AGENT_MODE: &str = "multi";
+    pub const AGENT_EXECUTION_MODE: &str = "multi";
     pub const AGENT_TRIGGER_MODE: &str = "tap";
     pub const CLOUD_ENABLED: bool = false;
     pub const AUTO_CONNECT: bool = false;
@@ -136,9 +136,9 @@ pub mod defaults {
 
     // Default keyboard shortcuts (cross-platform)
     #[cfg(target_os = "macos")]
-    pub const AGENT_MODE_TOGGLE: &str = "Shift+Option+Space";
+    pub const AGENT_MODE: &str = "Option+D";
     #[cfg(not(target_os = "macos"))]
-    pub const AGENT_MODE_TOGGLE: &str = "Shift+Alt+Space";
+    pub const AGENT_MODE: &str = "Alt+D";
 
     #[cfg(target_os = "macos")]
     pub const DICTATION_INPUT: &str = "Option+Space";

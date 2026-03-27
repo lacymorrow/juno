@@ -30,6 +30,10 @@
     <key>com.apple.security.device.microphone</key>
     <true/>
 
+    <!-- Location access for contextual queries (weather, timezone) -->
+    <key>com.apple.security.personal-information.location</key>
+    <true/>
+
     <!-- Network access for cloud features -->
     <key>com.apple.security.network.client</key>
     <true/>

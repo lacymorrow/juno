@@ -173,7 +173,10 @@ pub fn is_jsx_content(content: &str) -> bool {
         "StatusCard", "ColorShowcase", "VisualDemo", "className=", "jsx", "React",
         "WeatherCard", "FileListCard", "SystemStatusCard", "ComparisonCard",
         "TimerCard", "LinkCard", "TaskSummaryCard", "ProgressBar",
-        "ActionButton", "QueryButton", "OpenButton", "CopyButton"
+        "ActionButton", "QueryButton", "OpenButton", "CopyButton",
+        "AnimatedCard", "AnimatedList", "AnimatedProgress", "GlowBadge",
+        "ShimmerText", "Confetti", "PulseRing", "AnimatedDivider",
+        "Stat", "MiniChart", "AnimatedNumber"
     ];
 
     // Check for JSX patterns efficiently

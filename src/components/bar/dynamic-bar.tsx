@@ -13,12 +13,10 @@ import {
   type SizePresets,
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BarAppearance } from "@/components/bar/barAppearance";
-import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
+import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
 
 // Debounce utility
 function debounce<T extends (...args: any[]) => any>(
@@ -269,13 +267,10 @@ const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
   );
 };
 
-const AIFloatingChatbot = ({
-  barAppearance,
-}: {
+const AIFloatingChatbot = (_props: {
   barAppearance?: BarAppearance;
 }) => {
   const { setSize } = useDynamicIslandSize();
-  const windowLabel = getCurrentWindow().label;
 
   // === STATE MANAGEMENT ===
 
@@ -302,19 +297,8 @@ const AIFloatingChatbot = ({
     MOCK_WIDGETS.idle
   );
 
-  // === WINDOW CONFIGURATION ===
-
-  const layoutWindowLabel = barAppearance
-    ? getBarLayoutWindowLabel(barAppearance)
-    : windowLabel;
-  const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === layoutWindowLabel
-  );
-
-  const defaultWidth =
-    floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
-  const defaultHeight =
-    floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
+  // Agent response content — populated when stream ends
+  const [agentResponseContent, setAgentResponseContent] = useState<string | null>(null);
 
   // === STANDARDIZED EVENT LISTENER ===
 
@@ -362,6 +346,46 @@ const AIFloatingChatbot = ({
       console.log("🔄 DynamicBar: Event listener cleaned up");
     };
   }, []);
+
+  // === AGENT STREAM END LISTENER ===
+  // Captures completed agent responses so the bar can display component content
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        unlisten = await listen<{
+          message_id: string;
+          complete_text: string;
+          is_jsx?: boolean;
+          agent_state?: string;
+        }>(EVENTS.STREAMING_STREAM_END, (event) => {
+          if (!mounted) return;
+          const { complete_text } = event.payload;
+          if (complete_text) {
+            setAgentResponseContent(complete_text);
+          }
+        });
+      } catch (error) {
+        console.error("DynamicBar: Failed to setup stream-end listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  // Clear response content when bar returns to default/idle
+  useEffect(() => {
+    if (barState.barState === UI.BAR_STATES_DEFAULT) {
+      setAgentResponseContent(null);
+    }
+  }, [barState.barState]);
 
   // === UI STATE TO WIDGET MAPPING ===
 
@@ -478,64 +502,69 @@ const AIFloatingChatbot = ({
   const { resizeWindowIfChanged } = useWindowSize("floating-bar"); // Always use floating-bar window
 
   /**
-   * Calculate optimal window dimensions based on state and content
+   * Calculate optimal window dimensions based on state and content.
+   * These MUST match the Dynamic Island preset sizes used by each state
+   * (via mapStateToWidget → widget.size → DynamicIslandSizePresets)
+   * plus SHADOW_PADDING for the p-6 wrapper around the island.
+   *
+   * Dynamic Island preset reference (width × height via aspectRatio):
+   *   default:       150 × 44
+   *   compact:       235 × 44
+   *   compactLong:   300 × 56
+   *   compactMedium: 351 × 61
+   *   long:          371 × 84
+   *   medium:        371 × 210
+   *   large:         371 × 84
    */
   const calculateDimensions = useCallback((state: BarStateData) => {
-    let dimensions = { width: defaultWidth, height: defaultHeight };
-    
+    let dimensions = { width: 150, height: 44 }; // matches "default" preset
+
     switch (state.barState) {
       case UI.BAR_STATES_DEFAULT:
-        dimensions = { width: 80, height: 30 };
+        // widget: idle → preset "default" → 150 × 44
+        dimensions = { width: 150, height: 44 };
         break;
-      
+
       case UI.BAR_STATES_LISTENING:
-      case UI.BAR_STATES_TRANSCRIBING:
-        dimensions = { width: 160, height: 40 };
-        break;
-      
       case UI.BAR_STATES_SPEAKING:
-        // Dynamic width based on text length
-        const textLen = state.spokenText?.length || 0;
-        const width = Math.min(320, Math.max(180, 180 + textLen * 2));
-        dimensions = { width, height: 45 };
+      case UI.BAR_STATES_DICTATING:
+      case UI.BAR_STATES_ERROR:
+      case UI.BAR_STATES_SUCCESS:
+        // widget: compact preset → 235 × 44
+        dimensions = { width: 235, height: 44 };
         break;
-      
+
+      case UI.BAR_STATES_TRANSCRIBING:
       case UI.BAR_STATES_LOADING:
       case UI.BAR_STATES_SUBMITTING:
-        dimensions = { width: 200, height: 50 };
+        // widget: compactLong preset → 300 × 56
+        dimensions = { width: 300, height: 56 };
         break;
-      
+
       case UI.BAR_STATES_INPUT:
-        dimensions = { width: 400, height: 60 };
+        // widget: long preset → 371 × 84
+        dimensions = { width: 371, height: 84 };
         break;
-      
-      case UI.BAR_STATES_ERROR:
-        const errorLen = state.currentError?.length || 0;
-        const errorWidth = Math.min(350, Math.max(200, 200 + errorLen * 1.5));
-        dimensions = { width: errorWidth, height: 55 };
-        break;
-      
-      case UI.BAR_STATES_SUCCESS:
-        dimensions = { width: 180, height: 45 };
-        break;
-      
+
       case UI.BAR_STATES_AGENT_RESPONDING:
-        dimensions = { width: 280, height: 65 };
+        // widget: medium preset → 371 × 210
+        dimensions = { width: 371, height: 210 };
         break;
-      
+
       case UI.BAR_STATES_ALWAYS_LISTENING:
-        dimensions = { width: 250, height: 80 };
+        // widget: large preset → 371 × 84
+        dimensions = { width: 371, height: 84 };
         break;
-      
+
       default:
-        dimensions = { width: defaultWidth, height: defaultHeight };
+        dimensions = { width: 150, height: 44 };
     }
-    
+
     return {
       width: dimensions.width + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
       height: dimensions.height + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING
     };
-  }, [defaultWidth, defaultHeight]);
+  }, []);
 
   // Debounced resize to avoid flickering
   const debouncedResize = useMemo(
@@ -626,6 +655,14 @@ const AIFloatingChatbot = ({
     return <WidgetRenderer widget={currentWidgetData} />;
   };
 
+  // Show agent response content when available (JSX components or text)
+  const showAgentContent = agentResponseContent && (
+    barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
+    barState.barState === UI.BAR_STATES_SUCCESS ||
+    // Keep showing while finishing transition
+    barState.barState === UI.BAR_STATES_FINISHING
+  );
+
   // Add transition effect between widget changes
   const [isTransitioning, setIsTransitioning] = useState(false);
 
@@ -634,6 +671,17 @@ const AIFloatingChatbot = ({
     const timer = setTimeout(() => setIsTransitioning(false), 300);
     return () => clearTimeout(timer);
   }, [currentWidgetData.id]);
+
+  // When agent content arrives, expand the island to fit
+  useEffect(() => {
+    if (showAgentContent) {
+      setSize("medium");
+      resizeWindowIfChanged({
+        width: 371 + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
+        height: 210 + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
+      });
+    }
+  }, [showAgentContent, setSize, resizeWindowIfChanged]);
 
   return (
     <div className="h-full w-full relative p-6" data-tauri-drag-region>
@@ -645,14 +693,20 @@ const AIFloatingChatbot = ({
           aria-label="Activate AI panel"
           aria-controls="ai-chatbot-panel"
         >
-          <DynamicIsland 
+          <DynamicIsland
             id="ai-chatbot-panel"
           >
             <div className={cn(
               "transition-all duration-300",
               isTransitioning && "scale-95 opacity-80"
             )}>
-              {renderCurrentWidget()}
+              {showAgentContent ? (
+                <div className="p-3 overflow-y-auto max-h-[200px] text-white text-sm">
+                  <MixedContentRenderer content={agentResponseContent} />
+                </div>
+              ) : (
+                renderCurrentWidget()
+              )}
             </div>
           </DynamicIsland>
         </button>
@@ -664,7 +718,7 @@ const AIFloatingChatbot = ({
 export function DynamicBar({ barAppearance }: { barAppearance?: BarAppearance }) {
   return (
     <DynamicIslandProvider initialSize={"default"}>
-      <div className="h-full w-full bg-transparent" data-tauri-drag-region>
+      <div className="h-full w-full bg-transparent overflow-hidden" data-tauri-drag-region>
         <AIFloatingChatbot barAppearance={barAppearance} />
       </div>
     </DynamicIslandProvider>
