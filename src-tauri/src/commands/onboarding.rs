@@ -213,7 +213,7 @@ pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, St
         "completed_at": onboarding_settings.completed_at,
         "is_development_mode": is_development_mode(),
         "shortcuts": {
-            "agent_mode_toggle": shortcuts.agent_mode_toggle,
+            "agent_mode": shortcuts.agent_mode,
             "dictation_input": shortcuts.dictation_input,
             "stop_current_task": shortcuts.stop_current_task
         }
@@ -243,7 +243,7 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 
     // Attempt to parse the shortcuts to see if they're valid
     let agent_shortcut_valid =
-        crate::events::shortcuts::parse_shortcut_string(&shortcuts.agent_mode_toggle).is_some();
+        crate::events::shortcuts::parse_shortcut_string(&shortcuts.agent_mode).is_some();
     let dictation_shortcut_valid =
         crate::events::shortcuts::parse_shortcut_string(&shortcuts.dictation_input).is_some();
 

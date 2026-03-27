@@ -17,7 +17,7 @@ import ShortcutInput from "../ShortcutInput";
 export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
   const getShortcutDisplayName = (shortcutName: string): string => {
     const names: { [key: string]: string } = {
-      agent_mode_toggle: "Toggle Agent Mode",
+      agent_mode: "Agent Mode",
       dictation_input: "Start Dictation",
       stop_current_task: "Stop Current Task",
       open_settings: "Open Settings",
@@ -27,7 +27,7 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
 
   const getShortcutDescription = (shortcutName: string): string => {
     const descriptions: { [key: string]: string } = {
-      agent_mode_toggle: "Switch between agent and normal mode",
+      agent_mode: "Activate agent mode",
       dictation_input: "Activate voice input for dictation",
       stop_current_task: "Stop the current AI task or operation",
       open_settings: "Open the settings window",

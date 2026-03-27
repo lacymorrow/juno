@@ -24,6 +24,13 @@
     <key>NSInputMonitoringUsageDescription</key>
     <string>Juno needs input monitoring permissions to register global keyboard shortcuts for voice control and automation features.</string>
 
+    <!-- Location permission (for weather, timezone, location-aware queries) -->
+    <key>NSLocationUsageDescription</key>
+    <string>Juno uses your location to provide contextual information like weather, timezone, and location-aware responses without asking.</string>
+
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Juno uses your location to provide contextual information like weather, timezone, and location-aware responses without asking.</string>
+
     <!-- Screen capture permission -->
     <key>NSScreenCaptureUsageDescription</key>
     <string>Juno needs screen capture permissions to take screenshots and analyze the desktop for automation tasks.</string>
