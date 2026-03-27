@@ -332,16 +332,16 @@ impl NativePermissionChecker {
                 }
             }
             
-            // Alternative: Try to test with a simple AppleScript that checks for Listen Event permission
-            // This is less reliable but doesn't require special APIs
+            // Alternative: Use a non-destructive System Events query to test input monitoring.
+            // IMPORTANT: Do NOT use `key code` — that literally types a character into the
+            // focused application.  Instead, ask System Events for the process list, which
+            // still requires the ListenEvent (input monitoring) entitlement but is read-only.
             match Command::new("osascript")
                 .args([
                     "-e",
-                    "use framework \"Foundation\"
-                     use framework \"AppKit\"
-                     try
+                    "try
                          tell application \"System Events\"
-                             key code 0
+                             get name of first process
                          end tell
                          return \"true\"
                      on error

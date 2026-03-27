@@ -161,7 +161,7 @@ export function useSettings() {
 
 	// Keyboard Shortcuts state
 	const [keyboardShortcuts, setKeyboardShortcuts] = useState<KeyboardShortcuts>({
-		agent_mode_toggle: "",
+		agent_mode: "",
 		dictation_input: "",
 		stop_current_task: "",
 		open_settings: "",

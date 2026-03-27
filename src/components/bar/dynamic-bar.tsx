@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type FormEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Brain, Mic, Volume2, AlertCircle, Check, Loader2, Type, Keyboard } from "lucide-react";
 import { cn } from "@/lib/utils";
-
 import {
   DynamicIsland,
   DynamicIslandProvider,
@@ -13,31 +17,13 @@ import {
   type SizePresets,
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BarAppearance } from "@/components/bar/barAppearance";
-import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
+import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
 
-// Debounce utility
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  };
-}
+// ─── Types ───────────────────────────────────────────────
 
-// === STANDARDIZED UI API TYPES ===
-
-/**
- * UI State enumeration - Uses generated constants from backend
- * These values are emitted by the backend UIManager in BAR_STATE_UPDATE events
- */
 type UIState =
   | typeof UI.BAR_STATES_DEFAULT
   | typeof UI.BAR_STATES_EXPANDING
@@ -56,36 +42,21 @@ type UIState =
   | typeof UI.BAR_STATES_ALWAYS_LISTENING
   | typeof UI.BAR_STATES_AGENT_RESPONDING;
 
-/**
- * Backend State Data Structure - Matches exactly what backend emits
- * This structure is defined in ui_commands.rs emit_bar_state_update()
- */
 interface BarStateData {
-  // Core state
   barState: UIState;
   inputValue: string;
   lastSubmittedValue: string;
   currentError: string | null;
-
-  // Voice and transcription
   transcriptionText: string;
   spokenText: string;
   voiceMode: string;
   audioLevel: number;
-
-  // Status flags
   isAgentWorking: boolean;
   isDictationMode: boolean;
   isAlwaysListening: boolean;
-
-  // Agent state
   agentState: string | null;
 }
 
-/**
- * Standardized UI Interaction Event Structure
- * This matches UIInteractionEvent in ui_commands.rs
- */
 interface UIInteractionEvent {
   element_id: string;
   interaction_type: string;
@@ -93,196 +64,250 @@ interface UIInteractionEvent {
   timestamp: number;
 }
 
-/**
- * Widget Data Structure for Dynamic Content
- */
-interface WidgetData {
-  id: string;
-  type: string;
-  category: string;
-  content: any;
-  size: SizePresets;
-  loading?: boolean;
-  error?: string;
-}
+// ─── Constants ───────────────────────────────────────────
 
-// === COMPONENT CONSTANTS ===
-
-const FLOATING_BAR_DIMENSIONS = {
-  DEFAULT_WIDTH: 60,
-  DEFAULT_HEIGHT: 20,
-  EXPANDED_WIDTH: 280,
-  EXPANDED_HEIGHT: 50,
-  SHADOW_PADDING: 48,
-};
-
-/**
- * Component name for backend interactions - MUST match backend element handling
- */
+const SHADOW_PADDING = 48;
 const COMPONENT_ID = "dynamic-bar";
 
-// Mock widget data until agent-driven widgets are implemented
-const MOCK_WIDGETS: Record<string, WidgetData> = {
-  idle: {
-    id: "idle",
-    type: "status",
-    category: "voice",
-    content: { status: "Ready", icon: "brain" },
-    size: "default",
-  },
-  listening: {
-    id: "listening",
-    type: "voice",
-    category: "voice",
-    content: { status: "Listening...", icon: "mic" },
-    size: "compact",
-  },
-  speaking: {
-    id: "speaking",
-    type: "voice",
-    category: "voice",
-    content: { status: "Speaking...", icon: "volume" },
-    size: "compact",
-  },
-  processing: {
-    id: "processing",
-    type: "status",
-    category: "system",
-    content: { status: "Processing...", icon: "loader" },
-    size: "compactLong",
-  },
-  error: {
-    id: "error",
-    type: "status",
-    category: "system",
-    content: { status: "Error occurred", icon: "alert" },
-    size: "compact",
-  },
-  success: {
-    id: "success",
-    type: "status",
-    category: "system",
-    content: { status: "Success!", icon: "check" },
-    size: "compact",
-  },
-};
+// Spring animation in DynamicIsland takes ~300ms to settle.
+// When shrinking, we delay the window resize so the island animates first.
+const SHRINK_DELAY_MS = 350;
 
-const WidgetRenderer = ({ widget }: { widget: WidgetData }) => {
-  if (widget.loading) {
-    return (
-      <div className="flex items-center justify-center h-full w-full">
-        <Loader2 className="animate-spin h-6 w-6 text-blue-400" />
-      </div>
-    );
-  }
+// Custom keyframes — injected once into <head>.
+// These replace Tailwind's default animate-pulse / animate-spin
+// with organic, purpose-built motions for each state.
+const BAR_KEYFRAMES = `
+@keyframes bar-idle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.08); }
+}
+@keyframes bar-breathe {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+@keyframes bar-ring {
+  0%   { transform: scale(1); opacity: 0.3; }
+  100% { transform: scale(3.5); opacity: 0; }
+}
+@keyframes bar-orbit {
+  0%   { transform: translateX(0) scale(1); }
+  25%  { transform: translateX(4px) scale(0.92); }
+  50%  { transform: translateX(0) scale(1); }
+  75%  { transform: translateX(-4px) scale(0.92); }
+  100% { transform: translateX(0) scale(1); }
+}
+@keyframes bar-ripple {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.12); }
+  100% { box-shadow: 0 0 0 8px rgba(255,255,255,0); }
+}
+@keyframes bar-flash {
+  0%   { opacity: 1; transform: scale(1.5); }
+  100% { opacity: 0.4; transform: scale(1); }
+}
+@keyframes bar-shake {
+  0%, 100% { transform: translateX(0); }
+  20%  { transform: translateX(-2px); }
+  40%  { transform: translateX(2px); }
+  60%  { transform: translateX(-1px); }
+  80%  { transform: translateX(1px); }
+}
+@keyframes bar-content-in {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+`;
 
-  if (widget.error) {
-    return (
-      <div className="flex items-center justify-center h-full w-full px-4">
-        <div className="text-center">
-          <div className="text-red-400 text-sm font-medium">Error</div>
-          <div className="text-gray-400 text-xs">{widget.error}</div>
-        </div>
-      </div>
-    );
-  }
+// ─── State indicator ─────────────────────────────────────
+// One dot. No icons. State communicated through motion and color.
 
-  const getWidgetIcon = () => {
-    switch (widget.content.icon) {
-      case "mic":
-        return <Mic className={cn(
-          "w-4 h-4 text-blue-400",
-          widget.content.level && widget.content.level > 0.5 && "animate-pulse"
-        )} />;
-      case "volume":
-        return <Volume2 className="w-4 h-4 text-green-400" />;
-      case "loader":
-        return <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />;
-      case "alert":
-        return <AlertCircle className="w-4 h-4 text-red-400" />;
-      case "check":
-        return <Check className="w-4 h-4 text-green-400" />;
-      case "type":
-        return <Type className="w-4 h-4 text-orange-400" />;
-      case "keyboard":
-        return <Keyboard className="w-4 h-4 text-purple-400" />;
-      case "brain":
-      default:
-        return <Brain className="w-4 h-4 text-white" />;
-    }
-  };
-
-  // Special rendering for different widget types
-  if (widget.type === "voice" && widget.content.level !== undefined) {
-    return (
-      <div className="flex items-center justify-center h-full w-full px-4 py-2">
-        <div className="flex items-center gap-3">
-          {getWidgetIcon()}
-          <div className="flex flex-col">
-            <span className="text-white text-sm font-medium">
-              {widget.content.status}
-            </span>
-            <div className="flex items-center gap-1 mt-1">
-              {[...Array(5)].map((_, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "w-1 h-3 rounded-full transition-all duration-100",
-                    i < Math.ceil(widget.content.level * 5)
-                      ? "bg-blue-400"
-                      : "bg-white/20"
-                  )}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (widget.id === "always-listening" && widget.content.wakeWords) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full w-full px-4 py-2">
-        <div className="flex items-center gap-2 mb-1">
-          {getWidgetIcon()}
-          <span className="text-white text-sm font-medium">
-            {widget.content.status}
-          </span>
-        </div>
-        <div className="text-xs text-white/60">
-          Say "{widget.content.wakeWords.join('" or "')}"
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-center h-full w-full px-4 py-2">
-      <div className="flex items-center gap-2">
-        {getWidgetIcon()}
-        <span className="text-white text-sm font-medium truncate max-w-[200px]">
-          {widget.content.status}
-        </span>
-      </div>
-    </div>
-  );
-};
-
-const AIFloatingChatbot = ({
-  barAppearance,
+const StateIndicator = ({
+  state,
+  audioLevel,
 }: {
-  barAppearance?: BarAppearance;
+  state: UIState;
+  audioLevel: number;
 }) => {
+  const dot = "w-[7px] h-[7px] rounded-full";
+
+  switch (state) {
+    case UI.BAR_STATES_DEFAULT:
+    case UI.BAR_STATES_DICTATION_READY:
+      return (
+        <div
+          className={cn(dot, "bg-white")}
+          style={{ animation: "bar-idle 4s ease-in-out infinite" }}
+        />
+      );
+
+    case UI.BAR_STATES_LISTENING:
+    case UI.BAR_STATES_ALWAYS_LISTENING:
+      return (
+        <div className="relative flex items-center justify-center">
+          <div
+            className={cn(dot, "bg-white relative z-10")}
+            style={{
+              animation: "bar-breathe 1.6s ease-in-out infinite",
+              opacity: Math.max(0.5, audioLevel),
+            }}
+          />
+          <div
+            className="absolute w-[7px] h-[7px] rounded-full bg-white/25"
+            style={{ animation: "bar-ring 2s ease-out infinite" }}
+          />
+        </div>
+      );
+
+    case UI.BAR_STATES_TRANSCRIBING:
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      return (
+        <div
+          className={cn(dot, "bg-white/80")}
+          style={{ animation: "bar-orbit 1.1s ease-in-out infinite" }}
+        />
+      );
+
+    case UI.BAR_STATES_SPEAKING:
+      return (
+        <div
+          className={cn(dot, "bg-white/80")}
+          style={{ animation: "bar-ripple 1.4s ease-out infinite" }}
+        />
+      );
+
+    case UI.BAR_STATES_ERROR:
+      return (
+        <div
+          className={cn(dot, "bg-[#e8866a]")}
+          style={{ animation: "bar-shake 0.4s ease-out" }}
+        />
+      );
+
+    case UI.BAR_STATES_SUCCESS:
+      return (
+        <div
+          className={cn(dot, "bg-[#7aba8a]")}
+          style={{ animation: "bar-flash 0.6s ease-out forwards" }}
+        />
+      );
+
+    case UI.BAR_STATES_DICTATING:
+      return (
+        <div
+          className={cn(dot, "bg-white")}
+          style={{ animation: "bar-breathe 1.2s ease-in-out infinite" }}
+        />
+      );
+
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+      // Steady bright dot — "I'm here, ready for your input"
+      return <div className={cn(dot, "bg-white/70 shrink-0")} />;
+
+    case UI.BAR_STATES_FINISHING:
+    case UI.BAR_STATES_SHRINKING:
+      return <div className={cn(dot, "bg-white/25 transition-opacity duration-500")} />;
+
+    default:
+      return <div className={cn(dot, "bg-white/35")} />;
+  }
+};
+
+// ─── State → island size preset ──────────────────────────
+
+const getIslandSize = (state: UIState): SizePresets => {
+  switch (state) {
+    case UI.BAR_STATES_DEFAULT:
+    case UI.BAR_STATES_DICTATION_READY:
+      return "default";
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+      return "long";
+    case UI.BAR_STATES_TRANSCRIBING:
+      return "compactLong";
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      return "medium";
+    case UI.BAR_STATES_ALWAYS_LISTENING:
+      return "large";
+    default:
+      return "compact";
+  }
+};
+
+// State label — lowercase, no trailing ellipsis.
+// Returns null for states that don't need a label.
+const getLabel = (state: UIState, data: BarStateData): string | null => {
+  switch (state) {
+    case UI.BAR_STATES_LISTENING:
+      return "listening";
+    case UI.BAR_STATES_TRANSCRIBING:
+      return data.transcriptionText || "transcribing";
+    case UI.BAR_STATES_SPEAKING: {
+      const t = data.spokenText;
+      return t ? (t.length > 32 ? t.slice(0, 32) + "\u2026" : t) : "speaking";
+    }
+    case UI.BAR_STATES_DICTATING:
+      return "dictating";
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      return data.agentState || "working";
+    case UI.BAR_STATES_ERROR:
+      return data.currentError || "something went wrong";
+    case UI.BAR_STATES_SUCCESS:
+      return "done";
+    case UI.BAR_STATES_FINISHING:
+      return "finishing";
+    default:
+      return null;
+  }
+};
+
+// State → window dimensions (must match island size presets + padding)
+const getDimensions = (state: UIState) => {
+  let w = 150, h = 44;
+  switch (state) {
+    case UI.BAR_STATES_DEFAULT:
+    case UI.BAR_STATES_DICTATION_READY:
+      break; // 150 × 44
+    case UI.BAR_STATES_TRANSCRIBING:
+      w = 300; h = 56;
+      break;
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+      w = 371; h = 84;
+      break;
+    case UI.BAR_STATES_AGENT_RESPONDING:
+      w = 371; h = 210;
+      break;
+    case UI.BAR_STATES_ALWAYS_LISTENING:
+      w = 371; h = 84;
+      break;
+    default:
+      w = 235; h = 44;
+  }
+  return { width: w + SHADOW_PADDING, height: h + SHADOW_PADDING };
+};
+
+// ─── Main component ──────────────────────────────────────
+
+const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const { setSize } = useDynamicIslandSize();
-  const windowLabel = getCurrentWindow().label;
 
-  // === STATE MANAGEMENT ===
+  // Inject keyframes once
+  useEffect(() => {
+    const id = "dynamic-bar-keyframes";
+    if (!document.getElementById(id)) {
+      const style = document.createElement("style");
+      style.id = id;
+      style.textContent = BAR_KEYFRAMES;
+      document.head.appendChild(style);
+    }
+  }, []);
 
-  /**
-   * Backend-driven state - Updated via BAR_STATE_UPDATE events
-   * This is the single source of truth for all UI state
-   */
+  // ── State ──
+
   const [barState, setBarState] = useState<BarStateData>({
     barState: UI.BAR_STATES_DEFAULT,
     inputValue: "",
@@ -298,374 +323,571 @@ const AIFloatingChatbot = ({
     agentState: null,
   });
 
-  const [currentWidgetData, setCurrentWidgetData] = useState<WidgetData>(
-    MOCK_WIDGETS.idle
-  );
+  const [agentResponseContent, setAgentResponseContent] = useState<
+    string | null
+  >(null);
+  const [isStreamingContent, setIsStreamingContent] = useState(false);
+  // Display lifecycle decoupled from backend — component persists after
+  // stream-end until explicitly dismissed (close, escape, mode change).
+  const [componentPinned, setComponentPinned] = useState(false);
+  const streamContentRef = useRef("");
+  const rafRef = useRef(0);
+  const [localInputValue, setLocalInputValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pinnedInputRef = useRef<HTMLInputElement>(null);
 
-  // === WINDOW CONFIGURATION ===
+  const dismissComponent = useCallback(() => {
+    setAgentResponseContent(null);
+    setComponentPinned(false);
+    setIsStreamingContent(false);
+    streamContentRef.current = "";
+  }, []);
 
-  const layoutWindowLabel = barAppearance
-    ? getBarLayoutWindowLabel(barAppearance)
-    : windowLabel;
-  const floatingBarConfig = tauriConfig.app.windows.find(
-    (w) => w.label === layoutWindowLabel
-  );
+  // ── Event listeners ──
 
-  const defaultWidth =
-    floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
-  const defaultHeight =
-    floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
-
-  // === STANDARDIZED EVENT LISTENER ===
-
-  /**
-   * Primary backend integration: Listen to BAR_STATE_UPDATE events
-   * This is the core pattern for all UI components - event-driven state updates
-   */
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-
-    const setupListener = async () => {
+    let mounted = true;
+    const setup = async () => {
       try {
-        unlisten = await listen<BarStateData>(
+        const fn = await listen<BarStateData>(
           EVENTS.BAR_STATE_UPDATE,
           (event) => {
-            console.log("📨 DynamicBar: Received state update:", event.payload);
-
-            // Validate the received data structure
-            const payload = event.payload;
-            if (
-              payload &&
-              typeof payload === "object" &&
-              "barState" in payload
-            ) {
-              setBarState(payload);
-            } else {
-              console.error(
-                "❌ DynamicBar: Invalid state data received:",
-                payload
-              );
-            }
-          }
+            if (!mounted) return;
+            const p = event.payload;
+            if (p && typeof p === "object" && "barState" in p) setBarState(p);
+          },
         );
-
-        console.log("✅ DynamicBar: Event listener established");
-      } catch (error) {
-        console.error("❌ DynamicBar: Failed to setup event listener:", error);
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: listener setup failed:", e);
       }
     };
-
-    setupListener();
-
+    setup();
     return () => {
+      mounted = false;
       safeCleanupEventListener(unlisten);
-      console.log("🔄 DynamicBar: Event listener cleaned up");
     };
   }, []);
 
-  // === UI STATE TO WIDGET MAPPING ===
-
-  /**
-   * Map UI states to dynamic island sizes and widget data
-   */
-  const mapStateToWidget = (uiState: UIState): WidgetData => {
-    switch (uiState) {
-      case UI.BAR_STATES_LISTENING:
-        return {
-          ...MOCK_WIDGETS.listening,
-          content: { status: "Listening...", icon: "mic", level: barState.audioLevel },
-        };
-      case UI.BAR_STATES_SPEAKING:
-        return {
-          ...MOCK_WIDGETS.speaking,
-          content: { 
-            status: barState.spokenText || "Speaking...", 
-            icon: "volume" 
-          },
-        };
-      case UI.BAR_STATES_TRANSCRIBING:
-        return {
-          id: "transcribing",
-          type: "voice",
-          category: "voice",
-          content: { 
-            status: barState.transcriptionText || "Converting speech...", 
-            icon: "mic" 
-          },
-          size: "compactLong",
-        };
-      case UI.BAR_STATES_LOADING:
-      case UI.BAR_STATES_SUBMITTING:
-        return {
-          ...MOCK_WIDGETS.processing,
-          content: { 
-            status: barState.inputValue || "Processing...", 
-            icon: "loader" 
-          },
-        };
-      case UI.BAR_STATES_ERROR:
-        return {
-          ...MOCK_WIDGETS.error,
-          content: { 
-            status: barState.currentError || "Error occurred", 
-            icon: "alert" 
-          },
-        };
-      case UI.BAR_STATES_SUCCESS:
-        return {
-          ...MOCK_WIDGETS.success,
-          content: { 
-            status: barState.lastSubmittedValue ? "Task completed" : "Success!", 
-            icon: "check" 
-          },
-        };
-      case UI.BAR_STATES_AGENT_RESPONDING:
-        return {
-          id: "agent",
-          type: "agent",
-          category: "system",
-          content: { 
-            status: barState.agentState || "Agent working...", 
-            icon: "brain" 
-          },
-          size: "medium",
-        };
-      case UI.BAR_STATES_DICTATING:
-        return {
-          id: "dictating",
-          type: "voice",
-          category: "voice",
-          content: { status: "Dictating...", icon: "type" },
-          size: "compact",
-        };
-      case UI.BAR_STATES_ALWAYS_LISTENING:
-        return {
-          id: "always-listening",
-          type: "voice",
-          category: "voice",
-          content: { 
-            status: "Always listening", 
-            icon: "mic",
-            wakeWords: ["Hey Juno", "Computer"]
-          },
-          size: "large",
-        };
-      case UI.BAR_STATES_INPUT:
-        return {
-          id: "input",
-          type: "input",
-          category: "system",
-          content: { status: "Type your request", icon: "keyboard" },
-          size: "long",
-        };
-      case UI.BAR_STATES_DEFAULT:
-      default:
-        return MOCK_WIDGETS.idle;
-    }
-  };
-
-  // Update widget data and size based on backend state
+  // Stream start — clear old content, begin accumulating
   useEffect(() => {
-    const newWidget = mapStateToWidget(barState.barState);
-    setCurrentWidgetData(newWidget);
-    setSize(newWidget.size);
-  }, [barState.barState, setSize]);
-
-  // === DYNAMIC WINDOW RESIZING ===
-  // Each bar component manages its own sizing based on content
-  // This allows for precise, content-aware sizing that the backend cannot predict
-
-  const { resizeWindowIfChanged } = useWindowSize("floating-bar"); // Always use floating-bar window
-
-  /**
-   * Calculate optimal window dimensions based on state and content
-   */
-  const calculateDimensions = useCallback((state: BarStateData) => {
-    let dimensions = { width: defaultWidth, height: defaultHeight };
-    
-    switch (state.barState) {
-      case UI.BAR_STATES_DEFAULT:
-        dimensions = { width: 80, height: 30 };
-        break;
-      
-      case UI.BAR_STATES_LISTENING:
-      case UI.BAR_STATES_TRANSCRIBING:
-        dimensions = { width: 160, height: 40 };
-        break;
-      
-      case UI.BAR_STATES_SPEAKING:
-        // Dynamic width based on text length
-        const textLen = state.spokenText?.length || 0;
-        const width = Math.min(320, Math.max(180, 180 + textLen * 2));
-        dimensions = { width, height: 45 };
-        break;
-      
-      case UI.BAR_STATES_LOADING:
-      case UI.BAR_STATES_SUBMITTING:
-        dimensions = { width: 200, height: 50 };
-        break;
-      
-      case UI.BAR_STATES_INPUT:
-        dimensions = { width: 400, height: 60 };
-        break;
-      
-      case UI.BAR_STATES_ERROR:
-        const errorLen = state.currentError?.length || 0;
-        const errorWidth = Math.min(350, Math.max(200, 200 + errorLen * 1.5));
-        dimensions = { width: errorWidth, height: 55 };
-        break;
-      
-      case UI.BAR_STATES_SUCCESS:
-        dimensions = { width: 180, height: 45 };
-        break;
-      
-      case UI.BAR_STATES_AGENT_RESPONDING:
-        dimensions = { width: 280, height: 65 };
-        break;
-      
-      case UI.BAR_STATES_ALWAYS_LISTENING:
-        dimensions = { width: 250, height: 80 };
-        break;
-      
-      default:
-        dimensions = { width: defaultWidth, height: defaultHeight };
-    }
-    
-    return {
-      width: dimensions.width + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING,
-      height: dimensions.height + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    const setup = async () => {
+      try {
+        const fn = await listen<{ message_id: string }>(
+          EVENTS.STREAMING_STREAM_START,
+          () => {
+            if (!mounted) return;
+            streamContentRef.current = "";
+            setAgentResponseContent(null);
+            setIsStreamingContent(true);
+            setComponentPinned(false);
+          },
+        );
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: stream-start listener failed:", e);
+      }
     };
-  }, [defaultWidth, defaultHeight]);
+    setup();
+    return () => {
+      mounted = false;
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
 
-  // Debounced resize to avoid flickering
-  const debouncedResize = useMemo(
-    () => debounce((state: BarStateData) => {
-      const dimensions = calculateDimensions(state);
-      resizeWindowIfChanged(dimensions);
-    }, 100),
-    [calculateDimensions, resizeWindowIfChanged]
+  // Stream chunks — accumulate and render progressively (RAF-throttled)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    const setup = async () => {
+      try {
+        const fn = await listen<{ chunk: string }>(
+          EVENTS.STREAMING_TEXT_STREAM,
+          (event) => {
+            if (!mounted) return;
+            streamContentRef.current += event.payload.chunk;
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = requestAnimationFrame(() => {
+              setAgentResponseContent(streamContentRef.current);
+            });
+          },
+        );
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: text-stream listener failed:", e);
+      }
+    };
+    setup();
+    return () => {
+      mounted = false;
+      cancelAnimationFrame(rafRef.current);
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  // Stream end — finalize content, pin for persistence
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let mounted = true;
+    const setup = async () => {
+      try {
+        const fn = await listen<{
+          message_id: string;
+          complete_text: string;
+          is_jsx?: boolean;
+          agent_state?: string;
+        }>(EVENTS.STREAMING_STREAM_END, (event) => {
+          if (!mounted) return;
+          const { complete_text } = event.payload;
+          if (complete_text) {
+            streamContentRef.current = complete_text;
+            setAgentResponseContent(complete_text);
+          }
+          setIsStreamingContent(false);
+          if (streamContentRef.current) {
+            setComponentPinned(true);
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          safeCleanupEventListener(fn);
+        }
+      } catch (e) {
+        console.error("DynamicBar: stream-end listener failed:", e);
+      }
+    };
+    setup();
+    return () => {
+      mounted = false;
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  // Dismiss on mode change (dictation, listening, input) — NOT on idle
+  useEffect(() => {
+    const s = barState.barState;
+    if (
+      s === UI.BAR_STATES_LISTENING ||
+      s === UI.BAR_STATES_DICTATING ||
+      s === UI.BAR_STATES_ALWAYS_LISTENING ||
+      s === UI.BAR_STATES_DICTATION_READY
+    ) {
+      dismissComponent();
+    }
+  }, [barState.barState, dismissComponent]);
+
+  // ── Window + island resize ──
+  // Key invariant: window must always be >= island size.
+  //   Growing  → resize window FIRST (immediately), then animate island into new space
+  //   Shrinking → animate island FIRST, then shrink window after spring settles
+
+  const { resizeWindowIfChanged } = useWindowSize("floating-bar");
+  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
+  const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Skip when agent content is displayed — its own effect handles sizing.
+    // Covers: streaming in, pinned after completion, or backend responding.
+    if (
+      agentResponseContent &&
+      (isStreamingContent ||
+        componentPinned ||
+        barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
+        barState.barState === UI.BAR_STATES_SUCCESS ||
+        barState.barState === UI.BAR_STATES_FINISHING)
+    )
+      return;
+
+    const next = getDimensions(barState.barState);
+    const prev = prevDimensionsRef.current;
+    const isGrowing = next.width > prev.width || next.height > prev.height;
+
+    // Clear any pending shrink
+    if (shrinkTimerRef.current) {
+      clearTimeout(shrinkTimerRef.current);
+      shrinkTimerRef.current = null;
+    }
+
+    if (isGrowing) {
+      // Growing: expand window immediately, island animates in parallel.
+      // overflow:hidden on html/body prevents any scrollbar flash from async gap.
+      resizeWindowIfChanged(next);
+      setSize(getIslandSize(barState.barState));
+      prevDimensionsRef.current = next;
+    } else {
+      // Shrinking: animate island first, then shrink window after spring settles
+      setSize(getIslandSize(barState.barState));
+      shrinkTimerRef.current = setTimeout(() => {
+        resizeWindowIfChanged(next);
+        prevDimensionsRef.current = next;
+      }, SHRINK_DELAY_MS);
+    }
+  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent, isStreamingContent, componentPinned]);
+
+  // Clean up shrink timer on unmount
+  useEffect(() => {
+    return () => {
+      if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current);
+    };
+  }, []);
+
+  // ── Interactions ──
+
+  const createInteraction = useCallback(
+    (type: string, data?: Record<string, any>): UIInteractionEvent => ({
+      element_id: COMPONENT_ID,
+      interaction_type: type,
+      data: data || null,
+      timestamp: Date.now(),
+    }),
+    [],
   );
 
-  // Resize window when state changes
-  useEffect(() => {
-    debouncedResize(barState);
-  }, [barState, debouncedResize]);
+  const sendInteraction = useCallback(
+    async (interaction: UIInteractionEvent) => {
+      try {
+        await invoke("ui_handle_interaction", {
+          elementId: COMPONENT_ID,
+          interaction,
+        });
+      } catch (e) {
+        console.error("DynamicBar: interaction failed:", e);
+      }
+    },
+    [],
+  );
 
-  // === STANDARDIZED INTERACTION HANDLERS ===
-
-  /**
-   * Creates a standardized UI interaction event
-   * This helper ensures all interactions follow the same pattern
-   */
-  const createInteraction = (
-    interactionType: string,
-    data?: Record<string, any>
-  ): UIInteractionEvent => ({
-    element_id: COMPONENT_ID,
-    interaction_type: interactionType,
-    data: data || null,
-    timestamp: Date.now(),
-  });
-
-  /**
-   * Sends interaction to backend via ui_handle_interaction command
-   * This is the standardized way to trigger backend actions
-   */
-  const sendInteraction = async (interaction: UIInteractionEvent) => {
-    try {
-      console.log("🔧 DynamicBar: Sending interaction:", interaction);
-
-      await invoke("ui_handle_interaction", {
-        elementId: COMPONENT_ID,
-        interaction,
-      });
-
-      console.log("✅ DynamicBar: Interaction sent successfully");
-    } catch (error) {
-      console.error("❌ DynamicBar: Interaction failed:", error);
-    }
-  };
-
-  /**
-   * Handle dynamic island click interactions
-   */
   const handleIslandClick = useCallback(async () => {
-    const interaction = createInteraction(UI.INTERACTION_TYPES_CLICK);
-    await sendInteraction(interaction);
-  }, [createInteraction, sendInteraction]);
+    await sendInteraction(createInteraction(UI.INTERACTION_TYPES_CLICK));
+  }, [sendInteraction, createInteraction]);
 
-  /**
-   * Handle keyboard shortcuts (especially Escape key)
-   */
+  // Input sync & focus
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Handle escape key to cancel or close
-      if (event.key === "Escape") {
-        const interaction = createInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        sendInteraction(interaction);
-      }
+    setLocalInputValue(barState.inputValue);
+  }, [barState.inputValue]);
 
-      // Handle Enter key for quick actions
-      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-        const interaction = createInteraction(UI.INTERACTION_TYPES_ENTER);
-        sendInteraction(interaction);
-      }
-    };
-
-    // Only add keyboard listeners if this component is active
-    if (barState.barState !== UI.BAR_STATES_DEFAULT) {
-      document.addEventListener("keydown", handleKeyDown);
+  useEffect(() => {
+    if (barState.barState === UI.BAR_STATES_INPUT) {
+      const t = setTimeout(() => inputRef.current?.focus(), 60);
+      return () => clearTimeout(t);
     }
+  }, [barState.barState]);
 
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
+  const handleSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      const v = localInputValue.trim();
+      if (!v) return;
+      await sendInteraction(
+        createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: v }),
+      );
+      setLocalInputValue("");
+    },
+    [localInputValue, sendInteraction, createInteraction],
+  );
+
+  const handleInputChange = useCallback((v: string) => {
+    setLocalInputValue(v);
+  }, []);
+
+  const handleFocus = useCallback(async () => {
+    await sendInteraction(createInteraction(UI.INTERACTION_TYPES_FOCUS));
+  }, [sendInteraction, createInteraction]);
+
+  const handleBlur = useCallback(async () => {
+    await sendInteraction(createInteraction(UI.INTERACTION_TYPES_BLUR));
+  }, [sendInteraction, createInteraction]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    // Stay active when pinned (even if backend is idle)
+    if (barState.barState === UI.BAR_STATES_DEFAULT && !componentPinned) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (componentPinned) {
+          dismissComponent();
+        } else {
+          sendInteraction(createInteraction(UI.INTERACTION_TYPES_ESCAPE));
+        }
+      }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
+        sendInteraction(createInteraction(UI.INTERACTION_TYPES_ENTER));
     };
-  }, [barState.barState, createInteraction, sendInteraction]);
 
-  const renderCurrentWidget = () => {
-    return <WidgetRenderer widget={currentWidgetData} />;
-  };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [barState.barState, componentPinned, dismissComponent, sendInteraction, createInteraction]);
 
-  // Add transition effect between widget changes
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  // ── Derived state ──
+
+  // Show when: streaming (with enough content to render), pinned, or backend responding.
+  // Minimum 20 chars during streaming avoids FOUC from early partial tokens.
+  const hasRenderableContent =
+    !!agentResponseContent &&
+    (!isStreamingContent || agentResponseContent.length >= 20);
+  const showAgentContent =
+    hasRenderableContent &&
+    (isStreamingContent ||
+      componentPinned ||
+      barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
+      barState.barState === UI.BAR_STATES_SUCCESS ||
+      barState.barState === UI.BAR_STATES_FINISHING);
+
+  // Taller when pinned — room for content + inline input
+  const agentContentHeight = componentPinned ? 260 : 210;
 
   useEffect(() => {
-    setIsTransitioning(true);
-    const timer = setTimeout(() => setIsTransitioning(false), 300);
-    return () => clearTimeout(timer);
-  }, [currentWidgetData.id]);
+    if (showAgentContent) {
+      const next = { width: 371 + SHADOW_PADDING, height: agentContentHeight + SHADOW_PADDING };
+      resizeWindowIfChanged(next);
+      prevDimensionsRef.current = next;
+      setSize(componentPinned ? "tall" : "medium");
+    }
+  }, [showAgentContent, setSize, resizeWindowIfChanged, componentPinned, agentContentHeight]);
+
+  // Focus inline input when component becomes pinned
+  useEffect(() => {
+    if (componentPinned && pinnedInputRef.current) {
+      const t = setTimeout(() => pinnedInputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
+    }
+  }, [componentPinned]);
+
+  const isInputState =
+    barState.barState === UI.BAR_STATES_INPUT ||
+    barState.barState === UI.BAR_STATES_EXPANDING;
+
+  const isIdle =
+    barState.barState === UI.BAR_STATES_DEFAULT ||
+    barState.barState === UI.BAR_STATES_DICTATION_READY;
+
+  const label = getLabel(barState.barState, barState);
+
+  // ── Render ──
 
   return (
-    <div className="h-full w-full relative p-6" data-tauri-drag-region>
-      <div className="flex items-center justify-center h-full" data-tauri-drag-region>
-        <button
-          type="button"
-          onClick={handleIslandClick}
-          className="cursor-pointer bg-transparent p-0 m-0 border-0"
-          aria-label="Activate AI panel"
-          aria-controls="ai-chatbot-panel"
-        >
-          <DynamicIsland 
-            id="ai-chatbot-panel"
-          >
-            <div className={cn(
-              "transition-all duration-300",
-              isTransitioning && "scale-95 opacity-80"
-            )}>
-              {renderCurrentWidget()}
-            </div>
+    <div className="h-full w-full relative p-6 overflow-hidden" data-tauri-drag-region>
+      <div
+        className="flex items-center justify-center h-full"
+        data-tauri-drag-region
+      >
+        {isInputState ? (
+          // ── Input mode ──
+          <DynamicIsland id="ai-chatbot-panel">
+            <form
+              onSubmit={handleSubmit}
+              className={cn(
+                "flex items-center w-full h-full px-5 gap-3",
+                "transition-opacity duration-300",
+                barState.barState === UI.BAR_STATES_INPUT
+                  ? "opacity-100"
+                  : "opacity-0",
+              )}
+            >
+              <StateIndicator
+                state={barState.barState}
+                audioLevel={barState.audioLevel}
+              />
+              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={localInputValue}
+                  onChange={(e) => handleInputChange(e.target.value)}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                  className={cn(
+                    "w-full bg-transparent border-none outline-none",
+                    "text-[13px] text-white/90 placeholder:text-white/20",
+                    "tracking-[-0.02em] pb-1.5",
+                  )}
+                  disabled={barState.barState !== UI.BAR_STATES_INPUT}
+                  autoFocus
+                />
+                <div className="h-px bg-white/[0.06]" />
+              </div>
+              <span
+                className={cn(
+                  "text-[11px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
+                  localInputValue.trim()
+                    ? "text-white/25 opacity-100"
+                    : "opacity-0",
+                )}
+              >
+                return
+              </span>
+            </form>
           </DynamicIsland>
-        </button>
+        ) : (
+          // ── All other states ──
+          <button
+            type="button"
+            onClick={handleIslandClick}
+            className="cursor-pointer bg-transparent p-0 m-0 border-0"
+            aria-label="Activate assistant"
+          >
+            <DynamicIsland id="ai-chatbot-panel">
+              {showAgentContent ? (
+                // Agent response — streamed progressively, pinned after completion
+                <div
+                  className="flex flex-col h-full"
+                  style={{
+                    animation: "bar-content-in 0.3s ease-out 0.15s both",
+                  }}
+                >
+                  <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
+                    <MixedContentRenderer
+                      content={agentResponseContent}
+                      isStreaming={isStreamingContent}
+                    />
+                    {/* Close button */}
+                    {componentPinned && !isStreamingContent && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissComponent();
+                        }}
+                        className={cn(
+                          "sticky bottom-0 float-right w-5 h-5 flex items-center justify-center",
+                          "rounded-full bg-white/[0.08] text-white/30",
+                          "transition-all duration-200",
+                          "hover:bg-white/[0.15] hover:text-white/60",
+                          "-mt-5 mr-[-4px]",
+                        )}
+                        aria-label="Dismiss response"
+                      >
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                          <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {/* Inline input — visible when pinned */}
+                  {componentPinned && !isStreamingContent && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const v = localInputValue.trim();
+                        if (!v) return;
+                        sendInteraction(
+                          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: v }),
+                        );
+                        setLocalInputValue("");
+                      }}
+                      className="flex items-center gap-2 px-4 pb-3 pt-0"
+                    >
+                      <input
+                        ref={pinnedInputRef}
+                        type="text"
+                        value={localInputValue}
+                        onChange={(e) => setLocalInputValue(e.target.value)}
+                        className={cn(
+                          "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md",
+                          "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
+                          "outline-none focus:border-white/[0.15]",
+                          "tracking-[-0.01em] transition-colors duration-150",
+                        )}
+                        placeholder="follow up"
+                      />
+                      <span
+                        className={cn(
+                          "text-[10px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
+                          localInputValue.trim()
+                            ? "text-white/25 opacity-100"
+                            : "opacity-0",
+                        )}
+                      >
+                        return
+                      </span>
+                    </form>
+                  )}
+                </div>
+              ) : barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
+                // Always-listening — two lines
+                <div className="flex flex-col items-center justify-center h-full w-full gap-2.5 px-5">
+                  <div className="flex items-center gap-3">
+                    <StateIndicator
+                      state={barState.barState}
+                      audioLevel={barState.audioLevel}
+                    />
+                    <span className="text-white/55 text-[13px] tracking-[-0.02em]">
+                      listening
+                    </span>
+                  </div>
+                  <span className="text-white/20 text-[11px] tracking-[0.02em]">
+                    say &ldquo;hey juno&rdquo;
+                  </span>
+                </div>
+              ) : isIdle ? (
+                // Idle — just the dot
+                <div className="flex items-center justify-center h-full w-full">
+                  <StateIndicator
+                    state={barState.barState}
+                    audioLevel={barState.audioLevel}
+                  />
+                </div>
+              ) : (
+                // Active states — dot + label
+                <div className="flex items-center h-full w-full px-5 gap-3">
+                  <StateIndicator
+                    state={barState.barState}
+                    audioLevel={barState.audioLevel}
+                  />
+                  {label && (
+                    <span
+                      className={cn(
+                        "text-[13px] tracking-[-0.02em] truncate",
+                        barState.barState === UI.BAR_STATES_ERROR
+                          ? "text-[#e8866a]/75"
+                          : "text-white/40",
+                      )}
+                    >
+                      {label}
+                    </span>
+                  )}
+                </div>
+              )}
+            </DynamicIsland>
+          </button>
+        )}
       </div>
     </div>
   );
 };
 
-export function DynamicBar({ barAppearance }: { barAppearance?: BarAppearance }) {
+// ─── Export ───────────────────────────────────────────────
+
+export function DynamicBar({
+  barAppearance,
+}: {
+  barAppearance?: BarAppearance;
+}) {
   return (
-    <DynamicIslandProvider initialSize={"default"}>
-      <div className="h-full w-full bg-transparent" data-tauri-drag-region>
-        <AIFloatingChatbot barAppearance={barAppearance} />
+    <DynamicIslandProvider initialSize="default">
+      <div
+        className="h-full w-full bg-transparent overflow-hidden"
+        data-tauri-drag-region
+      >
+        <DynamicBarContent barAppearance={barAppearance} />
       </div>
     </DynamicIslandProvider>
   );

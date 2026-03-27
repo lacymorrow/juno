@@ -860,14 +860,14 @@ export default function OnboardingFlow({
                 {step.id === "shortcut" && (
                   <div className="relative">
                     <KeyboardShortcutDisplay
-                      shortcutString={keyboardShortcuts?.agent_mode_toggle}
+                      shortcutString={keyboardShortcuts?.agent_mode}
                       isActivated={shortcutPressed}
                     />
                     <p className="text-sm text-muted-foreground mt-4 text-center">
                       {shortcutPressed
                         ? "Perfect! You've got it."
-                        : keyboardShortcuts?.agent_mode_toggle
-                        ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
+                        : keyboardShortcuts?.agent_mode
+                        ? `Press ${keyboardShortcuts.agent_mode.replace(
                             /\+/g,
                             " + "
                           )} to activate agent mode`

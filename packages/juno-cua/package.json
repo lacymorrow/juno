@@ -1,0 +1,32 @@
+{
+  "name": "juno-cua",
+  "version": "0.4.11",
+  "description": "Setup juno-cua desktop automation for AI coding agents (Claude Code, Cursor, Codex, Gemini CLI, etc.)",
+  "keywords": [
+    "juno",
+    "computer-use",
+    "desktop-automation",
+    "mcp",
+    "ai-agent",
+    "claude-code",
+    "cursor",
+    "codex"
+  ],
+  "author": "Lacy Morrow <me@lacymorrow.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lacymorrow/juno",
+    "directory": "packages/juno-cua"
+  },
+  "bin": {
+    "juno-cua": "./bin/setup.mjs"
+  },
+  "files": [
+    "bin/",
+    "skill/"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

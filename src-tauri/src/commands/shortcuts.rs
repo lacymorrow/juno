@@ -39,7 +39,7 @@ pub async fn set_keyboard_shortcut(
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     match shortcut_name.as_str() {
-        "agent_mode_toggle" => shortcuts.agent_mode_toggle = shortcut_value.clone(),
+        "agent_mode" => shortcuts.agent_mode = shortcut_value.clone(),
         "dictation_input" => shortcuts.dictation_input = shortcut_value.clone(),
         "stop_current_task" => shortcuts.stop_current_task = shortcut_value.clone(),
         "open_settings" => return Err("The settings shortcut cannot be changed".to_string()),
@@ -68,14 +68,14 @@ pub async fn set_keyboard_shortcuts(
     shortcuts: KeyboardShortcuts,
 ) -> Result<(), String> {
     // Validate all shortcuts
-    validate_shortcut_format(&shortcuts.agent_mode_toggle)?;
+    validate_shortcut_format(&shortcuts.agent_mode)?;
     validate_shortcut_format(&shortcuts.dictation_input)?;
     validate_shortcut_format(&shortcuts.stop_current_task)?;
     validate_shortcut_format(&shortcuts.open_settings)?;
 
     // Check for internal conflicts within the new shortcuts
     let shortcut_pairs = [
-        ("agent_mode_toggle", &shortcuts.agent_mode_toggle),
+        ("agent_mode", &shortcuts.agent_mode),
         ("dictation_input", &shortcuts.dictation_input),
         ("stop_current_task", &shortcuts.stop_current_task),
         ("open_settings", &shortcuts.open_settings),
@@ -174,7 +174,7 @@ async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppStat
 /// Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
 fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShortcuts) -> crate::state::KeyboardShortcuts {
     crate::state::KeyboardShortcuts {
-        agent_mode_toggle: settings.agent_mode_toggle.clone(),
+        agent_mode: settings.agent_mode.clone(),
         dictation_input: settings.dictation_input.clone(),
         stop_current_task: settings.stop_current_task.clone(),
         open_settings: settings.open_settings.clone(),
@@ -184,7 +184,7 @@ fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShort
 /// Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
 fn convert_state_to_settings_shortcuts(state: &crate::state::KeyboardShortcuts) -> crate::settings::KeyboardShortcuts {
     crate::settings::KeyboardShortcuts {
-        agent_mode_toggle: state.agent_mode_toggle.clone(),
+        agent_mode: state.agent_mode.clone(),
         dictation_input: state.dictation_input.clone(),
         stop_current_task: state.stop_current_task.clone(),
         open_settings: state.open_settings.clone(),
@@ -326,7 +326,7 @@ fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state
     let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
 
     let shortcuts_to_check = [
-        ("agent_mode_toggle", &current_shortcuts.agent_mode_toggle),
+        ("agent_mode", &current_shortcuts.agent_mode),
         ("dictation_input", &current_shortcuts.dictation_input),
         ("stop_current_task", &current_shortcuts.stop_current_task),
         ("open_settings", &current_shortcuts.open_settings),
@@ -351,7 +351,7 @@ fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state
 /// Helper function for validation error messages
 fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
     match shortcut_name {
-        "agent_mode_toggle" => "Agent Mode Toggle",
+        "agent_mode" => "Agent Mode",
         "dictation_input" => "Dictation Input",
         "stop_current_task" => "Stop Current Task",
         "open_settings" => "Open Settings",
@@ -383,19 +383,19 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // Import parse_shortcut_string from lib.rs
     use crate::parse_shortcut_string;
 
-    // Register the agent mode toggle shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode_toggle) {
+    // Register the agent mode shortcut with error handling
+    if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode) {
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("✅ Successfully registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
+                info!("✅ Successfully registered agent mode shortcut: {}", shortcuts.agent_mode);
             },
             Err(e) => {
-                error!("❌ Failed to register agent mode toggle shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode_toggle, e);
+                error!("❌ Failed to register agent mode shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode, e);
                 // Don't fail - continue with other shortcuts
             }
         }
     } else {
-        warn!("Failed to parse agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
+        warn!("Failed to parse agent mode shortcut: {}", shortcuts.agent_mode);
     }
 
     // Register the dictation input shortcut with error handling
@@ -480,7 +480,7 @@ pub async fn get_shortcut_suggestions(
     let mut suggestions = Vec::new();
 
     match shortcut_name.as_str() {
-        "agent_mode_toggle" => {
+        "agent_mode" => {
             if is_macos {
                 suggestions.extend([
                     "Option+D".to_string(),
@@ -560,7 +560,7 @@ pub async fn get_shortcut_suggestions(
 
     // Filter out suggestions that conflict with current shortcuts
     let current_values: Vec<String> = vec![
-        current_shortcuts.agent_mode_toggle.clone(),
+        current_shortcuts.agent_mode.clone(),
         current_shortcuts.dictation_input.clone(),
         current_shortcuts.stop_current_task.clone(),
         current_shortcuts.open_settings.clone(),

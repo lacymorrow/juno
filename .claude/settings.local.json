@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/lacy/repo/cua/**)",
+      "Bash(find:*)",
+      "Bash(cargo check:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(npm test:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "outputStyle": "Explanatory",
+  "enabledMcpjsonServers": [
+    "obs"
+  ],
+  "enableAllProjectMcpServers": true
+}

@@ -24,7 +24,7 @@ pub fn handle_mode_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shortc
 
     // Parse all shortcuts from configuration (including stop_current_task)
     let stop_shortcut = crate::parse_shortcut_string(&shortcuts.stop_current_task);
-    let agent_shortcut = crate::parse_shortcut_string(&shortcuts.agent_mode_toggle);
+    let agent_shortcut = crate::parse_shortcut_string(&shortcuts.agent_mode);
     let dictation_shortcut = crate::parse_shortcut_string(&shortcuts.dictation_input);
 
     // Handle stop shortcut - always transitions to idle

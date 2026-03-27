@@ -386,6 +386,252 @@ pub struct SystemContext {
     pub voice_audio_state: Option<VoiceAudioState>,
     // NEW: Display information for agent context
     pub display_info: Option<DisplayInfo>,
+    // Approximate location from IP geolocation (cached)
+    pub location_info: Option<GeoLocation>,
+}
+
+/// Geographic location resolved via native macOS Core Location or IP geolocation fallback.
+/// Cached after first successful lookup so subsequent queries are free.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GeoLocation {
+    pub city: String,
+    pub region: String,
+    pub country: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub timezone: String,
+}
+
+/// Cached geolocation result (global, resolved once per app session).
+static GEO_CACHE: std::sync::OnceLock<tokio::sync::OnceCell<Option<GeoLocation>>> =
+    std::sync::OnceLock::new();
+
+fn geo_cell() -> &'static tokio::sync::OnceCell<Option<GeoLocation>> {
+    GEO_CACHE.get_or_init(tokio::sync::OnceCell::new)
+}
+
+/// Resolve location using native macOS Core Location, falling back to IP geolocation.
+/// Returns cached result on subsequent calls.
+async fn resolve_geolocation() -> Option<GeoLocation> {
+    geo_cell()
+        .get_or_init(|| async {
+            // Try native macOS Core Location first (precise, no network needed)
+            #[cfg(target_os = "macos")]
+            {
+                match fetch_native_location().await {
+                    Ok(loc) => {
+                        tracing::info!(
+                            "📍 Native location resolved: {}, {} ({})",
+                            loc.city,
+                            loc.region,
+                            loc.timezone
+                        );
+                        return Some(loc);
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                            "📍 Native location unavailable ({}), falling back to IP geolocation",
+                            e
+                        );
+                    }
+                }
+            }
+
+            // Fallback: IP geolocation (city-level accuracy, requires network)
+            match fetch_ip_geolocation().await {
+                Ok(loc) => {
+                    tracing::info!(
+                        "📍 IP geolocation resolved: {}, {} ({})",
+                        loc.city,
+                        loc.region,
+                        loc.timezone
+                    );
+                    Some(loc)
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ All geolocation methods failed (non-fatal): {}", e);
+                    None
+                }
+            }
+        })
+        .await
+        .clone()
+}
+
+/// Embedded Swift script that uses macOS Core Location + CLGeocoder.
+/// Outputs a JSON object with location data or an error.
+const CORE_LOCATION_SWIFT: &str = r#"
+import CoreLocation
+import Foundation
+
+class LocationDelegate: NSObject, CLLocationManagerDelegate {
+    var done = false
+    var result: [String: Any] = ["error": "timeout"]
+    let geocoder = CLGeocoder()
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else {
+            result = ["error": "no_location"]
+            done = true
+            return
+        }
+        // Reverse geocode to get city/region/country
+        geocoder.reverseGeocodeLocation(loc) { placemarks, error in
+            let pm = placemarks?.first
+            self.result = [
+                "latitude": loc.coordinate.latitude,
+                "longitude": loc.coordinate.longitude,
+                "city": pm?.locality ?? "Unknown",
+                "region": pm?.administrativeArea ?? "Unknown",
+                "country": pm?.country ?? "Unknown",
+                "timezone": TimeZone.current.identifier
+            ]
+            self.done = true
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        result = ["error": error.localizedDescription]
+        done = true
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorized:
+            manager.requestLocation()
+        case .denied, .restricted:
+            result = ["error": "denied"]
+            done = true
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+    }
+}
+
+let mgr = CLLocationManager()
+let del = LocationDelegate()
+mgr.delegate = del
+mgr.desiredAccuracy = kCLLocationAccuracyKilometer
+
+switch mgr.authorizationStatus {
+case .authorizedAlways, .authorized:
+    mgr.requestLocation()
+case .notDetermined:
+    mgr.requestWhenInUseAuthorization()
+case .denied, .restricted:
+    del.result = ["error": "denied"]
+    del.done = true
+@unknown default:
+    del.result = ["error": "unknown_auth_status"]
+    del.done = true
+}
+
+let deadline = Date(timeIntervalSinceNow: 10)
+while !del.done && Date() < deadline {
+    RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+}
+
+if let data = try? JSONSerialization.data(withJSONObject: del.result),
+   let str = String(data: data, encoding: .utf8) {
+    print(str)
+} else {
+    print("{\"error\":\"serialization_failed\"}")
+}
+"#;
+
+/// Fetch location using macOS native Core Location via a Swift subprocess.
+/// This provides GPS/Wi-Fi/cell-tower accuracy (meters) vs IP geolocation (city-level).
+#[cfg(target_os = "macos")]
+async fn fetch_native_location() -> Result<GeoLocation, String> {
+    use std::io::Write;
+
+    // Write Swift script to a temp file
+    let temp_dir = std::env::temp_dir();
+    let script_path = temp_dir.join("juno_location.swift");
+
+    // Write script (blocking I/O in spawn_blocking)
+    let script_path_clone = script_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut file = std::fs::File::create(&script_path_clone)
+            .map_err(|e| format!("Failed to create temp script: {}", e))?;
+        file.write_all(CORE_LOCATION_SWIFT.as_bytes())
+            .map_err(|e| format!("Failed to write temp script: {}", e))?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e: String| e)?;
+
+    // Execute Swift script with timeout
+    let script_path_str = script_path.to_string_lossy().to_string();
+    let output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("/usr/bin/swift")
+            .arg(&script_path_str)
+            .output()
+            .map_err(|e| format!("Failed to execute swift: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e: String| e)?;
+
+    // Clean up temp file (best-effort)
+    let _ = std::fs::remove_file(&script_path);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Swift script failed: {}", stderr.chars().take(200).collect::<String>()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse location JSON: {} (output: {})", e, stdout.chars().take(100).collect::<String>()))?;
+
+    // Check for error response
+    if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("Core Location error: {}", err));
+    }
+
+    Ok(GeoLocation {
+        city: json["city"].as_str().unwrap_or("Unknown").to_string(),
+        region: json["region"].as_str().unwrap_or("Unknown").to_string(),
+        country: json["country"].as_str().unwrap_or("Unknown").to_string(),
+        latitude: json["latitude"].as_f64().unwrap_or(0.0),
+        longitude: json["longitude"].as_f64().unwrap_or(0.0),
+        timezone: json["timezone"].as_str().unwrap_or("Unknown").to_string(),
+    })
+}
+
+/// Fallback: IP geolocation via ipapi.co (city-level accuracy, 3s timeout).
+async fn fetch_ip_geolocation() -> Result<GeoLocation, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("HTTP client init: {}", e))?;
+
+    let resp: serde_json::Value = client
+        .get("https://ipapi.co/json/")
+        .header("User-Agent", "Juno-Desktop/1.0")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("JSON parse failed: {}", e))?;
+
+    Ok(GeoLocation {
+        city: resp["city"].as_str().unwrap_or("Unknown").to_string(),
+        region: resp["region"].as_str().unwrap_or("Unknown").to_string(),
+        country: resp["country_name"]
+            .as_str()
+            .or_else(|| resp["country"].as_str())
+            .unwrap_or("Unknown")
+            .to_string(),
+        latitude: resp["latitude"].as_f64().unwrap_or(0.0),
+        longitude: resp["longitude"].as_f64().unwrap_or(0.0),
+        timezone: resp["timezone"].as_str().unwrap_or("Unknown").to_string(),
+    })
 }
 
 /// Information about the currently focused window
@@ -598,8 +844,8 @@ pub async fn gather_system_context(
     let current_time = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
     let current_timestamp = current_timestamp_ms();
 
-    // Get timezone
-    let timezone = "Local".to_string(); // Simplified timezone info
+    // Get timezone — use the actual UTC offset and abbreviation
+    let timezone = now.format("%Z (UTC%:z)").to_string();
 
     // Get focused window information
     let focused_window = get_focused_window_info(app_state).await;
@@ -626,6 +872,9 @@ pub async fn gather_system_context(
     // Get display information
     let display_info = get_display_info_safe().await;
 
+    // Resolve approximate location (cached after first call)
+    let location_info = resolve_geolocation().await;
+
     Ok(SystemContext {
         current_time,
         current_timestamp,
@@ -643,6 +892,7 @@ pub async fn gather_system_context(
         hardware_info,
         voice_audio_state,
         display_info,
+        location_info,
     })
 }
 
@@ -1705,6 +1955,14 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
                 context.running_applications.len() - 10
             ));
         }
+    }
+
+    // Add location information if available
+    if let Some(ref loc) = context.location_info {
+        context_parts.push(format!(
+            "User location: {}, {}, {} (timezone: {}, coordinates: {:.2},{:.2})",
+            loc.city, loc.region, loc.country, loc.timezone, loc.latitude, loc.longitude
+        ));
     }
 
     context_parts.join("\n")
