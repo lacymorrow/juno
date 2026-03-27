@@ -561,6 +561,315 @@
     background-color: rgba(255, 255, 255, 0.2);
 }
 
+/* ============================================================
+   Agent JSX Component Animations
+   Used by domain cards and animated components in agent responses.
+   ============================================================ */
+
+/* Entry animations for JSX components */
+@keyframes juno-fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes juno-scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes juno-slide-in-left {
+    from {
+        opacity: 0;
+        transform: translateX(-16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes juno-slide-in-right {
+    from {
+        opacity: 0;
+        transform: translateX(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Bar/progress fill animation */
+@keyframes juno-fill-width {
+    from {
+        width: 0%;
+    }
+}
+
+/* Vertical bar grow animation (for charts) */
+@keyframes juno-grow-up {
+    from {
+        transform: scaleY(0);
+    }
+    to {
+        transform: scaleY(1);
+    }
+}
+
+/* Shimmer effect for loading/highlight */
+@keyframes juno-shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* Glow pulse for badges/highlights */
+@keyframes juno-glow-pulse {
+    0%, 100% {
+        box-shadow: 0 0 4px 0 currentColor;
+        opacity: 1;
+    }
+    50% {
+        box-shadow: 0 0 12px 4px currentColor;
+        opacity: 0.8;
+    }
+}
+
+/* Weather: rain drops */
+@keyframes juno-rain-drop {
+    0% {
+        transform: translateY(-10px) scaleY(0.8);
+        opacity: 0;
+    }
+    10% {
+        opacity: 0.6;
+    }
+    100% {
+        transform: translateY(100px) scaleY(1.2);
+        opacity: 0;
+    }
+}
+
+/* Weather: snow fall */
+@keyframes juno-snow-fall {
+    0% {
+        transform: translateY(-10px) translateX(0) rotate(0deg);
+        opacity: 0;
+    }
+    10% {
+        opacity: 0.8;
+    }
+    100% {
+        transform: translateY(80px) translateX(20px) rotate(360deg);
+        opacity: 0;
+    }
+}
+
+/* Weather: lightning flash */
+@keyframes juno-lightning {
+    0%, 100% {
+        opacity: 0;
+    }
+    5% {
+        opacity: 1;
+    }
+    10% {
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.8;
+    }
+    20% {
+        opacity: 0;
+    }
+}
+
+/* Weather: sun rays rotating */
+@keyframes juno-sun-rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Floating/bobbing animation */
+@keyframes juno-float {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-4px);
+    }
+}
+
+/* Confetti burst */
+@keyframes juno-confetti {
+    0% {
+        transform: translateY(0) rotate(0deg) scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(-60px) rotate(720deg) scale(0);
+        opacity: 0;
+    }
+}
+
+/* Pulse ring expanding outward */
+@keyframes juno-pulse-ring {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+/* Number count-up (used with CSS counter trick) */
+@keyframes juno-number-reveal {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Classes for agent JSX components */
+.juno-animate-in {
+    animation: juno-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.juno-animate-scale {
+    animation: juno-scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.juno-animate-slide-left {
+    animation: juno-slide-in-left 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.juno-animate-slide-right {
+    animation: juno-slide-in-right 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.juno-shimmer {
+    background: linear-gradient(
+        90deg,
+        transparent 25%,
+        rgba(255, 255, 255, 0.1) 50%,
+        transparent 75%
+    );
+    background-size: 200% 100%;
+    animation: juno-shimmer 2s ease-in-out infinite;
+}
+
+.juno-float {
+    animation: juno-float 3s ease-in-out infinite;
+}
+
+.juno-glow {
+    animation: juno-glow-pulse 2s ease-in-out infinite;
+}
+
+/* Stagger delay utilities for list items */
+.juno-stagger-1 { animation-delay: 0.05s; }
+.juno-stagger-2 { animation-delay: 0.1s; }
+.juno-stagger-3 { animation-delay: 0.15s; }
+.juno-stagger-4 { animation-delay: 0.2s; }
+.juno-stagger-5 { animation-delay: 0.25s; }
+.juno-stagger-6 { animation-delay: 0.3s; }
+.juno-stagger-7 { animation-delay: 0.35s; }
+.juno-stagger-8 { animation-delay: 0.4s; }
+.juno-stagger-9 { animation-delay: 0.45s; }
+.juno-stagger-10 { animation-delay: 0.5s; }
+
+/* Weather effect containers */
+.juno-weather-rain {
+    position: relative;
+    overflow: hidden;
+}
+
+.juno-weather-rain::before,
+.juno-weather-rain::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 10px;
+    background: linear-gradient(transparent, rgba(147, 197, 253, 0.5));
+    border-radius: 9999px;
+    animation: juno-rain-drop 1s linear infinite;
+    pointer-events: none;
+}
+
+.juno-weather-rain::before {
+    left: 20%;
+    animation-delay: 0s;
+    animation-duration: 0.8s;
+}
+
+.juno-weather-rain::after {
+    left: 60%;
+    animation-delay: 0.3s;
+    animation-duration: 1.1s;
+}
+
+.juno-weather-snow {
+    position: relative;
+    overflow: hidden;
+}
+
+.juno-weather-snow::before,
+.juno-weather-snow::after {
+    content: "•";
+    position: absolute;
+    top: 0;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 10px;
+    animation: juno-snow-fall 3s linear infinite;
+    pointer-events: none;
+}
+
+.juno-weather-snow::before {
+    left: 25%;
+    animation-delay: 0s;
+}
+
+.juno-weather-snow::after {
+    left: 65%;
+    animation-delay: 1.2s;
+}
+
+/* Agent JSX entry wrapper */
+.jsx-segment-enter {
+    animation: juno-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.jsx-segment-enter:nth-child(2) { animation-delay: 0.08s; }
+.jsx-segment-enter:nth-child(3) { animation-delay: 0.16s; }
+.jsx-segment-enter:nth-child(4) { animation-delay: 0.24s; }
+.jsx-segment-enter:nth-child(5) { animation-delay: 0.32s; }
+
 /* Agent continuation toast styling */
 .agent-continuation-toast {
     @apply border-l-4 border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/20;

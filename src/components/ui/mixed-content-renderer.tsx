@@ -44,6 +44,18 @@ const JSX_COMPONENT_NAMES = [
   "QueryButton",
   "OpenButton",
   "CopyButton",
+  // Animated components
+  "AnimatedCard",
+  "AnimatedList",
+  "AnimatedProgress",
+  "GlowBadge",
+  "ShimmerText",
+  "Confetti",
+  "PulseRing",
+  "AnimatedDivider",
+  "Stat",
+  "MiniChart",
+  "AnimatedNumber",
 ] as const;
 
 /**
@@ -245,9 +257,13 @@ export const MixedContentRenderer = React.memo(
       <div className={cn("space-y-3", className)}>
         {segments.map((seg, i) =>
           seg.type === "text" ? (
-            <Response key={i}>{seg.content}</Response>
+            <div key={i} className="jsx-segment-enter">
+              <Response>{seg.content}</Response>
+            </div>
           ) : (
-            <JsxMessageRenderer key={i} jsx={seg.content} />
+            <div key={i} className="jsx-segment-enter">
+              <JsxMessageRenderer jsx={seg.content} />
+            </div>
           ),
         )}
         {isStreaming && (

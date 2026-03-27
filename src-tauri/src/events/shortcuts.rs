@@ -45,7 +45,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let stop_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.stop_current_task);
     let agent_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
+        parse_shortcut_string(&current_shortcuts.agent_mode);
     let dictation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
@@ -54,7 +54,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     // Debug logging
     println!("[DEBUG] Current shortcuts from state:");
     println!("  Stop: {} -> {:?}", current_shortcuts.stop_current_task, stop_shortcut);
-    println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode_toggle, agent_shortcut);
+    println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode, agent_shortcut);
     println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
     println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
     println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
@@ -166,7 +166,7 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         events::shortcuts::AGENT_MODE,
         serde_json::json!({
             "state": shortcut_state,
-            "shortcut": "agent_mode_toggle"
+            "shortcut": "agent_mode"
         }),
     ) {
         error!(
@@ -320,7 +320,7 @@ pub async fn trigger_shortcut_test_event(
     state: String,
 ) -> Result<(), String> {
     let event_name = match shortcut_name.as_str() {
-        "agent_mode_toggle" => events::shortcuts::AGENT_MODE,
+        "agent_mode" => events::shortcuts::AGENT_MODE,
         "dictation_input" => events::shortcuts::DICTATION_INPUT,
         _ => return Err("Unknown shortcut name".to_string()),
     };
