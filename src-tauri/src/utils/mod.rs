@@ -406,6 +406,28 @@ pub struct GeoLocation {
 static GEO_CACHE: std::sync::OnceLock<tokio::sync::OnceCell<Option<GeoLocation>>> =
     std::sync::OnceLock::new();
 
+/// Cached slow system context fields (running apps, installed apps, preferences, hardware, display).
+/// These change infrequently and are expensive to gather, so we cache them with a short TTL.
+struct CachedSlowContext {
+    running_applications: Vec<RunningApplicationInfo>,
+    installed_applications: Vec<InstalledApplicationInfo>,
+    user_preferences: UserPreferences,
+    hardware_info: Option<HardwareInfo>,
+    voice_audio_state: Option<VoiceAudioState>,
+    display_info: Option<DisplayInfo>,
+    cached_at: std::time::Instant,
+}
+
+static SLOW_CONTEXT_CACHE: std::sync::OnceLock<tokio::sync::Mutex<Option<CachedSlowContext>>> =
+    std::sync::OnceLock::new();
+
+fn slow_context_cache() -> &'static tokio::sync::Mutex<Option<CachedSlowContext>> {
+    SLOW_CONTEXT_CACHE.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+/// TTL for cached slow context fields (10 seconds)
+const SLOW_CONTEXT_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn geo_cell() -> &'static tokio::sync::OnceCell<Option<GeoLocation>> {
     GEO_CACHE.get_or_init(tokio::sync::OnceCell::new)
 }
@@ -652,7 +674,7 @@ pub struct SystemInfo {
 }
 
 /// Information about a running application
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RunningApplicationInfo {
     pub name: String,
     pub bundle_id: Option<String>,
@@ -662,7 +684,7 @@ pub struct RunningApplicationInfo {
 }
 
 /// Information about an installed application
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct InstalledApplicationInfo {
     pub name: String,
     pub bundle_id: Option<String>,
@@ -671,7 +693,7 @@ pub struct InstalledApplicationInfo {
 }
 
 /// User preferences for agent behavior
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UserPreferences {
     pub preferred_applications: Vec<PreferredApp>,
     pub browser_preference: Option<String>,
@@ -681,7 +703,7 @@ pub struct UserPreferences {
 }
 
 /// Preferred application for a specific category
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PreferredApp {
     pub category: String,
     pub app_name: String,
@@ -835,45 +857,78 @@ async fn get_display_info_safe() -> Option<DisplayInfo> {
     }
 }
 
-/// Gather comprehensive system context for agent initialization
+/// Gather comprehensive system context for agent initialization.
+///
+/// Performance: splits work into "fresh" (must run every query) and "slow" (cached 10s TTL).
+/// Fresh operations run in parallel via `tokio::join!`. Screen resolution uses CoreGraphics
+/// (cached until display config changes). Geolocation is cached per-session.
 pub async fn gather_system_context(
     app_state: Option<&crate::state::AppState>,
 ) -> Result<SystemContext, String> {
-    // Get current time
+    let start = std::time::Instant::now();
+
+    // --- Always-fresh: time, timezone ---
     let now = chrono::Local::now();
     let current_time = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
     let current_timestamp = current_timestamp_ms();
-
-    // Get timezone — use the actual UTC offset and abbreviation
     let timezone = now.format("%Z (UTC%:z)").to_string();
 
-    // Get focused window information
-    let focused_window = get_focused_window_info(app_state).await;
-
-    // Get screen resolution if available
+    // --- Instant: screen resolution (CoreGraphics, cached until display change) ---
     let screen_resolution = get_screen_resolution();
 
-    // Get running applications
-    let running_applications = get_running_applications_info().await;
+    // --- Fresh operations: run in parallel (these depend on current user state) ---
+    let (focused_window, clipboard_content, selected_text) = tokio::join!(
+        get_focused_window_info(app_state),
+        get_clipboard_content_safe(app_state),
+        get_selected_text_safe(app_state),
+    );
 
-    // Get installed applications (limited scan for performance)
-    let installed_applications = get_installed_applications_info(&running_applications).await;
+    // --- Slow operations: use cached values if available (10s TTL) ---
+    let (running_applications, installed_applications, user_preferences, hardware_info, voice_audio_state, display_info) = {
+        let cache_guard = slow_context_cache().lock().await;
 
-    // Get user preferences based on application usage patterns
-    let user_preferences =
-        get_user_preferences(&running_applications, &installed_applications).await;
+        // Extract from cache if valid
+        let cached_result = cache_guard.as_ref().and_then(|cached| {
+            let age = std::time::Instant::now().duration_since(cached.cached_at);
+            if age < SLOW_CONTEXT_TTL {
+                log::debug!("Using cached slow context (age: {:?})", age);
+                Some((
+                    cached.running_applications.clone(),
+                    cached.installed_applications.clone(),
+                    cached.user_preferences.clone(),
+                    cached.hardware_info.clone(),
+                    cached.voice_audio_state.clone(),
+                    cached.display_info.clone(),
+                ))
+            } else {
+                None
+            }
+        });
 
-    // Enhanced context gathering
-    let clipboard_content = get_clipboard_content_safe(app_state).await;
-    let selected_text = get_selected_text_safe(app_state).await;
-    let hardware_info = get_hardware_info_safe().await;
-    let voice_audio_state = get_voice_audio_state_safe(app_state).await;
+        if let Some(result) = cached_result {
+            result
+        } else {
+            // Cache miss or TTL expired — drop lock, refresh, re-acquire
+            drop(cache_guard);
+            let fresh = gather_slow_context(app_state).await;
+            let result = (
+                fresh.running_applications.clone(),
+                fresh.installed_applications.clone(),
+                fresh.user_preferences.clone(),
+                fresh.hardware_info.clone(),
+                fresh.voice_audio_state.clone(),
+                fresh.display_info.clone(),
+            );
+            let mut cache_guard = slow_context_cache().lock().await;
+            *cache_guard = Some(fresh);
+            result
+        }
+    };
 
-    // Get display information
-    let display_info = get_display_info_safe().await;
-
-    // Resolve approximate location (cached after first call)
+    // --- Geolocation: cached per-session (already has its own OnceCell) ---
     let location_info = resolve_geolocation().await;
+
+    log::debug!("gather_system_context completed in {:?}", start.elapsed());
 
     Ok(SystemContext {
         current_time,
@@ -894,6 +949,35 @@ pub async fn gather_system_context(
         display_info,
         location_info,
     })
+}
+
+/// Gather the "slow" context fields that are safe to cache.
+/// Runs expensive operations in parallel where possible.
+async fn gather_slow_context(
+    app_state: Option<&crate::state::AppState>,
+) -> CachedSlowContext {
+    // Run independent slow operations in parallel
+    let (running_applications, hardware_info, voice_audio_state, display_info) = tokio::join!(
+        get_running_applications_info(),
+        get_hardware_info_safe(),
+        get_voice_audio_state_safe(app_state),
+        get_display_info_safe(),
+    );
+
+    // These depend on running_applications, so run sequentially
+    let installed_applications = get_installed_applications_info(&running_applications).await;
+    let user_preferences =
+        get_user_preferences(&running_applications, &installed_applications).await;
+
+    CachedSlowContext {
+        running_applications,
+        installed_applications,
+        user_preferences,
+        hardware_info,
+        voice_audio_state,
+        display_info,
+        cached_at: std::time::Instant::now(),
+    }
 }
 
 /// Get information about the currently focused window
@@ -1027,39 +1111,27 @@ fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -
     None
 }
 
-/// Get screen resolution using macOS display APIs
+/// Get screen resolution using CoreGraphics display APIs (microseconds, no screenshot).
+///
+/// Previously this captured a full screenshot, base64-decoded it, and loaded it as a PNG
+/// just to read width/height — adding 50-150ms per query. Now uses the same CoreGraphics
+/// API that `get_display_info_safe` already calls, which returns in microseconds.
 fn get_screen_resolution() -> Option<(u32, u32)> {
     #[cfg(target_os = "macos")]
     {
-        // Use the existing screenshot functionality to get screen dimensions
-        use base64::Engine;
-        use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
+        use computer_use_ai_sdk::platforms::macos::display::get_main_display;
 
-        match capture_and_encode_screenshot() {
-            Ok(screenshot_data) => {
-                // Parse the base64 PNG to get dimensions
-                let engine = base64::engine::general_purpose::STANDARD;
-                if let Ok(image_data) = engine.decode(&screenshot_data) {
-                    if let Ok(img) = image::load_from_memory(&image_data) {
-                        let width = img.width();
-                        let height = img.height();
-                        log::debug!(
-                            "Got screen resolution from screenshot: {}x{}",
-                            width,
-                            height
-                        );
-                        return Some((width, height));
-                    }
-                }
+        match get_main_display() {
+            Ok(display) => {
+                let width = display.bounds.size.width as u32;
+                let height = display.bounds.size.height as u32;
+                Some((width, height))
             }
             Err(e) => {
-                log::debug!("Failed to get screenshot for resolution: {}", e);
+                log::debug!("Failed to get display info for resolution: {}", e);
+                None
             }
         }
-
-        // Fallback: use a reasonable default for macOS if we can't get the actual resolution
-        log::debug!("Using fallback screen resolution");
-        None
     }
 
     #[cfg(not(target_os = "macos"))]

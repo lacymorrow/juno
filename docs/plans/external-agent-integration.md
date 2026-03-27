@@ -3,7 +3,7 @@
 **Goal**: Allow any CLI coding agent (Claude Code, Codex, OpenCode, Gemini CLI, etc.) to discover and use Juno's capabilities — maximizing adoption across the agent ecosystem.
 
 **Date**: 2026-03-27
-**Status**: Phase 1+2 COMPLETE, Phase 3 in progress
+**Status**: ALL PHASES COMPLETE (except MCP Registry)
 
 ---
 
@@ -45,7 +45,15 @@ All three should exist. The CLI is the foundation; MCP adds structure; skills ad
 | npm package (`juno-cua`) | DONE | `packages/juno-cua/` — `npx juno-cua` detects agents, configures MCP + skill |
 | `juno mcp serve` (full Tauri) | DONE | MCP server in headless.rs with `query` tool + all CUA tools |
 | CI release workflow | DONE | `.github/workflows/release-cua.yml` — universal binary, Homebrew auto-update |
-| MCP Registry publication | TODO | `registry.modelcontextprotocol.io` |
+| Unified release script | DONE | `scripts/release.ts` — `bun run release` for full pipeline |
+| PR #395 merged | DONE | dyn → main, Homebrew formula pushed |
+| MCP Registry publication | TODO | `registry.modelcontextprotocol.io` — needs first published release |
+
+### Release workflow
+- `bun run release` — interactive full pipeline (version bump → build → git → GitHub Release → npm → Homebrew → juno-www)
+- `bun run release --cua-only` — skip Tauri DMG build
+- `bun run release --skip-build` — use existing artifacts
+- Script at `scripts/release.ts`, uses `@clack/prompts` + `picocolors`
 
 ### Key files created/modified
 - `crates/juno-cua/src/main.rs` — `Capabilities` + `ServeMcp` subcommands
