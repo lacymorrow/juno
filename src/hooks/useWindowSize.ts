@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { LogicalSize, Window } from '@tauri-apps/api/window';
+import { LogicalSize, PhysicalPosition, Window } from '@tauri-apps/api/window';
 
 interface WindowSizeConfig {
   width: number;
@@ -9,12 +9,37 @@ interface WindowSizeConfig {
 // Cache last applied sizes per window to avoid redundant resizes
 const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map();
 
+/**
+ * Center-stable resize: adjusts the window X position so the horizontal center
+ * stays constant. Without this, macOS resizes from the top-left anchor, causing
+ * the centered island to jump horizontally.
+ *
+ * Vertical: top-anchored — no Y adjustment. The native macOS behavior keeps the
+ * top edge fixed and grows downward, which is correct for a top-of-screen bar.
+ *
+ * Uses physical pixel coordinates to match outerPosition()/outerSize() units.
+ */
+async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
+  const scaleFactor = await appWindow.scaleFactor();
+  const physNextW = Math.round(next.width * scaleFactor);
+
+  const pos = await appWindow.outerPosition();   // PhysicalPosition
+  const size = await appWindow.outerSize();       // PhysicalSize
+
+  const dx = physNextW - size.width;
+  if (dx !== 0) {
+    const newX = Math.round(pos.x - dx / 2);
+    await appWindow.setPosition(new PhysicalPosition(newX, pos.y));
+  }
+  await appWindow.setSize(new LogicalSize(next.width, next.height));
+}
+
 export function useWindowSize(windowLabel: string) {
   const resizeWindow = useCallback(async (config: WindowSizeConfig) => {
     try {
       const appWindow = await Window.getByLabel(windowLabel);
       if (appWindow) {
-        await appWindow.setSize(new LogicalSize(config.width, config.height));
+        await centerStableResize(appWindow, config);
       }
     } catch (error) {
       console.error(`Failed to resize window ${windowLabel}:`, error);
@@ -30,7 +55,7 @@ export function useWindowSize(windowLabel: string) {
 
       const appWindow = await Window.getByLabel(windowLabel);
       if (appWindow) {
-        await appWindow.setSize(new LogicalSize(config.width, config.height));
+        await centerStableResize(appWindow, config);
         lastSizeByLabel.set(windowLabel, { width: config.width, height: config.height });
       }
     } catch (error) {
