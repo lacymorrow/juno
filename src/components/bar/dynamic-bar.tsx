@@ -4,7 +4,6 @@ import {
   useState,
   useEffect,
   useCallback,
-  useMemo,
   useRef,
   type FormEvent,
 } from "react";
@@ -22,21 +21,6 @@ import { useWindowSize } from "@/hooks/useWindowSize";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
-
-// ─── Utilities ───────────────────────────────────────────
-
-function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number,
-) {
-  let timeoutId: NodeJS.Timeout;
-  const debounced = (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  };
-  debounced.cancel = () => clearTimeout(timeoutId);
-  return debounced;
-}
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -85,6 +69,10 @@ interface UIInteractionEvent {
 const SHADOW_PADDING = 48;
 const COMPONENT_ID = "dynamic-bar";
 
+// Spring animation in DynamicIsland takes ~300ms to settle.
+// When shrinking, we delay the window resize so the island animates first.
+const SHRINK_DELAY_MS = 350;
+
 // Custom keyframes — injected once into <head>.
 // These replace Tailwind's default animate-pulse / animate-spin
 // with organic, purpose-built motions for each state.
@@ -93,6 +81,14 @@ const BAR_KEYFRAMES = `
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 0.55; transform: scale(1.08); }
 }
+@keyframes bar-breathe {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+@keyframes bar-ring {
+  0%   { transform: scale(1); opacity: 0.3; }
+  100% { transform: scale(3.5); opacity: 0; }
+}
 @keyframes bar-orbit {
   0%   { transform: translateX(0) scale(1); }
   25%  { transform: translateX(4px) scale(0.92); }
@@ -100,9 +96,9 @@ const BAR_KEYFRAMES = `
   75%  { transform: translateX(-4px) scale(0.92); }
   100% { transform: translateX(0) scale(1); }
 }
-@keyframes bar-shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+@keyframes bar-ripple {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.12); }
+  100% { box-shadow: 0 0 0 8px rgba(255,255,255,0); }
 }
 @keyframes bar-flash {
   0%   { opacity: 1; transform: scale(1.5); }
@@ -115,49 +111,10 @@ const BAR_KEYFRAMES = `
   60%  { transform: translateX(-1px); }
   80%  { transform: translateX(1px); }
 }
-@media (prefers-reduced-motion: reduce) {
-  @keyframes bar-idle { 0%, 100% { opacity: 0.45; } }
-  @keyframes bar-orbit { 0%, 100% { transform: none; } }
-  @keyframes bar-shimmer { 0%, 100% { background-position: 0 0; } }
-  @keyframes bar-flash { 0%, 100% { transform: none; } }
-  @keyframes bar-shake { 0%, 100% { transform: none; } }
-}
 `;
 
-// ─── Audio bars ──────────────────────────────────────────
-// 3 thin reactive bars for audio states. Height tracks audioLevel.
-// Replaces the dot for listening/speaking — immediately reads as "sound."
-
-const AUDIO_BAR_RATIOS = [0.5, 1.0, 0.65];
-const AUDIO_BAR_MIN = 4;
-const AUDIO_BAR_MAX = 14;
-
-const AudioBars = ({
-  level,
-  opacity = 0.55,
-}: {
-  level: number;
-  opacity?: number;
-}) => (
-  <div className="flex items-center gap-[2px] shrink-0" style={{ opacity }}>
-    {AUDIO_BAR_RATIOS.map((ratio, i) => (
-      <div
-        key={i}
-        className="w-[1.5px] rounded-full bg-white transition-all duration-[120ms] ease-out"
-        style={{
-          height: `${AUDIO_BAR_MIN + (AUDIO_BAR_MAX - AUDIO_BAR_MIN) * ratio * Math.max(0.15, level)}px`,
-        }}
-      />
-    ))}
-  </div>
-);
-
 // ─── State indicator ─────────────────────────────────────
-// Renders the appropriate visual for each state category:
-//   Dot → idle, input, finishing (passive)
-//   AudioBars → listening, speaking, dictating (audio)
-//   Orbiting dot → processing, transcribing (computing)
-//   Colored dot → error, success (terminal)
+// One dot. No icons. State communicated through motion and color.
 
 const StateIndicator = ({
   state,
@@ -166,10 +123,9 @@ const StateIndicator = ({
   state: UIState;
   audioLevel: number;
 }) => {
-  const dot = "w-[7px] h-[7px] rounded-full shrink-0";
+  const dot = "w-[7px] h-[7px] rounded-full";
 
   switch (state) {
-    // ── Passive: dot ──
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
       return (
@@ -179,28 +135,24 @@ const StateIndicator = ({
         />
       );
 
-    case UI.BAR_STATES_INPUT:
-    case UI.BAR_STATES_EXPANDING:
-      return <div className={cn(dot, "bg-white/70")} />;
-
-    case UI.BAR_STATES_FINISHING:
-    case UI.BAR_STATES_SHRINKING:
-      return (
-        <div className={cn(dot, "bg-white/25 transition-opacity duration-500")} />
-      );
-
-    // ── Audio: bars ──
     case UI.BAR_STATES_LISTENING:
     case UI.BAR_STATES_ALWAYS_LISTENING:
-      return <AudioBars level={audioLevel} opacity={0.65} />;
+      return (
+        <div className="relative flex items-center justify-center">
+          <div
+            className={cn(dot, "bg-white relative z-10")}
+            style={{
+              animation: "bar-breathe 1.6s ease-in-out infinite",
+              opacity: Math.max(0.5, audioLevel),
+            }}
+          />
+          <div
+            className="absolute w-[7px] h-[7px] rounded-full bg-white/25"
+            style={{ animation: "bar-ring 2s ease-out infinite" }}
+          />
+        </div>
+      );
 
-    case UI.BAR_STATES_SPEAKING:
-      return <AudioBars level={audioLevel} opacity={0.4} />;
-
-    case UI.BAR_STATES_DICTATING:
-      return <AudioBars level={audioLevel} opacity={0.55} />;
-
-    // ── Computing: orbiting dot ──
     case UI.BAR_STATES_TRANSCRIBING:
     case UI.BAR_STATES_LOADING:
     case UI.BAR_STATES_SUBMITTING:
@@ -212,7 +164,14 @@ const StateIndicator = ({
         />
       );
 
-    // ── Terminal: colored dot ──
+    case UI.BAR_STATES_SPEAKING:
+      return (
+        <div
+          className={cn(dot, "bg-white/80")}
+          style={{ animation: "bar-ripple 1.4s ease-out infinite" }}
+        />
+      );
+
     case UI.BAR_STATES_ERROR:
       return (
         <div
@@ -228,6 +187,23 @@ const StateIndicator = ({
           style={{ animation: "bar-flash 0.6s ease-out forwards" }}
         />
       );
+
+    case UI.BAR_STATES_DICTATING:
+      return (
+        <div
+          className={cn(dot, "bg-white")}
+          style={{ animation: "bar-breathe 1.2s ease-in-out infinite" }}
+        />
+      );
+
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+      // Steady bright dot — "I'm here, ready for your input"
+      return <div className={cn(dot, "bg-white/70 shrink-0")} />;
+
+    case UI.BAR_STATES_FINISHING:
+    case UI.BAR_STATES_SHRINKING:
+      return <div className={cn(dot, "bg-white/25 transition-opacity duration-500")} />;
 
     default:
       return <div className={cn(dot, "bg-white/35")} />;
@@ -412,31 +388,17 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       setAgentResponseContent(null);
   }, [barState.barState]);
 
-  // ── Island size ──
-
-  useEffect(() => {
-    setSize(getIslandSize(barState.barState));
-  }, [barState.barState, setSize]);
-
-  // ── Window resize ──
+  // ── Window + island resize ──
+  // Key invariant: window must always be >= island size.
+  //   Growing  → resize window FIRST (immediately), then animate island into new space
+  //   Shrinking → animate island FIRST, then shrink window after spring settles
 
   const { resizeWindowIfChanged } = useWindowSize("floating-bar");
-
-  const debouncedResize = useMemo(
-    () =>
-      debounce((state: BarStateData) => {
-        resizeWindowIfChanged(getDimensions(state.barState));
-      }, 100),
-    [resizeWindowIfChanged],
-  );
-
-  // Clean up debounce timer on unmount
-  useEffect(() => {
-    return () => debouncedResize.cancel();
-  }, [debouncedResize]);
+  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
+  const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Skip when agent content is displayed — its own effect handles sizing
+    // Skip when agent content override is active — its own effect handles sizing
     if (
       agentResponseContent &&
       (barState.barState === UI.BAR_STATES_AGENT_RESPONDING ||
@@ -444,8 +406,40 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
         barState.barState === UI.BAR_STATES_FINISHING)
     )
       return;
-    debouncedResize(barState);
-  }, [barState, debouncedResize, agentResponseContent]);
+
+    const next = getDimensions(barState.barState);
+    const prev = prevDimensionsRef.current;
+    const isGrowing = next.width > prev.width || next.height > prev.height;
+
+    // Clear any pending shrink
+    if (shrinkTimerRef.current) {
+      clearTimeout(shrinkTimerRef.current);
+      shrinkTimerRef.current = null;
+    }
+
+    if (isGrowing) {
+      // Growing: expand window immediately, then let island spring into new space
+      resizeWindowIfChanged(next);
+      // Small delay so the window is ready before the island starts animating
+      const t = setTimeout(() => setSize(getIslandSize(barState.barState)), 30);
+      prevDimensionsRef.current = next;
+      return () => clearTimeout(t);
+    } else {
+      // Shrinking: animate island first, then shrink window after spring settles
+      setSize(getIslandSize(barState.barState));
+      shrinkTimerRef.current = setTimeout(() => {
+        resizeWindowIfChanged(next);
+        prevDimensionsRef.current = next;
+      }, SHRINK_DELAY_MS);
+    }
+  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent]);
+
+  // Clean up shrink timer on unmount
+  useEffect(() => {
+    return () => {
+      if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current);
+    };
+  }, []);
 
   // ── Interactions ──
 
@@ -537,22 +531,14 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       barState.barState === UI.BAR_STATES_SUCCESS ||
       barState.barState === UI.BAR_STATES_FINISHING);
 
-  const isProcessing =
-    barState.barState === UI.BAR_STATES_LOADING ||
-    barState.barState === UI.BAR_STATES_SUBMITTING ||
-    barState.barState === UI.BAR_STATES_TRANSCRIBING ||
-    barState.barState === UI.BAR_STATES_AGENT_RESPONDING;
-
-  const isError = barState.barState === UI.BAR_STATES_ERROR;
-  const isSuccess = barState.barState === UI.BAR_STATES_SUCCESS;
-
   useEffect(() => {
     if (showAgentContent) {
-      setSize("medium");
-      resizeWindowIfChanged({
-        width: 371 + SHADOW_PADDING,
-        height: 210 + SHADOW_PADDING,
-      });
+      const next = { width: 371 + SHADOW_PADDING, height: 210 + SHADOW_PADDING };
+      // Grow window first, then animate island into new space
+      resizeWindowIfChanged(next);
+      prevDimensionsRef.current = next;
+      const t = setTimeout(() => setSize("medium"), 30);
+      return () => clearTimeout(t);
     }
   }, [showAgentContent, setSize, resizeWindowIfChanged]);
 
@@ -569,7 +555,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   // ── Render ──
 
   return (
-    <div className="h-full w-full relative p-6" data-tauri-drag-region>
+    <div className="h-full w-full relative p-6 overflow-hidden" data-tauri-drag-region>
       <div
         className="flex items-center justify-center h-full"
         data-tauri-drag-region
@@ -635,69 +621,48 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                 <div className="p-4 overflow-y-auto max-h-[200px] text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
                   <MixedContentRenderer content={agentResponseContent} />
                 </div>
+              ) : barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
+                // Always-listening — two lines
+                <div className="flex flex-col items-center justify-center h-full w-full gap-2.5 px-5">
+                  <div className="flex items-center gap-3">
+                    <StateIndicator
+                      state={barState.barState}
+                      audioLevel={barState.audioLevel}
+                    />
+                    <span className="text-white/55 text-[13px] tracking-[-0.02em]">
+                      listening
+                    </span>
+                  </div>
+                  <span className="text-white/20 text-[11px] tracking-[0.02em]">
+                    say &ldquo;hey juno&rdquo;
+                  </span>
+                </div>
+              ) : isIdle ? (
+                // Idle — just the dot
+                <div className="flex items-center justify-center h-full w-full">
+                  <StateIndicator
+                    state={barState.barState}
+                    audioLevel={barState.audioLevel}
+                  />
+                </div>
               ) : (
-                // State-aware wrapper — background communicates state family
-                <div
-                  className={cn(
-                    "w-full h-full transition-colors duration-300",
-                    isError && "bg-[#e8866a]/[0.07]",
-                    isSuccess && "bg-[#7aba8a]/[0.07]",
-                  )}
-                  style={
-                    isProcessing
-                      ? {
-                          background:
-                            "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.025) 50%, transparent 100%)",
-                          backgroundSize: "200% 100%",
-                          animation: "bar-shimmer 2.5s ease-in-out infinite",
-                        }
-                      : undefined
-                  }
-                >
-                  {barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
-                    // Always-listening — two lines
-                    <div className="flex flex-col items-center justify-center h-full w-full gap-2.5 px-5">
-                      <div className="flex items-center gap-3">
-                        <StateIndicator
-                          state={barState.barState}
-                          audioLevel={barState.audioLevel}
-                        />
-                        <span className="text-white/50 text-[13px] tracking-[-0.02em]">
-                          listening
-                        </span>
-                      </div>
-                      <span className="text-white/20 text-[11px] tracking-[0.02em]">
-                        say &ldquo;hey juno&rdquo;
-                      </span>
-                    </div>
-                  ) : isIdle ? (
-                    // Idle — just the indicator
-                    <div className="flex items-center justify-center h-full w-full">
-                      <StateIndicator
-                        state={barState.barState}
-                        audioLevel={barState.audioLevel}
-                      />
-                    </div>
-                  ) : (
-                    // Active states — indicator + label
-                    <div className="flex items-center h-full w-full px-5 gap-3">
-                      <StateIndicator
-                        state={barState.barState}
-                        audioLevel={barState.audioLevel}
-                      />
-                      {label && (
-                        <span
-                          className={cn(
-                            "text-[13px] tracking-[-0.02em] truncate",
-                            isError
-                              ? "text-[#e8866a]/80"
-                              : "text-white/40",
-                          )}
-                        >
-                          {label}
-                        </span>
+                // Active states — dot + label
+                <div className="flex items-center h-full w-full px-5 gap-3">
+                  <StateIndicator
+                    state={barState.barState}
+                    audioLevel={barState.audioLevel}
+                  />
+                  {label && (
+                    <span
+                      className={cn(
+                        "text-[13px] tracking-[-0.02em] truncate",
+                        barState.barState === UI.BAR_STATES_ERROR
+                          ? "text-[#e8866a]/75"
+                          : "text-white/40",
                       )}
-                    </div>
+                    >
+                      {label}
+                    </span>
                   )}
                 </div>
               )}
