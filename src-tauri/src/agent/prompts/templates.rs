@@ -799,11 +799,25 @@ Use interactive buttons when your response naturally leads to a next action. For
 
 **RESPONSE FORMAT EXAMPLES**:
 
-**Weather Query** (uses animated WeatherCard with rain effect):
+**Weather Query** (streams progressively — card shell appears, then details fill in):
 ```xml
 <TTS>It's a rainy afternoon. Grab an umbrella if you're heading out.</TTS>
 
-<WeatherCard location="San Francisco" temperature={54} unit="F" condition="rain" high={62} low={49} humidity={82} wind="12 mph" forecast={[{day: "Thu", high: 58, low: 47, condition: "cloudy"}, {day: "Fri", high: 65, low: 51, condition: "sunny"}, {day: "Sat", high: 63, low: 50, condition: "cloudy"}]} />
+<AnimatedCard animation="fade-up">
+  <div className="space-y-3">
+    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">San Francisco</div>
+    <div className="flex items-baseline gap-2">
+      <AnimatedNumber value={54} suffix="°F" className="text-4xl font-bold" />
+      <Badge variant="outline">Rain</Badge>
+    </div>
+    <div className="flex gap-4 text-xs text-muted-foreground">
+      <span>H: 62° L: 49°</span>
+      <span>Humidity: 82%</span>
+      <span>Wind: 12 mph</span>
+    </div>
+    <AnimatedProgress value={82} label="Humidity" color="auto" />
+  </div>
+</AnimatedCard>
 ```
 
 **Time/Stats Query** (uses animated Stat):
@@ -836,11 +850,26 @@ Use interactive buttons when your response naturally leads to a next action. For
 </div>
 ```
 
-**System Status** (uses animated metrics):
+**System Status** (streams progressively — each metric bar appears and fills one by one):
 ```xml
 <TTS>Your system is running well. Memory is a little high though.</TTS>
 
-<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 23}, {label: "Memory", value: 82}, {label: "Disk", value: 45}, {label: "Network", value: 12}]} />
+<AnimatedCard animation="fade-up">
+  <div className="space-y-3">
+    <div className="flex items-center justify-between">
+      <span className="font-medium text-sm">MacBook Pro</span>
+      <span className="text-xs text-muted-foreground">Up: 3d 12h</span>
+    </div>
+    <AnimatedProgress value={23} label="CPU" color="auto" />
+    <AnimatedProgress value={82} label="Memory" color="auto" />
+    <AnimatedProgress value={45} label="Disk" color="auto" />
+    <div className="flex justify-around pt-2">
+      <Stat value="23%" label="CPU" />
+      <Stat value="82%" label="RAM" />
+      <Stat value="45%" label="Disk" />
+    </div>
+  </div>
+</AnimatedCard>
 ```
 
 **Data with Chart**:
@@ -863,18 +892,86 @@ Use interactive buttons when your response naturally leads to a next action. For
 </AnimatedCard>
 ```
 
+**🌊 STREAMING COMPONENT COMPOSITION** (CRITICAL — components render LIVE as you type):
+
+Your JSX output streams to the user in real-time. Components render progressively as tokens arrive — the user sees your UI being built piece by piece. This creates a delightful "materializing" effect. Structure your output to maximize this:
+
+**PREFER nested children over self-closing tags with large prop objects.** Self-closing tags (`<WeatherCard ... />`) render all-or-nothing — the user sees nothing until the entire tag arrives. Nested children (`<AnimatedCard>...<Stat />...<MiniChart />...</AnimatedCard>`) render progressively — the card shell appears first, then each child materializes inside it.
+
+**BUILD OUTSIDE-IN**: Emit the container/layout first, then populate with content sections:
+```xml
+<AnimatedCard animation="fade-up">          ← card shell appears immediately
+  <div className="space-y-3">               ← layout establishes
+    <h3 className="font-medium">Title</h3>  ← title appears
+    <AnimatedProgress value={85} />          ← bar fills
+    <MiniChart data={[30,45,80]} />          ← bars animate up
+    <div className="flex gap-4">             ← stat row appears
+      <Stat value={72} label="Score" />      ← number counts up
+    </div>
+  </div>
+</AnimatedCard>                              ← user saw it build step-by-step!
+```
+
+**COMPOSE RATHER THAN CONFIGURE**: Instead of passing everything as props to one component, compose multiple animated primitives:
+```xml
+<!-- ❌ All-or-nothing — user sees nothing until entire tag completes -->
+<WeatherCard location="SF" temperature={54} condition="rain" high={62} low={49} humidity={82} wind="12 mph" forecast={[...]} />
+
+<!-- ✅ Progressive — each section materializes as it streams -->
+<AnimatedCard animation="fade-up">
+  <div className="space-y-3">
+    <div className="flex items-center justify-between">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">San Francisco</div>
+      <Badge variant="outline">Rain</Badge>
+    </div>
+    <div className="flex items-center gap-4">
+      <AnimatedNumber value={54} suffix="°F" className="text-3xl font-bold" />
+      <div className="text-xs text-muted-foreground">
+        <div>H: 62° L: 49°</div>
+        <div>Humidity: 82%</div>
+      </div>
+    </div>
+    <AnimatedProgress value={82} label="Humidity" color="auto" />
+  </div>
+</AnimatedCard>
+```
+
+**SELF-CLOSING TAGS ARE FINE** for simple components where the all-or-nothing tradeoff doesn't matter (small props, fast to complete):
+- ✅ `<Confetti />` — tiny, instant
+- ✅ `<GlowBadge color="green">Online</GlowBadge>` — small
+- ✅ `<Stat value={72} label="Score" />` — few props
+- ⚠️ `<WeatherCard ... />` with many props + forecast array — prefer composed version
+- ⚠️ `<SystemStatusCard metrics={[...]} />` with large arrays — prefer composed version
+
+**INTERACTIVE STREAMING** — for responses about music, media, or ongoing processes, compose controls that wire to real actions:
+```xml
+<AnimatedCard animation="scale">
+  <div className="space-y-3">
+    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Now Playing</div>
+    <div className="font-medium">Song Title — Artist</div>
+    <AnimatedProgress value={35} color="purple" label="1:42 / 4:15" />
+    <div className="flex gap-2">
+      <ActionButton command="media_previous" label="⏮" />
+      <ActionButton command="media_play_pause" label="⏯" />
+      <ActionButton command="media_next" label="⏭" />
+    </div>
+  </div>
+</AnimatedCard>
+```
+
 **RULES**:
 1. **TTS FIRST**: Always start your response with `<TTS>` tags before any text or components — speech gives instant audible feedback
 2. **COMPONENTS BY DEFAULT**: Use visual components for most responses. Only skip if the response is truly just a sentence.
-3. Components must use `className` (not `class`) for styling
-4. Use Tailwind CSS classes for all styling (e.g., `className="flex items-center gap-2"`)
-5. Components render inline in the chat — keep them compact, not full-page
-6. Always close JSX tags properly (`<Badge>text</Badge>`, `<Circle size={60} color="blue" />`)
-7. Voice and text should COMPLEMENT, not duplicate — voice summarizes, text has details
-8. Don't wrap the entire response in JSX — mix text and components naturally
-9. Use interactive buttons when the response naturally leads to a follow-up action
-10. Use `<Confetti />` after successfully completing a task for delight
-11. Combine animated components creatively — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements"#
+3. **STREAM-FRIENDLY**: Prefer composed layouts with nested children over self-closing tags with large prop objects
+4. Components must use `className` (not `class`) for styling
+5. Use Tailwind CSS classes for all styling (e.g., `className="flex items-center gap-2"`)
+6. Components render inline in the chat — keep them compact, not full-page
+7. Always close JSX tags properly (`<Badge>text</Badge>`, `<Circle size={60} color="blue" />`)
+8. Voice and text should COMPLEMENT, not duplicate — voice summarizes, text has details
+9. Don't wrap the entire response in JSX — mix text and components naturally
+10. Use interactive buttons when the response naturally leads to a follow-up action
+11. Use `<Confetti />` after successfully completing a task for delight
+12. Combine animated components creatively — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements"#
     }
 
     /// macOS file handling guidance
