@@ -81,7 +81,7 @@ const JSX_OPEN_TAG_PATTERN = new RegExp(
  * These edge cases are acceptable because the agent is instructed to produce
  * well-formed JSX at the top level.
  */
-export function splitMixedContent(content: string): ContentSegment[] {
+export function splitMixedContent(content: string, isStreaming = false): ContentSegment[] {
   const segments: ContentSegment[] = [];
   let remaining = content;
 
@@ -129,8 +129,15 @@ export function splitMixedContent(content: string): ContentSegment[] {
     const jsxEnd = findJsxBlockEnd(remaining, jsxStart, componentName);
 
     if (jsxEnd === -1) {
-      // Can't find closing tag — treat the rest as text (possibly incomplete JSX during streaming)
-      segments.push({ type: "text", content: remaining.slice(jsxStart) });
+      if (isStreaming) {
+        // During streaming, treat incomplete JSX as a jsx segment —
+        // JsxRenderer with fixIncompleteJsx will auto-close tags,
+        // rendering the component progressively as chunks arrive
+        segments.push({ type: "jsx", content: remaining.slice(jsxStart) });
+      } else {
+        // After streaming, incomplete JSX is malformed — show as text
+        segments.push({ type: "text", content: remaining.slice(jsxStart) });
+      }
       break;
     }
 
@@ -240,8 +247,8 @@ export const MixedContentRenderer = React.memo(
     className,
   }: MixedContentRendererProps) {
     const segments = React.useMemo(
-      () => splitMixedContent(content),
-      [content],
+      () => splitMixedContent(content, isStreaming),
+      [content, isStreaming],
     );
 
     // Single segment optimization — no wrapper div needed
