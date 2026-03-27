@@ -432,6 +432,12 @@ fn geo_cell() -> &'static tokio::sync::OnceCell<Option<GeoLocation>> {
     GEO_CACHE.get_or_init(tokio::sync::OnceCell::new)
 }
 
+/// Pre-load geolocation in the background so the first query doesn't pay the cost.
+/// Safe to call multiple times — subsequent calls are no-ops due to the OnceCell.
+pub async fn preload_geolocation() {
+    let _ = resolve_geolocation().await;
+}
+
 /// Resolve location using native macOS Core Location, falling back to IP geolocation.
 /// Returns cached result on subsequent calls.
 async fn resolve_geolocation() -> Option<GeoLocation> {
@@ -1756,26 +1762,14 @@ async fn get_hardware_info_safe() -> Option<HardwareInfo> {
     }
 }
 
-/// Get CPU usage directly (simplified version)
+/// Get CPU usage directly using Mach host_processor_info (microseconds, no subprocess).
+///
+/// Previously shelled out to `top -l 1 -n 0` which took 1-2 seconds per call.
+/// Now uses the kernel's host_processor_info() API which returns instantly.
 async fn get_cpu_usage_direct() -> Option<f32> {
     #[cfg(target_os = "macos")]
     {
-        use tokio::process::Command;
-
-        match Command::new("top")
-            .args(["-l", "1", "-n", "0"])
-            .output()
-            .await
-        {
-            Ok(output) => {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                parse_cpu_usage_direct(&output_str)
-            }
-            Err(e) => {
-                log::debug!("Failed to get CPU usage: {}", e);
-                None
-            }
-        }
+        get_cpu_usage_mach()
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1784,21 +1778,64 @@ async fn get_cpu_usage_direct() -> Option<f32> {
     }
 }
 
-/// Parse CPU usage from top command output
-fn parse_cpu_usage_direct(output: &str) -> Option<f32> {
-    for line in output.lines() {
-        if line.contains("CPU usage:") {
-            // Parse line like "CPU usage: 15.2% user, 8.1% sys, 76.7% idle"
-            if let Some(user_part) = line.split("CPU usage:").nth(1) {
-                if let Some(user_str) = user_part.split('%').next() {
-                    if let Ok(user_cpu) = user_str.trim().parse::<f32>() {
-                        return Some(user_cpu);
-                    }
-                }
-            }
-        }
+/// Read CPU ticks from Mach kernel (instant, no subprocess).
+/// Returns overall CPU usage percentage (user + system).
+#[cfg(target_os = "macos")]
+fn get_cpu_usage_mach() -> Option<f32> {
+    use std::mem;
+
+    // Mach host_processor_info constants
+    const HOST_CPU_LOAD_INFO: i32 = 3;
+    const CPU_STATE_USER: usize = 0;
+    const CPU_STATE_SYSTEM: usize = 1;
+    const CPU_STATE_IDLE: usize = 2;
+    const CPU_STATE_NICE: usize = 3;
+
+    #[repr(C)]
+    struct HostCpuLoadInfo {
+        ticks: [u32; 4], // user, system, idle, nice
     }
-    None
+
+    extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics64(
+            host: u32,
+            flavor: i32,
+            host_info: *mut HostCpuLoadInfo,
+            count: *mut u32,
+        ) -> i32;
+    }
+
+    let mut cpu_load = HostCpuLoadInfo { ticks: [0; 4] };
+    let mut count = (mem::size_of::<HostCpuLoadInfo>() / mem::size_of::<u32>()) as u32;
+
+    // Safety: calling well-defined Mach kernel API with properly sized buffer
+    let result = unsafe {
+        host_statistics64(
+            mach_host_self(),
+            HOST_CPU_LOAD_INFO,
+            &mut cpu_load as *mut HostCpuLoadInfo,
+            &mut count,
+        )
+    };
+
+    if result != 0 {
+        log::debug!("host_statistics64 failed with error: {}", result);
+        return None;
+    }
+
+    let user = cpu_load.ticks[CPU_STATE_USER] as f64;
+    let system = cpu_load.ticks[CPU_STATE_SYSTEM] as f64;
+    let idle = cpu_load.ticks[CPU_STATE_IDLE] as f64;
+    let nice = cpu_load.ticks[CPU_STATE_NICE] as f64;
+    let total = user + system + idle + nice;
+
+    if total > 0.0 {
+        // Return user + system as percentage of total
+        Some(((user + system) / total * 100.0) as f32)
+    } else {
+        None
+    }
 }
 
 /// Get memory usage directly (simplified version)
