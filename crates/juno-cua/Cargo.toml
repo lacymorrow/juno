@@ -1,6 +1,6 @@
 [package]
 name = "juno-cua"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2021"
 description = "Headless CLI for Juno Computer Use Agent tools — screenshot, click, type, scroll, and more without a GUI"
 authors = ["Lacy Morrow <me@lacymorrow.com>"]
