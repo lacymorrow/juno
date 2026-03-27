@@ -2,224 +2,465 @@
 /**
  * Release script for Juno
  *
+ * Handles the full release pipeline:
+ *   1. Version bump (all Cargo.toml + package.json files)
+ *   2. Build universal Tauri app (DMG) + juno-cua binary
+ *   3. Git commit + tag + push
+ *   4. GitHub Release (DMG + juno-cua binaries)
+ *   5. npm publish (juno-cua package)
+ *   6. Homebrew formula update (juno-cua)
+ *   7. juno-www marketing site update
+ *
  * Usage:
- *   bun run release          # patch bump (default)
- *   bun run release patch    # patch bump
- *   bun run release minor    # minor bump
- *   bun run release major    # major bump
- *   bun run release 1.2.3    # explicit version
+ *   bun run release              # interactive — prompts for bump type
+ *   bun run release patch        # patch bump  (0.4.11 → 0.4.12)
+ *   bun run release minor        # minor bump  (0.4.11 → 0.5.0)
+ *   bun run release major        # major bump  (0.4.11 → 1.0.0)
+ *   bun run release 1.0.0        # explicit version
+ *   bun run release --skip-build # skip Tauri build (use existing artifacts)
+ *   bun run release --cua-only   # only release juno-cua (no Tauri DMG)
  */
 
-import { $} from "bun";
-import { existsSync } from "fs";
-import { readdir } from "fs/promises";
+import * as p from "@clack/prompts";
+import pc from "picocolors";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const JUNO_WWW = `${REPO_ROOT}/../juno-www`;
+const ROOT = resolve(import.meta.dirname, "..");
+const HOMEBREW_TAP = resolve(ROOT, "../homebrew-tap");
+const HOMEBREW_FORMULA = resolve(HOMEBREW_TAP, "Formula/juno-cua.rb");
+const JUNO_WWW = resolve(ROOT, "../juno-www");
+const NPM_PACKAGE = resolve(ROOT, "packages/juno-cua");
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const SKIP_BUILD = process.argv.includes("--skip-build");
+const CUA_ONLY = process.argv.includes("--cua-only");
 
-async function exec(cmd: string): Promise<string> {
-  const result = await $`sh -c ${cmd}`.quiet().nothrow();
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Command failed (${result.exitCode}): ${cmd}\n${result.stderr.toString()}`
-    );
-  }
-  return result.stdout.toString().trim();
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function run(cmd: string, opts?: { cwd?: string; stdio?: "inherit" | "pipe" }) {
+	return execSync(cmd, {
+		cwd: opts?.cwd ?? ROOT,
+		stdio: opts?.stdio ?? "pipe",
+		encoding: "utf-8",
+		shell: "/bin/bash",
+	});
 }
 
-async function hasCommand(name: string): Promise<boolean> {
-  const result = await $`which ${name}`.quiet().nothrow();
-  return result.exitCode === 0;
+function readJson(path: string) {
+	return JSON.parse(readFileSync(path, "utf-8"));
 }
 
-function bumpVersion(current: string, bump: string): string {
-  const parts = current.split(".").map(Number);
-  if (parts.length !== 3 || parts.some(isNaN)) {
-    throw new Error(`Invalid current version: ${current}`);
-  }
-  switch (bump) {
-    case "major":
-      return `${parts[0] + 1}.0.0`;
-    case "minor":
-      return `${parts[0]}.${parts[1] + 1}.0`;
-    case "patch":
-      return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
-    default:
-      throw new Error(`Unknown bump type: ${bump}`);
-  }
+function writeJson(path: string, data: Record<string, unknown>) {
+	writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
 
-async function findDmg(): Promise<string> {
-  // Search common Tauri output paths for .dmg files
-  const searchDirs = [
-    `${REPO_ROOT}/target/universal-apple-darwin/release/bundle/dmg`,
-    `${REPO_ROOT}/target/release/bundle/dmg`,
-    `${REPO_ROOT}/target/aarch64-apple-darwin/release/bundle/dmg`,
-    `${REPO_ROOT}/target/x86_64-apple-darwin/release/bundle/dmg`,
-    `${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/dmg`,
-    `${REPO_ROOT}/src-tauri/target/release/bundle/dmg`,
-  ];
-
-  for (const dir of searchDirs) {
-    if (!existsSync(dir)) continue;
-    const files = await readdir(dir);
-    const dmgs = files.filter((f) => f.endsWith(".dmg"));
-    if (dmgs.length > 0) {
-      // Return the most recently modified
-      const sorted = dmgs.sort((a, b) => {
-        const aFile = Bun.file(`${dir}/${a}`);
-        const bFile = Bun.file(`${dir}/${b}`);
-        return bFile.lastModified - aFile.lastModified;
-      });
-      return `${dir}/${sorted[0]}`;
-    }
-  }
-
-  throw new Error(
-    `No DMG found. Searched:\n${searchDirs.map((d) => `  ${d}`).join("\n")}`
-  );
+function bumpVersion(current: string, type: "patch" | "minor" | "major"): string {
+	const [major, minor, patch] = current.split(".").map(Number);
+	switch (type) {
+		case "major": return `${major + 1}.0.0`;
+		case "minor": return `${major}.${minor + 1}.0`;
+		case "patch": return `${major}.${minor}.${patch + 1}`;
+	}
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
+function cancelled(): never {
+	p.cancel("Release cancelled.");
+	process.exit(0);
+}
+
+function errorText(err: unknown): string {
+	if (err instanceof Error) {
+		if ("stderr" in err && typeof err.stderr === "string" && err.stderr.trim())
+			return err.stderr.trim();
+		return err.message;
+	}
+	return String(err);
+}
+
+function findDmg(): string | null {
+	const searchDirs = [
+		`${ROOT}/target/universal-apple-darwin/release/bundle/dmg`,
+		`${ROOT}/target/release/bundle/dmg`,
+		`${ROOT}/target/aarch64-apple-darwin/release/bundle/dmg`,
+	];
+
+	for (const dir of searchDirs) {
+		if (!existsSync(dir)) continue;
+		const dmgs = readdirSync(dir)
+			.filter((f) => f.endsWith(".dmg"))
+			.sort((a, b) => {
+				const aTime = statSync(`${dir}/${a}`).mtimeMs;
+				const bTime = statSync(`${dir}/${b}`).mtimeMs;
+				return bTime - aTime;
+			});
+		if (dmgs.length > 0) return `${dir}/${dmgs[0]}`;
+	}
+	return null;
+}
+
+// ── npm publish ──────────────────────────────────────────────────────────────
+
+async function publishNpm(): Promise<boolean> {
+	if (!existsSync(NPM_PACKAGE)) {
+		p.log.warn(`npm package not found at ${pc.dim(NPM_PACKAGE)}`);
+		return false;
+	}
+
+	const spinner = p.spinner();
+	spinner.start("Publishing juno-cua to npm");
+	try {
+		run("npm publish --access public", { cwd: NPM_PACKAGE });
+		spinner.stop(pc.green("Published juno-cua to npm"));
+		return true;
+	} catch (err: unknown) {
+		spinner.stop(pc.yellow("npm publish failed"));
+		p.log.message(pc.dim(errorText(err)));
+	}
+
+	// Retry loop
+	while (true) {
+		const action = await p.select({
+			message: "How would you like to proceed?",
+			options: [
+				{ value: "otp" as const, label: "Enter OTP", hint: "publish with one-time password" },
+				{ value: "login" as const, label: "Log in to npm", hint: "run npm login, then retry" },
+				{ value: "retry" as const, label: "Retry publish" },
+				{ value: "skip" as const, label: "Skip npm publish" },
+			],
+		});
+
+		if (p.isCancel(action) || action === "skip") {
+			p.log.info("Skipping npm publish");
+			return false;
+		}
+
+		if (action === "login") {
+			try {
+				run("npm login", { cwd: NPM_PACKAGE, stdio: "inherit" });
+				p.log.success("Logged in to npm");
+			} catch {
+				p.log.error("npm login failed");
+			}
+			continue;
+		}
+
+		let otpFlag = "";
+		if (action === "otp") {
+			const otp = await p.text({
+				message: "npm OTP",
+				placeholder: "123456",
+				validate: (v) => { if (!v || !/^\d{6}$/.test(v.trim())) return "OTP must be 6 digits"; },
+			});
+			if (p.isCancel(otp)) continue;
+			otpFlag = ` --otp ${otp}`;
+		}
+
+		const retrySpinner = p.spinner();
+		retrySpinner.start("Publishing to npm");
+		try {
+			run(`npm publish --access public${otpFlag}`, { cwd: NPM_PACKAGE });
+			retrySpinner.stop(pc.green("Published to npm"));
+			return true;
+		} catch (err: unknown) {
+			retrySpinner.stop(pc.red("npm publish failed"));
+			p.log.message(pc.dim(errorText(err)));
+		}
+	}
+}
+
+// ── Homebrew ─────────────────────────────────────────────────────────────────
+
+async function publishHomebrew(version: string, arm64Sha: string, x64Sha: string) {
+	if (!existsSync(HOMEBREW_FORMULA)) {
+		p.log.warn(`Homebrew formula not found at ${pc.dim(HOMEBREW_FORMULA)}`);
+		return;
+	}
+
+	const doHomebrew = await p.confirm({
+		message: "Update Homebrew formula?",
+		initialValue: true,
+	});
+	if (p.isCancel(doHomebrew) || !doHomebrew) {
+		p.log.info("Skipping Homebrew");
+		return;
+	}
+
+	const spinner = p.spinner();
+	spinner.start("Updating Homebrew formula");
+
+	try {
+		run("git checkout main && git pull --rebase origin main", { cwd: HOMEBREW_TAP });
+
+		let formula = readFileSync(HOMEBREW_FORMULA, "utf-8");
+
+		// Update version
+		formula = formula.replace(/version "[^"]*"/, `version "${version}"`);
+
+		// Update download URLs
+		formula = formula.replace(
+			/releases\/download\/v[^/]*\//g,
+			`releases/download/v${version}/`,
+		);
+
+		// Update SHA256s (arm64 first, then x64 in file order)
+		let shaIndex = 0;
+		const shas = [arm64Sha, x64Sha];
+		formula = formula.replace(/sha256 "[^"]*"/g, () => {
+			const sha = shas[shaIndex] || "";
+			shaIndex++;
+			return `sha256 "${sha}"`;
+		});
+
+		writeFileSync(HOMEBREW_FORMULA, formula);
+
+		run("git add Formula/juno-cua.rb", { cwd: HOMEBREW_TAP });
+		run(`git commit -m "juno-cua: update to v${version}"`, { cwd: HOMEBREW_TAP });
+		run("git push origin main", { cwd: HOMEBREW_TAP });
+
+		spinner.stop(`Homebrew formula updated to ${pc.green(`v${version}`)}`);
+	} catch (err: unknown) {
+		spinner.stop(pc.red("Homebrew update failed"));
+		p.log.error(errorText(err));
+	}
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const arg = process.argv[2] || "patch";
+	const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 
-  console.log("\n🚀 Juno Release\n");
+	console.clear();
+	p.intro(pc.magenta(pc.bold(CUA_ONLY ? "  Juno — juno-cua Release  " : "  Juno — Release  ")));
 
-  // 1. Pre-flight checks
-  console.log("🔍 Pre-flight checks...");
+	// Preflight
+	const preflight = p.spinner();
+	preflight.start("Running preflight checks");
 
-  // Clean git tree
-  const status = await exec("git status --porcelain");
-  if (status) {
-    throw new Error(
-      "Working tree is not clean. Commit or stash changes first.\n" + status
-    );
-  }
+	const status = run("git status --porcelain").trim();
+	if (status) {
+		preflight.stop(pc.red("Working tree is not clean"));
+		p.log.error("Commit or stash changes first:");
+		console.log(pc.dim(status));
+		process.exit(1);
+	}
 
-  // Required tools
-  for (const tool of ["gh", "cargo"]) {
-    if (!(await hasCommand(tool))) {
-      throw new Error(`Required tool '${tool}' not found. Please install it.`);
-    }
-  }
+	for (const tool of ["gh", "cargo"]) {
+		try { run(`which ${tool}`); } catch {
+			preflight.stop(pc.red(`Required tool '${tool}' not found`));
+			process.exit(1);
+		}
+	}
 
-  // On main branch
-  const branch = await exec("git branch --show-current");
-  if (branch !== "main") {
-    throw new Error(`Must be on 'main' branch (currently on '${branch}').`);
-  }
+	preflight.stop("Preflight OK");
 
-  console.log("  ✓ Git tree clean, tools available, on main branch\n");
+	// Determine version
+	const pkg = readJson(`${ROOT}/package.json`);
+	const currentVersion: string = pkg.version;
 
-  // 2. Determine version
-  const pkgPath = `${REPO_ROOT}/package.json`;
-  const pkg = await Bun.file(pkgPath).json();
-  const currentVersion: string = pkg.version;
+	let newVersion: string;
+	const arg = args[0];
 
-  let newVersion: string;
-  if (["patch", "minor", "major"].includes(arg)) {
-    newVersion = bumpVersion(currentVersion, arg);
-  } else if (/^\d+\.\d+\.\d+$/.test(arg)) {
-    newVersion = arg;
-  } else {
-    throw new Error(
-      `Invalid version argument: ${arg}. Use patch, minor, major, or x.y.z`
-    );
-  }
+	if (arg === "patch" || arg === "minor" || arg === "major") {
+		newVersion = bumpVersion(currentVersion, arg);
+	} else if (arg && /^\d+\.\d+\.\d+$/.test(arg)) {
+		newVersion = arg;
+	} else {
+		const selected = await p.select({
+			message: `Current version: ${pc.cyan(currentVersion)}. Bump type?`,
+			options: [
+				{ value: "patch" as const, label: "patch", hint: `→ ${bumpVersion(currentVersion, "patch")}` },
+				{ value: "minor" as const, label: "minor", hint: `→ ${bumpVersion(currentVersion, "minor")}` },
+				{ value: "major" as const, label: "major", hint: `→ ${bumpVersion(currentVersion, "major")}` },
+			],
+		});
+		if (p.isCancel(selected)) cancelled();
+		newVersion = bumpVersion(currentVersion, selected);
+	}
 
-  console.log(`📦 Version: ${currentVersion} → ${newVersion}\n`);
+	const tag = `v${newVersion}`;
+	const cuaTag = `cua-v${newVersion}`;
 
-  // 3. Bump version using existing script
-  console.log("🔄 Bumping versions...");
-  await exec(`bash ${REPO_ROOT}/scripts/bump-version.sh ${newVersion}`);
-  console.log("  ✓ Versions bumped\n");
+	const proceed = await p.confirm({
+		message: `Release ${pc.cyan(currentVersion)} → ${pc.green(newVersion)} (${tag})?`,
+	});
+	if (p.isCancel(proceed) || !proceed) cancelled();
 
-  // 4. Build
-  console.log("🔨 Building universal macOS binary (this may take a while)...");
-  const buildResult =
-    await $`sh -c ${"cd " + REPO_ROOT + " && bun run tauri build --target universal-apple-darwin"}`
-      .quiet()
-      .nothrow();
-  if (buildResult.exitCode !== 0) {
-    throw new Error(`Build failed:\n${buildResult.stderr.toString()}`);
-  }
-  console.log("  ✓ Build complete\n");
+	// 1. Bump versions (all Cargo.toml + package.json)
+	const bumpSpinner = p.spinner();
+	bumpSpinner.start("Bumping versions");
+	run(`bash scripts/bump-version.sh ${newVersion}`);
+	bumpSpinner.stop(`Versions bumped to ${pc.green(newVersion)}`);
 
-  // 5. Find DMG artifact
-  console.log("📀 Looking for DMG artifact...");
-  const dmgPath = await findDmg();
-  const dmgName = dmgPath.split("/").pop()!;
-  console.log(`  ✓ Found: ${dmgName}\n`);
+	// 2. Build
+	let dmgPath: string | null = null;
 
-  // 6. Update juno-www release metadata to point to GitHub Release
-  if (existsSync(JUNO_WWW)) {
-    console.log("📦 Updating juno-www release metadata...");
-    const downloadDir = `${JUNO_WWW}/public/downloads`;
-    await exec(`mkdir -p "${downloadDir}"`);
+	if (!CUA_ONLY && !SKIP_BUILD) {
+		const buildSpinner = p.spinner();
+		buildSpinner.start("Building universal Tauri app (this takes a while)");
+		try {
+			run("bun run tauri build --target universal-apple-darwin", { stdio: "inherit" });
+			buildSpinner.stop(pc.green("Tauri build complete"));
+			dmgPath = findDmg();
+			if (dmgPath) {
+				p.log.success(`DMG: ${pc.dim(dmgPath.split("/").pop())}`);
+			}
+		} catch (err: unknown) {
+			buildSpinner.stop(pc.red("Tauri build failed"));
+			p.log.error(errorText(err));
+			const cont = await p.confirm({ message: "Continue without DMG?" });
+			if (p.isCancel(cont) || !cont) cancelled();
+		}
+	} else if (SKIP_BUILD) {
+		dmgPath = findDmg();
+		if (dmgPath) p.log.info(`Using existing DMG: ${pc.dim(dmgPath.split("/").pop())}`);
+	}
 
-    // Point to GitHub Release download URL (Vercel can't serve large LFS files)
-    const githubDownloadUrl = `https://github.com/lacymorrow/juno/releases/download/v${newVersion}/${dmgName}`;
-    const releaseMeta = {
-      version: `v${newVersion}`,
-      file: githubDownloadUrl,
-      releasedAt: new Date().toISOString(),
-    };
-    await Bun.write(
-      `${JUNO_WWW}/public/downloads/release.json`,
-      JSON.stringify(releaseMeta, null, 2) + "\n"
-    );
+	// 3. Build juno-cua (arm64 + x86_64 + universal)
+	const cuaSpinner = p.spinner();
+	cuaSpinner.start("Building juno-cua (arm64 + x86_64)");
+	try {
+		run("cargo build -p juno-cua --release --target aarch64-apple-darwin");
+		run("cargo build -p juno-cua --release --target x86_64-apple-darwin");
 
-    console.log(`  ✓ Updated release.json → ${githubDownloadUrl}\n`);
+		// Create universal binary
+		run(`lipo -create \
+			target/aarch64-apple-darwin/release/juno-cua \
+			target/x86_64-apple-darwin/release/juno-cua \
+			-output target/juno-cua-universal`);
 
-    // Auto-commit and push juno-www
-    console.log("🌐 Deploying juno-www...");
-    await exec(
-      `cd "${JUNO_WWW}" && git add public/downloads/release.json && git commit -m "release: update download to Juno v${newVersion}"`
-    );
-    await exec(`cd "${JUNO_WWW}" && git push origin main`);
-    console.log("  ✓ juno-www committed and pushed (Vercel will auto-deploy)\n");
-  } else {
-    console.log(
-      `  ⚠ juno-www not found at ${JUNO_WWW}, skipping marketing site update.\n`
-    );
-  }
+		cuaSpinner.stop(pc.green("juno-cua built (arm64 + x86_64 + universal)"));
+	} catch (err: unknown) {
+		cuaSpinner.stop(pc.red("juno-cua build failed"));
+		p.log.error(errorText(err));
+		const cont = await p.confirm({ message: "Continue without juno-cua binaries?" });
+		if (p.isCancel(cont) || !cont) cancelled();
+	}
 
-  // 7. Commit + tag
-  console.log("📝 Committing and tagging...");
-  await exec(`cd ${REPO_ROOT} && git add -A`);
-  await exec(
-    `cd ${REPO_ROOT} && git commit -m "release: v${newVersion}"`
-  );
-  await exec(`cd ${REPO_ROOT} && git tag v${newVersion}`);
-  console.log(`  ✓ Tagged v${newVersion}\n`);
+	// 4. Package juno-cua archives + compute SHA256
+	const archiveSpinner = p.spinner();
+	archiveSpinner.start("Packaging juno-cua archives");
 
-  // 8. Push
-  console.log("⬆️  Pushing to origin...");
-  await exec(`cd ${REPO_ROOT} && git push origin HEAD --tags`);
-  console.log("  ✓ Pushed\n");
+	let arm64Sha = "";
+	let x64Sha = "";
 
-  // 9. GitHub Release
-  console.log("🎉 Creating GitHub Release...");
-  const releaseUrl = await exec(
-    `cd ${REPO_ROOT} && gh release create v${newVersion} --title "v${newVersion}" --generate-notes "${dmgPath}"`
-  );
-  console.log(`  ✓ Release created\n`);
+	try {
+		run("tar czf target/juno-cua-darwin-arm64.tar.gz -C target/aarch64-apple-darwin/release juno-cua");
+		run("tar czf target/juno-cua-darwin-x64.tar.gz -C target/x86_64-apple-darwin/release juno-cua");
+		run("tar czf target/juno-cua-darwin-universal.tar.gz -C target juno-cua-universal --transform 's/juno-cua-universal/juno-cua/'");
 
-  // 10. Done
-  console.log("━".repeat(50));
-  console.log(`\n✅ Juno v${newVersion} released!\n`);
-  console.log(`   ${releaseUrl}\n`);
+		arm64Sha = run("shasum -a 256 target/juno-cua-darwin-arm64.tar.gz | cut -d' ' -f1").trim();
+		x64Sha = run("shasum -a 256 target/juno-cua-darwin-x64.tar.gz | cut -d' ' -f1").trim();
+
+		archiveSpinner.stop(pc.green("Archives packaged"));
+	} catch (err: unknown) {
+		// tar --transform may not be available on macOS, use alternative
+		archiveSpinner.stop(pc.yellow("Retrying archive with macOS-compatible tar"));
+		try {
+			run("cd target && cp juno-cua-universal juno-cua && tar czf juno-cua-darwin-universal.tar.gz juno-cua && rm juno-cua");
+			arm64Sha = run("shasum -a 256 target/juno-cua-darwin-arm64.tar.gz | cut -d' ' -f1").trim();
+			x64Sha = run("shasum -a 256 target/juno-cua-darwin-x64.tar.gz | cut -d' ' -f1").trim();
+			p.log.success("Archives packaged (macOS tar)");
+		} catch (err2: unknown) {
+			p.log.error(errorText(err2));
+		}
+	}
+
+	// 5. Changelog
+	const lastTag = run("git describe --tags --abbrev=0 2>/dev/null || echo ''").trim();
+	let changelog = "";
+	if (lastTag) {
+		changelog = run(`git log ${lastTag}..HEAD --pretty=format:"- %s (%h)" --no-merges`).trim();
+	}
+	if (!changelog) changelog = `- Release ${tag}`;
+	p.note(changelog, "Changelog");
+
+	// 6. Commit + tag
+	const gitSpinner = p.spinner();
+	gitSpinner.start("Committing and tagging");
+	run("git add -A");
+	run(`git commit -m "release: ${tag}"`);
+	run(`git tag ${tag}`);
+	if (!CUA_ONLY) run(`git tag ${cuaTag}`);
+	gitSpinner.stop(`Tagged ${pc.green(tag)}${CUA_ONLY ? "" : ` + ${pc.green(cuaTag)}`}`);
+
+	// 7. Push
+	const pushSpinner = p.spinner();
+	pushSpinner.start("Pushing to GitHub");
+	run("git push origin HEAD --tags");
+	pushSpinner.stop("Pushed to GitHub");
+
+	// 8. GitHub Release
+	const releaseSpinner = p.spinner();
+	releaseSpinner.start("Creating GitHub Release");
+
+	const releaseAssets: string[] = [];
+	if (dmgPath && existsSync(dmgPath)) releaseAssets.push(`"${dmgPath}"`);
+	if (existsSync(`${ROOT}/target/juno-cua-darwin-arm64.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-arm64.tar.gz"`);
+	if (existsSync(`${ROOT}/target/juno-cua-darwin-x64.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-x64.tar.gz"`);
+	if (existsSync(`${ROOT}/target/juno-cua-darwin-universal.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-universal.tar.gz"`);
+
+	const assetsArg = releaseAssets.length > 0 ? ` ${releaseAssets.join(" ")}` : "";
+
+	try {
+		const releaseUrl = run(
+			`gh release create ${tag} --title "${tag}" --notes "${changelog.replace(/"/g, '\\"')}"${assetsArg}`
+		).trim();
+		releaseSpinner.stop(`GitHub Release created`);
+		p.log.success(pc.dim(releaseUrl));
+	} catch (err: unknown) {
+		releaseSpinner.stop(pc.red("GitHub Release failed"));
+		p.log.error(errorText(err));
+	}
+
+	// 9. npm publish
+	await publishNpm();
+
+	// 10. Homebrew
+	if (arm64Sha && x64Sha) {
+		await publishHomebrew(newVersion, arm64Sha, x64Sha);
+	} else {
+		p.log.warn("Skipping Homebrew — no SHA256 hashes available");
+	}
+
+	// 11. juno-www
+	if (existsSync(JUNO_WWW) && dmgPath) {
+		const doWww = await p.confirm({
+			message: "Update juno-www marketing site?",
+			initialValue: true,
+		});
+		if (!p.isCancel(doWww) && doWww) {
+			const wwwSpinner = p.spinner();
+			wwwSpinner.start("Updating juno-www");
+			try {
+				const dmgName = dmgPath.split("/").pop();
+				const githubUrl = `https://github.com/lacymorrow/juno/releases/download/${tag}/${dmgName}`;
+				const releaseMeta = {
+					version: tag,
+					file: githubUrl,
+					releasedAt: new Date().toISOString(),
+				};
+				run(`mkdir -p "${JUNO_WWW}/public/downloads"`);
+				writeFileSync(
+					`${JUNO_WWW}/public/downloads/release.json`,
+					JSON.stringify(releaseMeta, null, 2) + "\n",
+				);
+				run(`git add public/downloads/release.json && git commit -m "release: update download to Juno ${tag}" && git push origin main`, { cwd: JUNO_WWW });
+				wwwSpinner.stop(pc.green("juno-www updated"));
+			} catch (err: unknown) {
+				wwwSpinner.stop(pc.red("juno-www update failed"));
+				p.log.error(errorText(err));
+			}
+		}
+	}
+
+	// Done
+	p.outro(
+		`${pc.green("Done!")} Released ${pc.green(tag)} — Tauri${dmgPath ? " + DMG" : ""}, juno-cua, npm, Homebrew`,
+	);
 }
 
 main().catch((err) => {
-  console.error(`\n❌ Release failed: ${err.message}\n`);
-  process.exit(1);
+	p.log.error(err.message ?? err);
+	process.exit(1);
 });
