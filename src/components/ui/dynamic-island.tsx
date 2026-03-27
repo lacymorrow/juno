@@ -116,8 +116,8 @@ const DynamicIslandSizePresets: Record<SizePresets, Preset> = {
   },
   [SIZE_PRESETS.TALL]: {
     width: 371,
-    aspectRatio: 210 / 371,
-    borderRadius: 42,
+    aspectRatio: 260 / 371,
+    borderRadius: 22,
   },
   [SIZE_PRESETS.ULTRA]: {
     width: 630,
@@ -369,7 +369,7 @@ const DynamicIslandContent = ({
   return (
     <motion.div
       id={id}
-      className="mx-auto h-0 w-0 items-center justify-center border border-black/10 bg-black text-center text-black transition duration-300 ease-in-out focus-within:bg-neutral-900 hover:shadow-md dark:border dark:border-white/5 dark:focus-within:bg-black"
+      className="mx-auto h-0 w-0 items-center justify-center overflow-hidden border border-black/10 bg-black text-center text-black transition duration-300 ease-in-out focus-within:bg-neutral-900 hover:shadow-md dark:border dark:border-white/5 dark:focus-within:bg-black"
       animate={{
         width: dimensions.width,
         height: dimensions.height,

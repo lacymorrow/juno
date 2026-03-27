@@ -263,3 +263,20 @@ juno query "Open Safari, navigate to github.com, and take a screenshot"
 ```
 
 This routes through Juno's hierarchical agent system (Desktop Agent, Browser Agent, File Agent) for complex multi-step tasks. Install from https://github.com/lacymorrow/juno/releases.
+
+### Full Juno MCP Server
+
+The full Juno binary can also run as an MCP server, exposing everything `juno-cua` has PLUS the `query` tool:
+
+```json
+{
+  "mcpServers": {
+    "juno": {
+      "command": "juno",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+The `query` tool is the key difference — it delegates to the multi-agent orchestrator. No other MCP server offers a full AI orchestrator as a single tool call.
