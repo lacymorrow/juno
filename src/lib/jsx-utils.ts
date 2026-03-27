@@ -45,6 +45,9 @@ export function completeJsxTag(code: string) {
 	while (currentPosition < code.length) {
 		const match = matchJsxTag(code.slice(currentPosition));
 		if (!match) {
+			// No more tags — include remaining text content (important for streaming
+			// where content may end mid-text, e.g. "<Card>Hello worl")
+			result += code.slice(currentPosition);
 			break;
 		}
 
