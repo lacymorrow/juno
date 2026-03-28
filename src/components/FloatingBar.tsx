@@ -229,6 +229,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
         const isCompact = [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
+          UI.BAR_STATES_SHRINKING,
         ].includes(currentUiState as any);
         const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
         const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
@@ -359,6 +360,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
   const isCompact = [
     UI.BAR_STATES_DEFAULT,
     UI.BAR_STATES_DICTATION_READY,
+    UI.BAR_STATES_SHRINKING,
   ].includes(currentUiState as any);
   const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
   const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
@@ -565,7 +567,6 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
           UI.BAR_STATES_LOADING,
           UI.BAR_STATES_ERROR,
           UI.BAR_STATES_SUCCESS,
-          UI.BAR_STATES_SHRINKING,
           UI.BAR_STATES_FINISHING,
         ].includes(currentUiState as any) && (
           <div
@@ -581,7 +582,6 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
                 {currentUiState === UI.BAR_STATES_ERROR &&
                   (barState.currentError || "Error occurred")}
                 {currentUiState === UI.BAR_STATES_SUCCESS && "Complete!"}
-                {currentUiState === UI.BAR_STATES_SHRINKING && ""}
               </span>
             </div>
           </div>

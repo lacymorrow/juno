@@ -286,7 +286,7 @@ export function ModalSystem({
                 <ul className="list-disc list-inside space-y-1">
                   <li>
                     <strong>
-                      {keyboardShortcuts?.agent_mode || KEYBOARD_SHORTCUTS.AGENT_MODE_TOGGLE}:
+                      {keyboardShortcuts?.agent_mode || KEYBOARD_SHORTCUTS.AGENT_MODE}:
                     </strong>{" "}
                     Activate Agent Mode
                     <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
