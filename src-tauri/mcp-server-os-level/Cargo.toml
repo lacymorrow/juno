@@ -1,6 +1,6 @@
 [package]
 name = "computer-use-ai-sdk"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2021"
 description = "Desktop UI automation through accessibility APIs"
 authors = ["m13v, louis030195"]
