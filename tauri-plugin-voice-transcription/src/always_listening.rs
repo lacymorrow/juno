@@ -1058,7 +1058,6 @@ impl AlwaysListeningController {
                 }
 
                 let cleaned_text = filter_transcription_text(transcribed_text.trim());
-                let cleaned_text = cleaned_text.trim();
                 if !cleaned_text.is_empty() {
                     info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
 
