@@ -220,6 +220,7 @@ const getIslandSize = (state: UIState): SizePresets => {
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
+    case UI.BAR_STATES_SHRINKING:
       return "default";
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
@@ -270,6 +271,7 @@ const getDimensions = (state: UIState) => {
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
+    case UI.BAR_STATES_SHRINKING:
       break; // 150 × 44
     case UI.BAR_STATES_TRANSCRIBING:
       w = 300; h = 56;
@@ -693,7 +695,8 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
 
   const isIdle =
     barState.barState === UI.BAR_STATES_DEFAULT ||
-    barState.barState === UI.BAR_STATES_DICTATION_READY;
+    barState.barState === UI.BAR_STATES_DICTATION_READY ||
+    barState.barState === UI.BAR_STATES_SHRINKING;
 
   const label = getLabel(barState.barState, barState);
 
@@ -705,9 +708,9 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
         className="flex items-start justify-center h-full"
         data-tauri-drag-region
       >
-        {isInputState ? (
-          // ── Input mode ──
-          <DynamicIsland id="ai-chatbot-panel">
+        <DynamicIsland id="ai-chatbot-panel">
+          {isInputState ? (
+            // ── Input mode ──
             <form
               onSubmit={handleSubmit}
               className={cn(
@@ -751,143 +754,146 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                 return
               </span>
             </form>
-          </DynamicIsland>
-        ) : (
-          // ── All other states ──
-          <button
-            type="button"
-            onClick={handleIslandClick}
-            className="cursor-pointer bg-transparent p-0 m-0 border-0"
-            aria-label="Activate assistant"
-          >
-            <DynamicIsland id="ai-chatbot-panel">
-              {showAgentContent ? (
-                // Agent response — streamed progressively, pinned after completion.
-                // Delay matches spring settle time so content fades in AFTER
-                // the island finishes expanding (prevents FOUC).
-                <div
-                  className="flex flex-col h-full"
-                  style={{
-                    animation: `bar-content-in 0.25s ease-out ${SHRINK_DELAY_MS}ms both`,
-                  }}
-                >
-                  <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
-                    <MixedContentRenderer
-                      content={agentResponseContent}
-                      isStreaming={isStreamingContent}
-                    />
-                    {/* Close button */}
-                    {componentPinned && !isStreamingContent && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dismissComponent();
-                        }}
-                        className={cn(
-                          "sticky bottom-0 float-right w-5 h-5 flex items-center justify-center",
-                          "rounded-full bg-white/[0.08] text-white/30",
-                          "transition-all duration-200",
-                          "hover:bg-white/[0.15] hover:text-white/60",
-                          "-mt-5 mr-[-4px]",
-                        )}
-                        aria-label="Dismiss response"
-                      >
-                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                          <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                        </svg>
-                      </button>
+          ) : showAgentContent ? (
+            // ── Agent response ──
+            // Delay matches spring settle time so content fades in AFTER
+            // the island finishes expanding (prevents FOUC).
+            <div
+              className="flex flex-col h-full"
+              style={{
+                animation: `bar-content-in 0.25s ease-out ${SHRINK_DELAY_MS}ms both`,
+              }}
+            >
+              <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
+                <MixedContentRenderer
+                  content={agentResponseContent}
+                  isStreaming={isStreamingContent}
+                />
+                {/* Close button */}
+                {componentPinned && !isStreamingContent && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dismissComponent();
+                    }}
+                    className={cn(
+                      "sticky bottom-0 float-right w-5 h-5 flex items-center justify-center",
+                      "rounded-full bg-white/[0.08] text-white/30",
+                      "transition-all duration-200",
+                      "hover:bg-white/[0.15] hover:text-white/60",
+                      "-mt-5 mr-[-4px]",
                     )}
-                  </div>
-                  {/* Inline input — visible when pinned */}
-                  {componentPinned && !isStreamingContent && (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const v = localInputValue.trim();
-                        if (!v) return;
-                        sendInteraction(
-                          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: v }),
-                        );
-                        setLocalInputValue("");
-                      }}
-                      className="flex items-center gap-2 px-4 pb-3 pt-0"
-                    >
-                      <input
-                        ref={pinnedInputRef}
-                        type="text"
-                        value={localInputValue}
-                        onChange={(e) => setLocalInputValue(e.target.value)}
-                        className={cn(
-                          "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md",
-                          "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
-                          "outline-none focus:border-white/[0.15]",
-                          "tracking-[-0.01em] transition-colors duration-150",
-                        )}
-                        placeholder="follow up"
-                      />
-                      <span
-                        className={cn(
-                          "text-[10px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
-                          localInputValue.trim()
-                            ? "text-white/25 opacity-100"
-                            : "opacity-0",
-                        )}
-                      >
-                        return
-                      </span>
-                    </form>
-                  )}
-                </div>
-              ) : barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
-                // Always-listening — two lines
-                <div className="flex flex-col items-center justify-center h-full w-full gap-2.5 px-5">
-                  <div className="flex items-center gap-3">
-                    <StateIndicator
-                      state={barState.barState}
-                      audioLevel={barState.audioLevel}
-                    />
-                    <span className="text-white/55 text-[13px] tracking-[-0.02em]">
-                      listening
-                    </span>
-                  </div>
-                  <span className="text-white/20 text-[11px] tracking-[0.02em]">
-                    say &ldquo;hey juno&rdquo;
+                    aria-label="Dismiss response"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                      <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {/* Inline input — visible when pinned */}
+              {componentPinned && !isStreamingContent && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const v = localInputValue.trim();
+                    if (!v) return;
+                    sendInteraction(
+                      createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: v }),
+                    );
+                    setLocalInputValue("");
+                  }}
+                  className="flex items-center gap-2 px-4 pb-3 pt-0"
+                >
+                  <input
+                    ref={pinnedInputRef}
+                    type="text"
+                    value={localInputValue}
+                    onChange={(e) => setLocalInputValue(e.target.value)}
+                    className={cn(
+                      "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md",
+                      "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
+                      "outline-none focus:border-white/[0.15]",
+                      "tracking-[-0.01em] transition-colors duration-150",
+                    )}
+                    placeholder="follow up"
+                  />
+                  <span
+                    className={cn(
+                      "text-[10px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
+                      localInputValue.trim()
+                        ? "text-white/25 opacity-100"
+                        : "opacity-0",
+                    )}
+                  >
+                    return
                   </span>
-                </div>
-              ) : isIdle ? (
-                // Idle — just the dot
-                <div className="flex items-center justify-center h-full w-full">
-                  <StateIndicator
-                    state={barState.barState}
-                    audioLevel={barState.audioLevel}
-                  />
-                </div>
-              ) : (
-                // Active states — dot + label
-                <div className="flex items-center h-full w-full px-5 gap-3">
-                  <StateIndicator
-                    state={barState.barState}
-                    audioLevel={barState.audioLevel}
-                  />
-                  {label && (
-                    <span
-                      className={cn(
-                        "text-[13px] tracking-[-0.02em] truncate",
-                        barState.barState === UI.BAR_STATES_ERROR
-                          ? "text-[#e8866a]/75"
-                          : "text-white/40",
-                      )}
-                    >
-                      {label}
-                    </span>
-                  )}
-                </div>
+                </form>
               )}
-            </DynamicIsland>
-          </button>
-        )}
+            </div>
+          ) : barState.barState === UI.BAR_STATES_ALWAYS_LISTENING ? (
+            // ── Always-listening — two lines ──
+            <div
+              className="flex flex-col items-center justify-center h-full w-full gap-2.5 px-5 cursor-pointer"
+              onClick={handleIslandClick}
+              role="button"
+              aria-label="Activate assistant"
+            >
+              <div className="flex items-center gap-3">
+                <StateIndicator
+                  state={barState.barState}
+                  audioLevel={barState.audioLevel}
+                />
+                <span className="text-white/55 text-[13px] tracking-[-0.02em]">
+                  listening
+                </span>
+              </div>
+              <span className="text-white/20 text-[11px] tracking-[0.02em]">
+                say &ldquo;hey juno&rdquo;
+              </span>
+            </div>
+          ) : isIdle ? (
+            // ── Idle — just the dot ──
+            <div
+              className="flex items-center justify-center h-full w-full cursor-pointer"
+              onClick={handleIslandClick}
+              role="button"
+              aria-label="Activate assistant"
+            >
+              <StateIndicator
+                state={barState.barState}
+                audioLevel={barState.audioLevel}
+              />
+            </div>
+          ) : (
+            // ── Active states — dot + label ──
+            <div
+              className="flex items-center h-full w-full px-5 gap-3 cursor-pointer"
+              onClick={handleIslandClick}
+              role="button"
+              aria-label="Activate assistant"
+            >
+              <StateIndicator
+                state={barState.barState}
+                audioLevel={barState.audioLevel}
+              />
+              {label && (
+                <span
+                  className={cn(
+                    "text-[13px] tracking-[-0.02em] truncate",
+                    barState.barState === UI.BAR_STATES_ERROR
+                      ? "text-[#e8866a]/75"
+                      : "text-white/40",
+                  )}
+                >
+                  {label}
+                </span>
+              )}
+            </div>
+          )}
+        </DynamicIsland>
       </div>
     </div>
   );

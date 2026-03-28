@@ -12,6 +12,7 @@ use tracing::{info, warn, error, debug};
 use serde_json;
 
 use crate::error::{Error, Result};
+use crate::utils::filter_transcription_text;
 
 // Audio processing constants (matching main crate's constants)
 const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -45,11 +46,6 @@ const STOP_WORDS: &[&str] = &[
     "done", "that's all", "thats all", "end", "finish", "enough"
 ];
 
-// Noise patterns that should be ignored
-const NOISE_PATTERNS: &[&str] = &[
-    "[blank_audio]", "[BLANK_AUDIO]", "blank audio",
-    "[music]", "[noise]", "[silence]",
-];
 
 // Single word noise patterns that should only match complete words
 const NOISE_WORDS: &[&str] = &[
@@ -830,7 +826,8 @@ impl AlwaysListeningController {
                     }
                 }
 
-                let cleaned_text = transcribed_text.trim();
+                let cleaned_text = filter_transcription_text(transcribed_text.trim());
+                let cleaned_text = cleaned_text.trim();
                 if !cleaned_text.is_empty() {
                     info!("[AlwaysListening] Active transcription result: '{}'", cleaned_text);
 
@@ -890,21 +887,12 @@ impl AlwaysListeningController {
             return false;
         }
 
-        // Remove phrase-level noise patterns but don't reject the entire text
-        // This allows "Open Spotify [BLANK_AUDIO]" to become "Open Spotify"
-        let mut found_noise_patterns = Vec::new();
-        for pattern in NOISE_PATTERNS {
-            if text_trimmed.contains(pattern) {
-                found_noise_patterns.push(pattern);
-                text_trimmed = text_trimmed.replace(pattern, " ");
-            }
-        }
-
-        // Clean up extra whitespace after pattern removal
-        text_trimmed = text_trimmed.split_whitespace().collect::<Vec<&str>>().join(" ");
-
-        if !found_noise_patterns.is_empty() {
-            info!("[AlwaysListening] Removed noise patterns {:?} from text, remaining: '{}'", found_noise_patterns, text_trimmed);
+        // Remove phrase-level noise markers (e.g. [BLANK_AUDIO], [SILENCE]) but don't reject the
+        // entire text — this allows "Open Spotify [BLANK_AUDIO]" to become "Open Spotify"
+        let filtered = filter_transcription_text(&text_trimmed);
+        if filtered != text_trimmed {
+            info!("[AlwaysListening] Removed noise markers from text, remaining: '{}'", filtered);
+            text_trimmed = filtered;
         }
 
         // Re-check length after noise pattern removal
@@ -1069,7 +1057,8 @@ impl AlwaysListeningController {
                     }
                 }
 
-                let cleaned_text = transcribed_text.trim();
+                let cleaned_text = filter_transcription_text(transcribed_text.trim());
+                let cleaned_text = cleaned_text.trim();
                 if !cleaned_text.is_empty() {
                     info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
 

@@ -1,5 +1,26 @@
 use tauri::{Runtime, Manager};
 use std::path::PathBuf;
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+/// Compiled regex for all Whisper audio marker artifacts.
+/// Matches bracket, paren, and asterisk-wrapped forms, case-insensitively.
+/// Examples: [BLANK_AUDIO], [BLANK AUDIO], [SILENCE], [INAUDIBLE], (MUSIC), *BLANK_AUDIO*, blank audio
+static WHISPER_ARTIFACT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\[(?:BLANK[\s_]AUDIO|SILENCE|INAUDIBLE|MUSIC|NOISE|APPLAUSE|LAUGHTER)\]|\((?:BLANK[\s_]AUDIO|MUSIC|NOISE)\)|\*BLANK[\s_]AUDIO\*|blank\s+audio"
+    ).expect("WHISPER_ARTIFACT_RE is a valid regex")
+});
+
+/// Remove Whisper audio marker artifacts from transcription text.
+///
+/// Strips tokens like `[BLANK_AUDIO]`, `[BLANK AUDIO]`, `[SILENCE]`, `[INAUDIBLE]`, `[MUSIC]`,
+/// `[NOISE]`, `[APPLAUSE]`, `[LAUGHTER]`, their `(...)` and `*...*` variants, and the plain-text
+/// "blank audio" form.  Collapses any resulting extra whitespace.
+pub fn filter_transcription_text(text: &str) -> String {
+    let cleaned = WHISPER_ARTIFACT_RE.replace_all(text, " ");
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
 /// Resolve model path to an absolute path using production-ready path resolution
 pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &str) -> String {

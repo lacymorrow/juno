@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-voice-transcription"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2021"
 links = "tauri-plugin-voice-transcription"
 authors = ["Juno Contributors"]
@@ -30,6 +30,7 @@ hound = "3.5"
 tracing = "0.1"
 thiserror = "1.0"
 once_cell = "1.17"
+regex = "1"
 crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 base64 = "0.22"
