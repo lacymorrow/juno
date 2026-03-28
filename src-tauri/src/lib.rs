@@ -822,6 +822,12 @@ pub fn run() {
                 }
             }
 
+            // --- Pre-load geolocation in background (removes 100-500ms from first query) ---
+            tauri::async_runtime::spawn(async {
+                crate::utils::preload_geolocation().await;
+                tracing::info!("Geolocation pre-loaded successfully");
+            });
+
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
