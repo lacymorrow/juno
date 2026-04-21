@@ -58,21 +58,16 @@ pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
         }
     }
 
-    // Fall back to PATH lookup via `which` (blocking, but only runs if
-    // all static paths miss — acceptable for a one-time detection)
-    match std::process::Command::new("which")
-        .arg("claude")
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                let path = PathBuf::from(&path_str);
-                info!("Found Claude CLI via PATH: {}", path.display());
-                return Ok(path);
+    // Fall back to manual PATH search (avoids spawning a subprocess
+    // and works even when `which` isn't available)
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join("claude");
+            if candidate.is_file() {
+                info!("Found Claude CLI via PATH: {}", candidate.display());
+                return Ok(candidate);
             }
         }
-        _ => {}
     }
 
     Err(AgentError::ConfigurationError(
@@ -382,15 +377,23 @@ impl ClaudeCliBrain {
             AgentError::LlmError(format!("Claude CLI process error: {}", e))
         })?;
 
-        // Collect stderr output
+        // Collect stderr output — log on both success and failure for debuggability
         if let Some(handle) = stderr_handle {
             match handle.await {
-                Ok(stderr_buf) if !stderr_buf.is_empty() && !status.success() => {
-                    error!(
-                        "Claude CLI stderr: {}",
-                        stderr_buf.chars().take(500).collect::<String>()
-                    );
+                Ok(stderr_buf) if !stderr_buf.is_empty() => {
+                    if status.success() {
+                        warn!(
+                            "Claude CLI stderr (success): {}",
+                            stderr_buf.chars().take(500).collect::<String>()
+                        );
+                    } else {
+                        error!(
+                            "Claude CLI stderr (failure): {}",
+                            stderr_buf.chars().take(500).collect::<String>()
+                        );
+                    }
                 }
+                Err(e) => error!("Failed to read Claude CLI stderr: {}", e),
                 _ => {}
             }
         }
