@@ -14,8 +14,8 @@ const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map(
  * stays constant. Without this, macOS resizes from the top-left anchor, causing
  * the centered island to jump horizontally.
  *
- * Vertical: top-anchored — no Y adjustment. The native macOS behavior keeps the
- * top edge fixed and grows downward, which is correct for a top-of-screen bar.
+ * Vertical: top-anchored — the window grows/shrinks downward. The island is
+ * positioned at the top of its container so it stays visually stable.
  *
  * Uses physical pixel coordinates to match outerPosition()/outerSize() units.
  */
@@ -29,9 +29,13 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const dx = physNextW - size.width;
   if (dx !== 0) {
     const newX = Math.round(pos.x - dx / 2);
-    await appWindow.setPosition(new PhysicalPosition(newX, pos.y));
+    await Promise.all([
+      appWindow.setPosition(new PhysicalPosition(newX, pos.y)),
+      appWindow.setSize(new LogicalSize(next.width, next.height)),
+    ]);
+  } else {
+    await appWindow.setSize(new LogicalSize(next.width, next.height));
   }
-  await appWindow.setSize(new LogicalSize(next.width, next.height));
 }
 
 export function useWindowSize(windowLabel: string) {
