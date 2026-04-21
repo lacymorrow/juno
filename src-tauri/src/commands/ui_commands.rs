@@ -79,6 +79,7 @@ pub enum BarState {
     AlwaysListening,
     Finishing,
     AgentResponding,
+    Stopping,
 }
 
 impl BarState {
@@ -100,6 +101,7 @@ impl BarState {
             BarState::AlwaysListening => ui::bar_states::ALWAYS_LISTENING,
             BarState::Finishing => ui::bar_states::FINISHING,
             BarState::AgentResponding => ui::bar_states::AGENT_RESPONDING,
+            BarState::Stopping => ui::bar_states::STOPPING,
         }
     }
 }
@@ -1186,6 +1188,17 @@ pub async fn handle_agent_cancelled(_app_handle: &AppHandle) {
         if let Err(e) = manager.handle_agent_cancelled().await {
             error!("Failed to handle agent cancelled: {}", e);
         }
+    }
+}
+
+/// Set the bar to the Stopping state immediately for instant visual feedback.
+/// Called from the escape key handler before the stop coordinator begins cleanup.
+pub async fn set_stopping_state() {
+    if let Some(manager) = get_ui_manager().await {
+        let mut manager = manager.lock().await;
+        manager.agent_state = Some("stopping".to_string());
+        manager.current_error = None;
+        manager.set_bar_state(BarState::Stopping).await;
     }
 }
 
