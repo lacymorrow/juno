@@ -84,7 +84,7 @@ pub fn is_claude_cli_available() -> bool {
 /// Returns Ok(()) if authenticated, or an error with details.
 async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
     let output = tokio::process::Command::new(binary_path)
-        .args(["auth", "status", "--output", "json"])
+        .args(["auth", "status", "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
