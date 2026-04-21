@@ -9,6 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 import {
   DynamicIsland,
@@ -626,6 +627,40 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const handleBlur = useCallback(async () => {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_BLUR));
   }, [sendInteraction, createInteraction]);
+
+  // OS-level window focus/blur (Cmd+Tab, clicking another app)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const fn = await appWindow.onFocusChanged(({ payload: focused }) => {
+          if (!mounted) return;
+          if (focused) {
+            handleFocus();
+          } else {
+            handleBlur();
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      } catch (error) {
+        console.error("DynamicBar: Failed to setup window focus listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [handleFocus, handleBlur]);
 
   // Keyboard shortcuts
   useEffect(() => {

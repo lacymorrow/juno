@@ -231,11 +231,11 @@ const DynamicIslandProvider: React.FC<DynamicIslandProviderProps> = ({
 
   const setSize = useCallback(
     (newSize: SizePresets) => {
-      if (state.previousSize !== newSize && newSize !== state.size) {
+      if (newSize !== state.size) {
         dispatch({ type: "SET_SIZE", newSize })
       }
     },
-    [state.previousSize, state.size, dispatch]
+    [state.size, dispatch]
   )
 
   const scheduleAnimation = useCallback(

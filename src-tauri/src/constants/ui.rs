@@ -52,6 +52,7 @@ pub mod bar_states {
     pub const ALWAYS_LISTENING: &str = "always_listening";
     pub const FINISHING: &str = "finishing";
     pub const AGENT_RESPONDING: &str = "agent_responding";
+    pub const STOPPING: &str = "stopping";
 }
 
 /// Voice mode constants
