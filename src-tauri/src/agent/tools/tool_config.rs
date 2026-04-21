@@ -375,7 +375,7 @@ impl ToolConfigManager {
         } else {
             // Unknown/unconfigured tools are allowed by default.
             // Tools are permitted unless explicitly disabled in config.
-            tracing::debug!("Tool '{}' is unconfigured, allowing by default", tool_name);
+            tracing::warn!("Tool '{}' is unconfigured, allowing by default — add to config to control enablement", tool_name);
             true
         }
     }
