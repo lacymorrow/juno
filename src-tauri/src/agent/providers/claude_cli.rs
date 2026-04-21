@@ -192,6 +192,9 @@ impl ClaudeCliBrain {
             // --strict-mcp-config with no --mcp-config disables all MCP servers.
             // We can't use --bare because it blocks OAuth/keychain auth.
             "--strict-mcp-config".to_string(),
+            // In -p mode with stdin null, the CLI can't prompt for permission.
+            // Allow tool execution since the user explicitly chose this provider.
+            "--dangerously-skip-permissions".to_string(),
         ];
 
         if let Some(ref prompt) = self.system_prompt {
