@@ -324,7 +324,17 @@ impl ClaudeCliBrain {
                         }
                     }
                 }
-                _ = rx.wait_for(|&cancelled| cancelled) => {
+                // Loop on changed() + borrow() instead of wait_for() to avoid
+                // holding a non-Send RwLockReadGuard across the select! boundary.
+                _ = async {
+                    loop {
+                        if *rx.borrow() { return; }
+                        if rx.changed().await.is_err() {
+                            // Sender dropped — will never cancel
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                } => {
                     info!("Claude CLI cancelled via escape key, killing subprocess");
                     let _ = child.kill().await;
                     if let Some(ref handle) = app_handle {
