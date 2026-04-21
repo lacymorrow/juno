@@ -148,9 +148,9 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
 /// streaming the response back through Tauri events. The CLI handles its own tool
 /// execution (Bash, Read, Edit, etc.) so Juno doesn't need to provide tools.
 ///
-/// Note: The user cannot cancel a running Claude CLI query via Juno's escape key —
-/// the subprocess runs to completion or until the timeout (300s). The `kill_on_drop`
-/// flag ensures cleanup if the `Child` handle is dropped.
+/// The subprocess is cancellable via Juno's escape key: the `run_streaming` method
+/// races the streaming loop against the AppState `cancel_rx` signal and kills the
+/// child process immediately when cancellation is detected.
 pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
@@ -279,38 +279,91 @@ impl ClaudeCliBrain {
             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
         }
 
-        // Run the streaming loop with a timeout
-        let streaming_result = tokio::time::timeout(CLI_TIMEOUT, async {
-            self.process_stream(stdout, &app_handle, &msg_id).await
-        })
-        .await;
+        // Get cancel receiver from AppState so we can abort on Escape key
+        let cancel_rx = app_handle.as_ref().and_then(|handle| {
+            use tauri::Manager;
+            handle
+                .try_state::<crate::state::AppState>()
+                .map(|state| state.cancel_rx.clone())
+        });
 
-        let (accumulated_text, final_result) = match streaming_result {
-            Ok(Ok(result)) => result,
-            Ok(Err(e)) => {
-                // Emit stream end with error before returning
-                if let Some(ref handle) = app_handle {
-                    crate::agent::tool_logger::emit_stream_end(
-                        handle,
-                        msg_id,
-                        format!("Error: {}", e),
-                    );
+        // Run the streaming loop with a timeout, cancellable via escape key.
+        // tokio::select! races the stream against the cancellation signal —
+        // whichever completes first wins, and the other branch is dropped.
+        let stream_future = tokio::time::timeout(CLI_TIMEOUT, async {
+            self.process_stream(stdout, &app_handle, &msg_id).await
+        });
+
+        let (accumulated_text, final_result) = if let Some(mut rx) = cancel_rx {
+            tokio::select! {
+                result = stream_future => {
+                    match result {
+                        Ok(Ok(r)) => r,
+                        Ok(Err(e)) => {
+                            if let Some(ref handle) = app_handle {
+                                crate::agent::tool_logger::emit_stream_end(
+                                    handle,
+                                    msg_id,
+                                    format!("Error: {}", e),
+                                );
+                            }
+                            return Err(e);
+                        }
+                        Err(_elapsed) => {
+                            if let Some(ref handle) = app_handle {
+                                crate::agent::tool_logger::emit_stream_end(
+                                    handle,
+                                    msg_id,
+                                    "Claude CLI timed out".to_string(),
+                                );
+                            }
+                            return Err(AgentError::Timeout(format!(
+                                "Claude CLI timed out after {} seconds",
+                                CLI_TIMEOUT.as_secs()
+                            )));
+                        }
+                    }
                 }
-                return Err(e);
+                _ = rx.wait_for(|&cancelled| cancelled) => {
+                    info!("Claude CLI cancelled via escape key, killing subprocess");
+                    let _ = child.kill().await;
+                    if let Some(ref handle) = app_handle {
+                        crate::agent::tool_logger::emit_stream_end(
+                            handle,
+                            msg_id,
+                            "Cancelled".to_string(),
+                        );
+                    }
+                    return Err(AgentError::Terminated);
+                }
             }
-            Err(_elapsed) => {
-                // Timeout — child is killed via kill_on_drop when dropped
-                if let Some(ref handle) = app_handle {
-                    crate::agent::tool_logger::emit_stream_end(
-                        handle,
-                        msg_id,
-                        "Claude CLI timed out".to_string(),
-                    );
+        } else {
+            // No AppState available (headless/test) — fall back to timeout-only
+            match stream_future.await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    if let Some(ref handle) = app_handle {
+                        crate::agent::tool_logger::emit_stream_end(
+                            handle,
+                            msg_id,
+                            format!("Error: {}", e),
+                        );
+                    }
+                    return Err(e);
                 }
-                return Err(AgentError::Timeout(format!(
-                    "Claude CLI timed out after {} seconds",
-                    CLI_TIMEOUT.as_secs()
-                )));
+                Err(_elapsed) => {
+                    if let Some(ref handle) = app_handle {
+                        crate::agent::tool_logger::emit_stream_end(
+                            handle,
+                            msg_id,
+                            "Claude CLI timed out".to_string(),
+                        );
+                    }
+                    return Err(AgentError::Timeout(format!(
+                        "Claude CLI timed out after {} seconds",
+                        CLI_TIMEOUT.as_secs()
+                    )));
+                }
             }
         };
 
