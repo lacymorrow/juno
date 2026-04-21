@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
@@ -221,7 +222,7 @@ const getIslandSize = (state: UIState): SizePresets => {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
     case UI.BAR_STATES_SHRINKING:
-      return "default";
+      return "tiny";
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
       return "long";
@@ -267,12 +268,12 @@ const getLabel = (state: UIState, data: BarStateData): string | null => {
 
 // State → window dimensions (must match island size presets + padding)
 const getDimensions = (state: UIState) => {
-  let w = 150, h = 44;
+  let w = 44, h = 28;
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
     case UI.BAR_STATES_SHRINKING:
-      break; // 150 × 44
+      break; // 44 × 28
     case UI.BAR_STATES_TRANSCRIBING:
       w = 300; h = 56;
       break;
@@ -348,7 +349,8 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   // ── Window + island resize (declared early so stream listeners can use them) ──
 
   const { resizeWindowIfChanged } = useWindowSize("floating-bar");
-  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
+  // Start at zero so the first mount is treated as "growing" (immediate resize)
+  const prevDimensionsRef = useRef({ width: 0, height: 0 });
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Event listeners ──
@@ -699,14 +701,14 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     barState.barState === UI.BAR_STATES_SHRINKING;
 
   const label = getLabel(barState.barState, barState);
+  const onDragMouseDown = useDragWindow();
 
   // ── Render ──
 
   return (
-    <div className="h-full w-full relative p-6 overflow-hidden" data-tauri-drag-region>
+    <div className="h-full w-full relative p-6 overflow-hidden cursor-grab active:cursor-grabbing" onMouseDown={onDragMouseDown}>
       <div
         className="flex items-start justify-center h-full"
-        data-tauri-drag-region
       >
         <DynamicIsland id="ai-chatbot-panel">
           {isInputState ? (
@@ -906,11 +908,13 @@ export function DynamicBar({
 }: {
   barAppearance?: BarAppearance;
 }) {
+  const onDragMouseDown = useDragWindow();
+
   return (
-    <DynamicIslandProvider initialSize="default">
+    <DynamicIslandProvider initialSize="tiny">
       <div
-        className="h-full w-full bg-transparent overflow-hidden"
-        data-tauri-drag-region
+        className="h-screen w-screen bg-transparent overflow-hidden cursor-grab active:cursor-grabbing"
+        onMouseDown={onDragMouseDown}
       >
         <DynamicBarContent barAppearance={barAppearance} />
       </div>

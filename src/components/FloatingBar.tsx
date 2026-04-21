@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Mic,
@@ -344,6 +345,47 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
     await sendInteraction(interaction);
   }, []);
 
+  // === NATIVE WINDOW FOCUS DETECTION ===
+
+  /**
+   * Listen for OS-level window focus changes via Tauri's native event.
+   * The HTML onBlur/onFocus on the input only fires when focus moves within
+   * the webview. This listener fires when the user switches apps (Cmd+Tab,
+   * clicks another window, etc.), which is the primary trigger for idle state.
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const fn = await appWindow.onFocusChanged(({ payload: focused }) => {
+          if (!mounted) return;
+          if (focused) {
+            handleFocus();
+          } else {
+            handleBlur();
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      } catch (error) {
+        console.error("FloatingBar: Failed to setup window focus listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [handleFocus, handleBlur]);
+
   // === SYNC LOCAL INPUT WITH BACKEND STATE ===
 
   /**
@@ -459,13 +501,15 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
     );
   };
 
+  // === WINDOW DRAGGING ===
+  const onDragMouseDown = useDragWindow();
+
   // === RENDER LOGIC ===
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden cursor-move flex items-center justify-center p-6" data-tauri-drag-region>
+    <div className="w-screen h-screen relative overflow-hidden cursor-grab active:cursor-grabbing flex items-center justify-center p-6" onMouseDown={onDragMouseDown}>
       <div
         className={getContainerStyles()}
-        data-tauri-drag-region
         style={{
           width: `${currentWidth}px`,
           height: `${currentHeight}px`,
@@ -480,7 +524,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
       >
         {/* Compact States - Default and Dictation Ready */}
         {isCompact && (
-          <div className="flex items-center gap-2" data-tauri-drag-region>
+          <div className="flex items-center gap-2">
             {getMainIcon()}
             {barState.voiceMode !== UI.VOICE_MODES_IDLE && (
               <VoiceStatusIndicator variant="compact" className="ml-1" />
@@ -498,13 +542,11 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
         ].includes(currentUiState as any) && (
           <div
             className="flex items-center justify-between w-full h-full"
-            data-tauri-drag-region
           >
-            <div className="flex items-center gap-2" data-tauri-drag-region>
+            <div className="flex items-center gap-2">
               {getMainIcon()}
               <span
                 className="text-sm font-medium truncate"
-                data-tauri-drag-region
               >
                 {currentUiState === UI.BAR_STATES_LISTENING && "Listening..."}
                 {currentUiState === UI.BAR_STATES_TRANSCRIBING &&
@@ -533,11 +575,9 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
                 ? "opacity-100"
                 : "opacity-0"
             )}
-            data-tauri-drag-region
           >
             <div
               className="flex items-center gap-2 flex-1"
-              data-tauri-drag-region
             >
               {getMainIcon()}
               <input
@@ -571,11 +611,10 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
         ].includes(currentUiState as any) && (
           <div
             className="flex items-center justify-center w-full h-full"
-            data-tauri-drag-region
           >
-            <div className="flex items-center gap-2" data-tauri-drag-region>
+            <div className="flex items-center gap-2">
               {getMainIcon()}
-              <span className="text-sm font-medium" data-tauri-drag-region>
+              <span className="text-sm font-medium">
                 {currentUiState === UI.BAR_STATES_SUBMITTING && "Sending..."}
                 {currentUiState === UI.BAR_STATES_LOADING && "Processing..."}
                 {currentUiState === UI.BAR_STATES_FINISHING && "Finishing..."}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type { AgentState } from "@/components/ui/orb";
 import { Orb } from "@/components/ui/orb";
@@ -150,11 +151,13 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
     []
   );
 
+  const dragHandlers = useDragWindowWithThreshold();
+
   return (
     <div
-      className="flex flex-col items-center justify-center w-full h-full select-none cursor-pointer"
+      className="flex flex-col items-center justify-center w-full h-full select-none cursor-grab active:cursor-grabbing"
       onClick={handleClick}
-      data-tauri-drag-region
+      {...dragHandlers}
     >
       <Orb
         agentState={agentState}
