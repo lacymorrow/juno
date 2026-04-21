@@ -408,6 +408,7 @@ static GEO_CACHE: std::sync::OnceLock<tokio::sync::OnceCell<Option<GeoLocation>>
 
 /// Cached slow system context fields (running apps, installed apps, preferences, hardware, display).
 /// These change infrequently and are expensive to gather, so we cache them with a short TTL.
+#[derive(Clone)]
 struct CachedSlowContext {
     running_applications: Vec<RunningApplicationInfo>,
     installed_applications: Vec<InstalledApplicationInfo>,
@@ -917,17 +918,18 @@ pub async fn gather_system_context(
             // Cache miss or TTL expired — drop lock, refresh, re-acquire
             drop(cache_guard);
             let fresh = gather_slow_context(app_state).await;
-            let result = (
-                fresh.running_applications.clone(),
-                fresh.installed_applications.clone(),
-                fresh.user_preferences.clone(),
-                fresh.hardware_info.clone(),
-                fresh.voice_audio_state.clone(),
-                fresh.display_info.clone(),
-            );
+            // Clone once to produce the return tuple, then store the original
+            let snapshot = fresh.clone();
             let mut cache_guard = slow_context_cache().lock().await;
             *cache_guard = Some(fresh);
-            result
+            (
+                snapshot.running_applications,
+                snapshot.installed_applications,
+                snapshot.user_preferences,
+                snapshot.hardware_info,
+                snapshot.voice_audio_state,
+                snapshot.display_info,
+            )
         }
     };
 
@@ -1122,6 +1124,12 @@ fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -
 /// Previously this captured a full screenshot, base64-decoded it, and loaded it as a PNG
 /// just to read width/height — adding 50-150ms per query. Now uses the same CoreGraphics
 /// API that `get_display_info_safe` already calls, which returns in microseconds.
+///
+/// Note: CoreGraphics returns **logical points**, not physical pixels. On a 2× Retina
+/// display a 2880×1800 panel reports 1440×900. This is intentional — this value is only
+/// included as context for the AI agent (to reason about screen size), not for coordinate
+/// math. Pixel-accurate coordinate transforms are handled separately by the `coordinates`
+/// module which reads the actual screenshot dimensions on each capture.
 fn get_screen_resolution() -> Option<(u32, u32)> {
     #[cfg(target_os = "macos")]
     {

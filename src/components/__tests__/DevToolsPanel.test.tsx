@@ -12,7 +12,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   emit: vi.fn(),
 }));
 
-// Mock heavy sub-panels that trigger async effects to avoid act() warnings
+// Mock heavy sub-panels that trigger async effects or use browser APIs unavailable in jsdom
 vi.mock('../devtools/CloudTestPanel', () => ({
   CloudTestPanel: () => <div data-testid="cloud-test-panel" />,
 }));
@@ -22,6 +22,13 @@ vi.mock('../devtools/WakeWordTesting', () => ({
   default: ({ children }: { children?: any }) => (
     <div data-testid="wake-word-testing">{children}</div>
   ),
+}));
+
+// VisualizationSettings reads localStorage in useState initializers — mock to avoid
+// "localStorage.getItem is not a function" in jsdom
+vi.mock('../devtools/VisualizationSettings', () => ({
+  __esModule: true,
+  default: () => <div data-testid="visualization-settings" />,
 }));
 
 // Mock the UI components with simple implementations
