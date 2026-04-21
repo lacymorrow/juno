@@ -75,13 +75,15 @@ async fn enforce_action_cooldown(action: &str) {
 
 // --- Computer Use Safety Checks ---
 
-/// Juno's own bundle identifier — the agent must never interact with itself.
+/// Juno's own bundle identifier — used for audit logging when the agent
+/// targets its own window.
 const JUNO_BUNDLE_ID: &str = "com.juno.desktop";
 
-/// Bundle IDs that are blocked from agent interaction by default.
-/// These are sensitive system apps where automated input could cause harm.
-const BLOCKED_BUNDLE_IDS: &[&str] = &[
-    JUNO_BUNDLE_ID,                        // Self-automation prevention
+/// Bundle IDs that receive extra audit logging when targeted.
+/// These are sensitive system apps — currently observe-only (no blocking).
+/// To enforce blocking, check these in `check_app_safety` and return Err.
+const NOTABLE_BUNDLE_IDS: &[&str] = &[
+    JUNO_BUNDLE_ID,                        // Self-automation awareness
     "com.apple.systempreferences",         // System Preferences / System Settings
     "com.apple.keychainaccess",            // Keychain Access — credential store
 ];
@@ -179,44 +181,34 @@ fn get_frontmost_app_name() -> Option<String> {
     None
 }
 
-/// Checks whether the frontmost app is safe for the agent to interact with.
-/// Returns an error string if interaction should be blocked.
+/// Logs when the agent targets a notable app (Juno itself, system prefs, etc.).
+/// Currently observe-only — always allows the action. The infrastructure exists
+/// so blocking can be enabled later via user settings if desired.
 fn check_app_safety(action: &str) -> Result<(), String> {
-    // Read-only actions are always safe regardless of target app
+    // Read-only actions don't need any logging
     if !is_ui_modifying_action(action) {
         return Ok(());
     }
 
     if let Some(bundle_id) = get_frontmost_bundle_id() {
-        for blocked in BLOCKED_BUNDLE_IDS {
-            if bundle_id == *blocked {
-                let app_name = get_frontmost_app_name().unwrap_or_else(|| bundle_id.clone());
+        if NOTABLE_BUNDLE_IDS.contains(&bundle_id.as_str()) {
+            let app_name = get_frontmost_app_name().unwrap_or_else(|| bundle_id.clone());
 
-                if bundle_id == JUNO_BUNDLE_ID {
-                    warn!(
-                        "🚫 Self-automation blocked: agent tried to {} in Juno's own window",
-                        action
-                    );
-                    return Err(format!(
-                        "Self-automation prevented: the agent cannot interact with Juno's own UI. \
-                         The frontmost app is '{}' ({}). Please switch to the target application first.",
-                        app_name, bundle_id
-                    ));
-                }
-
-                warn!(
-                    "🚫 Blocked app interaction: agent tried to {} in {} ({})",
+            if bundle_id == JUNO_BUNDLE_ID {
+                info!(
+                    "🔍 Self-targeting: agent is performing '{}' in Juno's own window ({})",
+                    action, app_name
+                );
+            } else {
+                info!(
+                    "🔍 Notable app target: agent is performing '{}' in {} ({})",
                     action, app_name, bundle_id
                 );
-                return Err(format!(
-                    "Interaction blocked: '{}' ({}) is in the blocked apps list. \
-                     This app is restricted for safety. Switch to a different application.",
-                    app_name, bundle_id
-                ));
             }
         }
     }
 
+    // Always allow — observe only
     Ok(())
 }
 
