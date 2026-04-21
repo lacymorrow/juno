@@ -4,6 +4,27 @@ use tracing::info;
 use serde::Serialize;
 use crate::constants::ui::standard_resolutions;
 
+/// The model name currently in use. Updated at the start of each agent run so
+/// that the screenshot pipeline can pick the right resolution tier.
+pub static CURRENT_MODEL: Lazy<RwLock<String>> = Lazy::new(|| {
+    RwLock::new(String::new())
+});
+
+/// Update the current model name (called at agent start).
+pub fn set_current_model(model: &str) {
+    if let Ok(mut m) = CURRENT_MODEL.write() {
+        *m = model.to_string();
+    }
+}
+
+/// Read the current model name.
+pub fn get_current_model() -> String {
+    CURRENT_MODEL
+        .read()
+        .map(|m| m.clone())
+        .unwrap_or_default()
+}
+
 // Global state to store the current screenshot scaling information
 pub static SCREENSHOT_SCALE: Lazy<RwLock<ScalingInfo>> = Lazy::new(|| {
     RwLock::new(ScalingInfo {
@@ -74,8 +95,14 @@ pub fn update_standard_resolution_scaling(
     screenshot_width: u32,
     screenshot_height: u32,
 ) {
-    // Select the best standard resolution based on display aspect ratio
-    let (standard_width, standard_height) = standard_resolutions::select_best_resolution(display_width, display_height);
+    // Select the best standard resolution based on display aspect ratio.
+    // Model-aware: Opus 4.5+ gets higher resolutions (up to 2576px).
+    let model = get_current_model();
+    let (standard_width, standard_height) = if model.is_empty() {
+        standard_resolutions::select_best_resolution(display_width, display_height)
+    } else {
+        standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+    };
 
     // Calculate scaling factors from display to standard resolution
     let display_to_standard_scale_x = if display_width > 0 {
@@ -169,8 +196,14 @@ pub fn update_standard_resolution_scaling_with_display(
     display_origin_y: f64,
     display_id: Option<u32>,
 ) {
-    // Select the best standard resolution based on display aspect ratio
-    let (standard_width, standard_height) = standard_resolutions::select_best_resolution(display_width, display_height);
+    // Select the best standard resolution based on display aspect ratio.
+    // Model-aware: Opus 4.5+ gets higher resolutions (up to 2576px).
+    let model = get_current_model();
+    let (standard_width, standard_height) = if model.is_empty() {
+        standard_resolutions::select_best_resolution(display_width, display_height)
+    } else {
+        standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+    };
 
     // Calculate scaling factors from display to standard resolution
     let display_to_standard_scale_x = if display_width > 0 {

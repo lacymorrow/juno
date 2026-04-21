@@ -151,6 +151,36 @@ return () => { unlisten.then((fn) => fn()); };
 - `capture_screenshot` - Screenshot functionality
 - `get_permissions_status` - Check system permissions
 
+### Window Dragging
+
+All floating windows use **programmatic dragging** via `useDragWindow` hooks. Do NOT use `data-tauri-drag-region` — it is unreliable on macOS with `transparent: true` + `decorations: false` windows.
+
+**Two hooks** in `src/hooks/useDragWindow.ts`:
+
+```typescript
+// For pure drag surfaces (bar containers, background padding):
+import { useDragWindow } from "@/hooks/useDragWindow";
+
+const onDragMouseDown = useDragWindow();
+return <div onMouseDown={onDragMouseDown} className="cursor-grab active:cursor-grabbing">...</div>;
+```
+
+```typescript
+// For surfaces that are BOTH clickable AND draggable (orb, persona):
+import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
+
+const dragHandlers = useDragWindowWithThreshold();
+return <div onClick={handleClick} {...dragHandlers} className="cursor-grab active:cursor-grabbing">...</div>;
+```
+
+**Rules:**
+- `useDragWindow()` — Calls `startDragging()` immediately on mousedown. Use on containers where clicks always mean "drag."
+- `useDragWindowWithThreshold()` — Only drags after 4px of mouse movement. Quick taps pass through to `onClick`. Use when the surface is also an activation target.
+- Interactive elements (button, input, `[role="button"]`, `[data-no-drag]`) are automatically excluded — clicks on them pass through normally.
+- Always add `cursor-grab active:cursor-grabbing` for visual affordance.
+- NEVER add `data-tauri-drag-region` to any element — this attribute is banned.
+- The Tauri capability `core:window:allow-start-dragging` must be present (already in `floating.json`).
+
 ## Component Patterns
 
 ### Modal System

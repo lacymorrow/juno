@@ -65,6 +65,7 @@ This is the most critical architectural principle in Juno. Violating it creates 
 | Rendering chat messages | TypeScript (React components) | Rust |
 | Styling / layout | TypeScript (Tailwind, shadcn/ui) | Rust |
 | Animations / transitions | TypeScript (CSS, React) | Rust |
+| Window dragging | TypeScript (`useDragWindow` hook → `startDragging()`) | `data-tauri-drag-region` attribute |
 | User click → action routing | TypeScript calls `invoke()` | TypeScript runs the action directly |
 
 ### Why This Matters
