@@ -6,6 +6,7 @@ use crate::agent::implementations::agent_runner::DefaultAgentRunner;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
+use crate::agent::providers::claude_cli::ClaudeCliBrain;
 use crate::agent::providers::config::{load_provider_config, AgentMode, ProviderConfig};
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
@@ -216,6 +217,7 @@ impl BrainFactory {
             Provider::OpenAI,
             Provider::Rig,
             Provider::Gemini,
+            Provider::ClaudeCli,
         ];
         let config = Some(load_provider_config(app_handle));
 
@@ -260,6 +262,10 @@ impl BrainFactory {
                                 .and_then(|c| c.get_provider_settings(provider_id))
                                 .and_then(|s| s.api_key.as_ref())
                                 .is_some_and(|k| !k.is_empty())
+                    }
+                    Provider::ClaudeCli => {
+                        // Claude CLI availability = binary exists on PATH (fast check)
+                        crate::agent::providers::claude_cli::is_claude_cli_available()
                     }
                 };
                 ProviderInfo {
@@ -332,6 +338,12 @@ impl BrainFactory {
             }
         }
 
+        // Publish model name so the screenshot pipeline can pick the right
+        // resolution tier (Opus 4.5+ → up to 2576px, legacy → XGA/WXGA/FWXGA).
+        if let Some(ref model) = provider_config.model {
+            crate::utils::coordinates::set_current_model(model);
+        }
+
         match provider {
             Provider::Anthropic => {
                 info!("Initializing Anthropic brain with system prompt...");
@@ -351,6 +363,11 @@ impl BrainFactory {
             Provider::Gemini => {
                 info!("Initializing Gemini brain...");
                 GeminiBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
+            Provider::ClaudeCli => {
+                info!("Initializing Claude CLI brain (subprocess-based, no API key)...");
+                ClaudeCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
@@ -384,6 +401,12 @@ impl BrainFactory {
         // Override with custom system prompt
         provider_config.system_prompt = Some(system_prompt);
 
+        // Publish model name so the screenshot pipeline can pick the right
+        // resolution tier (Opus 4.5+ → up to 2576px, legacy → XGA/WXGA/FWXGA).
+        if let Some(ref model) = provider_config.model {
+            crate::utils::coordinates::set_current_model(model);
+        }
+
         match provider {
             Provider::Anthropic => {
                 info!("Initializing Anthropic brain with custom system prompt...");
@@ -403,6 +426,11 @@ impl BrainFactory {
             Provider::Gemini => {
                 info!("Initializing Gemini brain with custom system prompt...");
                 GeminiBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
+            Provider::ClaudeCli => {
+                info!("Initializing Claude CLI brain with custom system prompt...");
+                ClaudeCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }

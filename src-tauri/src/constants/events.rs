@@ -245,6 +245,9 @@ pub mod tools {
     pub const APPROVAL_REQUEST: &str = "tool-approval-request";
     pub const COMMAND_EXECUTION_START: &str = "command-execution-start";
     pub const COMMAND_EXECUTION_END: &str = "command-execution-end";
+    /// Emitted for every computer use action with target app, sensitivity, and timing.
+    /// Frontend can collect these to display a reviewable action audit trail.
+    pub const COMPUTER_USE_AUDIT: &str = "computer-use-audit";
 }
 
 /// Continuation events

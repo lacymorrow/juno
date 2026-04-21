@@ -222,7 +222,7 @@ const getIslandSize = (state: UIState): SizePresets => {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
     case UI.BAR_STATES_SHRINKING:
-      return "tiny";
+      return "default";
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
       return "long";
@@ -268,12 +268,12 @@ const getLabel = (state: UIState, data: BarStateData): string | null => {
 
 // State → window dimensions (must match island size presets + padding)
 const getDimensions = (state: UIState) => {
-  let w = 44, h = 28;
+  let w = 150, h = 44;
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
     case UI.BAR_STATES_SHRINKING:
-      break; // 44 × 28
+      break; // 150 × 44
     case UI.BAR_STATES_TRANSCRIBING:
       w = 300; h = 56;
       break;
@@ -349,8 +349,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   // ── Window + island resize (declared early so stream listeners can use them) ──
 
   const { resizeWindowIfChanged } = useWindowSize("floating-bar");
-  // Start at zero so the first mount is treated as "growing" (immediate resize)
-  const prevDimensionsRef = useRef({ width: 0, height: 0 });
+  const prevDimensionsRef = useRef(getDimensions(UI.BAR_STATES_DEFAULT));
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Event listeners ──
@@ -911,7 +910,7 @@ export function DynamicBar({
   const onDragMouseDown = useDragWindow();
 
   return (
-    <DynamicIslandProvider initialSize="tiny">
+    <DynamicIslandProvider initialSize="default">
       <div
         className="h-screen w-screen bg-transparent overflow-hidden cursor-grab active:cursor-grabbing"
         onMouseDown={onDragMouseDown}

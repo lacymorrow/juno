@@ -45,8 +45,8 @@
       {
         "label": "floating-bar",
         "url": "/floating-bar",
-        "width": 110,
-        "height": 60,
+        "width": 198,
+        "height": 92,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

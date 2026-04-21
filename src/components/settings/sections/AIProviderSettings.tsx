@@ -138,7 +138,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                           variant="outline"
                           className="text-xs text-muted-foreground"
                         >
-                          No API key
+                          {provider.id === "claude_cli"
+                            ? "CLI not found"
+                            : "No API key"}
                         </Badge>
                       )}
                       {provider.is_available && provider.computer_use_supported && (
@@ -201,7 +203,10 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                           {provider.name}
                           {!provider.is_available && (
                             <span className="text-[10px] text-muted-foreground/60">
-                              — No API key
+                              —{" "}
+                              {provider.id === "claude_cli"
+                                ? "CLI not found"
+                                : "No API key"}
                             </span>
                           )}
                         </span>
@@ -226,7 +231,11 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                             <ModelSelectorLogo provider={provider.id} />
                             <ModelSelectorName>{model.name}</ModelSelectorName>
                             {!provider.is_available && (
-                              <span className="text-xs text-muted-foreground">No API key</span>
+                              <span className="text-xs text-muted-foreground">
+                                {provider.id === "claude_cli"
+                                  ? "CLI not found"
+                                  : "No API key"}
+                              </span>
                             )}
                             {provider.is_available && model.is_recommended && (
                               <span className="text-xs text-green-600">Recommended</span>
@@ -265,66 +274,87 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
           <CardHeader>
             <CardTitle>Provider Configuration</CardTitle>
             <CardDescription>
-              Configure settings for {settings.activeProvider}
+              Configure settings for{" "}
+              {settings.activeProvider === "claude_cli"
+                ? "Claude CLI"
+                : settings.activeProvider}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <EnvironmentVariables>
-              <EnvironmentVariablesHeader>
-                <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
-                <EnvironmentVariablesToggle />
-              </EnvironmentVariablesHeader>
-              <EnvironmentVariablesContent>
-                <EnvironmentVariable
-                  name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
-                  value={settings.formData.apiKey}
-                  onChange={(val) =>
-                    settings.setFormData((prev) => ({
-                      ...prev,
-                      apiKey: val,
-                    }))
-                  }
-                  required
-                />
-              </EnvironmentVariablesContent>
-            </EnvironmentVariables>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="max-tokens">Max Tokens</Label>
-                <Input
-                  id="max-tokens"
-                  type="number"
-                  value={settings.formData.maxTokens}
-                  onChange={(e) =>
-                    settings.setFormData((prev) => ({
-                      ...prev,
-                      maxTokens: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g., 4000"
-                />
+            {settings.activeProvider === "claude_cli" ? (
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+                <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                  No API key needed
+                </p>
+                <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
+                  Claude CLI uses your existing authentication. Run{" "}
+                  <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                    claude login
+                  </code>{" "}
+                  in your terminal if not authenticated.
+                </p>
               </div>
+            ) : (
+              <EnvironmentVariables>
+                <EnvironmentVariablesHeader>
+                  <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
+                  <EnvironmentVariablesToggle />
+                </EnvironmentVariablesHeader>
+                <EnvironmentVariablesContent>
+                  <EnvironmentVariable
+                    name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
+                    value={settings.formData.apiKey}
+                    onChange={(val) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        apiKey: val,
+                      }))
+                    }
+                    required
+                  />
+                </EnvironmentVariablesContent>
+              </EnvironmentVariables>
+            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="temperature">Temperature</Label>
-                <Input
-                  id="temperature"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="2"
-                  value={settings.formData.temperature}
-                  onChange={(e) =>
-                    settings.setFormData((prev) => ({
-                      ...prev,
-                      temperature: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g., 0.7"
-                />
+            {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
+            {settings.activeProvider !== "claude_cli" && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="max-tokens">Max Tokens</Label>
+                  <Input
+                    id="max-tokens"
+                    type="number"
+                    value={settings.formData.maxTokens}
+                    onChange={(e) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        maxTokens: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g., 4000"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="temperature">Temperature</Label>
+                  <Input
+                    id="temperature"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={settings.formData.temperature}
+                    onChange={(e) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        temperature: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g., 0.7"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="system-prompt">System Prompt</Label>

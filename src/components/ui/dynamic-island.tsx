@@ -21,7 +21,6 @@ const min = (a: number, b: number) => (a < b ? a : b)
 export type SizePresets =
   | "reset"
   | "empty"
-  | "tiny"
   | "default"
   | "compact"
   | "compactLong"
@@ -38,7 +37,6 @@ export type SizePresets =
 const SIZE_PRESETS = {
   RESET: "reset",
   EMPTY: "empty",
-  TINY: "tiny",
   DEFAULT: "default",
   COMPACT: "compact",
   COMPACT_LONG: "compactLong",
@@ -70,11 +68,6 @@ const DynamicIslandSizePresets: Record<SizePresets, Preset> = {
     width: 0,
     aspectRatio: 0,
     borderRadius: 0,
-  },
-  [SIZE_PRESETS.TINY]: {
-    width: 44,
-    aspectRatio: 28 / 44,
-    borderRadius: 14,
   },
   [SIZE_PRESETS.DEFAULT]: {
     width: 150,
