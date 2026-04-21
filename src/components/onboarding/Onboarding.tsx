@@ -138,9 +138,9 @@ const getOnboardingSteps = (
     id: "complete",
     title: "Ready to Go",
     subtitle: "AI-powered desktop automation",
-    description: permissionsAlreadyGranted
-      ? "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. Just describe what you need — use the shortcut you learned to activate Juno anytime."
-      : "Juno can control your computer, browse the web, manage files, and execute tasks through natural language. You can always change permissions later in System Preferences.",
+    description: "Juno can control your computer, browse the web, manage files, and execute tasks through natural language." + (permissionsAlreadyGranted
+      ? " Just describe what you need — use the shortcut you learned to activate Juno anytime."
+      : " You can always change permissions later in System Preferences."),
     icon: <CheckCircle className="w-12 h-12 text-green-500" />,
     action: "Start Using Juno",
   },
@@ -813,11 +813,15 @@ export default function OnboardingFlow({
               >
                 <AudioVisualizer
                   appState={
-                    step.id === "cancel" && escapePressed
-                      ? "error"
-                      : shortcutPressed || step.id === "cancel"
-                      ? "listening"
-                      : "idle"
+                    (() => {
+                      if (step.id === "cancel") {
+                        return escapePressed ? "error" : "listening";
+                      }
+                      if (step.id === "shortcut") {
+                        return shortcutPressed ? "listening" : "idle";
+                      }
+                      return "idle";
+                    })()
                   }
                   width={350}
                   height={60}
