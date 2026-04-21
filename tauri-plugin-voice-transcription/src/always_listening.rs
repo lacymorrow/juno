@@ -831,9 +831,9 @@ impl AlwaysListeningController {
                     info!("[AlwaysListening] Active transcription result: '{}'", cleaned_text);
 
                     // Apply intelligent filtering before calling agent
-                    if Self::should_process_with_agent(cleaned_text) {
+                    if Self::should_process_with_agent(&cleaned_text) {
                         // Check for stop words
-                        if Self::contains_stop_words(cleaned_text) {
+                        if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected: '{}' - stopping always listening", cleaned_text);
 
                             // Emit stop event to main app
@@ -1061,9 +1061,9 @@ impl AlwaysListeningController {
                     info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
 
                     // Apply the same content filtering as active transcription
-                    if Self::should_process_with_agent(cleaned_text) {
+                    if Self::should_process_with_agent(&cleaned_text) {
                         // Check for stop words
-                        if Self::contains_stop_words(cleaned_text) {
+                        if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected in waiting mode: '{}' - stopping", cleaned_text);
                             if let Err(e) = app_handle.emit("always-listening:stop-requested",
                                 serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
