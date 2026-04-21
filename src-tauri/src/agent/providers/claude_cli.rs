@@ -13,9 +13,14 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
+
+/// Session-level auth cache — once verified, skip re-checking.
+/// Reset on app restart (static lifetime).
+static AUTH_VERIFIED: AtomicBool = AtomicBool::new(false);
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
 use crate::agent::traits::AgentBrain;
@@ -81,8 +86,14 @@ pub fn is_claude_cli_available() -> bool {
 }
 
 /// Check Claude CLI authentication status by running `claude auth status`.
+/// Caches the result for the session — only runs the subprocess once.
 /// Returns Ok(()) if authenticated, or an error with details.
 async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
+    // Fast path: already verified this session
+    if AUTH_VERIFIED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+
     let output = tokio::process::Command::new(binary_path)
         .args(["auth", "status", "--json"])
         .stdout(Stdio::piped())
@@ -114,6 +125,7 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 info!("Claude CLI authenticated as: {}", email);
+                AUTH_VERIFIED.store(true, Ordering::Relaxed);
                 Ok(())
             } else {
                 Err(AgentError::ConfigurationError(
@@ -124,6 +136,7 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
         Err(_) => {
             // If we can't parse JSON but the command succeeded, assume OK
             warn!("Could not parse claude auth status output, assuming authenticated");
+            AUTH_VERIFIED.store(true, Ordering::Relaxed);
             Ok(())
         }
     }
@@ -176,8 +189,9 @@ impl ClaudeCliBrain {
             "stream-json".to_string(),
             "--model".to_string(),
             self.model.clone(),
-            "--verbose".to_string(),
-            "false".to_string(),
+            // --strict-mcp-config with no --mcp-config disables all MCP servers.
+            // We can't use --bare because it blocks OAuth/keychain auth.
+            "--strict-mcp-config".to_string(),
         ];
 
         if let Some(ref prompt) = self.system_prompt {
