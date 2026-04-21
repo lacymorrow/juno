@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Mic,
@@ -279,6 +280,40 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
     await sendInteraction(interaction);
   }, []);
 
+  // Listen for OS-level window focus changes (Cmd+Tab, clicking another app, etc.)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const fn = await appWindow.onFocusChanged(({ payload: focused }) => {
+          if (!mounted) return;
+          if (focused) {
+            handleFocus();
+          } else {
+            handleBlur();
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      } catch (error) {
+        console.error("VoiceAiBarDark: Failed to setup window focus listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [handleFocus, handleBlur]);
+
   // === UI HELPERS ===
 
   const getStateIcon = () => {
@@ -362,10 +397,13 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
     return cn(baseClass, stateClasses[currentUiState as keyof typeof stateClasses] || "dark-bar-default");
   };
 
+  // === WINDOW DRAGGING ===
+  const onDragMouseDown = useDragWindow();
+
   // === RENDER ===
 
   return (
-    <div className={cn("voice-ai-bar-dark-container", className)}>
+    <div className={cn("voice-ai-bar-dark-container", className)} onMouseDown={onDragMouseDown}>
       <div
         className={getBarClass()}
         onMouseEnter={() => setIsHovered(true)}
@@ -475,6 +513,11 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
           position: relative;
           height: 100%;
           width: 100%;
+          cursor: grab;
+        }
+
+        .voice-ai-bar-dark-container:active {
+          cursor: grabbing;
         }
 
         .dark-bar {

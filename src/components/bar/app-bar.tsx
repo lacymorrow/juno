@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Mic, Zap, Volume2, MessageCircle, Keyboard, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "../VoiceStatusIndicator";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
 
 // === STANDARDIZED UI API TYPES ===
@@ -357,8 +358,10 @@ export function AppBar() {
     );
   };
 
+  const onDragMouseDown = useDragWindow();
+
   return (
-    <div className="relative">
+    <div className="relative cursor-grab active:cursor-grabbing" onMouseDown={onDragMouseDown}>
       <button
         type="button"
         aria-label="Activate assistant"
@@ -379,7 +382,7 @@ export function AppBar() {
         {(barState.barState === UI.BAR_STATES_DEFAULT ||
           barState.barState === UI.BAR_STATES_DICTATION_READY ||
           barState.barState === UI.BAR_STATES_FINISHING) && (
-          <div className="flex items-center gap-2" data-tauri-drag-region>
+          <div className="flex items-center gap-2">
             {getMainIcon(barState.barState || UI.BAR_STATES_DEFAULT)}
             {uiConfig.showVoiceIndicator &&
               (barState.voiceMode !== UI.VOICE_MODES_IDLE ||
@@ -390,8 +393,7 @@ export function AppBar() {
             {barState.isAlwaysListening && (
               <div
                 className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
-                data-tauri-drag-region
-              />
+                             />
             )}
           </div>
         )}
@@ -408,9 +410,8 @@ export function AppBar() {
                 ? "opacity-100"
                 : "opacity-0"
             )}
-            data-tauri-drag-region
-          >
-            <div className="flex items-center gap-2" data-tauri-drag-region>
+                     >
+            <div className="flex items-center gap-2">
               {getMainIcon(barState.barState || UI.BAR_STATES_INPUT)}
               <input
                 ref={inputRef}
@@ -446,14 +447,12 @@ export function AppBar() {
         ].includes((barState.barState || UI.BAR_STATES_DEFAULT) as any) && (
           <div
             className="flex items-center justify-between w-full h-full"
-            data-tauri-drag-region
-          >
-            <div className="flex items-center gap-2" data-tauri-drag-region>
+                     >
+            <div className="flex items-center gap-2">
               {getMainIcon(barState.barState || UI.BAR_STATES_DEFAULT)}
               <span
                 className="text-sm font-medium truncate"
-                data-tauri-drag-region
-              >
+                             >
                 {getStatusText(
                   barState.barState || UI.BAR_STATES_DEFAULT,
                   barState.currentError
