@@ -98,6 +98,10 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "checkout", "wire transfer", "payment",
 ];
 
+/// NSString encoding constant for UTF-8 (Apple docs: NSUTF8StringEncoding = 4).
+#[cfg(target_os = "macos")]
+const NS_UTF8_STRING_ENCODING: usize = 4;
+
 /// Get the frontmost application's bundle ID via NSWorkspace.
 /// Returns None if detection fails (non-fatal).
 #[cfg(target_os = "macos")]
@@ -125,7 +129,7 @@ fn get_frontmost_bundle_id() -> Option<String> {
         }
 
         let bytes: *const std::os::raw::c_char = msg_send![bundle_id_obj, UTF8String];
-        let len: usize = msg_send![bundle_id_obj, lengthOfBytesUsingEncoding:4];
+        let len: usize = msg_send![bundle_id_obj, lengthOfBytesUsingEncoding:NS_UTF8_STRING_ENCODING];
         if bytes.is_null() || len == 0 {
             return None;
         }
@@ -166,7 +170,7 @@ fn get_frontmost_app_name() -> Option<String> {
         }
 
         let bytes: *const std::os::raw::c_char = msg_send![name_obj, UTF8String];
-        let len: usize = msg_send![name_obj, lengthOfBytesUsingEncoding:4];
+        let len: usize = msg_send![name_obj, lengthOfBytesUsingEncoding:NS_UTF8_STRING_ENCODING];
         if bytes.is_null() || len == 0 {
             return None;
         }
@@ -243,7 +247,7 @@ fn emit_action_audit(
             .as_millis() as u64,
         "coordinate": input.get("coordinate"),
         "text_preview": input["text"].as_str().map(|t| {
-            if t.len() > 50 { format!("{}...", t.chars().take(50).collect::<String>()) } else { t.to_string() }
+            if t.chars().count() > 50 { format!("{}...", t.chars().take(50).collect::<String>()) } else { t.to_string() }
         }),
     });
 
