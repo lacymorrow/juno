@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // No direct window calls needed; resizing is handled by hook
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getBarLayoutWindowLabel } from "@/components/bar/barAppearance";
 import {
@@ -485,6 +486,40 @@ const styles = \`
     await sendInteraction(interaction);
   }, []);
 
+  // Listen for OS-level window focus changes (Cmd+Tab, clicking another app, etc.)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const fn = await appWindow.onFocusChanged(({ payload: focused }) => {
+          if (!mounted) return;
+          if (focused) {
+            handleFocus();
+          } else {
+            handleBlur();
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      } catch (error) {
+        console.error("VoiceAiBar: Failed to setup window focus listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [handleFocus, handleBlur]);
+
   const handleResponseState = () => {
     setIsCalculatingDimensions(true);
     setResponsePhase("collapsed");
@@ -815,10 +850,12 @@ const styles = \`
     }
   };
 
+  const onDragMouseDown = useDragWindow();
+
   return (
     <div
       className={`voice-ai-bar-container ${className}`}
-      data-tauri-drag-region
+      onMouseDown={onDragMouseDown}
       style={
         {
           "--response-width": `${contentDimensions.width}px`,
@@ -829,7 +866,7 @@ const styles = \`
       }
     >
       {/* Floating Voice Control Bar */}
-      <div className={getBarClass()} data-tauri-drag-region>
+      <div className={getBarClass()}>
         {/* Text Input Field - Only visible in input state */}
         {barState.barState === UI.BAR_STATES_INPUT && (
           <form onSubmit={handleInputSubmit} className="input-form">
@@ -1140,6 +1177,11 @@ const styles = \`
           justify-content: center;
           width: 100%;
           height: 100%;
+          cursor: grab;
+        }
+
+        .voice-ai-bar-container:active {
+          cursor: grabbing;
         }
 
         .idle-container {

@@ -15,7 +15,7 @@ use crate::commands::mouse::{
     left_click_drag
 };
 use serde_json::{json, Value};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tracing::{info, warn};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,8 +73,190 @@ async fn enforce_action_cooldown(action: &str) {
     LAST_UI_ACTION_MS.store(final_ms, Ordering::Relaxed);
 }
 
-// --- Security and Validation Helpers ---
+// --- Computer Use Safety Checks ---
 
+/// Juno's own bundle identifier — used for audit logging when the agent
+/// targets its own window.
+const JUNO_BUNDLE_ID: &str = "com.juno.desktop";
+
+/// Bundle IDs that receive extra audit logging when targeted.
+/// These are sensitive system apps — currently observe-only (no blocking).
+/// To enforce blocking, check these in `check_app_safety` and return Err.
+const NOTABLE_BUNDLE_IDS: &[&str] = &[
+    JUNO_BUNDLE_ID,                        // Self-automation awareness
+    "com.apple.systempreferences",         // System Preferences / System Settings
+    "com.apple.keychainaccess",            // Keychain Access — credential store
+];
+
+/// Actions considered sensitive/destructive — these get extra audit logging.
+/// Kept narrow to avoid false positives on normal text like "remove the space".
+const SENSITIVE_PATTERNS: &[&str] = &[
+    "rm -rf", "rm -r", "sudo", "format disk", "mkfs",
+    "drop table", "drop database", "truncate",
+    "password", "credential", "secret", "api_key", "api-key",
+    "force push", "git push -f", "git push --force",
+    "complete checkout", "wire transfer", "payment",
+];
+
+/// NSString encoding constant for UTF-8 (Apple docs: NSUTF8StringEncoding = 4).
+#[cfg(target_os = "macos")]
+const NS_UTF8_STRING_ENCODING: usize = 4;
+
+/// Get the frontmost application's bundle ID via NSWorkspace.
+/// Returns None if detection fails (non-fatal).
+#[cfg(target_os = "macos")]
+fn get_frontmost_bundle_id() -> Option<String> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let workspace_class = class!(NSWorkspace);
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![workspace_class, sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+
+        if frontmost_app.is_null() {
+            return None;
+        }
+
+        let bundle_id_obj: *mut objc::runtime::Object =
+            msg_send![frontmost_app, bundleIdentifier];
+        if bundle_id_obj.is_null() {
+            return None;
+        }
+
+        let bytes: *const std::os::raw::c_char = msg_send![bundle_id_obj, UTF8String];
+        let len: usize = msg_send![bundle_id_obj, lengthOfBytesUsingEncoding:NS_UTF8_STRING_ENCODING];
+        if bytes.is_null() || len == 0 {
+            return None;
+        }
+
+        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+        std::str::from_utf8(bytes_slice).ok().map(|s| s.to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_frontmost_bundle_id() -> Option<String> {
+    None
+}
+
+/// Get the frontmost application's localized name via NSWorkspace.
+#[cfg(target_os = "macos")]
+fn get_frontmost_app_name() -> Option<String> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let workspace_class = class!(NSWorkspace);
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![workspace_class, sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+
+        if frontmost_app.is_null() {
+            return None;
+        }
+
+        let name_obj: *mut objc::runtime::Object =
+            msg_send![frontmost_app, localizedName];
+        if name_obj.is_null() {
+            return None;
+        }
+
+        let bytes: *const std::os::raw::c_char = msg_send![name_obj, UTF8String];
+        let len: usize = msg_send![name_obj, lengthOfBytesUsingEncoding:NS_UTF8_STRING_ENCODING];
+        if bytes.is_null() || len == 0 {
+            return None;
+        }
+
+        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+        std::str::from_utf8(bytes_slice).ok().map(|s| s.to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_frontmost_app_name() -> Option<String> {
+    None
+}
+
+/// Logs when the agent targets a notable app (Juno itself, system prefs, etc.).
+/// Currently observe-only — always allows the action. The infrastructure exists
+/// so blocking can be enabled later via user settings if desired.
+fn check_app_safety(action: &str) -> Result<(), String> {
+    // Read-only actions don't need any logging
+    if !is_ui_modifying_action(action) {
+        return Ok(());
+    }
+
+    if let Some(bundle_id) = get_frontmost_bundle_id() {
+        if NOTABLE_BUNDLE_IDS.contains(&bundle_id.as_str()) {
+            let app_name = get_frontmost_app_name().unwrap_or_else(|| bundle_id.clone());
+
+            if bundle_id == JUNO_BUNDLE_ID {
+                info!(
+                    "🔍 Self-targeting: agent is performing '{}' in Juno's own window ({})",
+                    action, app_name
+                );
+            } else {
+                info!(
+                    "🔍 Notable app target: agent is performing '{}' in {} ({})",
+                    action, app_name, bundle_id
+                );
+            }
+        }
+    }
+
+    // Always allow — observe only
+    Ok(())
+}
+
+/// Check if an action's typed text contains sensitive patterns.
+/// Returns the matched pattern if found (for audit logging), or None.
+fn detect_sensitive_content(input: &Value) -> Option<&'static str> {
+    let text = input["text"].as_str().unwrap_or_default().to_lowercase();
+    if text.is_empty() {
+        return None;
+    }
+
+    SENSITIVE_PATTERNS.iter().find(|&&pattern| text.contains(pattern)).copied()
+}
+
+/// Emit an audit log event for the action being performed.
+/// This allows the frontend to display a reviewable history of agent actions.
+fn emit_action_audit(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    input: &Value,
+    target_app: Option<&str>,
+    sensitive_pattern: Option<&str>,
+) {
+    let audit = json!({
+        "action": action,
+        "target_app": target_app,
+        "sensitive": sensitive_pattern.is_some(),
+        "sensitive_pattern": sensitive_pattern,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis() as u64,
+        "coordinate": input.get("coordinate"),
+        "text_preview": input["text"].as_str().map(|t| {
+            if t.chars().count() > 50 { format!("{}...", t.chars().take(50).collect::<String>()) } else { t.to_string() }
+        }),
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::tools::COMPUTER_USE_AUDIT, &audit) {
+        tracing::debug!("Failed to emit audit event: {}", e);
+    }
+}
+
+// --- Security and Validation Helpers ---
 
 /// Security configuration for text editor operations
 struct SecurityConfig {
@@ -334,8 +516,8 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
         },
         "type" => {
             let text = input["text"].as_str().unwrap_or("");
-            if text.len() > 30 {
-                format!("computer/type(\"{}...\")", &text[..27])
+            if text.chars().count() > 30 {
+                format!("computer/type(\"{}...\")", text.chars().take(27).collect::<String>())
             } else {
                 format!("computer/type(\"{}\")", text)
             }
@@ -452,6 +634,31 @@ pub async fn execute_computer_tool(
     // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures
     enforce_action_cooldown(action).await;
 
+    // --- Safety checks ---
+    // 1. Self-automation prevention + blocked app check
+    if let Err(blocked_msg) = check_app_safety(action) {
+        return Ok(create_anthropic_error_response(blocked_msg));
+    }
+
+    // 2. Sensitive content detection (for audit logging)
+    let sensitive_pattern = detect_sensitive_content(&input);
+    if let Some(pattern) = sensitive_pattern {
+        info!(
+            "⚠️ Sensitive action detected: '{}' contains pattern '{}' — logged to audit",
+            action, pattern
+        );
+    }
+
+    // 3. Emit audit log event for frontend action history
+    let target_app = get_frontmost_app_name();
+    emit_action_audit(
+        app_handle,
+        action,
+        &input,
+        target_app.as_deref(),
+        sensitive_pattern,
+    );
+
     // Execute action
     let execution_start = std::time::Instant::now();
     let result = match action {
@@ -484,6 +691,13 @@ pub async fn execute_computer_tool(
                 &format!("computer ({})", action)
             ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
+            // Extract modifier key from `text` parameter (Anthropic API spec).
+            // When present on click/scroll actions, `text` holds a modifier key name
+            // (shift, ctrl, alt, super) to be held during the action.
+            let modifier = input["text"].as_str()
+                .filter(|t| matches!(*t, "shift" | "ctrl" | "alt" | "super" | "command" | "cmd" | "meta" | "option"))
+                .map(|m| m.to_string());
+
             match action {
                 "left_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -494,7 +708,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                    handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
                         .map_err(|e| format!("Left click failed: {}", e)));
 
                     Ok(json!({
@@ -510,7 +724,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                    handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
                         .map_err(|e| format!("Right click failed: {}", e)));
 
                     Ok(json!({
@@ -526,7 +740,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(middle_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                    handle_anthropic_result!(middle_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
                         .map_err(|e| format!("Middle click failed: {}", e)));
 
                     Ok(json!({
@@ -542,7 +756,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                    handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
                         .map_err(|e| format!("Double click failed: {}", e)));
 
                     Ok(json!({
@@ -558,7 +772,7 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(triple_click(app_handle.clone(), state_manager, screen_x, screen_y, None).await
+                    handle_anthropic_result!(triple_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
                         .map_err(|e| format!("Triple click failed: {}", e)));
 
                     Ok(json!({

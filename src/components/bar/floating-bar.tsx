@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, type FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import {
   Mic,
   Sparkles,
@@ -394,6 +395,40 @@ const FloatingBarContent = () => {
     await sendInteraction(interaction);
   }, []);
 
+  // Listen for OS-level window focus changes (Cmd+Tab, clicking another app, etc.)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const fn = await appWindow.onFocusChanged(({ payload: focused }) => {
+          if (!mounted) return;
+          if (focused) {
+            handleFocus();
+          } else {
+            handleBlur();
+          }
+        });
+        if (mounted) {
+          unlisten = fn;
+        } else {
+          fn();
+        }
+      } catch (error) {
+        console.error("FloatingBar: Failed to setup window focus listener:", error);
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [handleFocus, handleBlur]);
+
   // === VISUAL HELPERS ===
   const getMainIcon = () => {
     switch (barState.barState) {
@@ -582,9 +617,11 @@ const FloatingBarContent = () => {
 };
 
 export function FloatingBar() {
+  const onDragMouseDown = useDragWindow();
+
   return (
     <DynamicIslandProvider initialSize="default">
-      <div className="flex min-h-screen items-center justify-center bg-gray-900">
+      <div className="flex min-h-screen items-center justify-center cursor-grab active:cursor-grabbing" onMouseDown={onDragMouseDown}>
         <DynamicIsland id="floating-bar-refactored">
           <FloatingBarContent />
         </DynamicIsland>
