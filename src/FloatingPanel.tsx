@@ -2,6 +2,7 @@ import TransparentFloatingPanel from "@/components/TransparentFloatingPanel";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { UI } from "@/lib/constants.generated";
 import "./styles/globals.css";
 
@@ -35,6 +36,7 @@ function getWindowDimensionsForMode(
 }
 
 export default function FloatingPanel() {
+  const onDragMouseDown = useDragWindow();
   const [isHovered, setIsHovered] = useState(false);
   const [windowReady, setWindowReady] = useState(false);
   const [panelMode, setPanelMode] = useState<
@@ -177,8 +179,8 @@ export default function FloatingPanel() {
 
   return (
     <div
-      className="w-screen h-screen bg-transparent overflow-hidden cursor-move"
-      data-tauri-drag-region
+      className="w-screen h-screen bg-transparent overflow-hidden cursor-grab active:cursor-grabbing"
+      onMouseDown={onDragMouseDown}
       style={{
         // Enable pointer events for the entire window area
         pointerEvents: "auto",

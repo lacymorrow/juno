@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { Persona } from "@/components/ai-elements/persona";
 import { mapToPersonaState, getStatusLabel } from "./bar-state-mapper";
@@ -117,13 +118,14 @@ export function PersonaBar({ barAppearance: _barAppearance }: PersonaBarProps) {
   const personaState = mapToPersonaState(barState.barState);
   const statusLabel = getStatusLabel(barState.barState);
   const hasError = barState.barState === UI.BAR_STATES_ERROR;
+  const dragHandlers = useDragWindowWithThreshold();
 
   return (
     <div
-      className="relative select-none cursor-pointer"
+      className="relative select-none cursor-grab active:cursor-grabbing"
       style={{ width: PERSONA_SIZE, height: PERSONA_SIZE }}
       onClick={handleClick}
-      data-tauri-drag-region
+      {...dragHandlers}
     >
       <Persona
         state={personaState}

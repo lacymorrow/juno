@@ -140,6 +140,16 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         info!("[Escape Key] Pressed - initiating coordinated stop");
         let app_handle_clone = app.clone();
         tauri::async_runtime::spawn(async move {
+            // Immediate visual feedback — set bar to Stopping state before cleanup begins
+            crate::commands::ui_commands::set_stopping_state().await;
+
+            // Play a subtle system sound for audio confirmation
+            tokio::task::spawn_blocking(|| {
+                let _ = std::process::Command::new("afplay")
+                    .arg("/System/Library/Sounds/Tink.aiff")
+                    .output();
+            });
+
             let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
             if let Err(e) = coordinator
                 .stop_all_operations(&app_handle_clone, "Escape key pressed")

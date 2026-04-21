@@ -29,6 +29,8 @@ export function getStatusLabel(barState: string): string {
       return "Done";
     case UI.BAR_STATES_ERROR:
       return "Error";
+    case UI.BAR_STATES_STOPPING:
+      return "Stopping...";
     case UI.BAR_STATES_FINISHING:
       return "Finishing...";
     case UI.BAR_STATES_INPUT:
@@ -71,6 +73,7 @@ export function mapToOrbState(barState: string): OrbAgentState {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_SUCCESS:
     case UI.BAR_STATES_ERROR:
+    case UI.BAR_STATES_STOPPING:
     default:
       return null;
   }
@@ -104,6 +107,7 @@ export function mapToPersonaState(barState: string): PersonaState {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_SUCCESS:
     case UI.BAR_STATES_ERROR:
+    case UI.BAR_STATES_STOPPING:
     default:
       return "idle";
   }

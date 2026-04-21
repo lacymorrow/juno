@@ -52,6 +52,7 @@ pub mod bar_states {
     pub const ALWAYS_LISTENING: &str = "always_listening";
     pub const FINISHING: &str = "finishing";
     pub const AGENT_RESPONDING: &str = "agent_responding";
+    pub const STOPPING: &str = "stopping";
 }
 
 /// Voice mode constants
@@ -118,8 +119,12 @@ pub mod text_display {
     pub const MAX_UI_PREVIEW_TEXT_LENGTH: usize = 50;
 }
 
-/// Standard resolution constants for Anthropic Computer Use API compliance
-/// Screenshots must be scaled to these standard resolutions per specification
+/// Standard resolution constants for Anthropic Computer Use API compliance.
+/// Screenshots must be scaled to these standard resolutions per specification.
+///
+/// Opus 4.5+ models support up to 2,576px on the long edge with 1:1 pixel
+/// coordinates (no scale-factor conversion needed), so we offer a high-res
+/// tier alongside the legacy low-res resolutions for older models.
 pub mod standard_resolutions {
     /// Extended Graphics Array - 1024x768
     pub const XGA: (u32, u32) = (1024, 768);
@@ -130,35 +135,101 @@ pub mod standard_resolutions {
     /// Full Wide Extended Graphics Array - 1366x768
     pub const FWXGA: (u32, u32) = (1366, 768);
 
-    /// All supported standard resolutions
-    pub const ALL_RESOLUTIONS: [(u32, u32); 3] = [XGA, WXGA, FWXGA];
+    // --- High-resolution tier (Opus 4.5+ / computer_20251124) ---
+    // Anthropic docs: "Opus 4.7 supports up to 2576 pixels on the long edge,
+    // and its coordinates are 1:1 with image pixels (no scale-factor
+    // conversion required)."  These apply to all models using the
+    // computer_20251124 tool type.
 
-    /// Select the best standard resolution based on display dimensions
-    /// Returns the standard resolution that best matches the display aspect ratio
-    /// and provides reasonable scaling factors
+    /// High-res 16:10 — matches MacBook Pro 14" logical resolution
+    pub const HD_WXGA: (u32, u32) = (1680, 1050);
+
+    /// High-res 16:9 — standard 1080p
+    pub const HD_1080: (u32, u32) = (1920, 1080);
+
+    /// Max Anthropic resolution — 2,576px long edge, 16:10 aspect
+    pub const ULTRA_HD: (u32, u32) = (2576, 1610);
+
+    /// Legacy resolutions for older models (pre-Opus 4.5)
+    pub const LEGACY_RESOLUTIONS: [(u32, u32); 3] = [XGA, WXGA, FWXGA];
+
+    /// High-resolution options for Opus 4.5+ models
+    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 3] = [HD_WXGA, HD_1080, ULTRA_HD];
+
+    /// All supported standard resolutions (legacy + high-res)
+    pub const ALL_RESOLUTIONS: [(u32, u32); 6] = [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD];
+
+    /// Whether a model supports high-resolution screenshots (2,576px).
+    /// Returns true for Opus 4.5+ models that use computer_20251124.
+    /// Also matches Claude CLI aliases ("opus", "sonnet") which resolve
+    /// to current-gen models that support high-res.
+    pub fn supports_high_res(model: &str) -> bool {
+        use crate::agent::providers::types::model_ids;
+        model_ids::OPUS_4_5_PLUS_MODELS.contains(&model)
+            || matches!(model, "opus" | "sonnet")
+    }
+
+    /// Select the best standard resolution for a given display and model.
+    ///
+    /// For high-res capable models (Opus 4.5+), picks the largest resolution
+    /// that fits within 2,576px on the long edge while matching aspect ratio.
+    /// For legacy models, picks from the original XGA/WXGA/FWXGA set.
     pub fn select_best_resolution(display_width: u32, display_height: u32) -> (u32, u32) {
-        if display_width == 0 || display_height == 0 {
+        // Default to legacy — callers that are model-aware should use
+        // select_best_resolution_for_model() instead.
+        select_best_resolution_from_set(display_width, display_height, &LEGACY_RESOLUTIONS)
+    }
+
+    /// Model-aware resolution selection.
+    pub fn select_best_resolution_for_model(
+        display_width: u32,
+        display_height: u32,
+        model: &str,
+    ) -> (u32, u32) {
+        let candidates = if supports_high_res(model) {
+            &ALL_RESOLUTIONS[..]
+        } else {
+            &LEGACY_RESOLUTIONS[..]
+        };
+        select_best_resolution_from_set(display_width, display_height, candidates)
+    }
+
+    /// Pick the candidate resolution whose aspect ratio is closest to the display.
+    /// Only considers resolutions that fit within the display dimensions.
+    /// Among ties, prefer the larger resolution (better click accuracy).
+    fn select_best_resolution_from_set(
+        display_width: u32,
+        display_height: u32,
+        candidates: &[(u32, u32)],
+    ) -> (u32, u32) {
+        if display_width == 0 || display_height == 0 || candidates.is_empty() {
             return XGA; // Default fallback
         }
 
-        let display_aspect = display_width as f32 / display_height as f32;
+        let display_aspect = display_width as f64 / display_height as f64;
 
-        // Calculate aspect ratios for each standard resolution
-        let xga_aspect = XGA.0 as f32 / XGA.1 as f32;
-        let wxga_aspect = WXGA.0 as f32 / WXGA.1 as f32;
-        let fwxga_aspect = FWXGA.0 as f32 / FWXGA.1 as f32;
+        // Only consider resolutions that fit within the display
+        let fitting: Vec<(u32, u32)> = candidates
+            .iter()
+            .copied()
+            .filter(|(w, h)| *w <= display_width && *h <= display_height)
+            .collect();
 
-        // Find the closest aspect ratio match
-        let xga_diff = (display_aspect - xga_aspect).abs();
-        let wxga_diff = (display_aspect - wxga_aspect).abs();
-        let fwxga_diff = (display_aspect - fwxga_aspect).abs();
+        // Fall back to full candidate list if none fit (very small display)
+        let pool = if fitting.is_empty() { candidates } else { &fitting };
 
-        if xga_diff <= wxga_diff && xga_diff <= fwxga_diff {
-            XGA
-        } else if wxga_diff <= fwxga_diff {
-            WXGA
-        } else {
-            FWXGA
-        }
+        pool
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                let diff_a = (display_aspect - a.0 as f64 / a.1 as f64).abs();
+                let diff_b = (display_aspect - b.0 as f64 / b.1 as f64).abs();
+                diff_a
+                    .partial_cmp(&diff_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    // Tie-break: prefer larger resolution
+                    .then_with(|| (b.0 * b.1).cmp(&(a.0 * a.1)))
+            })
+            .unwrap_or(XGA)
     }
 }

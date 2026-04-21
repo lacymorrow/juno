@@ -65,6 +65,7 @@ This is the most critical architectural principle in Juno. Violating it creates 
 | Rendering chat messages | TypeScript (React components) | Rust |
 | Styling / layout | TypeScript (Tailwind, shadcn/ui) | Rust |
 | Animations / transitions | TypeScript (CSS, React) | Rust |
+| Window dragging | TypeScript (`useDragWindow` hook → `startDragging()`) | `data-tauri-drag-region` attribute |
 | User click → action routing | TypeScript calls `invoke()` | TypeScript runs the action directly |
 
 ### Why This Matters
@@ -147,7 +148,8 @@ Key events: `agent-text-stream`, `agent-stream-start/end`, `provider_settings_ch
 | `src-tauri/src/state.rs` | Central `AppState` with all shared state |
 | `src-tauri/src/commands/` | 50+ Tauri command handlers (organized by domain) |
 | `src-tauri/src/agent/tools/` | 24 tool modules (computer use, browser, desktop, safari, MCP) |
-| `src-tauri/src/agent/providers/` | AI provider integrations |
+| `src-tauri/src/agent/providers/` | AI provider integrations (Anthropic, OpenAI, Gemini, Claude CLI) |
+| `src-tauri/src/agent/providers/claude_cli.rs` | Claude CLI subprocess provider — no API key needed |
 | `src-tauri/src/agent/prompts/` | Prompt management with `{{variable}}` substitution |
 | `src-tauri/src/cloud/connector.rs` | WebSocket cloud connector with hardware monitoring |
 | `src-tauri/src/menu/tray_menu.rs` | Dynamic system tray |
@@ -155,6 +157,23 @@ Key events: `agent-text-stream`, `agent-stream-start/end`, `provider_settings_ch
 ### Package Manager
 
 Bun (uses `bun.lock`).
+
+### Claude CLI Provider
+
+Alternative to direct API keys — uses the locally installed `claude` binary (Claude Code) as a subprocess. Users with a Claude Max/Pro subscription can use Juno through their existing CLI authentication.
+
+**How it works**: Spawns `claude -p --output-format=stream-json --model <model> --strict-mcp-config --dangerously-skip-permissions "query"` per query. Parses NDJSON output and emits the same Tauri streaming events as the Anthropic API provider.
+
+**Key flags**:
+- `-p` — Print mode (non-interactive, pipe-friendly)
+- `--strict-mcp-config` — Disables all MCP servers (no `--mcp-config` provided)
+- `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions
+
+**Auth**: Checked once per session via `claude auth status --json`, cached with `AtomicBool`. Uses OAuth/keychain (not API key).
+
+**Models**: `opus`, `sonnet`, `haiku` (CLI aliases — resolves to latest versions automatically)
+
+**Limitations**: Juno's computer use tools (screenshots, clicking) are not wired through the CLI — the CLI uses its own built-in tools (Bash, Read, Edit, etc.). User cannot cancel a running CLI query via Juno's escape key.
 
 ## Critical Development Rules
 

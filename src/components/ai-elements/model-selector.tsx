@@ -110,6 +110,13 @@ export type ModelSelectorLogoProps = Omit<
   provider: string;
 };
 
+// Map provider IDs to their logo identifiers on models.dev
+const providerLogoId = (provider: string): string => {
+  // Claude CLI uses Anthropic's Claude models under the hood
+  if (provider === "claude_cli") return "anthropic";
+  return provider;
+};
+
 export const ModelSelectorLogo = ({
   provider,
   className,
@@ -120,7 +127,7 @@ export const ModelSelectorLogo = ({
     alt={`${provider} logo`}
     className={cn("size-3 dark:invert", className)}
     height={12}
-    src={`https://models.dev/logos/${provider}.svg`}
+    src={`https://models.dev/logos/${providerLogoId(provider)}.svg`}
     width={12}
   />
 );
