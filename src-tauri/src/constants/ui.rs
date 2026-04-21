@@ -161,9 +161,12 @@ pub mod standard_resolutions {
 
     /// Whether a model supports high-resolution screenshots (2,576px).
     /// Returns true for Opus 4.5+ models that use computer_20251124.
+    /// Also matches Claude CLI aliases ("opus", "sonnet") which resolve
+    /// to current-gen models that support high-res.
     pub fn supports_high_res(model: &str) -> bool {
         use crate::agent::providers::types::model_ids;
         model_ids::OPUS_4_5_PLUS_MODELS.contains(&model)
+            || matches!(model, "opus" | "sonnet")
     }
 
     /// Select the best standard resolution for a given display and model.

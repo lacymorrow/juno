@@ -1522,7 +1522,7 @@ impl ToolProvider for LocalToolProvider {
                 info!("Filtered out {} disabled tools", disabled_count);
             }
             if unconfigured_count > 0 {
-                info!("Filtered out {} unconfigured tools", unconfigured_count);
+                info!("Included {} unconfigured tools (allowed by default)", unconfigured_count);
             }
 
             all_tools = enabled_tools;

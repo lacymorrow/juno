@@ -95,7 +95,7 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "drop table", "drop database", "truncate",
     "password", "credential", "secret", "api_key", "api-key",
     "force push", "git push -f", "git push --force",
-    "checkout", "wire transfer", "payment",
+    "complete checkout", "wire transfer", "payment",
 ];
 
 /// NSString encoding constant for UTF-8 (Apple docs: NSUTF8StringEncoding = 4).
