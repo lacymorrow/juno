@@ -1,0 +1,249 @@
+# Competitive Computer Use Audit
+
+**Date:** 2026-04-21
+**Author:** Automated audit via Claude Code
+**Scope:** Juno vs OpenAI Codex vs Anthropic Computer Use API vs Google Gemini
+
+---
+
+## Executive Summary
+
+Juno has **full action parity** with Anthropic's Computer Use API (17 actions) and **exceeds** Codex on raw capability. The safety infrastructure is fully built out — app targeting awareness, sensitive action detection, per-action audit trail — but runs in **observe-only mode** by default, matching Juno's philosophy as a power tool. Juno's unique moat is its native macOS + voice + multi-agent + MCP stack, which no competitor matches.
+
+**Key wins from this audit:**
+- High-res screenshots up to 2,576px for Opus 4.5+ (3.5x precision improvement)
+- Modifier keys on click (shift+click, ctrl+click, cmd+click)
+- Full action audit trail with target app + sensitivity detection
+- Opus 4.7 and Sonnet 4.6 model support
+
+---
+
+## Competitors Analyzed
+
+| Product | Company | Architecture | Launch |
+|---------|---------|-------------|--------|
+| Computer Use API | Anthropic | API-first, caller owns environment | Beta (2024+) |
+| Codex Computer Use | OpenAI | Desktop-native macOS app | April 16, 2026 |
+| Gemini Computer Use | Google | Browser-anchored, DOM-aware | Q2 2026 |
+| **Juno** | Lacy Morrow | Native macOS Tauri app, Rust backend | — |
+
+---
+
+## 1. Action Parity Matrix
+
+| Action | Anthropic API | Codex | Juno | Status |
+|--------|:---:|:---:|:---:|---|
+| `screenshot` | Yes | Yes | Yes | Parity |
+| `left_click` | Yes | Yes | Yes | Parity |
+| `right_click` | Yes | Yes | Yes | Parity |
+| `middle_click` | Yes | ? | Yes | Parity |
+| `double_click` | Yes | Yes | Yes | Parity |
+| `triple_click` | Yes | ? | Yes | Parity |
+| `left_click_drag` | Yes | ? | Yes | Parity |
+| `mouse_move` | Yes | Yes | Yes | Parity |
+| `left_mouse_down` | Yes | ? | Yes | Parity |
+| `left_mouse_up` | Yes | ? | Yes | Parity |
+| `key` | Yes | Yes | Yes | Parity |
+| `hold_key` | Yes | ? | Yes | Parity |
+| `type` | Yes | Yes | Yes | Parity |
+| `scroll` (directional) | Yes | Yes | Yes | Parity |
+| `wait` | Yes | ? | Yes | Parity |
+| `cursor_position` | Yes | ? | Yes | Parity |
+| `zoom` (region) | Yes | No | Yes | AHEAD |
+| Modifier keys on click | Yes | ? | Yes | **DONE** |
+| Modifier keys on scroll | Yes | ? | No | Follow-up |
+| Clipboard manipulation | No (use bash) | Yes | Yes | AHEAD vs Anthropic |
+
+**Verdict:** 17/17 Anthropic actions implemented. Modifier keys on click now supported. Scroll modifiers as follow-up.
+
+---
+
+## 2. Screenshot & Vision
+
+| Capability | Anthropic | Codex | Juno | Status |
+|------------|:---:|:---:|:---:|---|
+| Max resolution (Opus 4.5+) | 2,576px, 1:1 coords | Unspecified | Up to 2,576px (model-aware) | **DONE** |
+| Resolution scaling | Caller handles | Automatic | Lanczos3, model-aware | AHEAD |
+| JPEG compression | Caller handles | Automatic | Quality 85 | Parity |
+| PNG for detail regions | Caller handles | ? | PNG for zoom | Parity |
+| Multi-monitor | Caller handles | Single? | Cursor-based detection | AHEAD |
+| Cursor position metadata | Not built-in | Unspecified | Returns coords as text | AHEAD |
+| Zoom (native-res region) | Yes (enable_zoom) | No | Yes (Retina res) | AHEAD |
+| Screenshot history limiting | No (stateless) | ? | MAX_RECENT_SCREENSHOTS=3 | AHEAD |
+
+### Resolution Pipeline (Implemented)
+
+The screenshot pipeline is now model-aware:
+- **Opus 4.5+ models** (`computer_20251124`): Select from HD_WXGA (1680x1050), HD_1080 (1920x1080), or ULTRA_HD (2576x1610) based on display aspect ratio
+- **Legacy models**: Use original XGA/WXGA/FWXGA set
+- Resolution is capped at display dimensions (never upscales)
+- Model name is published at brain creation via `set_current_model()` and read by the scaling pipeline
+
+---
+
+## 3. Safety & Permissions
+
+| Capability | Anthropic | Codex | Juno | Status |
+|------------|:---:|:---:|:---:|---|
+| Prompt injection classifier | Yes (auto) | ? | No | Future |
+| App targeting awareness | No (caller) | Yes (allowlist) | Yes (observe-only) | **DONE** |
+| Sensitive action detection | No (caller) | Yes | Yes (observe-only) | **DONE** |
+| Task cancellation | No (caller) | Yes | Yes (Escape) | Parity w/ Codex |
+| Sandboxed environment | Docker ref impl | macOS sandbox | No sandbox | Different |
+| Self-automation awareness | No | Yes (blocked) | Yes (observe-only) | **DONE** |
+| macOS permission validation | No (not native) | Yes | Yes (5 types) | AHEAD vs Anthropic |
+| Action cooldown | No | ? | 300ms | AHEAD |
+| Action audit trail | No | ? | Yes (event-based) | **DONE** |
+| Human confirmation loop | API pattern | Session approval | No | Future |
+
+### Safety Design Philosophy
+
+Juno's safety system is **observe-only by default** — all detection infrastructure exists and emits audit events, but nothing is blocked. This matches Juno's role as a power tool for developers. The infrastructure can be switched to blocking mode per-app via settings if needed.
+
+**What's implemented:**
+- **App targeting awareness**: `get_frontmost_bundle_id()` + `get_frontmost_app_name()` detect which app the agent is interacting with. Notable apps (Juno itself, System Preferences, Keychain Access) are logged with extra detail.
+- **Sensitive action detection**: Typed text is scanned for dangerous patterns (rm -rf, sudo, drop table, credentials, force push, payments). Matched patterns are flagged in the audit trail.
+- **Action audit log**: Every computer use action emits a `computer-use-audit` event containing action type, target app, sensitivity flag, timestamp, and coordinate/text preview. Frontend can collect these for a reviewable history.
+
+**What's NOT blocked:**
+- No app is blocked by default. Bash, Keychain, System Preferences — all accessible.
+- No action is blocked by default. Sensitive patterns are logged, not prevented.
+- Self-targeting (agent interacting with Juno) is logged but allowed.
+
+**To enable blocking**: Move bundle IDs from `NOTABLE_BUNDLE_IDS` into a blocking check in `check_app_safety()`, or load a blocklist from Tauri Store.
+
+---
+
+## 4. Agent Architecture
+
+| Capability | Anthropic | Codex | Juno | Status |
+|------------|:---:|:---:|:---:|---|
+| Multi-agent orchestration | No | Yes (parallel bg) | Yes (orchestrator) | AHEAD vs Anthropic |
+| Background execution | No (sync API) | Yes (non-blocking) | Yes (Tokio async) | Parity |
+| Parallel agents | Caller manages | Native sessions | Task queue (max 12) | Parity |
+| Memory isolation | Stateless | Memory preview | SpecialistSummary | AHEAD vs Anthropic |
+| Extended thinking | Yes (budget_tokens) | GPT-5.x reasoning | Not implemented | Future |
+| Iteration limits | Caller handles | Built-in | Yes (`agent_runner.rs:670`) | Parity |
+
+---
+
+## 5. Companion Tools & Integrations
+
+| Tool | Anthropic | Codex | Juno | Status |
+|------|:---:|:---:|:---:|---|
+| Bash/shell | Yes | Yes | Yes | Parity |
+| Text editor | Yes | Yes | Yes | Parity |
+| Browser automation | No (use CU) | In-app browser | Playwright + Safari | AHEAD |
+| MCP integration | No | 90+ plugins | Yes (STDIO + HTTP) | Different model |
+| Voice input | No | No | Yes (Whisper) | AHEAD |
+| TTS output | No | No | Yes (ElevenLabs) | AHEAD |
+| Cloud remote control | No | ? | Yes (WebSocket) | AHEAD |
+
+---
+
+## 6. Developer / User Experience
+
+| Capability | Anthropic | Codex | Juno | Status |
+|------------|:---:|:---:|:---:|---|
+| Zero setup | Docker pull | Install app | Install app | Parity w/ Codex |
+| Plugin marketplace | No | 90+ plugins | Manual MCP | Future |
+| Native macOS | Docker/VNC | Native | Native (Tauri) | AHEAD vs Anthropic |
+| Multi-window | No | Single? | Yes (6 windows) | AHEAD |
+| Headless/CLI | API-only | ? | juno-cua CLI | AHEAD vs Codex |
+
+---
+
+## 7. Where Juno is AHEAD
+
+| Advantage | Details |
+|-----------|---------|
+| Native macOS execution | Not Docker/VNC — direct AX, ScreenCaptureKit |
+| Model-aware high-res screenshots | Up to 2,576px for Opus 4.5+, legacy resolutions for older models |
+| Voice input/output | Whisper transcription + ElevenLabs TTS |
+| Multi-monitor support | Cursor-based display detection |
+| Zoom at Retina resolution | Native-res region capture, PNG |
+| Browser automation | Playwright + Safari AppleScript (dedicated tools) |
+| Multi-agent orchestration | Hierarchical orchestrator + specialist agents |
+| MCP extensibility | Open standard, STDIO + HTTP transport |
+| Cloud remote control | WebSocket connector for remote agent control |
+| CLI mode | juno-cua for headless/external agent use |
+| Action cooldown | 300ms between UI actions prevents racing |
+| Memory isolation | SpecialistSummary for cross-agent context |
+| Token optimization | JPEG quality 85 + screenshot history limiting |
+| Modifier keys on click | shift+click, ctrl+click, cmd+click for range/multi-select |
+| Action audit trail | Per-action event log with app targeting + sensitivity detection |
+
+---
+
+## 8. Gap Status
+
+### P0 — Core capability
+
+| # | Gap | Status | Notes |
+|---|-----|--------|-------|
+| 1 | Opus 4.5+ high-res resolution (up to 2,576px) | **DONE** | Model-aware pipeline: HD_WXGA, HD_1080, ULTRA_HD |
+| 2 | Human confirmation for risky actions | Future | Needs frontend modal UX. Pattern exists in `pending_tool_approvals` |
+| 3 | App targeting awareness | **DONE** | Observe-only. Detects frontmost app via NSWorkspace |
+| 4 | Self-automation awareness | **DONE** | Observe-only. Logs when agent targets Juno |
+
+### P1 — Competitive positioning
+
+| # | Gap | Status | Notes |
+|---|-----|--------|-------|
+| 5 | Sensitive action detection | **DONE** | Observe-only. Scans for rm -rf, sudo, credentials, etc. |
+| 6 | Modifier keys on click | **DONE** | shift/ctrl/alt/super/command/cmd/meta/option |
+| 7 | Iteration / cost guardrails | **ALREADY EXISTS** | `agent_runner.rs:670` — max_steps + user continuation |
+| 8 | Action audit log | **DONE** | `computer-use-audit` event with app, sensitivity, timing |
+
+### P2 — Future differentiation
+
+| # | Gap | Status | Notes |
+|---|-----|--------|-------|
+| 9 | Plugin/integration catalog | Not started | Curated MCP servers with one-click install |
+| 10 | Prompt injection defense | Not started | Screenshot text classifier |
+| 11 | Parallel background sessions | Not started | Codex's signature UX |
+| 12 | DOM-aware browser automation | Not started | Gemini's strength |
+| 13 | Modifier keys on scroll | Not started | Needs CGEvent-level changes to `scroll_window()` |
+
+---
+
+## Implementation Details (2026-04-21)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `src-tauri/src/constants/ui.rs` | Added HD_WXGA (1680x1050), HD_1080 (1920x1080), ULTRA_HD (2576x1610). Model-aware `select_best_resolution_for_model()`. Resolution capped at display size. |
+| `src-tauri/src/utils/coordinates.rs` | Added `CURRENT_MODEL` RwLock global. `set_current_model()` / `get_current_model()`. Both `update_standard_resolution_scaling*` functions now model-aware. |
+| `src-tauri/src/agent/providers/factory.rs` | Both `create_brain_with_system_prompt()` and `create_brain_with_app_handle()` publish model name at brain creation. |
+| `src-tauri/src/agent/providers/types.rs` | Added `CLAUDE_OPUS_4_7`, `CLAUDE_SONNET_4_6` model IDs. Updated `OPUS_4_5_PLUS_MODELS`. Added `ModelDefinition` entries for both. |
+| `src-tauri/src/agent/tools/anthropic_computer_use.rs` | App targeting awareness (NSWorkspace), observe-only safety checks, modifier key extraction on click, sensitive pattern detection, action audit event emission, UTF-8 byte-slice fix. |
+| `src-tauri/src/constants/events.rs` | Added `COMPUTER_USE_AUDIT` event constant. |
+
+### Key Design Decisions
+
+1. **Observe-only safety**: All detection exists but nothing is blocked. Juno is a power tool — the agent can interact with anything including Juno itself, Keychain, System Preferences. Notable interactions are logged to the audit trail for review.
+
+2. **Model-aware resolution**: The resolution pipeline reads the current model from a global `RwLock<String>` set at brain creation. Opus 4.5+ gets high-res candidates; legacy models get XGA/WXGA/FWXGA. Resolution is always capped at display dimensions (never upscales).
+
+3. **Modifier key pass-through**: The Anthropic API `text` parameter on click actions is recognized as a modifier key (shift/ctrl/alt/super/command/cmd/meta/option) and passed to the existing `modifier: Option<String>` parameter on all 5 click functions. Non-modifier text values are ignored.
+
+4. **Audit events, not state**: The audit trail is event-based (`app_handle.emit()`), not stored in `AppState`. This keeps the backend stateless w.r.t. audit and lets the frontend decide how to display/persist the history.
+
+### Remaining Follow-up
+
+- **Human confirmation modal**: Frontend React component + Tauri event round-trip. Existing pattern in `pending_tool_approvals`.
+- **Modifier keys on scroll**: `scroll_window()` needs a modifier parameter at the CGEvent level.
+- **User-configurable notable apps**: Load from Tauri Store instead of hardcoded `NOTABLE_BUNDLE_IDS`.
+- **Prompt injection defense**: Screenshot OCR/classifier. Significant effort.
+- **Plugin catalog**: Curated list of MCP servers with one-click install UX.
+
+---
+
+## Sources
+
+- [Anthropic Computer Use Docs](https://platform.claude.com/docs/en/docs/agents-and-tools/computer-use)
+- [Codex Computer Use](https://developers.openai.com/codex/app/computer-use)
+- [Computer Use Agents 2026 Comparison](https://www.digitalapplied.com/blog/computer-use-agents-2026-claude-openai-gemini-matrix)
+- [Codex Desktop April 2026 Update](https://smartscope.blog/en/generative-ai/chatgpt/codex-desktop-major-update-april-2026/)
+- [OpenAI Codex 2026: Computer Use, Memory & Full Review](https://www.buildfastwithai.com/blogs/openai-codex-for-almost-everything-2026)

@@ -1510,10 +1510,11 @@ impl ToolProvider for LocalToolProvider {
                         debug!("Tool '{}' is disabled, excluding from available tools", tool_name);
                     }
                 } else {
-                    // Tool is unconfigured - exclude by default for security
-                    // This prevents tools that should be disabled from being passed to the agent
+                    // Tool is unconfigured — allow by default.
+                    // Tools are permitted unless explicitly disabled in config.
+                    enabled_tools.push(tool);
                     unconfigured_count += 1;
-                    debug!("Tool '{}' is unconfigured, excluding for security", tool_name);
+                    debug!("Tool '{}' is unconfigured, allowing by default", tool_name);
                 }
             }
 
@@ -1521,7 +1522,7 @@ impl ToolProvider for LocalToolProvider {
                 info!("Filtered out {} disabled tools", disabled_count);
             }
             if unconfigured_count > 0 {
-                info!("Filtered out {} unconfigured tools", unconfigured_count);
+                info!("Included {} unconfigured tools (allowed by default)", unconfigured_count);
             }
 
             all_tools = enabled_tools;

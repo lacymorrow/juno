@@ -1,5 +1,6 @@
 pub mod types;
 pub mod anthropic;
+pub mod claude_cli;
 pub mod factory;
 pub mod openai;
 pub mod config;

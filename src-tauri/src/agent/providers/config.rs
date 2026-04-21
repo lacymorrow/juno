@@ -96,6 +96,14 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
         },
+        CentralizedProviderConfig {
+            id: Provider::ClaudeCli.id().to_string(),
+            api_key: None, // Claude CLI doesn't need an API key — uses its own auth
+            model: Some(Provider::ClaudeCli.default_model().to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+        },
     ]
 }
 

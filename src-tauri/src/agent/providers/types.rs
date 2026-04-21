@@ -4,6 +4,8 @@
 // Model ID Constants - Single source of truth
 pub mod model_ids {
     // Anthropic Claude Models — Current Generation
+    pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
+    pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
     pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
     pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
@@ -15,8 +17,14 @@ pub mod model_ids {
     pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
 
     /// Models that require the 2025-11-24 computer-use beta flag AND
-    /// new computer type (computer_20251124) + new editor (text_editor_20250728)
-    pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6];
+    /// new computer type (computer_20251124) + new editor (text_editor_20250728).
+    /// These also support high-resolution screenshots up to 2,576px.
+    pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[
+        CLAUDE_OPUS_4_5,
+        CLAUDE_OPUS_4_6,
+        CLAUDE_OPUS_4_7,
+        CLAUDE_SONNET_4_6,
+    ];
 
     /// Models that use the old computer type (computer_20250124) but require
     /// the new editor (text_editor_20250728). These sit between Opus 4.5+ and legacy.
@@ -76,7 +84,9 @@ pub enum Provider {
     OpenAI,
     Rig,
     Gemini,
-    // Add other providers as needed
+    /// Claude CLI (Claude Code) — subprocess-based provider, no API key needed.
+    /// Uses the locally installed `claude` binary with the user's existing auth.
+    ClaudeCli,
 }
 
 impl Provider {
@@ -88,7 +98,7 @@ impl Provider {
             "openai" => Some(Provider::OpenAI),
             "rig" => Some(Provider::Rig),
             "gemini" => Some(Provider::Gemini),
-            // Add other provider matches as needed
+            "claude_cli" | "claude-cli" | "claudecli" => Some(Provider::ClaudeCli),
             _ => None,
         }
     }
@@ -100,6 +110,7 @@ impl Provider {
             Provider::OpenAI => "OpenAI GPT",
             Provider::Rig => "Rig AI Agent",
             Provider::Gemini => "Google Gemini",
+            Provider::ClaudeCli => "Claude CLI",
         }
     }
 
@@ -112,6 +123,7 @@ impl Provider {
             Provider::OpenAI => "OpenAI's GPT models for conversational AI and text generation",
             Provider::Rig => "Rig framework for building AI agents with structured outputs",
             Provider::Gemini => "Google's Gemini models for multimodal AI capabilities",
+            Provider::ClaudeCli => "Use your local Claude CLI installation — no API key required",
         }
     }
 
@@ -127,6 +139,7 @@ impl Provider {
                     beta_flags::COMPUTER_USE_2025_01_24
                 }
             }
+            // Claude CLI handles its own API flags internally
             _ => "",
         }
     }
@@ -173,11 +186,25 @@ impl Provider {
                 &[
                     // Current generation
                     ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_4_7,
+                        name: "Claude Opus 4.7",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: true,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_SONNET_4_6,
+                        name: "Claude Sonnet 4.6",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_6,
                         name: "Claude Opus 4.6",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_4_5,
@@ -258,6 +285,29 @@ impl Provider {
                     is_recommended: true,
                 },
             ],
+            Provider::ClaudeCli => &[
+                ModelDefinition {
+                    id: "sonnet",
+                    name: "Claude Sonnet (via CLI)",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelDefinition {
+                    id: "opus",
+                    name: "Claude Opus (via CLI)",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: false,
+                },
+                ModelDefinition {
+                    id: "haiku",
+                    name: "Claude Haiku (via CLI)",
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: false,
+                },
+            ],
         }
     }
 
@@ -302,6 +352,7 @@ impl Provider {
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::OPENAI_CUA,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
+                    Provider::ClaudeCli => "sonnet",
                 }
             })
     }
@@ -313,6 +364,7 @@ impl Provider {
             Provider::OpenAI => "openai",
             Provider::Rig => "rig",
             Provider::Gemini => "gemini",
+            Provider::ClaudeCli => "claude_cli",
         }
     }
 

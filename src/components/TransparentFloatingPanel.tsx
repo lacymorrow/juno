@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useDragWindow } from "@/hooks/useDragWindow";
 import { UI } from "@/lib/constants.generated";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 
@@ -27,6 +28,7 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
   const [opacity, setOpacity] = useState(0.8);
   const [isHovered, setIsHovered] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const onDragMouseDown = useDragWindow();
 
   // Handle panel visibility
   useEffect(() => {
@@ -85,10 +87,10 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
       ref={panelRef}
       className={`
         fixed top-4 right-4 z-50 rounded-lg border backdrop-blur-sm
-        transition-all duration-300 ease-out cursor-move
+        transition-all duration-300 ease-out cursor-grab active:cursor-grabbing
         ${isHovered ? "shadow-lg" : "shadow-md"}
       `}
-      data-tauri-drag-region
+      onMouseDown={onDragMouseDown}
       style={{
         width: dimensions.width,
         height: dimensions.height,
@@ -100,7 +102,7 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Panel Header */}
-      <div className="flex items-center justify-between p-3 border-b border-white/20" data-tauri-drag-region>
+      <div className="flex items-center justify-between p-3 border-b border-white/20">
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${
