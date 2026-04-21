@@ -492,10 +492,12 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     };
   }, []);
 
-  // Dismiss on mode change (dictation, listening, input) — NOT on idle
+  // Dismiss pinned content when backend leaves agent/status states
   useEffect(() => {
     const s = barState.barState;
     if (
+      s === UI.BAR_STATES_DEFAULT ||
+      s === UI.BAR_STATES_SHRINKING ||
       s === UI.BAR_STATES_LISTENING ||
       s === UI.BAR_STATES_DICTATING ||
       s === UI.BAR_STATES_ALWAYS_LISTENING ||
