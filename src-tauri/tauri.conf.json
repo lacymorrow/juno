@@ -53,7 +53,7 @@
         "resizable": false,
         "skipTaskbar": true,
         "visible": false,
-        "shadow": true
+        "shadow": false
       },
       {
         "label": "onboarding",
