@@ -373,10 +373,10 @@ impl ToolConfigManager {
                 tool_name, tool_config.enabled, category_enabled, result);
             result
         } else {
-            // Unknown tools are disabled by default
-            // Note: Essential tools should be properly configured as required during initialization
-            tracing::debug!("Unknown tool '{}' disabled by default", tool_name);
-            false
+            // Unknown/unconfigured tools are allowed by default.
+            // Tools are permitted unless explicitly disabled in config.
+            tracing::debug!("Tool '{}' is unconfigured, allowing by default", tool_name);
+            true
         }
     }
 

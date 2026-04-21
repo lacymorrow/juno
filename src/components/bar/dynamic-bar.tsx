@@ -267,31 +267,34 @@ const getLabel = (state: UIState, data: BarStateData): string | null => {
   }
 };
 
-// State → window dimensions (must match island size presets + padding)
+// Fixed width — island width animates via CSS spring, window width stays constant.
+// Only height varies. Top-anchored, so height changes happen below the island.
+const FIXED_WIDTH = 371 + SHADOW_PADDING;
+
 const getDimensions = (state: UIState) => {
-  let w = 150, h = 44;
+  let h = 44;
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
     case UI.BAR_STATES_DICTATION_READY:
     case UI.BAR_STATES_SHRINKING:
-      break; // 150 × 44
+      break;
     case UI.BAR_STATES_TRANSCRIBING:
-      w = 300; h = 56;
+      h = 56;
       break;
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
-      w = 371; h = 84;
+      h = 84;
       break;
     case UI.BAR_STATES_AGENT_RESPONDING:
-      w = 371; h = 210;
+      h = 210;
       break;
     case UI.BAR_STATES_ALWAYS_LISTENING:
-      w = 371; h = 84;
+      h = 84;
       break;
     default:
-      w = 235; h = 44;
+      h = 44;
   }
-  return { width: w + SHADOW_PADDING, height: h + SHADOW_PADDING };
+  return { width: FIXED_WIDTH, height: h + SHADOW_PADDING };
 };
 
 // ─── Main component ──────────────────────────────────────
@@ -742,7 +745,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   return (
     <div className="h-full w-full relative p-6 overflow-hidden cursor-grab active:cursor-grabbing" onMouseDown={onDragMouseDown}>
       <div
-        className="flex items-start justify-center h-full"
+        className="flex items-start justify-center"
       >
         <DynamicIsland id="ai-chatbot-panel">
           {isInputState ? (
