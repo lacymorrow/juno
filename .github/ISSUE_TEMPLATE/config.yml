@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions
+    url: https://github.com/lacymorrow/juno/discussions
+    about: Ask questions, share use cases, and connect with the community
