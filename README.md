@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <img alt="GitHub stars" src="https://img.shields.io/github/stars/lacymorrow/juno?style=flat-square" />
   <img alt="Version" src="https://img.shields.io/github/v/release/lacymorrow/juno?style=flat-square&color=blue" />
   <img alt="License" src="https://img.shields.io/badge/license-FSL--1.1--MIT-green?style=flat-square" />
   <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple" />
@@ -179,11 +180,15 @@ See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for details.
 
 [FSL-1.1-MIT](LICENSE) — Source-available. Free to use, modify, and create derivative works. Converts to MIT after 2 years.
 
-## Links
+## Community
 
 - [junebug.ai](https://junebug.ai) — Website & download
 - [GitHub Issues](https://github.com/lacymorrow/juno/issues) — Bug reports & feature requests
-- [@lacymorrow](https://x.com/lacymorrow) — Updates
+- [Blog](https://junebug.ai/blog) — Technical articles about building Juno
+- [@junebug_ai](https://x.com/junebug_ai) — Product updates
+- [@lacybuilds](https://x.com/lacybuilds) — Dev updates from the builder
+
+Contributions welcome. See [CLAUDE.md](CLAUDE.md) for architecture docs and development rules.
 
 ---
 
