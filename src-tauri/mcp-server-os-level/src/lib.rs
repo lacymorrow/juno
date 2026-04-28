@@ -140,6 +140,12 @@ impl Desktop {
         Locator::new(Arc::clone(&self.engine), selector.into())
     }
 
+    /// Returns the accessibility element at the given screen coordinates, if any.
+    /// Uses native platform hit-testing (~1-5ms on macOS).
+    pub fn element_at_position(&self, x: f64, y: f64) -> Option<UIElement> {
+        self.engine.element_at_position(x, y)
+    }
+
     /// Get the currently focused element
     pub fn focused_element(&self) -> Result<UIElement, AutomationError> {
         self.engine.get_focused_element()
