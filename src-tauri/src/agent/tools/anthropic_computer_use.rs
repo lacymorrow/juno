@@ -256,6 +256,160 @@ fn emit_action_audit(
     }
 }
 
+// --- AX-Grounded Clicking ---
+
+/// Click variants supported by AX grounding.
+#[derive(Debug, Clone, Copy)]
+enum AxClickKind {
+    Left,
+    Right,
+    Double,
+}
+
+/// Result of an AX grounding attempt for a click action.
+struct AxGroundingResult {
+    /// True if AXPress (accessibility-native click) was used; false means caller
+    /// should perform a coordinate-based click as fallback.
+    used_ax_click: bool,
+    /// AX role of the element at the position (e.g., "AXButton"), if found.
+    role: Option<String>,
+    /// Label/title of the element, if available.
+    label: Option<String>,
+}
+
+/// Whether an AX role represents an interactive UI element worth clicking via AXPress.
+/// Accepts both prefixed ("AXButton") and unprefixed ("button") forms — the
+/// accessibility crate sometimes returns one or the other depending on the app.
+fn is_interactive_ax_role(role: &str) -> bool {
+    let normalized = role.trim_start_matches("AX").to_lowercase();
+    matches!(
+        normalized.as_str(),
+        "button"
+            | "link"
+            | "textfield"
+            | "textarea"
+            | "checkbox"
+            | "radiobutton"
+            | "popupbutton"
+            | "combobox"
+            | "tab"
+            | "menuitem"
+            | "menubuttom"
+            | "image"
+            | "cell"
+            | "searchfield"
+            | "statictext"
+            | "row"
+            | "list"
+    )
+}
+
+/// Attempt an AX-grounded click at the given screen coordinates.
+///
+/// Performs a fast native hit-test (~1-5ms) via `AXUIElementCopyElementAtPosition`.
+/// If an interactive element is found, performs an AXPress action (semantic
+/// click) instead of a CGEvent coordinate click — more accurate and robust.
+///
+/// On any failure (no element, non-interactive role, AXPress error, missing
+/// permissions), returns `used_ax_click: false` so the caller falls back to
+/// the existing coordinate click path. Never panics.
+fn try_ax_grounded_click(
+    app_handle: &tauri::AppHandle,
+    screen_x: f64,
+    screen_y: f64,
+    kind: AxClickKind,
+) -> AxGroundingResult {
+    let state = app_handle.state::<AppState>();
+
+    let element = match state.desktop.element_at_position(screen_x, screen_y) {
+        Some(el) => el,
+        None => {
+            return AxGroundingResult {
+                used_ax_click: false,
+                role: None,
+                label: None,
+            };
+        }
+    };
+
+    let attrs = element.attributes();
+    let role = attrs.role.clone();
+    let label = attrs.label.clone();
+
+    if !is_interactive_ax_role(&role) {
+        tracing::debug!(
+            "AX grounding: element at ({:.0}, {:.0}) is role='{}' (not interactive) — skipping AXPress",
+            screen_x, screen_y, role
+        );
+        return AxGroundingResult {
+            used_ax_click: false,
+            role: Some(role),
+            label,
+        };
+    }
+
+    // Attempt AX-native click. The UIElement API has click()/double_click()/right_click().
+    let result = match kind {
+        AxClickKind::Left => element.click().map(|_| ()),
+        AxClickKind::Double => element.double_click().map(|_| ()),
+        AxClickKind::Right => element.right_click(),
+    };
+
+    match result {
+        Ok(()) => {
+            info!(
+                "✨ AX grounded click ({:?}): {} '{}' at ({:.0}, {:.0})",
+                kind,
+                role,
+                label.as_deref().unwrap_or("<unlabeled>"),
+                screen_x,
+                screen_y
+            );
+            AxGroundingResult {
+                used_ax_click: true,
+                role: Some(role),
+                label,
+            }
+        }
+        Err(e) => {
+            tracing::debug!(
+                "AX grounding: AXPress failed for {} at ({:.0}, {:.0}): {} — falling back to coordinate",
+                role, screen_x, screen_y, e
+            );
+            AxGroundingResult {
+                used_ax_click: false,
+                role: Some(role),
+                label,
+            }
+        }
+    }
+}
+
+/// Emit an AX grounding audit event so the frontend can show element metadata
+/// in the action audit trail (e.g., "Clicked button 'Send'" instead of just coords).
+fn emit_ax_grounding_audit(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    screen_x: f64,
+    screen_y: f64,
+    result: &AxGroundingResult,
+) {
+    let payload = json!({
+        "action": action,
+        "ax_grounded": result.used_ax_click,
+        "ax_role": result.role,
+        "ax_label": result.label,
+        "screen_coordinate": [screen_x, screen_y],
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis() as u64,
+    });
+    if let Err(e) = app_handle.emit(crate::constants::events::tools::AX_GROUNDING_AUDIT, &payload) {
+        tracing::debug!("Failed to emit AX grounding audit: {}", e);
+    }
+}
+
 // --- Security and Validation Helpers ---
 
 /// Security configuration for text editor operations
@@ -707,13 +861,25 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                        .map_err(|e| format!("Left click failed: {}", e)));
+                    // Try AX-grounded click first (uses AXPress on the element under the cursor).
+                    // If it succeeds we skip the coordinate click. Modifier keys force coordinate
+                    // path because AXPress doesn't accept modifiers.
+                    let ax_result = if modifier.is_none() {
+                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Left)
+                    } else {
+                        AxGroundingResult { used_ax_click: false, role: None, label: None }
+                    };
+                    emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    if !ax_result.used_ax_click {
+                        handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                            .map_err(|e| format!("Left click failed: {}", e)));
+                    }
+
+                    let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(role) = &ax_result.role { response["ax_role"] = json!(role); }
+                    if let Some(label) = &ax_result.label { response["ax_label"] = json!(label); }
+                    Ok(response)
                 }
                 "right_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -723,13 +889,22 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                        .map_err(|e| format!("Right click failed: {}", e)));
+                    let ax_result = if modifier.is_none() {
+                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Right)
+                    } else {
+                        AxGroundingResult { used_ax_click: false, role: None, label: None }
+                    };
+                    emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    if !ax_result.used_ax_click {
+                        handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                            .map_err(|e| format!("Right click failed: {}", e)));
+                    }
+
+                    let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(role) = &ax_result.role { response["ax_role"] = json!(role); }
+                    if let Some(label) = &ax_result.label { response["ax_label"] = json!(label); }
+                    Ok(response)
                 }
                 "middle_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -755,13 +930,22 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                        .map_err(|e| format!("Double click failed: {}", e)));
+                    let ax_result = if modifier.is_none() {
+                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Double)
+                    } else {
+                        AxGroundingResult { used_ax_click: false, role: None, label: None }
+                    };
+                    emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    if !ax_result.used_ax_click {
+                        handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                            .map_err(|e| format!("Double click failed: {}", e)));
+                    }
+
+                    let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(role) = &ax_result.role { response["ax_role"] = json!(role); }
+                    if let Some(label) = &ax_result.label { response["ax_label"] = json!(label); }
+                    Ok(response)
                 }
                 "triple_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
