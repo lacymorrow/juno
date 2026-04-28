@@ -85,6 +85,13 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     /// Get the UI tree starting from a specific app or the focused one
     fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError>;
 
+    /// Returns the accessibility element at the given screen coordinates, if any.
+    /// Uses platform-native hit-testing (e.g. AXUIElementCopyElementAtPosition on macOS).
+    /// Default returns None — platforms that support AX hit-testing override this.
+    fn element_at_position(&self, _x: f64, _y: f64) -> Option<UIElement> {
+        None
+    }
+
     /// Get the current mouse cursor position.
     fn cursor_position(&self) -> Result<(f64, f64), AutomationError>;
 

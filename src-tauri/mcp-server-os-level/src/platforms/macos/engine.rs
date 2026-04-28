@@ -704,6 +704,69 @@ impl AccessibilityEngine for MacOSEngine {
         }
     }
 
+    /// Fast AX hit-test: returns the accessibility element at screen coordinates.
+    /// Uses native `AXUIElementCopyElementAtPosition` (~1-5ms).
+    fn element_at_position(&self, x: f64, y: f64) -> Option<UIElement> {
+        use accessibility_sys::AXUIElementCopyElementAtPosition;
+        use core_foundation::base::TCFType;
+
+        // Get frontmost application PID via NSWorkspace
+        let pid: i32 = unsafe {
+            use objc::{class, msg_send, sel, sel_impl};
+
+            let workspace_class = class!(NSWorkspace);
+            let shared_workspace: *mut objc::runtime::Object =
+                msg_send![workspace_class, sharedWorkspace];
+            if shared_workspace.is_null() {
+                return None;
+            }
+            let frontmost_app: *mut objc::runtime::Object =
+                msg_send![shared_workspace, frontmostApplication];
+            if frontmost_app.is_null() {
+                return None;
+            }
+            msg_send![frontmost_app, processIdentifier]
+        };
+
+        if pid <= 0 {
+            return None;
+        }
+
+        // Create AXUIElement for the frontmost application
+        let app_element = accessibility::AXUIElement::application(pid);
+
+        // Call native hit-test
+        let mut result_element: accessibility_sys::AXUIElementRef = std::ptr::null_mut();
+        let error = unsafe {
+            AXUIElementCopyElementAtPosition(
+                app_element.as_concrete_TypeRef(),
+                x as f32,
+                y as f32,
+                &mut result_element,
+            )
+        };
+
+        if error != 0 || result_element.is_null() {
+            tracing::debug!(
+                "AX hit-test at ({:.0}, {:.0}): no element (error={})",
+                x, y, error
+            );
+            return None;
+        }
+
+        // Wrap the returned element. AXUIElementCopyElementAtPosition follows
+        // the Create Rule — caller owns the returned reference.
+        let ax_element = unsafe {
+            accessibility::AXUIElement::wrap_under_create_rule(result_element)
+        };
+
+        tracing::debug!("AX hit-test at ({:.0}, {:.0}): found element", x, y);
+        Some(self.wrap_element(
+            ThreadSafeAXUIElement::new(ax_element),
+            None, None, None, None,
+        ))
+    }
+
     /// Safer implementation using NSWorkspace to get focused element
     fn get_application_by_name(&self, name: &str) -> Result<UIElement, AutomationError> {
         // Refresh the accessibility tree before searching
