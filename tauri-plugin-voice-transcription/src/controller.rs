@@ -280,10 +280,10 @@ impl VoiceController {
 
         let host = cpal::default_host();
         let device = host.default_input_device()
-            .ok_or_else(|| Error::AudioDevice("Failed to find a default input device.".to_string()))?;
+            .ok_or_else(|| Error::AudioDevice("No default input device found. This may indicate microphone permission was not granted — check System Settings > Privacy & Security > Microphone.".to_string()))?;
 
         let supported_configs_iter = device.supported_input_configs()
-            .map_err(|e| Error::AudioDevice(format!("Failed to get device configs: {:?}", e)))?;
+            .map_err(|e| Error::AudioDevice(format!("Failed to get input device configs (microphone permission may be denied): {:?}", e)))?;
 
         let selected_config_range = supported_configs_iter
             .filter(|c| c.channels() == 1 || c.channels() == 2)  // Support both mono and stereo
@@ -409,6 +409,7 @@ impl VoiceController {
                     Ok(stream) => stream,
                     Err(e) => {
                         tracing::error!("Failed to build f32 input stream: {:?}", e);
+                        crate::mic_permissions::invalidate_permission_cache();
                         return;
                     }
                 }
@@ -444,6 +445,7 @@ impl VoiceController {
                     Ok(stream) => stream,
                     Err(e) => {
                         tracing::error!("Failed to build i16 input stream: {:?}", e);
+                        crate::mic_permissions::invalidate_permission_cache();
                         return;
                     }
                 }
@@ -456,6 +458,7 @@ impl VoiceController {
 
         if let Err(e) = stream.play() {
             tracing::error!("Failed to start audio stream: {:?}", e);
+            crate::mic_permissions::invalidate_permission_cache();
             return;
         }
 

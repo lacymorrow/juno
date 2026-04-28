@@ -41,7 +41,6 @@ objc = "0.2"
 objc-foundation = "0.1"
 cocoa = "0.25"
 cocoa-foundation = "0.1"
-dispatch = "0.2"
 block = "0.1"
 
 [dev-dependencies]
