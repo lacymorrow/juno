@@ -871,6 +871,11 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
+            // Sweep orphaned temp browser profile directories from previous sessions
+            tauri::async_runtime::spawn(async {
+                crate::agent::tools::browser_controller::BrowserController::cleanup_orphaned_temp_profiles().await;
+            });
+
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module
             events::handlers::setup_event_listeners(app.handle());
