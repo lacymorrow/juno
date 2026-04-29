@@ -66,6 +66,7 @@ interface ChatContainerProps {
   ) => void;
   onExamplePromptSelect: (prompt: string) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
+  onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
 }
 
 export const ChatContainerV2 = React.memo(function ChatContainerV2({
@@ -76,6 +77,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   onSaveResponse,
   onExamplePromptSelect,
   onApprovalUpdate,
+  onContinuationUpdate,
 }: ChatContainerProps) {
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
@@ -106,6 +108,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
               onCopyResponse={onCopyResponse}
               onSaveResponse={onSaveResponse}
               onApprovalUpdate={onApprovalUpdate}
+              onContinuationUpdate={onContinuationUpdate}
             />
           </div>
         );
@@ -117,6 +120,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
       onCopyResponse,
       onSaveResponse,
       onApprovalUpdate,
+      onContinuationUpdate,
     ]
   );
 

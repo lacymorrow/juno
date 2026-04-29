@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
 import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/types/chat";
 import { EVENTS } from "@/lib/constants.generated";
@@ -300,98 +299,6 @@ export function useBackendEvents({
 				}
 				return prev;
 			});
-
-			// Handle toast notifications with deduplication
-			switch (type) {
-				case "tool_call_request": {
-					const notificationLevel = payload.notification_level || "standard";
-
-					if (notificationLevel !== "silent") {
-						const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
-						const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
-						const toastId = `tool-request-${payload.tool_name}`;
-
-						toast.dismiss(toastId);
-						toast.info(message, {
-							id: toastId,
-							duration,
-							className: getNotificationClassName(payload.tool_category, "request"),
-						});
-					}
-					break;
-				}
-
-				case "tool_call_result": {
-					const notificationLevel = payload.notification_level || "standard";
-					const success = payload.success ?? true;
-
-					if (notificationLevel !== "silent") {
-						const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
-						const duration = getNotificationDuration(notificationLevel);
-						const toastType = success ? "success" : "error";
-						const toastId = `tool-result-${payload.tool_name}`;
-
-						toast.dismiss(toastId);
-						toast.dismiss(`tool-request-${payload.tool_name}`);
-						toast[toastType](message, {
-							id: toastId,
-							duration,
-							className: getNotificationClassName(payload.tool_category, "result", success),
-						});
-
-						if (payload.screenshot_base64 && success) {
-							console.log("📸 Screenshot detected in tool result:", payload.tool_name);
-							toast.dismiss("screenshot-captured");
-							toast.success("📸 Screenshot captured", {
-								id: "screenshot-captured",
-								duration: 3000,
-								className: "screenshot-notification",
-							});
-						}
-					}
-					break;
-				}
-
-				case "thinking": {
-					if (payload.content) {
-						toast.dismiss("thinking");
-						toast.info(`💭 ${payload.content}`, {
-							id: "thinking",
-							duration: 2000,
-							className: "thinking-notification",
-						});
-					}
-					break;
-				}
-
-				case "screenshot": {
-					toast.dismiss("screenshot-captured");
-					toast.success("📸 Screenshot captured", {
-						id: "screenshot-captured",
-						duration: 3000,
-						className: "screenshot-notification",
-					});
-					break;
-				}
-
-				case "generic_content": {
-					if (payload.content) {
-						const contentHash = payload.content.slice(0, 50).replace(/\s+/g, '-');
-						const toastId = `generic-${contentHash}`;
-						toast.dismiss(toastId);
-						toast.info(payload.content, {
-							id: toastId,
-							duration: 4000,
-							className: "generic-content-notification",
-						});
-					}
-					break;
-				}
-
-				default:
-					break;
-			}
-
 		}
 	);
 
@@ -579,7 +486,7 @@ export function useBackendEvents({
 		}
 	);
 
-	// Listen for agent continuation requests
+	// Listen for agent continuation requests — inline chat message with action buttons
 	useEventListener<{
 		request_id: string;
 		execution_id: string;
@@ -590,75 +497,18 @@ export function useBackendEvents({
 		EVENTS.CONTINUATION_AGENT_REQUEST,
 		(payload) => {
 			console.log("Agent continuation request received:", payload);
-			const { request_id, current_step, max_steps, message } = payload;
+			const { request_id, current_step, max_steps } = payload;
 
-			// Add system message to conversation
-			addSystemMessage(
-				`🔄 Agent reached ${max_steps} step limit (step ${current_step}). Requesting continuation...`
-			);
-
-			// Show primary action toast with stop as the prominent action
-			toast.error(`⏹️ ${message}`, {
-				duration: 300000, // 5 minutes to match backend timeout
-				id: `continuation-${request_id}`,
-				description: `Step ${current_step}/${max_steps} - Agent has reached iteration limit`,
-				action: {
-					label: "🛑 Stop Agent",
-					onClick: () => {
-						invoke("respond_to_agent_continuation", {
-							requestId: request_id,
-							approved: false
-						}).then(() => {
-							toast.dismiss(`continuation-${request_id}`);
-							toast.dismiss(`continuation-continue-${request_id}`);
-							toast.success("✅ Agent execution stopped", {
-								id: `continuation-denied-${request_id}`,
-								duration: 3000,
-							});
-						}).catch((error) => {
-							console.error("Failed to deny continuation:", error);
-							toast.error("Failed to stop agent", {
-								duration: 5000,
-							});
-						});
-					},
+			setConversationWithPruning((prev) => [
+				...prev,
+				{
+					role: "system",
+					content: `Agent reached step ${current_step}/${max_steps}. Stop or continue?`,
+					continuation_request_id: request_id,
+					continuation_state: "pending",
+					timestamp: Date.now(),
 				},
-				closeButton: false,
-				className: "agent-continuation-toast-stop",
-			});
-
-			// Show secondary toast for continuation option
-			setTimeout(() => {
-				toast.warning("⚠️ Or click here to continue (not recommended)", {
-					duration: 300000,
-					id: `continuation-continue-${request_id}`,
-					description: "This will add 20 more steps and may continue indefinitely",
-					action: {
-						label: "▶️ Continue (+20 steps)",
-						onClick: () => {
-							invoke("respond_to_agent_continuation", {
-								requestId: request_id,
-								approved: true,
-								additionalSteps: 20
-							}).then(() => {
-								toast.dismiss(`continuation-${request_id}`);
-								toast.dismiss(`continuation-continue-${request_id}`);
-								toast.info("Agent continuation approved (+20 steps)", {
-									id: `continuation-approved-${request_id}`,
-									duration: 3000,
-								});
-							}).catch((error) => {
-								console.error("Failed to approve continuation:", error);
-								toast.error("Failed to approve continuation", {
-									duration: 5000,
-								});
-							});
-						},
-					},
-					closeButton: false,
-					className: "agent-continuation-toast-continue",
-				});
-			}, 100);
+			]);
 		}
 	);
 
@@ -729,48 +579,3 @@ export function useBackendEvents({
 	);
 }
 
-// Helper functions for notifications
-function getNotificationDuration(notificationLevel: string, estimatedDuration?: string): number {
-	const baseDurations = {
-		minimal: 1500,
-		standard: 3000,
-		detailed: 5000,
-	};
-
-	const baseDuration = baseDurations[notificationLevel as keyof typeof baseDurations] || 3000;
-
-	if (estimatedDuration) {
-		const durationMultipliers = {
-			instant: 0.5,
-			short: 0.8,
-			medium: 1.0,
-			long: 1.5,
-		};
-		const multiplier = durationMultipliers[estimatedDuration as keyof typeof durationMultipliers] || 1.0;
-		return Math.round(baseDuration * multiplier);
-	}
-
-	return baseDuration;
-}
-
-function getNotificationClassName(
-	toolCategory?: string,
-	eventType?: string,
-	success?: boolean
-): string {
-	let className = "tool-notification";
-
-	if (toolCategory) {
-		className += ` ${toolCategory.toLowerCase()}-category`;
-	}
-
-	if (eventType) {
-		className += ` ${eventType}-event`;
-	}
-
-	if (eventType === "result" && success !== undefined) {
-		className += success ? " success-result" : " failure-result";
-	}
-
-	return className;
-}

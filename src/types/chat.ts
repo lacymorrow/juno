@@ -22,6 +22,8 @@ export type ChatMessage = {
   agent_state?: string;
   tool_id?: string;
   approval_state?: "pending" | "approved" | "denied";
+  continuation_request_id?: string;
+  continuation_state?: "pending" | "stopped" | "continued";
   tts_metadata?: {
     has_spoken_content: boolean;
     tts_parts: string[];

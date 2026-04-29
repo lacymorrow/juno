@@ -406,6 +406,19 @@ function App() {
     [conversation.setConversationWithPruning],
   );
 
+  const handleContinuationUpdate = useCallback(
+    (requestId: string, state: "stopped" | "continued") => {
+      conversation.setConversationWithPruning((prev) =>
+        prev.map((msg) =>
+          msg.continuation_request_id === requestId
+            ? { ...msg, continuation_state: state }
+            : msg,
+        ),
+      );
+    },
+    [conversation.setConversationWithPruning],
+  );
+
   // Render main UI
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden antialiased">
@@ -438,6 +451,7 @@ function App() {
                       onSaveResponse={handleSaveResponse}
                       onExamplePromptSelect={handleExamplePromptSelect}
                       onApprovalUpdate={handleApprovalUpdate}
+                      onContinuationUpdate={handleContinuationUpdate}
                     />
 
                     <div className="px-3">

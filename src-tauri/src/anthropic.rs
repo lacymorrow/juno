@@ -82,11 +82,30 @@ impl AgentExecutionQueue {
             info!("Cancelling current agent execution: {}", execution_id);
             state.signal_cancel();
             info!("Signalled cancellation for existing agent execution");
-            
-            // Wait for cancellation with timeout
+
+            // Wait for the agent to honour the cancel signal. 500ms was too short for
+            // slow tools (browser navigation, network requests). 3s covers the common
+            // case while still being responsive; tool executors use select! so they
+            // should exit well within this window.
+            const CANCEL_TIMEOUT_MS: u128 = 3000;
             let start = std::time::Instant::now();
-            while self.coordinator.is_executing().await && start.elapsed().as_millis() < 500 {
+            while self.coordinator.is_executing().await
+                && start.elapsed().as_millis() < CANCEL_TIMEOUT_MS
+            {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+
+            if self.coordinator.is_executing().await {
+                warn!(
+                    "Agent execution '{}' did not stop within {}ms after cancel signal — proceeding with next execution anyway",
+                    execution_id, CANCEL_TIMEOUT_MS
+                );
+            } else {
+                info!(
+                    "Agent execution '{}' stopped after {}ms",
+                    execution_id,
+                    start.elapsed().as_millis()
+                );
             }
         }
     }

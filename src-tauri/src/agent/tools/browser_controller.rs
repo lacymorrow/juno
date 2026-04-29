@@ -1646,15 +1646,76 @@ impl BrowserController {
                     "Cleaning up temporary profile directory: {}",
                     temp_profile_path
                 );
-                if let Err(e) = std::fs::remove_dir_all(temp_profile_path) {
-                    log::warn!("Failed to clean up temporary profile directory: {}", e);
-                } else {
-                    log::info!("Temporary profile directory cleaned up successfully");
-                }
+                Self::remove_temp_profile_with_retry(temp_profile_path).await;
             }
         }
 
         Ok(())
+    }
+
+    /// Retries removing a temp profile directory with exponential backoff.
+    /// The browser process may still hold file handles immediately after
+    /// `browser.close()` returns, so a single removal attempt races with exit.
+    async fn remove_temp_profile_with_retry(path: &str) {
+        const MAX_RETRIES: u32 = 5;
+        const INITIAL_DELAY_MS: u64 = 100;
+
+        for attempt in 0..MAX_RETRIES {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => {
+                    log::info!("Temporary profile directory cleaned up: {}", path);
+                    return;
+                }
+                Err(e) if attempt + 1 < MAX_RETRIES => {
+                    let delay = INITIAL_DELAY_MS << attempt; // 100, 200, 400, 800 ms
+                    log::debug!(
+                        "Temp profile removal attempt {} failed ({}), retrying in {}ms",
+                        attempt + 1,
+                        e,
+                        delay
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to clean up temp profile {} after {} attempts: {}",
+                        path,
+                        MAX_RETRIES,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    /// Sweeps the system temp directory for orphaned `juno-browser-*` profile
+    /// directories left by previous sessions that crashed before cleanup.
+    pub async fn cleanup_orphaned_temp_profiles() {
+        let temp_dir = std::env::temp_dir();
+        let current_profile_name = format!("juno-browser-{}", std::process::id());
+
+        let entries = match std::fs::read_dir(&temp_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("Could not read temp dir for orphaned profile sweep: {}", e);
+                return;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            // Skip the current process's own profile and any non-Juno directories
+            if name.starts_with("juno-browser-") && name != current_profile_name.as_str() {
+                let path = entry.path();
+                if path.is_dir() {
+                    log::info!("Removing orphaned temp browser profile: {:?}", path);
+                    if let Err(e) = std::fs::remove_dir_all(&path) {
+                        log::warn!("Failed to remove orphaned profile {:?}: {}", path, e);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1696,9 +1757,7 @@ impl Drop for BrowserController {
             if connection_method.starts_with("TempProfile:") {
                 if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {
                     if !temp_path.is_empty() {
-                        if let Err(e) = std::fs::remove_dir_all(temp_path) {
-                            log::warn!("Failed to clean up temp profile in Drop: {}", e);
-                        }
+                        BrowserController::remove_temp_profile_with_retry(temp_path).await;
                     }
                 }
             }
