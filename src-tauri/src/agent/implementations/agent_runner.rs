@@ -310,14 +310,31 @@ where
                 tool_call.name
             );
 
-            crate::agent::tool_logger::log_tool_call_request(
-                &self.app_handle,
-                &tool_call.name,
-                tool_call.input.clone(),
-                Some(format!("Executing batched tool: {}", tool_call.name)),
-            );
+            // Skip runner-level logging for "computer" tool — it self-logs with
+            // enhanced metadata inside anthropic_computer_use.rs
+            if tool_call.name != "computer" {
+                crate::agent::tool_logger::log_tool_call_request(
+                    &self.app_handle,
+                    &tool_call.name,
+                    tool_call.input.clone(),
+                    Some(format!("Executing batched tool: {}", tool_call.name)),
+                );
+            }
 
-            let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+            // Race tool execution against the cancellation signal so slow tools
+            // (browser navigation, network requests) are interrupted immediately
+            // when the user presses Escape — not just between tools.
+            let mut cancel_for_tool = cancel_rx.clone();
+            let tool_result = tokio::select! {
+                result = self.tool_provider.execute_tool(tool_call.clone()) => result,
+                _ = cancel_for_tool.wait_for(|&v| v) => {
+                    log::info!(
+                        "Tool '{}' interrupted by cancellation signal during execution (tool {}/{} in batch)",
+                        tool_call.name, i + 1, batch.len()
+                    );
+                    return Ok(false);
+                }
+            };
 
             // PERFORMANCE OPTIMIZATION: Replace hardcoded delays with intelligent completion detection
             // Old approach: Hardcoded 350ms delay for ALL mouse movements
@@ -327,57 +344,56 @@ where
                 self.wait_for_mouse_movement_completion(tool_call).await;
             }
 
-            // FIXED: Emit tool result event to frontend for chat display
-            match &tool_result {
-                Ok(result) => {
-                    // Check if this is actually an error response (Anthropic Computer Use API format)
-                    let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
-                    let success = !is_error;
+            // Skip runner-level result logging for "computer" tool — it self-logs
+            // with enhanced metadata inside anthropic_computer_use.rs
+            if tool_call.name != "computer" {
+                match &tool_result {
+                    Ok(result) => {
+                        let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
+                        let success = !is_error;
 
-                    // Extract screenshot if this is a screenshot tool AND the operation was successful
-                    let screenshot_base64 = if success &&
-                        (tool_call.name == "capture_screenshot" || tool_call.name == "computer" || tool_call.name == "browser_screenshot") {
-                        // For screenshot tools, the result output should contain base64 data
-                        // Check multiple possible field names for screenshot data
-                        if let Some(screenshot_data) = result.output.get("base64_image") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_data) = result.output.get("base64") {
-                            screenshot_data.as_str().map(|s| s.to_string())
-                        } else if let Some(screenshot_data) = result.output.get("data") {
-                            screenshot_data.as_str().map(|s| s.to_string())
+                        let screenshot_base64 = if success &&
+                            (tool_call.name == "capture_screenshot" || tool_call.name == "browser_screenshot") {
+                            if let Some(screenshot_data) = result.output.get("base64_image") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("base64") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else if let Some(screenshot_data) = result.output.get("data") {
+                                screenshot_data.as_str().map(|s| s.to_string())
+                            } else {
+                                result.output.as_str().map(|s| s.to_string())
+                            }
                         } else {
-                            result.output.as_str().map(|s| s.to_string())
-                        }
-                    } else {
-                        None
-                    };
+                            None
+                        };
 
-                    let status_message = if success {
-                        format!("Batched tool {} executed successfully", tool_call.name)
-                    } else {
-                        let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&result.output)
-                            .unwrap_or_else(|| "Unknown error".to_string());
-                        format!("Batched tool {} failed: {}", tool_call.name, error_msg)
-                    };
+                        let status_message = if success {
+                            format!("Batched tool {} executed successfully", tool_call.name)
+                        } else {
+                            let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&result.output)
+                                .unwrap_or_else(|| "Unknown error".to_string());
+                            format!("Batched tool {} failed: {}", tool_call.name, error_msg)
+                        };
 
-                    crate::agent::tool_logger::log_tool_call_result(
-                        &self.app_handle,
-                        &tool_call.name,
-                        result.output.clone(),
-                        success,
-                        Some(status_message),
-                        screenshot_base64,
-                    );
-                }
-                Err(error) => {
-                    crate::agent::tool_logger::log_tool_call_result(
-                        &self.app_handle,
-                        &tool_call.name,
-                        serde_json::json!({"error": error.to_string()}),
-                        false,
-                        Some(format!("Batched tool {} failed: {}", tool_call.name, error)),
-                        None,
-                    );
+                        crate::agent::tool_logger::log_tool_call_result(
+                            &self.app_handle,
+                            &tool_call.name,
+                            result.output.clone(),
+                            success,
+                            Some(status_message),
+                            screenshot_base64,
+                        );
+                    }
+                    Err(error) => {
+                        crate::agent::tool_logger::log_tool_call_result(
+                            &self.app_handle,
+                            &tool_call.name,
+                            serde_json::json!({"error": error.to_string()}),
+                            false,
+                            Some(format!("Batched tool {} failed: {}", tool_call.name, error)),
+                            None,
+                        );
+                    }
                 }
             }
 
