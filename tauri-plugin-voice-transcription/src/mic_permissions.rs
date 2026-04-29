@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
@@ -10,8 +10,6 @@ use objc::runtime::{BOOL, YES};
 use cocoa::foundation::{NSString, NSAutoreleasePool};
 #[cfg(target_os = "macos")]
 use cocoa::base::{nil, id};
-#[cfg(target_os = "macos")]
-use dispatch::Queue;
 
 /// Microphone permission status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,48 +28,60 @@ pub enum MicrophonePermissionStatus {
 static PERMISSION_CACHED: AtomicBool = AtomicBool::new(false);
 static PERMISSION_GRANTED: AtomicBool = AtomicBool::new(false);
 
-/// Check microphone permission status using AVAudioSession
+/// Guard against concurrent permission requests
+static PERMISSION_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Track whether we already attempted a TCC request this session.
+/// If the OS doesn't persist the decision (e.g. unsigned dev builds),
+/// we avoid re-prompting and direct the user to System Settings instead.
+static PERMISSION_REQUESTED_THIS_SESSION: AtomicBool = AtomicBool::new(false);
+
+/// Check microphone permission status using AVCaptureDevice (macOS TCC-compatible)
 #[cfg(target_os = "macos")]
 pub fn check_microphone_permission() -> MicrophonePermissionStatus {
+    // Fast path: return cached result
+    if PERMISSION_CACHED.load(Ordering::SeqCst) {
+        let granted = PERMISSION_GRANTED.load(Ordering::SeqCst);
+        debug!("Returning cached microphone permission: {}", if granted { "granted" } else { "denied" });
+        return if granted {
+            MicrophonePermissionStatus::Granted
+        } else {
+            MicrophonePermissionStatus::Denied
+        };
+    }
+
     unsafe {
         let _pool = NSAutoreleasePool::new(nil);
-        
-        // Get AVAudioSession sharedInstance
-        let av_audio_session_class = class!(AVAudioSession);
-        let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
-        
-        if shared_instance == nil {
-            error!("Failed to get AVAudioSession shared instance");
-            return MicrophonePermissionStatus::Undetermined;
-        }
-        
-        // Get recordPermission
-        let permission: i64 = msg_send![shared_instance, recordPermission];
-        
-        // AVAudioSessionRecordPermission values:
-        // Undetermined = 1970168948 ('undt')
-        // Denied = 1684369017 ('deny')  
-        // Granted = 1735552628 ('grnt')
-        
-        match permission {
-            1735552628 => {
-                debug!("Microphone permission is granted");
+
+        // AVCaptureDevice.authorizationStatus(for: .audio) — the correct macOS TCC API
+        let av_capture_device_class = class!(AVCaptureDevice);
+        let media_type: id = NSString::alloc(nil).init_str("soun"); // AVMediaTypeAudio
+        let status: i64 = msg_send![av_capture_device_class, authorizationStatusForMediaType: media_type];
+
+        // AVAuthorizationStatus enum:
+        //   0 = NotDetermined
+        //   1 = Restricted
+        //   2 = Denied
+        //   3 = Authorized
+        match status {
+            3 => {
+                debug!("Microphone permission is granted (AVCaptureDevice)");
                 PERMISSION_GRANTED.store(true, Ordering::SeqCst);
                 PERMISSION_CACHED.store(true, Ordering::SeqCst);
                 MicrophonePermissionStatus::Granted
             }
-            1684369017 => {
-                debug!("Microphone permission is denied");
+            2 | 1 => {
+                debug!("Microphone permission is denied/restricted (AVCaptureDevice, status={})", status);
                 PERMISSION_GRANTED.store(false, Ordering::SeqCst);
                 PERMISSION_CACHED.store(true, Ordering::SeqCst);
                 MicrophonePermissionStatus::Denied
             }
-            1970168948 => {
-                debug!("Microphone permission is undetermined");
+            0 => {
+                debug!("Microphone permission is not determined (AVCaptureDevice)");
                 MicrophonePermissionStatus::Undetermined
             }
             _ => {
-                warn!("Unknown microphone permission status: {}", permission);
+                warn!("Unknown AVAuthorizationStatus for microphone: {}", status);
                 MicrophonePermissionStatus::Undetermined
             }
         }
@@ -83,116 +93,93 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
     MicrophonePermissionStatus::NotApplicable
 }
 
-/// Request microphone permission (async)
+/// Request microphone permission using AVCaptureDevice (async, macOS TCC-compatible)
 #[cfg(target_os = "macos")]
 pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatus, String> {
     use std::sync::Mutex;
 
-    // Use Arc<Mutex> to share the result between threads
+    // Prevent concurrent permission requests — only one dialog at a time
+    if PERMISSION_REQUEST_IN_FLIGHT.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        info!("Microphone permission request already in flight, waiting for result");
+        // Another request is in progress — poll the cache until it resolves
+        let start_time = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+        loop {
+            if PERMISSION_CACHED.load(Ordering::SeqCst) {
+                let granted = PERMISSION_GRANTED.load(Ordering::SeqCst);
+                return Ok(if granted {
+                    MicrophonePermissionStatus::Granted
+                } else {
+                    MicrophonePermissionStatus::Denied
+                });
+            }
+            if start_time.elapsed() > timeout {
+                return Err("Timeout waiting for in-flight microphone permission request".to_string());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    // We won the CAS — we're the one making the request.
+    // Mark that we've attempted a TCC dialog this session.
+    PERMISSION_REQUESTED_THIS_SESSION.store(true, Ordering::SeqCst);
+
+    // Ensure the in-flight flag is cleared on all exit paths.
+    struct InFlightGuard;
+    impl Drop for InFlightGuard {
+        fn drop(&mut self) {
+            PERMISSION_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = InFlightGuard;
+
     let result: Arc<Mutex<Option<Result<MicrophonePermissionStatus, String>>>> = Arc::new(Mutex::new(None));
     let result_clone = result.clone();
 
-    // SAFETY: exec_sync on the main queue deadlocks if called FROM the main thread.
-    // Tauri async commands run on tokio worker threads, so this is safe in normal use.
-    // Guard defensively in case this is ever called from a different context.
-    let is_main_thread: bool = unsafe {
-        let ns_thread_class = class!(NSThread);
-        let main: BOOL = msg_send![ns_thread_class, isMainThread];
-        main == YES
-    };
-    if is_main_thread {
-        warn!("request_microphone_permission called from main thread — dispatching async to avoid deadlock");
-        // Fall through to exec_async path by running inline
-        let result_for_inline = result_clone.clone();
-        unsafe {
-            let _pool = NSAutoreleasePool::new(nil);
-            let av_audio_session_class = class!(AVAudioSession);
-            let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
-            if shared_instance == nil {
-                return Err("Failed to get AVAudioSession shared instance".to_string());
-            }
-            let result_for_block = result_for_inline.clone();
-            let block = block::ConcreteBlock::new(move |granted: BOOL| {
-                let status = if granted == YES {
-                    info!("Microphone permission granted by user (main thread path)");
-                    PERMISSION_GRANTED.store(true, Ordering::SeqCst);
-                    PERMISSION_CACHED.store(true, Ordering::SeqCst);
-                    MicrophonePermissionStatus::Granted
-                } else {
-                    info!("Microphone permission denied by user (main thread path)");
-                    PERMISSION_GRANTED.store(false, Ordering::SeqCst);
-                    PERMISSION_CACHED.store(true, Ordering::SeqCst);
-                    MicrophonePermissionStatus::Denied
-                };
-                if let Ok(mut res) = result_for_block.lock() {
-                    *res = Some(Ok(status));
-                }
-            });
-            let block = block.copy();
-            let _: () = msg_send![shared_instance, requestRecordPermission: block];
-        }
-    } else {
-        // Request permission on main thread (safe — we are NOT on main thread)
-        Queue::main().exec_sync(move || {
-            unsafe {
-                let _pool = NSAutoreleasePool::new(nil);
+    // AVCaptureDevice.requestAccess(for: .audio) must be called; it handles
+    // its own main-thread dispatch internally, so we don't need exec_sync.
+    unsafe {
+        let _pool = NSAutoreleasePool::new(nil);
+        let av_capture_device_class = class!(AVCaptureDevice);
+        let media_type: id = NSString::alloc(nil).init_str("soun"); // AVMediaTypeAudio
 
-                // Get AVAudioSession sharedInstance
-                let av_audio_session_class = class!(AVAudioSession);
-                let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
-
-                if shared_instance == nil {
-                    if let Ok(mut res) = result_clone.lock() {
-                        *res = Some(Err("Failed to get AVAudioSession shared instance".to_string()));
-                    }
-                    return;
-                }
-
-                // Create completion handler block
-                let result_for_block = result_clone.clone();
-                let block = block::ConcreteBlock::new(move |granted: BOOL| {
-                    let status = if granted == YES {
-                        info!("Microphone permission granted by user");
-                        PERMISSION_GRANTED.store(true, Ordering::SeqCst);
-                        PERMISSION_CACHED.store(true, Ordering::SeqCst);
-                        MicrophonePermissionStatus::Granted
-                    } else {
-                        info!("Microphone permission denied by user");
-                        PERMISSION_GRANTED.store(false, Ordering::SeqCst);
-                        PERMISSION_CACHED.store(true, Ordering::SeqCst);
-                        MicrophonePermissionStatus::Denied
-                    };
-
-                    if let Ok(mut res) = result_for_block.lock() {
-                        *res = Some(Ok(status));
-                    }
-                });
-
-                // Copy block to heap before passing to ObjC runtime
-                // (stack blocks may be deallocated before the async callback fires)
-                let block = block.copy();
-
-                // Request permission
-                let _: () = msg_send![shared_instance, requestRecordPermission: block];
+        let result_for_block = result_clone;
+        let block = block::ConcreteBlock::new(move |granted: BOOL| {
+            let status = if granted == YES {
+                info!("Microphone permission granted by user (AVCaptureDevice)");
+                PERMISSION_GRANTED.store(true, Ordering::SeqCst);
+                PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                MicrophonePermissionStatus::Granted
+            } else {
+                info!("Microphone permission denied by user (AVCaptureDevice)");
+                PERMISSION_GRANTED.store(false, Ordering::SeqCst);
+                PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                MicrophonePermissionStatus::Denied
+            };
+            if let Ok(mut res) = result_for_block.lock() {
+                *res = Some(Ok(status));
             }
         });
+        let block = block.copy();
+
+        let _: () = msg_send![av_capture_device_class, requestAccessForMediaType: media_type completionHandler: block];
     }
 
-    // Poll for result with timeout (shared by both main-thread and worker-thread paths)
+    // Poll for result with timeout
     let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(30);
-    
+    let timeout = std::time::Duration::from_secs(60);
+
     loop {
         if let Ok(res) = result.lock() {
             if let Some(result) = res.as_ref() {
                 return result.clone();
             }
         }
-        
+
         if start_time.elapsed() > timeout {
             return Err("Timeout waiting for microphone permission response".to_string());
         }
-        
+
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 }
@@ -211,74 +198,25 @@ pub fn get_cached_permission() -> Option<bool> {
     }
 }
 
-/// Initialize audio session for recording
-#[cfg(target_os = "macos")]
-pub fn initialize_audio_session() -> Result<(), String> {
-    unsafe {
-        let _pool = NSAutoreleasePool::new(nil);
-        
-        // Get AVAudioSession sharedInstance
-        let av_audio_session_class = class!(AVAudioSession);
-        let shared_instance: id = msg_send![av_audio_session_class, sharedInstance];
-        
-        if shared_instance == nil {
-            return Err("Failed to get AVAudioSession shared instance".to_string());
-        }
-        
-        // Set category to PlayAndRecord
-        let category = NSString::alloc(nil).init_str("AVAudioSessionCategoryPlayAndRecord");
-        let mut error: id = nil;
-        let success: BOOL = msg_send![shared_instance, setCategory:category error:&mut error];
-
-        if success != YES {
-            let description = if error != nil {
-                let desc: id = msg_send![error, localizedDescription];
-                if desc != nil {
-                    let utf8: *const i8 = msg_send![desc, UTF8String];
-                    if !utf8.is_null() {
-                        std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string()
-                    } else {
-                        "unknown error".to_string()
-                    }
-                } else {
-                    "unknown error".to_string()
-                }
-            } else {
-                "unknown error".to_string()
-            };
-            return Err(format!("Failed to set audio session category: {}", description));
-        }
-
-        // Activate the audio session
-        let mut activate_error: id = nil;
-        let activate_success: BOOL = msg_send![shared_instance, setActive:YES error:&mut activate_error];
-
-        if activate_success != YES {
-            let description = if activate_error != nil {
-                let desc: id = msg_send![activate_error, localizedDescription];
-                if desc != nil {
-                    let utf8: *const i8 = msg_send![desc, UTF8String];
-                    if !utf8.is_null() {
-                        std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string()
-                    } else {
-                        "unknown error".to_string()
-                    }
-                } else {
-                    "unknown error".to_string()
-                }
-            } else {
-                "unknown error".to_string()
-            };
-            return Err(format!("Failed to activate audio session: {}", description));
-        }
-        
-        debug!("Audio session initialized successfully");
-        Ok(())
-    }
+/// Invalidate the permission cache so the next check re-queries the OS.
+/// Call this when audio access fails despite the cache saying "granted" —
+/// it forces a fresh TCC check on the next `ensure_microphone_ready()`.
+pub fn invalidate_permission_cache() {
+    info!("Invalidating microphone permission cache — next check will re-query TCC");
+    PERMISSION_GRANTED.store(false, Ordering::SeqCst);
+    PERMISSION_CACHED.store(false, Ordering::SeqCst);
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Initialize audio session for recording.
+///
+/// On macOS, CoreAudio (used by `cpal`) manages its own audio session via the
+/// Audio HAL. `AVAudioSession` is an iOS concept that was ported to macOS 12+
+/// but interferes with CoreAudio's session management and causes permission
+/// dialogs to appear without actually granting access to the HAL. We therefore
+/// treat this as a no-op on macOS — `cpal` will handle session setup when it
+/// opens the input stream.
 pub fn initialize_audio_session() -> Result<(), String> {
+    debug!("Audio session initialization: no-op (CoreAudio manages its own session)");
     Ok(())
 }
 
@@ -293,16 +231,16 @@ pub fn is_microphone_available() -> bool {
         {
             if output.status.success() {
                 let result = String::from_utf8_lossy(&output.stdout);
-                return result.contains("Input") || 
+                return result.contains("Input") ||
                        result.contains("Microphone") ||
                        result.contains("Built-in Microphone");
             }
         }
-        
+
         // Fallback: assume microphone is available on modern Macs
         true
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         true
@@ -315,10 +253,10 @@ pub async fn ensure_microphone_ready() -> Result<(), String> {
     if !is_microphone_available() {
         return Err("No microphone hardware detected".to_string());
     }
-    
+
     // Check current permission status
     let status = check_microphone_permission();
-    
+
     match status {
         MicrophonePermissionStatus::Granted => {
             // Initialize audio session
@@ -329,7 +267,18 @@ pub async fn ensure_microphone_ready() -> Result<(), String> {
             Err("Microphone permission denied. Please grant permission in System Settings > Privacy & Security > Microphone".to_string())
         }
         MicrophonePermissionStatus::Undetermined => {
-            // Request permission
+            // If we already attempted the TCC dialog this session and the OS
+            // still reports Undetermined, the decision isn't being persisted
+            // (common in unsigned dev builds). Don't re-prompt — direct to
+            // System Settings instead.
+            if PERMISSION_REQUESTED_THIS_SESSION.load(Ordering::SeqCst) {
+                warn!("Microphone permission still undetermined after previous request this session — TCC decision may not be persisting");
+                return Err(
+                    "Microphone permission could not be obtained. Please grant access manually in System Settings > Privacy & Security > Microphone".to_string()
+                );
+            }
+
+            // Request permission (first attempt this session)
             match request_microphone_permission().await? {
                 MicrophonePermissionStatus::Granted => {
                     // Initialize audio session after permission granted
@@ -337,10 +286,10 @@ pub async fn ensure_microphone_ready() -> Result<(), String> {
                     Ok(())
                 }
                 MicrophonePermissionStatus::Denied => {
-                    Err("Microphone permission denied by user".to_string())
+                    Err("Microphone permission denied by user. Please grant access in System Settings > Privacy & Security > Microphone".to_string())
                 }
                 _ => {
-                    Err("Unexpected permission status".to_string())
+                    Err("Microphone permission could not be obtained. Please grant access in System Settings > Privacy & Security > Microphone".to_string())
                 }
             }
         }
@@ -354,21 +303,21 @@ pub async fn ensure_microphone_ready() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_permission_cache() {
         // Test that cache starts empty
         assert_eq!(get_cached_permission(), None);
-        
+
         // Test cache after setting
         PERMISSION_GRANTED.store(true, Ordering::SeqCst);
         PERMISSION_CACHED.store(true, Ordering::SeqCst);
         assert_eq!(get_cached_permission(), Some(true));
-        
+
         // Reset cache for other tests
         PERMISSION_CACHED.store(false, Ordering::SeqCst);
     }
-    
+
     #[test]
     fn test_hardware_check() {
         // Hardware check should not panic
