@@ -40,6 +40,8 @@ import {
   CheckCircle,
   XCircle,
   WifiOff,
+  Square,
+  Play,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -60,6 +62,7 @@ interface ChatMessageProps {
     index: number
   ) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
+  onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
 }
 
 // Compact accordion for TTS spoken content
@@ -148,6 +151,78 @@ function AgentStatusBadge({ agentState }: { agentState?: string }) {
   );
 }
 
+function ContinuationActions({
+  requestId,
+  state,
+  onUpdate,
+}: {
+  requestId: string;
+  state: "pending" | "stopped" | "continued";
+  onUpdate?: (requestId: string, state: "stopped" | "continued") => void;
+}) {
+  const handleStop = useCallback(async () => {
+    try {
+      await invoke("respond_to_agent_continuation", {
+        requestId,
+        approved: false,
+      });
+      onUpdate?.(requestId, "stopped");
+    } catch (error) {
+      console.error("Failed to stop agent:", error);
+    }
+  }, [requestId, onUpdate]);
+
+  const handleContinue = useCallback(async () => {
+    try {
+      await invoke("respond_to_agent_continuation", {
+        requestId,
+        approved: true,
+        additionalSteps: 20,
+      });
+      onUpdate?.(requestId, "continued");
+    } catch (error) {
+      console.error("Failed to continue agent:", error);
+    }
+  }, [requestId, onUpdate]);
+
+  if (state === "stopped") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <Square className="h-3 w-3 text-red-500" />
+        <span>Stopped</span>
+      </span>
+    );
+  }
+
+  if (state === "continued") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <Play className="h-3 w-3 text-green-600" />
+        <span>Continued (+20 steps)</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <button
+        onClick={handleStop}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+      >
+        <Square className="h-3 w-3" />
+        Stop
+      </button>
+      <button
+        onClick={handleContinue}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
+      >
+        <Play className="h-3 w-3" />
+        Continue (+20)
+      </button>
+    </div>
+  );
+}
+
 export function ChatMessageComponent({
   msg,
   index,
@@ -156,6 +231,7 @@ export function ChatMessageComponent({
   onCopyResponse,
   onSaveResponse,
   onApprovalUpdate,
+  onContinuationUpdate,
 }: ChatMessageProps) {
   // Inline tool approval handlers — visual feedback via Confirmation component
   const handleApprove = useCallback(async (toolId: string) => {
@@ -299,6 +375,14 @@ export function ChatMessageComponent({
           <span>{msg.content}</span>
         ) : (
           msg.content
+        )}
+
+        {msg.continuation_request_id && (
+          <ContinuationActions
+            requestId={msg.continuation_request_id}
+            state={msg.continuation_state || "pending"}
+            onUpdate={onContinuationUpdate}
+          />
         )}
 
         {/* TTS spoken content — expanded when it's the only response */}
