@@ -25,77 +25,27 @@ pub struct NativePermissionStatus {
 pub struct NativePermissionChecker;
 
 impl NativePermissionChecker {
-    /// Check microphone permission using native APIs - NO admin privileges required
+    /// Check microphone permission using the voice-transcription plugin's TCC API
     pub fn check_microphone_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            // Method 1: Try to detect microphone hardware without admin privileges
-            match Command::new("system_profiler")
-                .args(["SPAudioDataType", "-detailLevel", "mini"])
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        let result = String::from_utf8_lossy(&output.stdout);
-                        let has_microphone = result.contains("Built-in Microphone") ||
-                                           result.contains("Microphone") ||
-                                           result.contains("Input");
-                        debug!("Microphone hardware detected via system_profiler: {}", has_microphone);
-
-                        if has_microphone {
-                            return Ok(true);
-                        }
-                    } else {
-                        debug!("system_profiler failed, trying alternative approach");
-                    }
+            use tauri_plugin_voice_transcription::mic_permissions;
+            let status = mic_permissions::check_microphone_permission();
+            match status {
+                mic_permissions::MicrophonePermissionStatus::Granted => {
+                    debug!("Microphone TCC permission: granted");
+                    Ok(true)
                 }
-                Err(e) => {
-                    debug!("Failed to run system_profiler: {}", e);
+                mic_permissions::MicrophonePermissionStatus::Denied => {
+                    debug!("Microphone TCC permission: denied");
+                    Ok(false)
                 }
+                mic_permissions::MicrophonePermissionStatus::Undetermined => {
+                    debug!("Microphone TCC permission: not yet requested");
+                    Ok(false)
+                }
+                mic_permissions::MicrophonePermissionStatus::NotApplicable => Ok(true),
             }
-
-            // Method 2: Check if audio units framework is available (no admin required)
-            match Command::new("ls")
-                .args(["/System/Library/Frameworks/AudioToolbox.framework"])
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        debug!("AudioToolbox framework available - microphone support likely present");
-                        return Ok(true);
-                    }
-                }
-                Err(e) => {
-                    debug!("Framework check failed: {}", e);
-                }
-            }
-
-            // Method 3: Check if we can query Core Audio (no admin required)
-            match Command::new("ioreg")
-                .args(["-r", "-c", "IOAudioDevice"])
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        let result = String::from_utf8_lossy(&output.stdout);
-                        let has_audio_device = result.contains("IOAudioDevice") ||
-                                              result.contains("Input") ||
-                                              result.contains("Microphone");
-                        debug!("Audio devices detected via ioreg: {}", has_audio_device);
-
-                        if has_audio_device {
-                            return Ok(true);
-                        }
-                    }
-                }
-                Err(e) => {
-                    debug!("ioreg check failed: {}", e);
-                }
-            }
-
-            // Fallback: Modern Macs typically have built-in microphones
-            info!("Unable to definitively detect microphone, assuming available on macOS");
-            Ok(true)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -104,33 +54,38 @@ impl NativePermissionChecker {
         }
     }
 
-    /// Request microphone permission by triggering system dialog - NO admin privileges required
+    /// Request microphone permission via the native TCC dialog, falling back to System Settings
     pub async fn request_microphone_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            info!("Triggering microphone permission dialog through system preferences");
+            use tauri_plugin_voice_transcription::mic_permissions;
 
-            // Open microphone settings to let user grant permission manually
-            match Command::new("open")
-                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
-                .status()
-            {
-                Ok(status) => {
-                    if status.success() {
-                        info!("Opened microphone privacy settings");
-                        // Give user time to interact with settings
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                        // Check if permission was granted
-                        Self::check_microphone_permission()
-                    } else {
-                        warn!("Failed to open microphone settings");
-                        Err("Failed to open microphone settings".to_string())
-                    }
+            info!("Requesting microphone permission via TCC dialog");
+            match mic_permissions::request_microphone_permission().await {
+                Ok(mic_permissions::MicrophonePermissionStatus::Granted) => {
+                    info!("Microphone permission granted via TCC dialog");
+                    Ok(true)
+                }
+                Ok(mic_permissions::MicrophonePermissionStatus::Denied) => {
+                    info!("Microphone permission denied — opening System Settings as fallback");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+                        .status();
+                    Ok(false)
+                }
+                Ok(_) => {
+                    info!("Microphone permission undetermined — opening System Settings");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+                        .status();
+                    Ok(false)
                 }
                 Err(e) => {
-                    warn!("Error opening microphone settings: {}", e);
-                    Err(format!("Error opening microphone settings: {}", e))
+                    warn!("TCC permission request failed: {} — opening System Settings", e);
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+                        .status();
+                    Err(format!("Failed to request microphone permission: {}", e))
                 }
             }
         }
