@@ -248,6 +248,9 @@ pub mod tools {
     /// Emitted for every computer use action with target app, sensitivity, and timing.
     /// Frontend can collect these to display a reviewable action audit trail.
     pub const COMPUTER_USE_AUDIT: &str = "computer-use-audit";
+    /// Emitted when AX (accessibility) grounding is attempted on a click action.
+    /// Includes element role/label and whether AXPress was used vs coordinate fallback.
+    pub const AX_GROUNDING_AUDIT: &str = "ax-grounding-audit";
 }
 
 /// Continuation events
