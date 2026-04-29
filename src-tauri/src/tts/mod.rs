@@ -6,7 +6,7 @@ use tauri::{State, AppHandle};
 use crate::state::AppState;
 use tracing::{info, warn, error, debug};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::sync::Mutex;
 use regex::Regex;
 
@@ -16,6 +16,27 @@ static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
 
 // Global mutex for preventing concurrent TTS operations
 static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
+
+// Global registry of PIDs for Juno-spawned audio processes (not system-wide killall)
+static JUNO_AUDIO_PIDS: OnceLock<StdMutex<Vec<u32>>> = OnceLock::new();
+
+fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
+    JUNO_AUDIO_PIDS.get_or_init(|| StdMutex::new(Vec::new()))
+}
+
+fn register_audio_pid(pid: u32) {
+    match audio_pid_registry().lock() {
+        Ok(mut pids) => { pids.push(pid); }
+        Err(e) => { warn!("[TTS] Failed to register audio PID {}: {}", pid, e); }
+    }
+}
+
+fn unregister_audio_pid(pid: u32) {
+    match audio_pid_registry().lock() {
+        Ok(mut pids) => { pids.retain(|&p| p != pid); }
+        Err(e) => { warn!("[TTS] Failed to unregister audio PID {}: {}", pid, e); }
+    }
+}
 
 // Structure to track audio playback completion with error propagation
 #[derive(Debug)]
@@ -185,6 +206,12 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                 .spawn()
                 .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
 
+            // Capture PID before moving child into the task so we can kill it precisely
+            let child_pid = child.id();
+            if let Some(pid) = child_pid {
+                register_audio_pid(pid);
+            }
+
             let playback_started_clone = playback_started.clone();
 
             // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
@@ -194,6 +221,11 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                 playback_started_clone.store(true, Ordering::SeqCst);
 
                 let result = child.wait().await;
+
+                // Unregister PID now that the process has exited
+                if let Some(pid) = child_pid {
+                    unregister_audio_pid(pid);
+                }
 
                 match result {
                     Ok(status) => {
@@ -246,6 +278,12 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                 .spawn()
                 .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
 
+            // Capture PID before moving child into the task so we can kill it precisely
+            let child_pid = child.id();
+            if let Some(pid) = child_pid {
+                register_audio_pid(pid);
+            }
+
             let playback_started_clone = playback_started.clone();
 
             // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
@@ -255,6 +293,11 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                 playback_started_clone.store(true, Ordering::SeqCst);
 
                 let result = child.wait().await;
+
+                // Unregister PID now that the process has exited
+                if let Some(pid) = child_pid {
+                    unregister_audio_pid(pid);
+                }
 
                 match result {
                     Ok(status) => {
@@ -325,45 +368,37 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
     Ok(())
 }
 
-// Function to stop speech playback - Enhanced to handle all audio processes
-// KNOWN ISSUE: `killall afplay` and `killall say` kill ALL system-wide instances of these
-// processes, not just those spawned by Juno. This can interfere with other applications
-// that use `afplay` or `say` (e.g., other TTS apps, system audio playback, scripts).
-// A proper fix requires tracking spawned child PIDs and only killing those specific processes.
-// This is a design limitation that needs a larger refactor to implement PID-based cleanup.
+// Stop speech playback by sending SIGTERM only to PIDs that Juno spawned.
+// This replaces the previous `killall afplay/say/aplay` approach, which terminated
+// all system-wide instances and interfered with other apps' audio.
 pub fn stop_speech() {
-    info!("[TTS] Stop speech requested - killing all audio processes");
+    info!("[TTS] Stop speech requested - killing Juno-owned audio processes");
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
 
-    // Kill platform-specific audio processes
-    // WARNING: This kills ALL system instances, not just Juno's. See comment above.
-    #[cfg(target_os = "macos")]
-    {
-        // Kill macOS audio processes
-        let _ = std::process::Command::new("killall")
-            .arg("afplay")
-            .output();
-        let _ = std::process::Command::new("killall")
-            .arg("say")
-            .output();
-        debug!("Attempted to kill macOS audio processes (afplay, say)");
+    let pids_to_kill: Vec<u32> = match audio_pid_registry().lock() {
+        Ok(pids) => pids.clone(),
+        Err(e) => {
+            warn!("[TTS] Failed to read audio PID registry: {}", e);
+            vec![]
+        }
+    };
+
+    if pids_to_kill.is_empty() {
+        debug!("[TTS] No Juno-owned audio processes to stop");
+        return;
     }
 
+    info!("[TTS] Stopping {} Juno audio process(es): {:?}", pids_to_kill.len(), pids_to_kill);
 
-
-    #[cfg(target_os = "linux")]
-    {
-        // Kill Linux audio processes
-        let _ = std::process::Command::new("killall")
-            .arg("aplay")
-            .output();
-        let _ = std::process::Command::new("killall")
-            .arg("espeak")
-            .output();
-        let _ = std::process::Command::new("killall")
-            .arg("festival")
-            .output();
-        debug!("Attempted to kill Linux audio processes (aplay, espeak, festival)");
+    #[cfg(unix)]
+    for pid in pids_to_kill {
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if result == 0 {
+            debug!("[TTS] Sent SIGTERM to Juno audio process PID {}", pid);
+        } else {
+            // ESRCH (errno 3) means process already exited — not an error
+            debug!("[TTS] kill({}) returned error: {} (process may have already exited)", pid, std::io::Error::last_os_error());
+        }
     }
 }
 
