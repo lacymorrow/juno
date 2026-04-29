@@ -181,39 +181,63 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
     // Enhanced check that verifies both state management and initialization status
     check_voice_controller_availability(&app)?;
 
-    let mut voice_controller = match controller.try_lock() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::WouldBlock) => {
-            info!("[Plugin] VoiceController is busy - toggle deferred");
-            return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
-        }
-        Err(std::sync::TryLockError::Poisoned(e)) => {
-            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
-            return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
-        }
-    };
-
-    let was_dictating = voice_controller.is_dictating();
+    // Acquire-check-release in a block so the MutexGuard (which is !Send) is
+    // dropped before any .await, satisfying the Send bound on Tauri command futures.
+    let was_dictating = {
+        let voice_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                info!("[Plugin] VoiceController is busy - toggle deferred");
+                return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+                return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+            }
+        };
+        voice_controller.is_dictating()
+    }; // guard dropped here — before any .await
 
     if was_dictating {
+        let mut voice_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(Error::LockError("VoiceController is busy - please try again".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+            }
+        };
         voice_controller.stop_dictation()?;
 
-        // Sound will be handled automatically by backend event listener
         app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit dictation-stopped event: {}", e)))?;
         Ok(false)
     } else {
+        crate::mic_permissions::ensure_microphone_ready().await
+            .map_err(|e| {
+                error!("[Plugin] Microphone permission check failed in toggle: {}", e);
+                Error::PermissionError(e)
+            })?;
+        info!("[Plugin] Microphone permissions verified for toggle");
+
+        let mut voice_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(Error::LockError("VoiceController is busy after permission check".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return Err(Error::LockError(format!("VoiceController mutex is poisoned: {}", e)));
+            }
+        };
+
         match voice_controller.start_dictation(&app) {
             Ok(()) => {
-                // Sound will be handled automatically by backend event listener
                 app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED, ())
                     .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
                 Ok(true)
             }
-            Err(e) => {
-                // Error sound will be handled automatically by backend when error event is emitted from controller
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 }
@@ -438,24 +462,51 @@ pub async fn toggle_always_listening<R: tauri::Runtime + 'static>(
 ) -> Result<bool, Error> {
     info!("[Plugin] toggle_always_listening command called");
 
-    let mut always_listening_controller = match controller.try_lock() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::WouldBlock) => {
-            return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
-        }
-        Err(std::sync::TryLockError::Poisoned(e)) => {
-            return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
-        }
-    };
-
-    let was_active = always_listening_controller.is_active();
+    let was_active = {
+        let always_listening_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+            }
+        };
+        always_listening_controller.is_active()
+    }; // guard dropped here — before any .await
 
     if was_active {
+        let mut always_listening_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(Error::LockError("AlwaysListeningController is busy - please try again".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+            }
+        };
         always_listening_controller.stop_always_listening()?;
         app.emit(constants::plugin::ALWAYS_LISTENING_STOPPED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit always-listening-stopped event: {}", e)))?;
         Ok(false)
     } else {
+        crate::mic_permissions::ensure_microphone_ready().await
+            .map_err(|e| {
+                error!("[Plugin] Microphone permission check failed in always-listening toggle: {}", e);
+                Error::PermissionError(e)
+            })?;
+        info!("[Plugin] Microphone permissions verified for always-listening toggle");
+
+        let mut always_listening_controller = match controller.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(Error::LockError("AlwaysListeningController is busy after permission check".to_string()));
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return Err(Error::LockError(format!("AlwaysListeningController mutex is poisoned: {}", e)));
+            }
+        };
+
         always_listening_controller.start_always_listening(&app)?;
         app.emit(constants::plugin::ALWAYS_LISTENING_STARTED, ())
             .map_err(|e| Error::EventError(format!("Failed to emit always-listening-started event: {}", e)))?;

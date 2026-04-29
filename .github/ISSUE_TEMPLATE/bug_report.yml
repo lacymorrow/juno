@@ -10,8 +10,8 @@ body:
     id: version
     attributes:
       label: Juno version
-      description: "Find this in Juno > About (e.g. v0.4.11)"
-      placeholder: "v0.4.11"
+      description: "Find this in Juno > About (e.g. v0.5.0)"
+      placeholder: "v0.5.0"
     validations:
       required: true
   - type: input
@@ -46,7 +46,7 @@ body:
         2.
         3.
     validations:
-      required: false
+      required: true
   - type: textarea
     id: logs
     attributes:
