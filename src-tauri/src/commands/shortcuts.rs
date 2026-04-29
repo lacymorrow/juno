@@ -428,17 +428,8 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 
 /// Check if input monitoring permissions are granted (macOS only)
 /// This is required for global shortcuts to work
-#[cfg(target_os = "macos")]
 pub fn check_input_monitoring_permissions() -> Result<bool, String> {
-    // This is a basic check - in a real implementation you would use proper macOS APIs
-    // For now, we'll assume permissions are needed and return true to avoid blocking
-    // A proper implementation would use IOHIDRequestAccess() or similar APIs
-    Ok(true) // Assume granted for now to avoid blocking the app
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn check_input_monitoring_permissions() -> Result<bool, String> {
-    Ok(true) // Always true on non-macOS platforms
+    crate::commands::native_permissions::NativePermissionChecker::check_input_monitoring_permission()
 }
 
 /// Validate a keyboard shortcut in real-time (for frontend feedback)
