@@ -1,0 +1,26 @@
+name: Deploy Remote Control Server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'remote-control-server/**'
+      - '.github/workflows/deploy-remote-control.yml'
+
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: remote-control-server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

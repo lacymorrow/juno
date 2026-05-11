@@ -29,6 +29,7 @@ use {
         declare::ClassDecl
     },
     std::sync::Mutex,
+    window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial},
 };
 
 /// Apply comprehensive macOS-specific setup for all application windows
@@ -156,6 +157,13 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
             }
         }
 
+        // Apply native macOS vibrancy (HUD-style frosted glass) to the floating panel
+        if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, Some(12.0)) {
+            warn!("Failed to apply vibrancy to floating-panel: {:?}", e);
+        } else {
+            info!("macOS vibrancy applied to floating-panel.");
+        }
+
         // Setup mouse tracking for floating panel
         if let Err(e) = mouse_tracking::setup_tracking_area(&window, app_handle.clone()) {
             error!("Failed to setup mouse tracking area for floating panel: {}", e);
@@ -190,6 +198,13 @@ fn setup_main_window(app_handle: &AppHandle) {
             Err(e) => {
                 error!("Error getting NSWindow for main window setup: {}", e);
             }
+        }
+
+        // Apply native macOS vibrancy (frosted glass) effect
+        if let Err(e) = apply_vibrancy(&main_window, NSVisualEffectMaterial::Sidebar, None, Some(10.0)) {
+            warn!("Failed to apply vibrancy to main window: {:?}", e);
+        } else {
+            info!("macOS vibrancy applied to main window.");
         }
 
         // NOTE: Main window activation (show/focus) is handled by
