@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-voice-transcription"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 links = "tauri-plugin-voice-transcription"
 authors = ["Juno Contributors"]
@@ -13,14 +13,14 @@ keywords = ["tauri", "plugin", "voice", "transcription", "whisper"]
 categories = ["multimedia::audio", "api-bindings"]
 
 [build-dependencies]
-tauri-plugin = { version = "2.0.0-beta", features = ["build"] }
+tauri-plugin = { version = "2", features = ["build"] }
 
 [lib]
 name = "tauri_plugin_voice_transcription"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tauri = "2.0.0-beta"
+tauri = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 whisper-rs = "0.11.0"
@@ -44,7 +44,7 @@ cocoa-foundation = "0.1"
 block = "0.1"
 
 [dev-dependencies]
-tauri = { version = "2.0.0-beta", features = ["test"] }
+tauri = { version = "2", features = ["test"] }
 tokio = { version = "1", features = ["full"] }
 
 [features]

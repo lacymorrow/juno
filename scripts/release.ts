@@ -4,12 +4,14 @@
  *
  * Handles the full release pipeline:
  *   1. Version bump (all Cargo.toml + package.json files)
- *   2. Build universal Tauri app (DMG) + juno-cua binary
- *   3. Git commit + tag + push
- *   4. GitHub Release (DMG + juno-cua binaries)
- *   5. npm publish (juno-cua package)
- *   6. Homebrew formula update (juno-cua)
- *   7. juno-www marketing site update
+ *   2. Build juno-cua binary (arm64 + x86_64 + universal)
+ *   3. Git commit + tag + push  (v* tag triggers release-tauri.yml on GitHub)
+ *   4. npm publish (juno-cua package)
+ *   5. Homebrew formula update (juno-cua)
+ *   6. Wait for CI to publish the Tauri DMG, then sync juno-www marketing site
+ *
+ * The Tauri DMG and updater latest.json are built and published by
+ * `.github/workflows/release-tauri.yml`, triggered by the v* tag push.
  *
  * Usage:
  *   bun run release              # interactive — prompts for bump type
@@ -17,14 +19,13 @@
  *   bun run release minor        # minor bump  (0.4.11 → 0.5.0)
  *   bun run release major        # major bump  (0.4.11 → 1.0.0)
  *   bun run release 1.0.0        # explicit version
- *   bun run release --skip-build # skip Tauri build (use existing artifacts)
- *   bun run release --cua-only   # only release juno-cua (no Tauri DMG)
+ *   bun run release --cua-only   # only release juno-cua (skip juno-www wait)
  */
 
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -33,7 +34,6 @@ const HOMEBREW_FORMULA = resolve(HOMEBREW_TAP, "Formula/juno-cua.rb");
 const JUNO_WWW = resolve(ROOT, "../juno-www");
 const NPM_PACKAGE = resolve(ROOT, "packages/juno-cua");
 
-const SKIP_BUILD = process.argv.includes("--skip-build");
 const CUA_ONLY = process.argv.includes("--cua-only");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -78,24 +78,50 @@ function errorText(err: unknown): string {
 	return String(err);
 }
 
-function findDmg(): string | null {
-	const searchDirs = [
-		`${ROOT}/target/universal-apple-darwin/release/bundle/dmg`,
-		`${ROOT}/target/release/bundle/dmg`,
-		`${ROOT}/target/aarch64-apple-darwin/release/bundle/dmg`,
-	];
+const GITHUB_OWNER = "lacymorrow";
+const GITHUB_REPO = "juno";
 
-	for (const dir of searchDirs) {
-		if (!existsSync(dir)) continue;
-		const dmgs = readdirSync(dir)
-			.filter((f) => f.endsWith(".dmg"))
-			.sort((a, b) => {
-				const aTime = statSync(`${dir}/${a}`).mtimeMs;
-				const bTime = statSync(`${dir}/${b}`).mtimeMs;
-				return bTime - aTime;
-			});
-		if (dmgs.length > 0) return `${dir}/${dmgs[0]}`;
+/**
+ * Poll `gh release view` for a tag until the universal .dmg asset shows up
+ * (i.e. release-tauri.yml CI has finished publishing). Returns the download URL.
+ */
+async function waitForDmg(
+	tag: string,
+	timeoutMs = 30 * 60 * 1000,
+): Promise<{ name: string; url: string } | null> {
+	const spinner = p.spinner();
+	spinner.start(`Waiting for GitHub Actions to publish ${tag}'s DMG`);
+	const start = Date.now();
+	let lastStatus = "";
+
+	while (Date.now() - start < timeoutMs) {
+		try {
+			const json = run(`gh release view ${tag} --json assets 2>/dev/null`);
+			const parsed = JSON.parse(json) as { assets: { name: string }[] };
+			const dmg = parsed.assets.find((a) => a.name.toLowerCase().endsWith(".dmg"));
+			if (dmg) {
+				spinner.stop(pc.green(`Found ${dmg.name} in release ${tag}`));
+				return {
+					name: dmg.name,
+					url: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/${encodeURIComponent(dmg.name)}`,
+				};
+			}
+			const newStatus = `release exists, no DMG yet (${parsed.assets.length} assets)`;
+			if (newStatus !== lastStatus) {
+				spinner.message(`Waiting for ${tag} DMG — ${newStatus}`);
+				lastStatus = newStatus;
+			}
+		} catch {
+			const newStatus = "release not created yet";
+			if (newStatus !== lastStatus) {
+				spinner.message(`Waiting for ${tag} — ${newStatus}`);
+				lastStatus = newStatus;
+			}
+		}
+		await new Promise((r) => setTimeout(r, 15_000));
 	}
+
+	spinner.stop(pc.yellow(`Timed out after ${Math.round(timeoutMs / 60000)}m waiting for DMG`));
 	return null;
 }
 
@@ -292,29 +318,8 @@ async function main() {
 	run(`bash scripts/bump-version.sh ${newVersion}`);
 	bumpSpinner.stop(`Versions bumped to ${pc.green(newVersion)}`);
 
-	// 2. Build
-	let dmgPath: string | null = null;
-
-	if (!CUA_ONLY && !SKIP_BUILD) {
-		const buildSpinner = p.spinner();
-		buildSpinner.start("Building universal Tauri app (this takes a while)");
-		try {
-			run("bun run tauri build --target universal-apple-darwin", { stdio: "inherit" });
-			buildSpinner.stop(pc.green("Tauri build complete"));
-			dmgPath = findDmg();
-			if (dmgPath) {
-				p.log.success(`DMG: ${pc.dim(dmgPath.split("/").pop())}`);
-			}
-		} catch (err: unknown) {
-			buildSpinner.stop(pc.red("Tauri build failed"));
-			p.log.error(errorText(err));
-			const cont = await p.confirm({ message: "Continue without DMG?" });
-			if (p.isCancel(cont) || !cont) cancelled();
-		}
-	} else if (SKIP_BUILD) {
-		dmgPath = findDmg();
-		if (dmgPath) p.log.info(`Using existing DMG: ${pc.dim(dmgPath.split("/").pop())}`);
-	}
+	// 2. Tauri app build is handled by GitHub Actions (release-tauri.yml) on v* tag push.
+	p.log.info("Tauri build → GitHub Actions will build and publish the DMG after tag push.");
 
 	// 3. Build juno-cua (arm64 + x86_64 + universal)
 	const cuaSpinner = p.spinner();
@@ -390,28 +395,9 @@ async function main() {
 	run("git push origin HEAD --tags");
 	pushSpinner.stop("Pushed to GitHub");
 
-	// 8. GitHub Release
-	const releaseSpinner = p.spinner();
-	releaseSpinner.start("Creating GitHub Release");
-
-	const releaseAssets: string[] = [];
-	if (dmgPath && existsSync(dmgPath)) releaseAssets.push(`"${dmgPath}"`);
-	if (existsSync(`${ROOT}/target/juno-cua-darwin-arm64.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-arm64.tar.gz"`);
-	if (existsSync(`${ROOT}/target/juno-cua-darwin-x64.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-x64.tar.gz"`);
-	if (existsSync(`${ROOT}/target/juno-cua-darwin-universal.tar.gz`)) releaseAssets.push(`"${ROOT}/target/juno-cua-darwin-universal.tar.gz"`);
-
-	const assetsArg = releaseAssets.length > 0 ? ` ${releaseAssets.join(" ")}` : "";
-
-	try {
-		const releaseUrl = run(
-			`gh release create ${tag} --title "${tag}" --notes "${changelog.replace(/"/g, '\\"')}"${assetsArg}`
-		).trim();
-		releaseSpinner.stop(`GitHub Release created`);
-		p.log.success(pc.dim(releaseUrl));
-	} catch (err: unknown) {
-		releaseSpinner.stop(pc.red("GitHub Release failed"));
-		p.log.error(errorText(err));
-	}
+	// 8. GitHub Release for Juno app is created by GitHub Actions (release-tauri.yml).
+	// juno-cua release is created by GitHub Actions (release-cua.yml) on cua-v* tag push.
+	p.log.info(`GitHub Actions will create the ${pc.green(tag)} release with DMG + latest.json.`);
 
 	// 9. npm publish
 	await publishNpm();
@@ -423,40 +409,46 @@ async function main() {
 		p.log.warn("Skipping Homebrew — no SHA256 hashes available");
 	}
 
-	// 11. juno-www
-	if (existsSync(JUNO_WWW) && dmgPath) {
+	// 11. juno-www — wait for CI to publish, then sync marketing site
+	if (existsSync(JUNO_WWW) && !CUA_ONLY) {
 		const doWww = await p.confirm({
-			message: "Update juno-www marketing site?",
+			message: "Wait for CI and update juno-www marketing site?",
 			initialValue: true,
 		});
 		if (!p.isCancel(doWww) && doWww) {
-			const wwwSpinner = p.spinner();
-			wwwSpinner.start("Updating juno-www");
-			try {
-				const dmgName = dmgPath.split("/").pop();
-				const githubUrl = `https://github.com/lacymorrow/juno/releases/download/${tag}/${dmgName}`;
-				const releaseMeta = {
-					version: tag,
-					file: githubUrl,
-					releasedAt: new Date().toISOString(),
-				};
-				run(`mkdir -p "${JUNO_WWW}/public/downloads"`);
-				writeFileSync(
-					`${JUNO_WWW}/public/downloads/release.json`,
-					JSON.stringify(releaseMeta, null, 2) + "\n",
-				);
-				run(`git add public/downloads/release.json && git commit -m "release: update download to Juno ${tag}" && git push origin main`, { cwd: JUNO_WWW });
-				wwwSpinner.stop(pc.green("juno-www updated"));
-			} catch (err: unknown) {
-				wwwSpinner.stop(pc.red("juno-www update failed"));
-				p.log.error(errorText(err));
+			const dmg = await waitForDmg(tag);
+			if (dmg) {
+				const wwwSpinner = p.spinner();
+				wwwSpinner.start("Updating juno-www");
+				try {
+					const releaseMeta = {
+						version: tag,
+						file: dmg.url,
+						releasedAt: new Date().toISOString(),
+					};
+					run(`mkdir -p "${JUNO_WWW}/public/downloads"`);
+					writeFileSync(
+						`${JUNO_WWW}/public/downloads/release.json`,
+						JSON.stringify(releaseMeta, null, 2) + "\n",
+					);
+					run(
+						`git add public/downloads/release.json && git commit -m "release: update download to Juno ${tag}" && git push origin main`,
+						{ cwd: JUNO_WWW },
+					);
+					wwwSpinner.stop(pc.green("juno-www updated"));
+				} catch (err: unknown) {
+					wwwSpinner.stop(pc.red("juno-www update failed"));
+					p.log.error(errorText(err));
+				}
+			} else {
+				p.log.warn(`No DMG found for ${tag} — update juno-www manually once CI publishes.`);
 			}
 		}
 	}
 
 	// Done
 	p.outro(
-		`${pc.green("Done!")} Released ${pc.green(tag)} — Tauri${dmgPath ? " + DMG" : ""}, juno-cua, npm, Homebrew`,
+		`${pc.green("Done!")} Released ${pc.green(tag)} — juno-cua, npm, Homebrew, www. Tauri DMG → GitHub Actions.`,
 	);
 }
 
