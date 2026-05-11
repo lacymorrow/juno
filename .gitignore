@@ -187,6 +187,9 @@ debug/
 # IDEs and Editors
 # =============================================================================
 
+# Cursor — mcp.json embeds API keys, never commit it
+.cursor/mcp.json
+
 # Visual Studio Code
 .vscode/*
 !.vscode/settings.json
