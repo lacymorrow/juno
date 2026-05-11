@@ -28,6 +28,7 @@ import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
+import { useUpdater } from "@/hooks/useUpdater";
 
 function App() {
   // Initialize custom hooks
@@ -35,6 +36,8 @@ function App() {
   const conversation = useConversation();
   const audioPlayback = useAudioPlayback();
   const { playError } = useSound();
+
+  const { checkForUpdates, installUpdate } = useUpdater();
 
   // Timer tracking for cleanup
   const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -111,20 +114,12 @@ function App() {
 
     appState.setIsCheckingUpdate(true);
     try {
-      console.log("🔍 Checking for updates...");
-      const updateAvailable: boolean = await invoke("check_for_updates");
-
-      if (updateAvailable) {
-        const latestVersion: string = await invoke("get_latest_version");
-        appState.setUpdateInfo({
-          available: true,
-          version: latestVersion,
-        });
+      const { available, info } = await checkForUpdates();
+      if (available && info) {
+        appState.setUpdateInfo(info);
         appState.setActiveModal("update");
-        console.log(`✅ Update available: v${latestVersion}`);
       } else {
         toast.success("✅ You're running the latest version!");
-        console.log("✅ No updates available - you're on the latest version");
       }
     } catch (error) {
       console.error("❌ Error checking for updates:", error);
@@ -137,6 +132,7 @@ function App() {
     appState.setIsCheckingUpdate,
     appState.setUpdateInfo,
     appState.setActiveModal,
+    checkForUpdates,
   ]);
 
   // Backend events integration
@@ -497,6 +493,7 @@ function App() {
         feedbackData={appState.feedbackData}
         onFeedbackDataChange={appState.handleFeedbackDataChange}
         updateInfo={appState.updateInfo}
+        onInstallUpdate={installUpdate}
         conversation={conversation.conversation}
         isExporting={false}
         isImporting={false}

@@ -66,6 +66,7 @@ interface ModalSystemProps {
   feedbackData: FeedbackData;
   onFeedbackDataChange: (data: Partial<FeedbackData>) => void;
   updateInfo: UpdateInfo | null;
+  onInstallUpdate?: () => Promise<void>;
   conversation: ChatMessage[];
   isExporting: boolean;
   isImporting: boolean;
@@ -85,6 +86,7 @@ export function ModalSystem({
   feedbackData,
   onFeedbackDataChange,
   updateInfo,
+  onInstallUpdate,
   conversation,
   isExporting,
   isImporting,
@@ -236,12 +238,10 @@ export function ModalSystem({
 
   const handleInstallUpdate = async () => {
     try {
-      console.log("🚀 Installing update...");
       onAddSystemMessage(
         "🚀 Installing update... The application will restart automatically."
       );
-
-      await invoke("install_update");
+      await onInstallUpdate?.();
     } catch (error) {
       console.error("❌ Failed to install update:", error);
       onAddSystemMessage(`Failed to install update: ${error}`);

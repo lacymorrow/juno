@@ -258,6 +258,7 @@ pub fn run() {
             None,
         )) // Add autostart plugin
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
+        .plugin(tauri_plugin_updater::Builder::new().build()) // Add the updater plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data

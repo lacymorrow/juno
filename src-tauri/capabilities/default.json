@@ -44,6 +44,9 @@
     "voice-transcription:allow-get-always-listening-sensitivity",
     "voice-transcription:allow-set-always-listening-wake-words",
     "voice-transcription:allow-get-always-listening-wake-words",
-    "store:default"
+    "store:default",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }
