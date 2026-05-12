@@ -350,9 +350,16 @@ async fn execute_agent_internal(
                 info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
                 crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
             }
-            _ => crate::cursor_scale::CursorScaleGuard::noop(),
+            Ok(_) => crate::cursor_scale::CursorScaleGuard::noop(),
+            Err(e) => {
+                warn!("[CursorScale] Failed to read agent settings, skipping cursor scaling: {}", e);
+                crate::cursor_scale::CursorScaleGuard::noop()
+            }
         },
-        Err(_) => crate::cursor_scale::CursorScaleGuard::noop(),
+        Err(e) => {
+            warn!("[CursorScale] Failed to init settings manager, skipping cursor scaling: {}", e);
+            crate::cursor_scale::CursorScaleGuard::noop()
+        }
     };
 
     // TODO: TARS Integration disabled - event system not yet implemented

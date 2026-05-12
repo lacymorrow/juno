@@ -160,13 +160,16 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleBigCursorScaleChange = async (value: number[]) => {
+  const handleBigCursorScaleChange = (value: number[]) => {
+    setBigCursorScale(value[0]);
+  };
+
+  const handleBigCursorScaleCommit = async (value: number[]) => {
     const scale = value[0];
-    setBigCursorScale(scale);
     try {
       await invoke("set_big_cursor_scale", { scale });
     } catch (error) {
-      console.error("Failed to update big cursor scale:", error);
+      console.error("Failed to persist big cursor scale:", error);
       toast.error("Failed to update cursor scale");
     }
   };
@@ -425,6 +428,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               <Slider
                 value={[bigCursorScale]}
                 onValueChange={handleBigCursorScaleChange}
+                onValueCommit={handleBigCursorScaleCommit}
                 min={1.5}
                 max={10}
                 step={0.5}
