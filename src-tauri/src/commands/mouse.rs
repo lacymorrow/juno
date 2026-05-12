@@ -907,7 +907,7 @@ pub(crate) async fn set_big_cursor_scale(
     scale: f32,
 ) -> Result<(), String> {
     use crate::constants::settings::validation;
-    if scale < validation::MIN_BIG_CURSOR_SCALE || scale > validation::MAX_BIG_CURSOR_SCALE {
+    if !(validation::MIN_BIG_CURSOR_SCALE..=validation::MAX_BIG_CURSOR_SCALE).contains(&scale) {
         return Err(format!(
             "Cursor scale must be between {} and {}",
             validation::MIN_BIG_CURSOR_SCALE,

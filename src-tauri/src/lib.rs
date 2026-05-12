@@ -454,6 +454,10 @@ pub fn run() {
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
+            get_big_cursor_enabled,
+            set_big_cursor_enabled,
+            get_big_cursor_scale,
+            set_big_cursor_scale,
 
             // Sound Commands
             play_sound_by_type,
