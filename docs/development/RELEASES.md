@@ -35,10 +35,10 @@ bun run release patch
   │             → updates lacymorrow/homebrew-tap
   │
   ├── 5. Local: npm publish juno-cua
-  ├── 6. Local: update homebrew-tap formula (for juno-cua)
-  └── 7. Local: poll for CI DMG (waitForDmg, 45min timeout)
-          → once published, write juno-www/public/downloads/release.json
-          → commit + push juno-www
+  └── 6. Local: update homebrew-tap formula (for juno-cua)
+
+juno-www (marketing site) pulls the latest release from the GitHub API
+on demand — no sync step. See juno-www/app/api/release/route.ts.
 ```
 
 Two GitHub Releases get created per version: `v0.X.Y` (the Tauri app) and `cua-v0.X.Y` (the CLI). They live in the same repo but represent different artifacts.
@@ -116,40 +116,24 @@ Tags both `v0.X.Y` (main app) and `cua-v0.X.Y` (CLI). Pushes triggers two workfl
 
 `npm publish --access public` from `packages/juno-cua`. Updates `lacymorrow/homebrew-tap/Formula/juno-cua.rb` with new SHAs and version, commits, pushes.
 
-### 6. Wait for CI Tauri build
+### 6. CI Tauri build
 
-`waitForDmg()` polls `gh release view v0.X.Y --json assets` every 15s until the `.dmg` shows up. Timeout: **45 min** (universal macOS builds run ~30 min on cold runner cache; budget for slow builds).
+The `v*` tag push triggers `.github/workflows/release-tauri.yml`. The release script does **not** wait for it — once the tag is pushed, the script exits. The CI build runs ~30 min and publishes the DMG, `.app.tar.gz`, `.sig`, and `latest.json` to a GitHub Release.
 
-### 7. Sync juno-www
+### 7. juno-www updates itself
 
-Once the DMG asset URL is known, writes `juno-www/public/downloads/release.json` with:
-```json
-{
-  "version": "v0.X.Y",
-  "file": "https://github.com/lacymorrow/juno/releases/download/v0.X.Y/Juno_X.Y.Z_universal.dmg",
-  "releasedAt": "..."
-}
-```
-Commits and pushes to `juno-www` main.
+`juno-www/app/api/release/route.ts` hits the GitHub API (`/repos/lacymorrow/juno/releases/latest`) with Next.js ISR (`revalidate: 300`). Within ~5 minutes of CI publishing the new release, the marketing site's download button picks up the new DMG URL automatically. No commit or sync needed.
 
 ## Troubleshooting
 
-### `waitForDmg` timed out
+### CI build failed or never published
 
-The CI build took longer than 45 min, or it failed. Check:
+Check workflow runs:
 ```bash
 gh run list --workflow=release-tauri.yml --limit=3
 gh run view <run-id> --log-failed
 ```
-If the build did eventually succeed, manually update `juno-www`:
-```bash
-echo '{
-  "version": "v0.X.Y",
-  "file": "https://github.com/lacymorrow/juno/releases/download/v0.X.Y/Juno_X.Y.Z_universal.dmg",
-  "releasedAt": "TIMESTAMP"
-}' > ~/repo/juno-www/public/downloads/release.json
-cd ~/repo/juno-www && git add public/downloads/release.json && git commit -m "release: update download to Juno v0.X.Y" && git push
-```
+Once CI does publish, juno-www will pick up the new release on the next ISR revalidation (max 5 min after first request).
 
 ### CI fails on "spending limit"
 
