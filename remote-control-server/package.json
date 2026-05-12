@@ -1,6 +1,6 @@
 {
   "name": "juno-remote-control-server",
-  "version": "0.1.0",
+  "version": "0.5.3",
   "description": "Remote control server for Juno with GitHub OAuth authentication",
   "main": "src/server.js",
   "scripts": {
