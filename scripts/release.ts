@@ -87,7 +87,7 @@ const GITHUB_REPO = "juno";
  */
 async function waitForDmg(
 	tag: string,
-	timeoutMs = 30 * 60 * 1000,
+	timeoutMs = 45 * 60 * 1000,
 ): Promise<{ name: string; url: string } | null> {
 	const spinner = p.spinner();
 	spinner.start(`Waiting for GitHub Actions to publish ${tag}'s DMG`);
