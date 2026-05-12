@@ -860,6 +860,75 @@ pub(crate) async fn set_smooth_mouse_movement_setting(
     Ok(())
 }
 
+// === Big Cursor Settings ===
+
+#[tauri::command]
+pub(crate) async fn get_big_cursor_enabled(
+    app: AppHandle,
+) -> Result<bool, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app)
+        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
+    let agent_settings = settings_manager.get_agent_settings().await?;
+    Ok(agent_settings.big_cursor_enabled)
+}
+
+#[tauri::command]
+pub(crate) async fn set_big_cursor_enabled(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app)
+        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
+    let mut agent_settings = settings_manager.get_agent_settings().await?;
+    agent_settings.big_cursor_enabled = enabled;
+    settings_manager.set_agent_settings(&agent_settings).await?;
+
+    if !enabled {
+        crate::cursor_scale::restore_cursor_scale();
+    }
+
+    info!("Big cursor {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn get_big_cursor_scale(
+    app: AppHandle,
+) -> Result<f32, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app)
+        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
+    let agent_settings = settings_manager.get_agent_settings().await?;
+    Ok(agent_settings.big_cursor_scale)
+}
+
+#[tauri::command]
+pub(crate) async fn set_big_cursor_scale(
+    app: AppHandle,
+    scale: f32,
+) -> Result<(), String> {
+    use crate::constants::settings::validation;
+    if scale < validation::MIN_BIG_CURSOR_SCALE || scale > validation::MAX_BIG_CURSOR_SCALE {
+        return Err(format!(
+            "Cursor scale must be between {} and {}",
+            validation::MIN_BIG_CURSOR_SCALE,
+            validation::MAX_BIG_CURSOR_SCALE
+        ));
+    }
+
+    let settings_manager = crate::settings::manager::SettingsManager::new(app)
+        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
+    let mut agent_settings = settings_manager.get_agent_settings().await?;
+    agent_settings.big_cursor_scale = scale;
+    settings_manager.set_agent_settings(&agent_settings).await?;
+
+    if crate::cursor_scale::is_cursor_scaled() {
+        crate::cursor_scale::set_cursor_scale(scale as f64);
+    }
+
+    info!("Big cursor scale set to {:.1}x", scale);
+    Ok(())
+}
+
 // Window-relative click functions removed due to missing DesktopWrapper functionality
 // TODO: Implement window bounds retrieval methods in DesktopWrapper to support:
 // - window_relative_click(window_id, relative_x, relative_y, modifier)

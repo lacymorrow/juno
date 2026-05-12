@@ -29,6 +29,7 @@ pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
+pub mod cursor_scale;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription

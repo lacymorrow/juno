@@ -89,6 +89,10 @@ macro_rules! generate_invoke_handler {
 
             // Production mouse operations (minimal set for system functions)
             get_cursor_position,
+            get_big_cursor_enabled,
+            set_big_cursor_enabled,
+            get_big_cursor_scale,
+            set_big_cursor_scale,
 
             // Production keyboard operations (minimal set for system functions)
             type_text,
@@ -297,6 +301,10 @@ pub mod categories {
     /// Mouse interaction commands (minimal set - most operations use computer tool)
     pub const MOUSE: &[&str] = &[
         "get_cursor_position",
+        "get_big_cursor_enabled",
+        "set_big_cursor_enabled",
+        "get_big_cursor_scale",
+        "set_big_cursor_scale",
     ];
 
 

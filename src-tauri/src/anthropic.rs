@@ -343,6 +343,18 @@ async fn execute_agent_internal(
         agent::config::MAX_ITERATIONS
     );
 
+    // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
+    let _cursor_guard = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        Ok(mgr) => match mgr.get_agent_settings().await {
+            Ok(s) if s.big_cursor_enabled => {
+                info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
+                crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
+            }
+            _ => crate::cursor_scale::CursorScaleGuard::noop(),
+        },
+        Err(_) => crate::cursor_scale::CursorScaleGuard::noop(),
+    };
+
     // TODO: TARS Integration disabled - event system not yet implemented
     // let agent_run_start_event = JunoAgentEvent::AgentRunStart {
     //     session_id: execution_id.clone(),
