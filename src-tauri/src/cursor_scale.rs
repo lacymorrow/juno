@@ -1,55 +1,86 @@
-//! macOS cursor scaling via CoreGraphics private API.
+//! macOS cursor scaling via Accessibility preferences.
 //!
-//! Uses `CGSMainConnectionID` and `CGSSetCursorScale` to change the system
-//! cursor size at runtime. These private APIs have been stable since macOS 10.6
-//! and are the same mechanism macOS uses for the "shake to locate" cursor feature.
+//! Sets `mouseDriverCursorSize` in `com.apple.universalaccess` — the same
+//! preference macOS System Settings → Accessibility → Display → Pointer Size
+//! uses. Works on all macOS versions including macOS 16+ where the older
+//! CGSSetCursorScale private API was removed.
 
 #[cfg(target_os = "macos")]
 mod inner {
+    use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tracing::info;
-    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use std::sync::Mutex;
+    use tracing::{info, warn};
 
-    /// Ref-count of active cursor-scale guards. Only restores to 1.0
-    /// when the last guard drops, so concurrent agents don't fight.
     static SCALE_REFCOUNT: AtomicUsize = AtomicUsize::new(0);
+    static ORIGINAL_SIZE: Mutex<Option<f64>> = Mutex::new(None);
 
-    type CGSConnectionID = u32;
-
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGSMainConnectionID() -> CGSConnectionID;
-        fn CGSSetCursorScale(cid: CGSConnectionID, scale: f64);
+    fn read_cursor_size() -> f64 {
+        Command::new("defaults")
+            .args(["read", "com.apple.universalaccess", "mouseDriverCursorSize"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .unwrap_or(1.0)
     }
 
-    /// Post a synthetic mouse-moved event at the current cursor position
-    /// to force macOS to redraw the cursor at the new scale.
-    fn refresh_cursor() {
-        if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
-            if let Ok(dummy) = CGEvent::new(source.clone()) {
-                let pos = dummy.location();
-                if let Ok(ev) = CGEvent::new_mouse_event(
-                    source,
-                    CGEventType::MouseMoved,
-                    pos,
-                    CGMouseButton::Left,
-                ) {
-                    ev.post(CGEventTapLocation::HID);
-                }
+    fn write_cursor_size(size: f64) {
+        let result = Command::new("defaults")
+            .args([
+                "write",
+                "com.apple.universalaccess",
+                "mouseDriverCursorSize",
+                "-float",
+                &format!("{:.2}", size),
+            ])
+            .output();
+
+        match result {
+            Ok(o) if o.status.success() => {
+                info!("[CursorScale] Wrote mouseDriverCursorSize={:.2}", size);
             }
+            Ok(o) => {
+                warn!(
+                    "[CursorScale] defaults write failed: {}",
+                    String::from_utf8_lossy(&o.stderr)
+                );
+            }
+            Err(e) => {
+                warn!("[CursorScale] Failed to run defaults: {}", e);
+            }
+        }
+
+        // Post Darwin notifications to nudge the accessibility subsystem into
+        // picking up the new preference value. Multiple names for cross-version
+        // coverage — notifyutil is instant (no compilation unlike swift -e).
+        for name in &[
+            "com.apple.accessibility.cache.cursor",
+            "com.apple.universalaccess.prefChanged",
+        ] {
+            let _ = Command::new("notifyutil").args(["-p", name]).output();
         }
     }
 
     pub fn set_cursor_scale(scale: f64) {
         let scale = scale.clamp(1.0, 10.0);
-        unsafe {
-            let cid = CGSMainConnectionID();
-            CGSSetCursorScale(cid, scale);
+
+        // Save original size on first call
+        if let Ok(mut orig) = ORIGINAL_SIZE.lock() {
+            if orig.is_none() {
+                let current = read_cursor_size();
+                info!("[CursorScale] Saved original cursor size: {:.2}", current);
+                *orig = Some(current);
+            }
         }
+
+        write_cursor_size(scale);
         SCALE_REFCOUNT.fetch_add(1, Ordering::Release);
-        refresh_cursor();
-        info!("[CursorScale] Set cursor scale to {:.1} (refs: {})", scale, SCALE_REFCOUNT.load(Ordering::Acquire));
+        info!(
+            "[CursorScale] Set cursor scale to {:.1} (refs: {})",
+            scale,
+            SCALE_REFCOUNT.load(Ordering::Acquire)
+        );
     }
 
     pub fn restore_cursor_scale() {
@@ -58,15 +89,22 @@ mod inner {
         });
         match did_dec {
             Ok(1) => {
-                unsafe {
-                    let cid = CGSMainConnectionID();
-                    CGSSetCursorScale(cid, 1.0);
-                }
-                refresh_cursor();
-                info!("[CursorScale] Restored cursor scale to 1.0 (last guard dropped)");
+                let orig = ORIGINAL_SIZE
+                    .lock()
+                    .ok()
+                    .and_then(|mut g| g.take())
+                    .unwrap_or(1.0);
+                write_cursor_size(orig);
+                info!(
+                    "[CursorScale] Restored cursor to original size {:.2} (last guard dropped)",
+                    orig
+                );
             }
             Ok(prev) => {
-                info!("[CursorScale] Guard dropped, {} agent(s) still active", prev - 1);
+                info!(
+                    "[CursorScale] Guard dropped, {} agent(s) still active",
+                    prev - 1
+                );
             }
             Err(_) => {
                 info!("[CursorScale] restore_cursor_scale called with zero refs — no-op");
@@ -74,16 +112,18 @@ mod inner {
         }
     }
 
-    /// Force-reset cursor to normal size, clearing the ref-count.
-    /// Used when the user explicitly disables big cursor via settings.
     pub fn force_restore_cursor_scale() {
         SCALE_REFCOUNT.store(0, Ordering::Release);
-        unsafe {
-            let cid = CGSMainConnectionID();
-            CGSSetCursorScale(cid, 1.0);
-        }
-        refresh_cursor();
-        info!("[CursorScale] Force-restored cursor scale to 1.0 (user disabled)");
+        let orig = ORIGINAL_SIZE
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+            .unwrap_or(1.0);
+        write_cursor_size(orig);
+        info!(
+            "[CursorScale] Force-restored cursor to original size {:.2} (user disabled)",
+            orig
+        );
     }
 
     pub fn is_cursor_scaled() -> bool {
@@ -96,7 +136,9 @@ mod inner {
     pub fn set_cursor_scale(_scale: f64) {}
     pub fn restore_cursor_scale() {}
     pub fn force_restore_cursor_scale() {}
-    pub fn is_cursor_scaled() -> bool { false }
+    pub fn is_cursor_scaled() -> bool {
+        false
+    }
 }
 
 pub use inner::*;
