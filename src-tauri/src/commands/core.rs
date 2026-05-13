@@ -648,7 +648,9 @@ pub async fn set_agent_trigger_mode(
     let mut agent_settings = settings_manager.get_agent_settings().await
         .unwrap_or_else(|_| AgentSettings {
             trigger_mode: mode.clone(),
-            execution_mode: "multi".to_string(), // Default execution mode
+            execution_mode: "multi".to_string(),
+            big_cursor_enabled: crate::constants::settings::defaults::BIG_CURSOR_ENABLED,
+            big_cursor_scale: crate::constants::settings::defaults::BIG_CURSOR_SCALE,
         });
 
     // Update trigger mode

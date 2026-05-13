@@ -45,6 +45,8 @@ pub mod agent_keys {
     pub const TRIGGER_MODE: &str = "trigger_mode";
     pub const MODE: &str = "mode";
     pub const EXECUTION_MODE: &str = "execution_mode";
+    pub const BIG_CURSOR_ENABLED: &str = "big_cursor_enabled";
+    pub const BIG_CURSOR_SCALE: &str = "big_cursor_scale";
 }
 
 /// Cloud setting keys
@@ -117,6 +119,8 @@ pub mod validation {
     pub const MAX_MAX_TOKENS: u32 = 100000;
     pub const MIN_HEARTBEAT_INTERVAL: u64 = 10; // seconds
     pub const MAX_HEARTBEAT_INTERVAL: u64 = 300; // seconds
+    pub const MIN_BIG_CURSOR_SCALE: f32 = 1.5;
+    pub const MAX_BIG_CURSOR_SCALE: f32 = 10.0;
 }
 
 /// Default values for settings
@@ -133,6 +137,11 @@ pub mod defaults {
     pub const AUTO_CONNECT: bool = false;
     pub const AUTOSTART_ENABLED: bool = false;
     pub const ONBOARDING_COMPLETED: bool = false;
+    pub const BIG_CURSOR_ENABLED: bool = true;
+    pub const BIG_CURSOR_SCALE: f32 = 3.0;
+
+    pub fn big_cursor_enabled() -> bool { BIG_CURSOR_ENABLED }
+    pub fn big_cursor_scale() -> f32 { BIG_CURSOR_SCALE }
 
     // Default keyboard shortcuts (cross-platform)
     #[cfg(target_os = "macos")]
