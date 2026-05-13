@@ -7,7 +7,7 @@
 use crate::state::AppState;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 // Import sound commands for boot sound functionality
 use crate::constants::events;
@@ -253,29 +253,24 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
 
 /// Initialize MCP (Model Context Protocol) servers and tools
 async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing MCP state...");
+    debug!("[State] Initializing MCP state...");
 
     let app_state = app_handle.state::<AppState>();
 
-    // Initialize MCP servers from configuration in background to prevent blocking app startup
     let app_state_bg = app_state.inner().clone();
-    tokio::spawn(async move {
-        // Start MCP servers promptly to reduce first-call latency
-        // Keep a short delay to avoid racing app startup
+    tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
         match app_state_bg.initialize_mcp_servers().await {
             Ok(_) => {
-                info!("Successfully initialized MCP servers in background");
+                debug!("MCP servers initialized");
             }
             Err(e) => {
-                warn!("Failed to initialize MCP servers in background: {}", e);
-                info!("MCP servers can be configured and started via Settings");
+                warn!("Failed to initialize MCP servers: {}", e);
             }
         }
     });
 
-    info!("MCP state initialization scheduled - will complete in background");
     Ok(())
 }
 

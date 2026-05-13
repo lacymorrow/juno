@@ -1206,7 +1206,7 @@ impl AppState {
 
     /// Initialize enabled MCP servers - OPTIMIZED for parallel startup
     pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
-        info!("Starting optimized MCP server initialization...");
+        debug!("Starting MCP server initialization...");
 
         // CRITICAL FIX: Load MCP server configurations from tool config manager
         // and populate the MCP manager before trying to get enabled servers
@@ -1225,9 +1225,11 @@ impl AppState {
             let already_exists = existing_configs.iter().any(|existing| existing.id == config.id);
 
             if !already_exists {
-                if let Err(e) = manager_guard.add_server(config.clone()).await {
-                    warn!("Failed to add MCP server '{}' during initialization: {}", config.name, e);
-                    continue; // Continue with other servers even if one fails
+                let mut init_config = config.clone();
+                init_config.auto_start = false;
+                if let Err(e) = manager_guard.add_server(init_config).await {
+                    warn!("Failed to add MCP server '{}': {}", config.name, e);
+                    continue;
                 }
             }
         }
@@ -1241,14 +1243,12 @@ impl AppState {
         drop(manager_guard);
 
         if enabled_servers.is_empty() {
-            info!("No enabled MCP servers found to start");
+            debug!("No enabled MCP servers to start");
             return Ok(());
         }
 
-        info!("Found {} enabled MCP servers for parallel initialization", enabled_servers.len());
+        info!("Starting {} MCP server(s)...", enabled_servers.len());
 
-        // PERFORMANCE OPTIMIZATION: Parallel startup with intelligent resource management
-        // Based on successful mouse movement optimization pattern
         let startup_tasks: Vec<_> = enabled_servers
             .into_iter()
             .enumerate()
@@ -1258,13 +1258,12 @@ impl AppState {
                 let server_id = config.id.clone();
 
                 tokio::spawn(async move {
-                    // Staggered startup by index (50ms intervals instead of 2000ms)
                     if index > 0 {
-                        let stagger_delay = std::cmp::min(index * 50, 500); // Max 500ms stagger
+                        let stagger_delay = std::cmp::min(index * 50, 500);
                         tokio::time::sleep(Duration::from_millis(stagger_delay as u64)).await;
                     }
 
-                    info!("Starting MCP server '{}' (parallel slot {})", server_name, index);
+                    debug!("Starting MCP server '{}' (slot {})", server_name, index);
 
                     let manager_guard = manager.lock().await;
                     let start_result = tokio::time::timeout(
@@ -1278,20 +1277,16 @@ impl AppState {
 
                     match start_result {
                         Ok(Ok(_)) => {
-                            info!("✅ MCP server '{}' started successfully", server_name);
+                            debug!("MCP server '{}' started", server_name);
 
-                            // INTELLIGENT COMPLETION DETECTION with accurate timing and comprehensive readiness check
                             let readiness_start = std::time::Instant::now();
-                            let mut check_delay = 10; // Start with 10ms
-                            let max_delay = 200; // Max 200ms
-                            let max_checks = 20; // Max 2 seconds total wait
-                            let mut _cumulative_elapsed = 0u64; // Track actual elapsed time
+                            let mut check_delay = 10u64;
+                            let max_delay = 200u64;
+                            let max_checks = 20;
 
                             for check_attempt in 0..max_checks {
                                 tokio::time::sleep(Duration::from_millis(check_delay)).await;
-                                _cumulative_elapsed += check_delay;
 
-                                // Comprehensive readiness check: status + tools availability
                                 let manager_guard = manager.lock().await;
                                 let server_statuses = manager_guard.get_server_statuses().await;
                                 let server_status = server_statuses.get(&server_id);
@@ -1303,76 +1298,80 @@ impl AppState {
 
                                 match server_status {
                                     Some(crate::agent::tools::mcp_integration::MCPServerStatus::Connected) => {
-                                        // Additional readiness validation: ensure tools are actually discovered
-                                        // Note: Some servers may legitimately have 0 tools, so we just log this info
-                                        let actual_elapsed = readiness_start.elapsed();
-                                        if server_tools_count > 0 {
-                                            info!("MCP server '{}' confirmed fully ready after {}ms with {} tools",
-                                                  server_name, actual_elapsed.as_millis(), server_tools_count);
-                                        } else {
-                                            info!("MCP server '{}' confirmed connected after {}ms (no tools discovered - may be normal)",
-                                                  server_name, actual_elapsed.as_millis());
-                                        }
+                                        debug!("MCP server '{}' ready ({}ms, {} tools)",
+                                              server_name, readiness_start.elapsed().as_millis(), server_tools_count);
                                         break;
                                     }
                                     Some(crate::agent::tools::mcp_integration::MCPServerStatus::Error(ref error)) => {
-                                        warn!("MCP server '{}' failed during readiness check: {}", server_name, error);
-                                        break; // Don't continue checking if server has errored
+                                        warn!("MCP server '{}' failed: {}", server_name, error);
+                                        break;
                                     }
                                     _ => {
-                                        // Server still connecting/initializing - continue with exponential backoff
                                         check_delay = std::cmp::min(check_delay * 2, max_delay);
-
                                         if check_attempt == max_checks - 1 {
-                                            let final_elapsed = readiness_start.elapsed();
-                                            warn!("MCP server '{}' readiness check timed out after {}ms (status: {:?})",
-                                                  server_name, final_elapsed.as_millis(), server_status);
+                                            warn!("MCP server '{}' readiness timed out", server_name);
                                         }
                                     }
                                 }
                             }
 
-                            Ok(server_name.clone())
+                            Ok((server_name.clone(), server_id.clone()))
                         }
                         Ok(Err(e)) => {
-                            warn!("❌ {}", format_error(templates::FAILED_TO_START, &format!("MCP server '{}'", server_name), &e));
-                            Err(format!("{}: {}", server_name, e))
+                            warn!("{}", format_error(templates::FAILED_TO_START, &format!("MCP server '{}'", server_name), &e));
+                            Err((server_name.clone(), server_id.clone(), e))
                         }
                         Err(_) => {
-                            warn!("⏰ MCP server '{}' startup timed out after 45s", server_name);
-                            Err(format!("{}: timeout", server_name))
+                            warn!("MCP server '{}' startup timed out", server_name);
+                            Err((server_name.clone(), server_id.clone(), "timeout".to_string()))
                         }
                     }
                 })
             })
             .collect();
 
-        // Wait for all servers to complete startup (parallel execution)
         let startup_start = std::time::Instant::now();
         let results = futures::future::join_all(startup_tasks).await;
         let total_startup_time = startup_start.elapsed();
 
-        // Process results
-        let mut successful_servers = Vec::new();
-        let mut failed_servers = Vec::new();
+        let mut successful_count = 0usize;
+        let mut failed_server_ids: Vec<String> = Vec::new();
+        let mut failed_names: Vec<String> = Vec::new();
 
         for result in results {
             match result {
-                Ok(Ok(server_name)) => successful_servers.push(server_name),
-                Ok(Err(error)) => failed_servers.push(error),
-                Err(e) => failed_servers.push(format!("Task join error: {}", e)),
+                Ok(Ok(_)) => successful_count += 1,
+                Ok(Err((_name, id, _err))) => {
+                    failed_names.push(_name);
+                    failed_server_ids.push(id);
+                }
+                Err(e) => {
+                    warn!("MCP startup task join error: {}", e);
+                }
             }
         }
 
-        info!(
-            "Optimized MCP initialization complete in {}ms: {} succeeded, {} failed",
-            total_startup_time.as_millis(),
-            successful_servers.len(),
-            failed_servers.len()
-        );
+        if successful_count > 0 || !failed_names.is_empty() {
+            info!(
+                "MCP init: {} ok, {} failed ({}ms)",
+                successful_count,
+                failed_names.len(),
+                total_startup_time.as_millis()
+            );
+        }
 
-        if !failed_servers.is_empty() {
-            warn!("Failed MCP servers: {}", failed_servers.join(", "));
+        // Auto-disable servers that failed to start so they don't retry on every launch
+        if !failed_server_ids.is_empty() {
+            warn!("Auto-disabling failed MCP servers: {} (re-enable in Settings)", failed_names.join(", "));
+            let config_manager = self.get_tool_config_manager().await;
+            let mut config_guard = config_manager.lock().await;
+            for failed_id in &failed_server_ids {
+                if let Some(mut server_config) = config_guard.get_mcp_server(failed_id) {
+                    server_config.enabled = false;
+                    config_guard.update_mcp_server(server_config);
+                }
+            }
+            drop(config_guard);
         }
 
         // Sync tools once at the end (unchanged)
