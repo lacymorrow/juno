@@ -927,4 +927,18 @@ pub(crate) async fn set_big_cursor_scale(
 // - focused_window_relative_click(relative_x, relative_y, modifier)
 // These functions require get_window_bounds() and get_focused_window_bounds() methods
 
+#[tauri::command]
+pub(crate) fn test_cursor_scale(scale: f64) -> Result<(), String> {
+    info!("[CursorScale] Test: setting cursor scale to {:.1}x", scale);
+    crate::cursor_scale::set_cursor_scale(scale);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn test_cursor_restore() -> Result<(), String> {
+    info!("[CursorScale] Test: restoring cursor scale");
+    crate::cursor_scale::force_restore_cursor_scale();
+    Ok(())
+}
+
 

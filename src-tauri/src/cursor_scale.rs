@@ -8,6 +8,8 @@
 mod inner {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing::info;
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
     /// Ref-count of active cursor-scale guards. Only restores to 1.0
     /// when the last guard drops, so concurrent agents don't fight.
@@ -21,6 +23,24 @@ mod inner {
         fn CGSSetCursorScale(cid: CGSConnectionID, scale: f64);
     }
 
+    /// Post a synthetic mouse-moved event at the current cursor position
+    /// to force macOS to redraw the cursor at the new scale.
+    fn refresh_cursor() {
+        if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+            if let Ok(dummy) = CGEvent::new(source.clone()) {
+                let pos = dummy.location();
+                if let Ok(ev) = CGEvent::new_mouse_event(
+                    source,
+                    CGEventType::MouseMoved,
+                    pos,
+                    CGMouseButton::Left,
+                ) {
+                    ev.post(CGEventTapLocation::HID);
+                }
+            }
+        }
+    }
+
     pub fn set_cursor_scale(scale: f64) {
         let scale = scale.clamp(1.0, 10.0);
         unsafe {
@@ -28,6 +48,7 @@ mod inner {
             CGSSetCursorScale(cid, scale);
         }
         SCALE_REFCOUNT.fetch_add(1, Ordering::Release);
+        refresh_cursor();
         info!("[CursorScale] Set cursor scale to {:.1} (refs: {})", scale, SCALE_REFCOUNT.load(Ordering::Acquire));
     }
 
@@ -41,6 +62,7 @@ mod inner {
                     let cid = CGSMainConnectionID();
                     CGSSetCursorScale(cid, 1.0);
                 }
+                refresh_cursor();
                 info!("[CursorScale] Restored cursor scale to 1.0 (last guard dropped)");
             }
             Ok(prev) => {
@@ -60,6 +82,7 @@ mod inner {
             let cid = CGSMainConnectionID();
             CGSSetCursorScale(cid, 1.0);
         }
+        refresh_cursor();
         info!("[CursorScale] Force-restored cursor scale to 1.0 (user disabled)");
     }
 

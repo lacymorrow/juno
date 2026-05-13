@@ -93,6 +93,8 @@ macro_rules! generate_invoke_handler {
             set_big_cursor_enabled,
             get_big_cursor_scale,
             set_big_cursor_scale,
+            test_cursor_scale,
+            test_cursor_restore,
 
             // Production keyboard operations (minimal set for system functions)
             type_text,
@@ -305,6 +307,8 @@ pub mod categories {
         "set_big_cursor_enabled",
         "get_big_cursor_scale",
         "set_big_cursor_scale",
+        "test_cursor_scale",
+        "test_cursor_restore",
     ];
 
 
