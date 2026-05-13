@@ -14,7 +14,7 @@
 use crate::agent::core::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use serde_json::{json, Value};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::display::list_visible_windows;
@@ -24,7 +24,7 @@ pub async fn register_visible_windows_tools(
     provider: &mut LocalToolProvider,
     _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    info!("Registering visible_windows tool...");
+    debug!("Registering visible_windows tool...");
 
     let def = ToolDefinition {
         name: "list_visible_windows".to_string(),
@@ -43,7 +43,7 @@ pub async fn register_visible_windows_tools(
 
     let exec = move |_input: Value| async move { list_visible_windows_impl().await };
     provider.register_async_tool(def, exec).await;
-    info!("Registered tool: list_visible_windows");
+    debug!("Registered tool: list_visible_windows");
 
     Ok(())
 }

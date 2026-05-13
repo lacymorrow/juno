@@ -365,7 +365,9 @@ pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError>
             };
 
             // CGWindowListCopyWindowInfo returns front-to-back order; first layer-0
-            // window is the frontmost user app window.
+            // window is the frontmost user app window. Modals/alerts sit at layer 1+
+            // so they won't receive this flag, but their position in the array still
+            // conveys that they are in front of normal windows.
             let is_frontmost = layer == 0 && first_user_window;
             if is_frontmost {
                 first_user_window = false;
