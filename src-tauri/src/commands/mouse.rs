@@ -864,27 +864,23 @@ pub(crate) async fn set_smooth_mouse_movement_setting(
 
 #[tauri::command]
 pub(crate) async fn get_big_cursor_enabled(
-    app: AppHandle,
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
 ) -> Result<bool, String> {
-    let settings_manager = crate::settings::manager::SettingsManager::new(app)
-        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
     let agent_settings = settings_manager.get_agent_settings().await?;
     Ok(agent_settings.big_cursor_enabled)
 }
 
 #[tauri::command]
 pub(crate) async fn set_big_cursor_enabled(
-    app: AppHandle,
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
     enabled: bool,
 ) -> Result<(), String> {
-    let settings_manager = crate::settings::manager::SettingsManager::new(app)
-        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
     let mut agent_settings = settings_manager.get_agent_settings().await?;
     agent_settings.big_cursor_enabled = enabled;
     settings_manager.set_agent_settings(&agent_settings).await?;
 
     if !enabled {
-        crate::cursor_scale::restore_cursor_scale();
+        crate::cursor_scale::force_restore_cursor_scale();
     }
 
     info!("Big cursor {}", if enabled { "enabled" } else { "disabled" });
@@ -893,17 +889,15 @@ pub(crate) async fn set_big_cursor_enabled(
 
 #[tauri::command]
 pub(crate) async fn get_big_cursor_scale(
-    app: AppHandle,
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
 ) -> Result<f32, String> {
-    let settings_manager = crate::settings::manager::SettingsManager::new(app)
-        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
     let agent_settings = settings_manager.get_agent_settings().await?;
     Ok(agent_settings.big_cursor_scale)
 }
 
 #[tauri::command]
 pub(crate) async fn set_big_cursor_scale(
-    app: AppHandle,
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
     scale: f32,
 ) -> Result<(), String> {
     use crate::constants::settings::validation;
@@ -915,8 +909,6 @@ pub(crate) async fn set_big_cursor_scale(
         ));
     }
 
-    let settings_manager = crate::settings::manager::SettingsManager::new(app)
-        .map_err(|e| format!("Failed to init settings manager: {}", e))?;
     let mut agent_settings = settings_manager.get_agent_settings().await?;
     agent_settings.big_cursor_scale = scale;
     settings_manager.set_agent_settings(&agent_settings).await?;

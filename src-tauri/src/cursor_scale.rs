@@ -6,10 +6,12 @@
 
 #[cfg(target_os = "macos")]
 mod inner {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing::info;
 
-    static CURSOR_SCALED: AtomicBool = AtomicBool::new(false);
+    /// Ref-count of active cursor-scale guards. Only restores to 1.0
+    /// when the last guard drops, so concurrent agents don't fight.
+    static SCALE_REFCOUNT: AtomicUsize = AtomicUsize::new(0);
 
     type CGSConnectionID = u32;
 
@@ -25,22 +27,44 @@ mod inner {
             let cid = CGSMainConnectionID();
             CGSSetCursorScale(cid, scale);
         }
-        CURSOR_SCALED.store(scale > 1.0, Ordering::Relaxed);
-        info!("[CursorScale] Set cursor scale to {:.1}", scale);
+        SCALE_REFCOUNT.fetch_add(1, Ordering::Release);
+        info!("[CursorScale] Set cursor scale to {:.1} (refs: {})", scale, SCALE_REFCOUNT.load(Ordering::Acquire));
     }
 
     pub fn restore_cursor_scale() {
-        if CURSOR_SCALED.swap(false, Ordering::Relaxed) {
-            unsafe {
-                let cid = CGSMainConnectionID();
-                CGSSetCursorScale(cid, 1.0);
+        let did_dec = SCALE_REFCOUNT.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            if n > 0 { Some(n - 1) } else { None }
+        });
+        match did_dec {
+            Ok(1) => {
+                unsafe {
+                    let cid = CGSMainConnectionID();
+                    CGSSetCursorScale(cid, 1.0);
+                }
+                info!("[CursorScale] Restored cursor scale to 1.0 (last guard dropped)");
             }
-            info!("[CursorScale] Restored cursor scale to 1.0");
+            Ok(prev) => {
+                info!("[CursorScale] Guard dropped, {} agent(s) still active", prev - 1);
+            }
+            Err(_) => {
+                info!("[CursorScale] restore_cursor_scale called with zero refs — no-op");
+            }
         }
     }
 
+    /// Force-reset cursor to normal size, clearing the ref-count.
+    /// Used when the user explicitly disables big cursor via settings.
+    pub fn force_restore_cursor_scale() {
+        SCALE_REFCOUNT.store(0, Ordering::Release);
+        unsafe {
+            let cid = CGSMainConnectionID();
+            CGSSetCursorScale(cid, 1.0);
+        }
+        info!("[CursorScale] Force-restored cursor scale to 1.0 (user disabled)");
+    }
+
     pub fn is_cursor_scaled() -> bool {
-        CURSOR_SCALED.load(Ordering::Relaxed)
+        SCALE_REFCOUNT.load(Ordering::Acquire) > 0
     }
 }
 
@@ -48,6 +72,7 @@ mod inner {
 mod inner {
     pub fn set_cursor_scale(_scale: f64) {}
     pub fn restore_cursor_scale() {}
+    pub fn force_restore_cursor_scale() {}
     pub fn is_cursor_scaled() -> bool { false }
 }
 
