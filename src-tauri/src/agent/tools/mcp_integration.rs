@@ -818,7 +818,7 @@ impl MCPManager {
             }
         }
 
-        info!("Added MCP server configuration: {}", config.name);
+        debug!("Added MCP server configuration: {}", config.name);
         Ok(())
     }
 
