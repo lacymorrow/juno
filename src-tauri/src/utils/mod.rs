@@ -1184,6 +1184,16 @@ fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
 
         let count: usize = msg_send![window_list, count];
 
+        // Allocate lookup keys once — reused across every window in the list
+        let pid_key: *mut objc::runtime::Object = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"kCGWindowOwnerPID\0".as_ptr()
+        ];
+        let name_key: *mut objc::runtime::Object = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"kCGWindowName\0".as_ptr()
+        ];
+
         for i in 0..count {
             let dict: *mut objc::runtime::Object = msg_send![window_list, objectAtIndex: i];
             if dict.is_null() {
@@ -1191,10 +1201,6 @@ fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
             }
 
             // PID of the owning process
-            let pid_key: *mut objc::runtime::Object = msg_send![
-                class!(NSString),
-                stringWithUTF8String: b"kCGWindowOwnerPID\0".as_ptr()
-            ];
             let pid_val: *mut objc::runtime::Object = msg_send![dict, objectForKey: pid_key];
             if pid_val.is_null() {
                 continue;
@@ -1202,10 +1208,6 @@ fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
             let pid: i32 = msg_send![pid_val, intValue];
 
             // Window title (absent for background/private windows)
-            let name_key: *mut objc::runtime::Object = msg_send![
-                class!(NSString),
-                stringWithUTF8String: b"kCGWindowName\0".as_ptr()
-            ];
             let name_val: *mut objc::runtime::Object = msg_send![dict, objectForKey: name_key];
             if name_val.is_null() {
                 continue;
@@ -2150,11 +2152,12 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
     }
 
-    // Add running applications with window titles
+    // Add running applications with window titles (capped at 25 to prevent context overflow)
     if !context.running_applications.is_empty() {
         let app_list = context
             .running_applications
             .iter()
+            .take(25)
             .map(|app| {
                 if app.windows.is_empty() {
                     format!("{} (no windows visible)", app.name)
