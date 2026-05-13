@@ -17,6 +17,7 @@ const NS_UTF8_STRING_ENCODING: usize = 4;
 #[cfg(target_os = "macos")]
 fn find_running_app_pid(app_name: &str) -> Option<i32> {
     use objc::{class, msg_send, sel, sel_impl};
+    let target = app_name.to_lowercase();
     unsafe {
         let workspace_class = class!(NSWorkspace);
         let shared: *mut objc::runtime::Object = msg_send![workspace_class, sharedWorkspace];
@@ -46,7 +47,7 @@ fn find_running_app_pid(app_name: &str) -> Option<i32> {
             }
             let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
             if let Ok(found_name) = std::str::from_utf8(bytes_slice) {
-                if found_name.to_lowercase() == app_name.to_lowercase() {
+                if found_name.to_lowercase() == target {
                     let pid: i32 = msg_send![app, processIdentifier];
                     return Some(pid);
                 }
@@ -65,6 +66,7 @@ fn find_running_app_pid(_app_name: &str) -> Option<i32> {
 #[cfg(target_os = "macos")]
 fn is_app_frontmost(app_name: &str) -> bool {
     use objc::{class, msg_send, sel, sel_impl};
+    let target = app_name.to_lowercase();
     unsafe {
         let workspace_class = class!(NSWorkspace);
         let shared: *mut objc::runtime::Object = msg_send![workspace_class, sharedWorkspace];
@@ -88,7 +90,7 @@ fn is_app_frontmost(app_name: &str) -> bool {
         }
         let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
         std::str::from_utf8(bytes_slice)
-            .map(|name| name.to_lowercase() == app_name.to_lowercase())
+            .map(|name| name.to_lowercase() == target)
             .unwrap_or(false)
     }
 }
@@ -151,11 +153,14 @@ pub async fn open_application(
             info!("[APP] App '{}' already running, focusing instead of launching", app_name);
         }
 
-        // `open -a <app>` on macOS activates a running app without relaunching it,
-        // skipping the 10-attempt retry loop that desktop.open_application() would use.
-        let focus_status = std::process::Command::new("open")
-            .args(["-a", &app_name])
-            .status();
+        let name_for_focus = app_name.clone();
+        let focus_status = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("open")
+                .args(["-a", &name_for_focus])
+                .status()
+        })
+        .await
+        .map_err(|e| format!("Focus task panicked: {}", e))?;
 
         return match focus_status {
             Ok(s) if s.success() => {
@@ -304,35 +309,12 @@ pub async fn open_url(
 ///
 /// Useful for agents that want to know "is Gmail open in Chrome?" before
 /// deciding whether to navigate or open a new window.
-/// Uses CGWindowListCopyWindowInfo (~1 ms) filtered by app name.
+/// Delegates to the shared implementation in `visible_windows.rs`.
 #[tauri::command]
 pub async fn get_app_windows(app_name: String) -> Result<Vec<String>, String> {
     if app_name.is_empty() {
         return Err("app_name cannot be empty".to_string());
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        use computer_use_ai_sdk::platforms::macos::display::list_visible_windows;
-
-        let name = app_name.clone();
-        let windows = tokio::task::spawn_blocking(move || list_visible_windows())
-            .await
-            .map_err(|e| format!("get_app_windows task panicked: {}", e))?
-            .map_err(|e| format!("Failed to list windows: {}", e))?;
-
-        let titles: Vec<String> = windows
-            .into_iter()
-            .filter(|w| w.app_name.to_lowercase() == name.to_lowercase())
-            .filter_map(|w| w.window_title)
-            .collect();
-
-        Ok(titles)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = app_name;
-        Ok(vec![])
-    }
+    crate::agent::tools::visible_windows::window_titles_for_app(&app_name).await
 }

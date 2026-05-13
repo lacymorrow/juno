@@ -75,6 +75,36 @@ pub async fn register_visible_windows_tools(
     Ok(())
 }
 
+/// Returns visible window titles for a given app name (case-insensitive).
+/// Shared by both the agent tool and the Tauri command.
+pub async fn window_titles_for_app(app_name: &str) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let target = app_name.to_lowercase();
+        let windows = tokio::task::spawn_blocking(move || list_visible_windows())
+            .await
+            .map_err(|e| format!("get_app_windows task panicked: {}", e))?
+            .map_err(|e| {
+                warn!("get_app_windows failed: {}", e);
+                format!("Failed to list windows: {}", e)
+            })?;
+
+        let titles: Vec<String> = windows
+            .into_iter()
+            .filter(|w| w.app_name.to_lowercase() == target)
+            .filter_map(|w| w.window_title)
+            .collect();
+
+        Ok(titles)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app_name;
+        Ok(vec![])
+    }
+}
+
 async fn get_app_windows_impl(input: Value) -> Result<Value, String> {
     let app_name = input["app_name"]
         .as_str()
@@ -85,41 +115,14 @@ async fn get_app_windows_impl(input: Value) -> Result<Value, String> {
         return Err("app_name cannot be empty".to_string());
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        let name = app_name.clone();
-        let windows = tokio::task::spawn_blocking(move || list_visible_windows())
-            .await
-            .map_err(|e| format!("get_app_windows task panicked: {}", e))?
-            .map_err(|e| {
-                warn!("get_app_windows failed: {}", e);
-                format!("Failed to list windows: {}", e)
-            })?;
+    let titles = window_titles_for_app(&app_name).await?;
+    let count = titles.len();
 
-        let titles: Vec<Value> = windows
-            .into_iter()
-            .filter(|w| w.app_name.to_lowercase() == name.to_lowercase())
-            .filter_map(|w| w.window_title)
-            .map(|t| json!(t))
-            .collect();
-
-        let count = titles.len();
-        return Ok(json!({
-            "app_name": app_name,
-            "window_titles": titles,
-            "count": count
-        }));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(json!({
-            "app_name": app_name,
-            "window_titles": [],
-            "count": 0,
-            "note": "only supported on macOS"
-        }))
-    }
+    Ok(json!({
+        "app_name": app_name,
+        "window_titles": titles,
+        "count": count
+    }))
 }
 
 async fn list_visible_windows_impl() -> Result<Value, String> {
