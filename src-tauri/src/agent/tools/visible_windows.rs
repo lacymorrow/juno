@@ -70,7 +70,7 @@ pub async fn register_visible_windows_tools(
 
     let exec_gaw = move |input: Value| async move { get_app_windows_impl(input).await };
     provider.register_async_tool(get_app_windows_def, exec_gaw).await;
-    info!("Registered tool: get_app_windows");
+    debug!("Registered tool: get_app_windows");
 
     Ok(())
 }
