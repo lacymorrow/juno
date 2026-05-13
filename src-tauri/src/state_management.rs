@@ -258,10 +258,11 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
     let app_state = app_handle.state::<AppState>();
 
     let app_state_bg = app_state.inner().clone();
+    let app_handle_bg = app_handle.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
-        match app_state_bg.initialize_mcp_servers().await {
+        match app_state_bg.initialize_mcp_servers(Some(&app_handle_bg)).await {
             Ok(_) => {
                 debug!("MCP servers initialized");
             }
