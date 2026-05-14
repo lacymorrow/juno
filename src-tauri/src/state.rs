@@ -1341,8 +1341,8 @@ impl AppState {
         for result in results {
             match result {
                 Ok(Ok(_)) => successful_count += 1,
-                Ok(Err((_name, id, _err))) => {
-                    failed_names.push(_name);
+                Ok(Err((name, id, _err))) => {
+                    failed_names.push(name);
                     failed_server_ids.push(id);
                 }
                 Err(e) => {
