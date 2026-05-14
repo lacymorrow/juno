@@ -482,6 +482,13 @@ impl BrainFactory {
         )
         .await?;
 
+        // Register lightweight window listing tool (per-provider instance)
+        crate::agent::tools::visible_windows::register_visible_windows_tools(
+            provider,
+            app_handle.clone(),
+        )
+        .await?;
+
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 

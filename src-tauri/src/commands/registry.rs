@@ -123,6 +123,7 @@ macro_rules! generate_invoke_handler {
             // Application management
             open_application,
             open_url,
+            get_app_windows,
 
             // System utilities
             wait,

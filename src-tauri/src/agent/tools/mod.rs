@@ -46,6 +46,7 @@ pub mod tool_mapping; // Add tool mapping service
 pub mod tool_versioning; // API versioning and compatibility management
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research // Enhanced Visual Reasoning System from CVPR 2025 research
+pub mod visible_windows; // Lightweight on-screen window enumeration via CGWindowListCopyWindowInfo
 
 pub use accessibility_tools::{AccessibilityElement, AccessibilityTools}; // Export accessibility tools
 pub use basic_tools::*; // Export functions from basic_tools
