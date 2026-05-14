@@ -1205,7 +1205,7 @@ impl AppState {
     }
 
     /// Initialize enabled MCP servers - OPTIMIZED for parallel startup
-    pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
+    pub async fn initialize_mcp_servers(&self, app_handle: Option<&tauri::AppHandle>) -> Result<(), String> {
         debug!("Starting MCP server initialization...");
 
         // CRITICAL FIX: Load MCP server configurations from tool config manager
@@ -1257,7 +1257,7 @@ impl AppState {
                 let server_name = config.name.clone();
                 let server_id = config.id.clone();
 
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     if index > 0 {
                         let stagger_delay = std::cmp::min(index * 50, 500);
                         tokio::time::sleep(Duration::from_millis(stagger_delay as u64)).await;
@@ -1372,6 +1372,13 @@ impl AppState {
                 }
             }
             drop(config_guard);
+
+            // Persist to settings store so disabled state survives app restart
+            if let Some(handle) = app_handle {
+                if let Err(e) = self.save_tool_config(handle).await {
+                    warn!("Failed to persist auto-disabled MCP servers: {}", e);
+                }
+            }
         }
 
         // Sync tools once at the end (unchanged)
@@ -1574,7 +1581,7 @@ impl AppState {
     }
 
     /// Initialize MCP servers with atomic deduplication
-    pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
+    pub async fn initialize_mcp_servers_once(&self, app_handle: Option<&tauri::AppHandle>) -> Result<(), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::sync::Mutex as AsyncMutex;
 
@@ -1599,7 +1606,7 @@ impl AppState {
         {
             // We're responsible for initialization
             info!("Starting MCP servers initialization (first time)");
-            let init_result = self.initialize_mcp_servers().await;
+            let init_result = self.initialize_mcp_servers(app_handle).await;
 
             // Store the result
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
