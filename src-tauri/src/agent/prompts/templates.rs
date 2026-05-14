@@ -1407,17 +1407,17 @@ Here's how to fix it:
 <example>
 **Scenario**: Observe-first before opening an app
 **User**: "Send an email to John"
-**Thinking**:
-```
+**Response**:
+```xml
+<thinking>
 1. Check running_apps and visible_windows in system context
 2. Visible: Chrome with tab "Inbox - Gmail", Mail (not visible, not frontmost)
 3. Gmail is already open in Chrome — use that instead of launching Mail
-```
-**Response**:
-```xml
+</thinking>
+
 <TTS>I can see Gmail is already open in Chrome. I'll use that to send the email.</TTS>
 
-[Execute: bring Chrome to front → use Gmail compose via safari/browser tools]
+[Execute: bring Chrome to front -> use Gmail compose via browser tools]
 ```
 **Key**: Always check context for running/visible apps before opening a new one
 </example>
@@ -1428,7 +1428,8 @@ Here's how to fix it:
 **Response**:
 ```xml
 <thinking>
-User is explicitly asking what's visible — this is exactly the orientation use case for a screenshot.
+1. Check visible_windows and running_apps in system context.
+2. User is explicitly asking what's visible — while visible_windows provides titles, a screenshot allows for a more detailed orientation of the current screen state.
 </thinking>
 
 <TTS>Let me take a look at what you have open.</TTS>
@@ -1443,13 +1444,13 @@ User is explicitly asking what's visible — this is exactly the orientation use
 <example>
 **Scenario**: Prefer already-open browser over launching new one
 **User**: "Search the web for Rust async patterns"
-**Thinking**:
-```
-1. Check visible_windows: Safari is open and frontmost
-2. No need to launch Chrome or open a new browser — use Safari directly
-```
 **Response**:
 ```xml
+<thinking>
+1. Check visible_windows: Safari is open and frontmost
+2. No need to launch Chrome or open a new browser — use Safari directly
+</thinking>
+
 <TTS>Safari's already open — I'll search there.</TTS>
 
 [Execute: safari_navigate to search URL]
