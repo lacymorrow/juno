@@ -343,21 +343,26 @@ async fn execute_agent_internal(
         agent::config::MAX_ITERATIONS
     );
 
+    // Read agent settings once — used for big cursor and companion mode
+    let agent_settings = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
+        Some(mgr) => mgr.get_agent_settings().await.ok(),
+        None => None,
+    };
+
+    let companion_mode = agent_settings.as_ref().map(|s| s.companion_mode).unwrap_or(false);
+    if companion_mode {
+        info!("🔍 Companion mode enabled — computer use tools will be withheld");
+    }
+
     // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
-    let _cursor_guard = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
-        Some(mgr) => match mgr.get_agent_settings().await {
-            Ok(s) if s.big_cursor_enabled => {
-                info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
-                crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
-            }
-            Ok(_) => crate::cursor_scale::CursorScaleGuard::noop(),
-            Err(e) => {
-                warn!("[CursorScale] Failed to read agent settings, skipping cursor scaling: {}", e);
-                crate::cursor_scale::CursorScaleGuard::noop()
-            }
-        },
+    let _cursor_guard = match &agent_settings {
+        Some(s) if s.big_cursor_enabled => {
+            info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
+            crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
+        }
+        Some(_) => crate::cursor_scale::CursorScaleGuard::noop(),
         None => {
-            warn!("[CursorScale] SettingsManager not found in managed state, skipping cursor scaling");
+            warn!("[CursorScale] Agent settings unavailable, skipping cursor scaling");
             crate::cursor_scale::CursorScaleGuard::noop()
         }
     };
@@ -542,21 +547,25 @@ async fn execute_agent_internal(
                 info!("✅ Registered browser tool for single agent: {}", definition.name);
             }
 
-            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut single_agent_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // In companion mode, skip all computer use tools — agent observes only
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut single_agent_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for single agent mode");
+            } else {
+                info!("🔍 Companion mode: skipping Computer Use tools registration");
             }
-            info!("✅ Registered full Computer Use tools for single agent mode");
 
             // Create single agent brain with enriched system prompt including available MCP tools
             let brain_result = {
@@ -603,8 +612,15 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
+                // Companion mode uses a vision-only advisory prompt
+                let prompt_type = if companion_mode {
+                    crate::agent::prompts::types::PromptType::SystemCompanion
+                } else {
+                    crate::agent::prompts::types::PromptType::SystemDefault
+                };
+
                 let system_prompt = prompt_manager
-                    .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
+                    .get_prompt(prompt_type, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
@@ -686,21 +702,25 @@ async fn execute_agent_internal(
                 app_handle.clone(),
             ).await;
 
-            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut specialist_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // In companion mode, skip all computer use tools — agent observes only
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut specialist_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for specialist mode");
+            } else {
+                info!("🔍 Companion mode: skipping Computer Use tools registration for specialist");
             }
-            info!("✅ Registered full Computer Use tools for specialist mode");
 
             // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
             let specialist_agent_tool_provider = {
@@ -817,8 +837,15 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
+                // Companion mode uses a vision-only advisory prompt even for orchestrator
+                let prompt_type = if companion_mode {
+                    crate::agent::prompts::types::PromptType::SystemCompanion
+                } else {
+                    crate::agent::prompts::types::PromptType::OrchestratorPersonality
+                };
+
                 let system_prompt = prompt_manager
-                    .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
+                    .get_prompt(prompt_type, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))

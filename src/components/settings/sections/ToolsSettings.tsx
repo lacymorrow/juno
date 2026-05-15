@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { RefreshCw, RotateCcw, Shield } from "lucide-react";
+import { Eye, RefreshCw, RotateCcw, Shield } from "lucide-react";
 import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,8 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const [smoothMouseMovement, setSmoothMouseMovement] = useState(false);
   const [smoothMouseMovementLoading, setSmoothMouseMovementLoading] =
     useState(false);
+  const [companionMode, setCompanionMode] = useState(false);
+  const [companionModeLoading, setCompanionModeLoading] = useState(false);
 
   // Load tool approval setting on mount
   useEffect(() => {
@@ -49,6 +51,15 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
       }
     };
     loadSmoothMouseMovementSetting();
+  }, []);
+
+  // Load companion mode setting on mount
+  useEffect(() => {
+    invoke<boolean>("get_companion_mode")
+      .then(setCompanionMode)
+      .catch((error) =>
+        console.error("Failed to load companion mode setting:", error)
+      );
   }, []);
 
   const handleToggleToolApproval = async (required: boolean) => {
@@ -82,6 +93,24 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
       toast.error("Failed to toggle smooth mouse movement setting");
     } finally {
       setSmoothMouseMovementLoading(false);
+    }
+  };
+
+  const handleToggleCompanionMode = async (enabled: boolean) => {
+    setCompanionModeLoading(true);
+    try {
+      await invoke("set_companion_mode", { enabled });
+      setCompanionMode(enabled);
+      toast.success(
+        enabled
+          ? "Companion mode enabled — agent will observe without acting"
+          : "Companion mode disabled — agent can take actions"
+      );
+    } catch (error) {
+      console.error("Failed to toggle companion mode:", error);
+      toast.error("Failed to toggle companion mode");
+    } finally {
+      setCompanionModeLoading(false);
     }
   };
 
@@ -260,6 +289,51 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                 onCheckedChange={handleToggleSmoothMouseMovement}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Companion Mode */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye size={20} />
+              Companion Mode
+            </CardTitle>
+            <CardDescription>
+              Watch and advise without taking any actions on your computer
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <div className="font-medium">Enable Companion Mode</div>
+                <div className="text-sm text-gray-500">
+                  Agent observes your screen and answers questions — no clicking,
+                  typing, or automation
+                </div>
+              </div>
+              <Switch
+                checked={companionMode}
+                disabled={companionModeLoading}
+                onCheckedChange={handleToggleCompanionMode}
+              />
+            </div>
+
+            {companionMode && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Eye className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                  <div className="text-sm text-blue-800">
+                    <div className="font-medium">Companion Mode Active</div>
+                    <div className="mt-1">
+                      Juno can see your screen and answer questions about it,
+                      but will never click, type, or take any automated actions.
+                      Useful for guided tours, learning, and pair programming.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

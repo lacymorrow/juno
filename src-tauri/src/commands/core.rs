@@ -651,6 +651,7 @@ pub async fn set_agent_trigger_mode(
             execution_mode: "multi".to_string(),
             big_cursor_enabled: crate::constants::settings::defaults::BIG_CURSOR_ENABLED,
             big_cursor_scale: crate::constants::settings::defaults::BIG_CURSOR_SCALE,
+            companion_mode: false,
         });
 
     // Update trigger mode
