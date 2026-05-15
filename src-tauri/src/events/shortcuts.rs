@@ -50,6 +50,8 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.open_settings);
+    let voice_activation_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.voice_activation);
 
     // Debug logging
     println!("[DEBUG] Current shortcuts from state:");
@@ -57,6 +59,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode, agent_shortcut);
     println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
     println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
+    println!("  Voice: {} -> {:?}", current_shortcuts.voice_activation, voice_activation_shortcut);
     println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
@@ -81,7 +84,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 
     // Check dictation shortcut separately (not as else-if to avoid exclusion)
     if let Some(dictation_shortcut_obj) = dictation_shortcut {
-        println!("[DEBUG] Checking dictation shortcut: incoming {:?} == expected {:?} -> {}", 
+        println!("[DEBUG] Checking dictation shortcut: incoming {:?} == expected {:?} -> {}",
                  shortcut, dictation_shortcut_obj, *shortcut == dictation_shortcut_obj);
         if *shortcut == dictation_shortcut_obj {
             println!("[DEBUG] Dictation shortcut matched! Calling handler...");
@@ -89,6 +92,13 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     } else {
         println!("[DEBUG] No dictation shortcut configured or failed to parse");
+    }
+
+    // Check voice activation shortcut
+    if let Some(voice_activation_obj) = voice_activation_shortcut {
+        if *shortcut == voice_activation_obj {
+            handle_voice_activation_shortcut(app, event);
+        }
     }
 }
 
@@ -320,6 +330,40 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
             info!("[Dictation Tap Mode] Emitted dictation start event for handler processing");
         });
     }
+}
+
+/// Handle the global voice activation shortcut (Option+Shift+V by default).
+///
+/// This is an always-on tap-to-toggle shortcut that starts/stops voice recording
+/// from anywhere on macOS without requiring the main window to be focused.
+/// It always uses tap-mode behavior regardless of the dictation trigger mode setting.
+fn handle_voice_activation_shortcut(app: &AppHandle, event: &ShortcutEvent) {
+    // Only fire on key press — this is a stateless toggle, no hold semantics
+    if event.state() != ShortcutState::Pressed {
+        return;
+    }
+
+    // Emit visual feedback event (for onboarding UI and status indicators)
+    if let Err(e) = app.emit(
+        events::shortcuts::VOICE_ACTIVATION,
+        serde_json::json!({
+            "state": "pressed",
+            "shortcut": "voice_activation"
+        }),
+    ) {
+        error!("[Voice Activation] Failed to emit shortcut event: {}", e);
+    }
+
+    // During onboarding, only provide visual feedback
+    let app_state = app.state::<state::AppState>();
+    if app_state.is_onboarding_active() {
+        info!("[Voice Activation] Pressed during onboarding - visual feedback only");
+        return;
+    }
+
+    // Delegate to the dictation tap handler — same behaviour: toggle recording on each press
+    info!("[Voice Activation] Triggering voice activation (tap-mode dictation toggle)");
+    handle_dictation_tap_mode(app);
 }
 
 /// Add a new command to trigger shortcut testing events during onboarding

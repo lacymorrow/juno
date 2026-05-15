@@ -42,6 +42,7 @@ pub async fn set_keyboard_shortcut(
         "agent_mode" => shortcuts.agent_mode = shortcut_value.clone(),
         "dictation_input" => shortcuts.dictation_input = shortcut_value.clone(),
         "stop_current_task" => shortcuts.stop_current_task = shortcut_value.clone(),
+        "voice_activation" => shortcuts.voice_activation = shortcut_value.clone(),
         "open_settings" => return Err("The settings shortcut cannot be changed".to_string()),
         _ => return Err(format!("Unknown shortcut name: {}", shortcut_name)),
     }
@@ -72,6 +73,7 @@ pub async fn set_keyboard_shortcuts(
     validate_shortcut_format(&shortcuts.dictation_input)?;
     validate_shortcut_format(&shortcuts.stop_current_task)?;
     validate_shortcut_format(&shortcuts.open_settings)?;
+    validate_shortcut_format(&shortcuts.voice_activation)?;
 
     // Check for internal conflicts within the new shortcuts
     let shortcut_pairs = [
@@ -79,6 +81,7 @@ pub async fn set_keyboard_shortcuts(
         ("dictation_input", &shortcuts.dictation_input),
         ("stop_current_task", &shortcuts.stop_current_task),
         ("open_settings", &shortcuts.open_settings),
+        ("voice_activation", &shortcuts.voice_activation),
     ];
 
     for (i, (name1, shortcut1)) in shortcut_pairs.iter().enumerate() {
@@ -178,6 +181,7 @@ fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShort
         dictation_input: settings.dictation_input.clone(),
         stop_current_task: settings.stop_current_task.clone(),
         open_settings: settings.open_settings.clone(),
+        voice_activation: settings.voice_activation.clone(),
     }
 }
 
@@ -188,6 +192,7 @@ fn convert_state_to_settings_shortcuts(state: &crate::state::KeyboardShortcuts) 
         dictation_input: state.dictation_input.clone(),
         stop_current_task: state.stop_current_task.clone(),
         open_settings: state.open_settings.clone(),
+        voice_activation: state.voice_activation.clone(),
     }
 }
 
@@ -330,6 +335,7 @@ fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state
         ("dictation_input", &current_shortcuts.dictation_input),
         ("stop_current_task", &current_shortcuts.stop_current_task),
         ("open_settings", &current_shortcuts.open_settings),
+        ("voice_activation", &current_shortcuts.voice_activation),
     ];
 
     for (key, existing_shortcut) in &shortcuts_to_check {
@@ -355,6 +361,7 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
         "dictation_input" => "Dictation Input",
         "stop_current_task" => "Stop Current Task",
         "open_settings" => "Open Settings",
+        "voice_activation" => "Voice Activation",
         _ => shortcut_name,
     }
 }
@@ -415,6 +422,20 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         }
     } else {
         warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
+    }
+
+    // Register the voice activation shortcut with error handling
+    if let Some(shortcut) = parse_shortcut_string(&shortcuts.voice_activation) {
+        match app.global_shortcut().register(shortcut) {
+            Ok(()) => {
+                info!("✅ Successfully registered voice activation shortcut: {}", shortcuts.voice_activation);
+            },
+            Err(e) => {
+                error!("❌ Failed to register voice activation shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.voice_activation, e);
+            }
+        }
+    } else {
+        warn!("Failed to parse voice activation shortcut: {}", shortcuts.voice_activation);
     }
 
     // NOTE: Escape key is now registered dynamically only when needed
@@ -529,6 +550,25 @@ pub async fn get_shortcut_suggestions(
                 suggestions.push("Ctrl+Break".to_string());
             }
         },
+        "voice_activation" => {
+            if is_macos {
+                suggestions.extend([
+                    "Option+Shift+V".to_string(),
+                    "Option+Shift+Space".to_string(),
+                    "Ctrl+Option+Space".to_string(),
+                    "Option+F5".to_string(),
+                    "Option+Shift+M".to_string(),
+                ]);
+            } else {
+                suggestions.extend([
+                    "Alt+Shift+V".to_string(),
+                    "Alt+Shift+Space".to_string(),
+                    "Ctrl+Alt+Space".to_string(),
+                    "Alt+F5".to_string(),
+                    "Alt+Shift+M".to_string(),
+                ]);
+            }
+        },
         _ => {
             // Generic suggestions for unknown shortcut types
             if is_macos {
@@ -555,6 +595,7 @@ pub async fn get_shortcut_suggestions(
         current_shortcuts.dictation_input.clone(),
         current_shortcuts.stop_current_task.clone(),
         current_shortcuts.open_settings.clone(),
+        current_shortcuts.voice_activation.clone(),
     ];
 
     suggestions.retain(|suggestion| {

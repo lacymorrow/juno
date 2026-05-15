@@ -43,10 +43,18 @@ fn format_error(template: &'static str, context: &str, error: impl std::fmt::Dis
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode: String, // Default: Alt+D (Option+D on macOS)
+    pub agent_mode: String,        // Default: Alt+D (Option+D on macOS)
     pub dictation_input: String,   // Default: Alt+Space (Option+Space on macOS)
     pub stop_current_task: String, // Default: Escape
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
+    #[serde(default = "KeyboardShortcuts::default_voice_activation")]
+    pub voice_activation: String,  // Default: Option+Shift+V — always-on global voice shortcut
+}
+
+impl KeyboardShortcuts {
+    fn default_voice_activation() -> String {
+        defaults::VOICE_ACTIVATION.to_string()
+    }
 }
 
 /// Agent trigger mode configuration
@@ -72,6 +80,7 @@ impl Default for KeyboardShortcuts {
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
+            voice_activation: defaults::VOICE_ACTIVATION.to_string(),
         }
     }
 }
