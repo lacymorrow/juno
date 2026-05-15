@@ -22,6 +22,7 @@ use crate::constants::{agent, events};
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 use crate::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
+use crate::persistent_memory::PersistentMemoryStore;
 // TARS Integration: Import event types
 // TODO: Implement event system - currently disabled due to incomplete implementation
 // use crate::agent::events::JunoAgentEvent;
@@ -607,6 +608,7 @@ async fn execute_agent_internal(
                     .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
+                let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let brain = match brain_result {
@@ -821,6 +823,7 @@ async fn execute_agent_internal(
                     .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
+                let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let orchestrator_brain = match orchestrator_brain_result {
@@ -1410,6 +1413,7 @@ async fn execute_specialized_agent_task(
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
+    let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
     let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle)) {
         Ok(brain) => brain,
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
@@ -1496,6 +1500,34 @@ async fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppH
         PromptManager::new()
     });
     prompt_manager.get_specialist_prompt(agent_type)
+}
+
+// --- Persistent Memory Injection ---
+
+/// Appends the user's persistent memory block to a system prompt.
+/// Silently skips injection on any error so agent execution is never blocked.
+fn inject_persistent_memory(system_prompt: String, app_handle: &tauri::AppHandle) -> String {
+    let store = PersistentMemoryStore::new(app_handle.clone());
+    match store.build_injection_block() {
+        Ok(Some((block, ids))) => {
+            let entry_count = ids.len();
+            // Record access in a background task so we don't block the agent start path
+            let app_handle_bg = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let store = PersistentMemoryStore::new(app_handle_bg);
+                if let Err(e) = store.record_access(&ids) {
+                    warn!("Failed to record persistent memory access: {}", e);
+                }
+            });
+            info!("Injecting {} persistent memory entries into system prompt", entry_count);
+            format!("{}{}", system_prompt, block)
+        }
+        Ok(None) => system_prompt,
+        Err(e) => {
+            warn!("Failed to load persistent memory for injection: {}", e);
+            system_prompt
+        }
+    }
 }
 
 // --- Browser Cleanup Function ---

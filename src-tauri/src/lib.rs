@@ -47,6 +47,7 @@ pub mod utils;
 pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
 pub mod testing; // Test harness and mock implementations for headless integration tests
+pub mod persistent_memory; // Cross-session persistent user memory
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes
@@ -72,7 +73,7 @@ use commands::{
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-            error_recovery::*, filesystem::*, keyboard::*, memory::*,
+            error_recovery::*, filesystem::*, keyboard::*, memory::*, persistent_memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_commands::*, ui_token_selection::*, window::*,
 };
@@ -323,6 +324,13 @@ pub fn run() {
             get_visual_config,
             compress_all_screenshots,
             configure_screenshot_compression,
+            // Persistent Cross-Session Memory Commands
+            get_persistent_memory,
+            add_persistent_memory,
+            update_persistent_memory,
+            delete_persistent_memory,
+            clear_persistent_memory,
+            preview_memory_injection,
             // Error Recovery Commands
             initialize_error_recovery,
             create_checkpoint,
