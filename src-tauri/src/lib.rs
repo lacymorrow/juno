@@ -458,6 +458,8 @@ pub fn run() {
             set_big_cursor_enabled,
             get_big_cursor_scale,
             set_big_cursor_scale,
+            test_cursor_scale,
+            test_cursor_restore,
 
             // Sound Commands
             play_sound_by_type,
