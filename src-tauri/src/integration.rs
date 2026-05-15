@@ -850,6 +850,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 Err(e) => {
                     error!("[Agent Mode] Failed to stop transcription: {}", e);
 
+                    // STT failed — no query will be submitted so discard the cached screenshot.
+                    let app_state = app_handle.state::<state::AppState>();
+                    app_state.take_pending_ptt_screenshot().await;
+
                     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                     let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
 
