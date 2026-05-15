@@ -167,6 +167,8 @@ macro_rules! generate_invoke_handler {
             reset_settings,
             export_settings,
             import_settings,
+            get_companion_mode,
+            set_companion_mode,
 
             // Provider management
             get_providers,
