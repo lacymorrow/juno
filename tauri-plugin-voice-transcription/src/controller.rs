@@ -4,7 +4,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound;
@@ -18,6 +18,15 @@ use crate::error::{Error, Result};
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const SINC_LENGTH: usize = 256;
 const OVERSAMPLING_FACTOR: usize = 256;
+
+/// Calculate RMS volume of an audio chunk (0.0 = silence, higher = louder).
+fn calculate_rms_volume(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
+}
 
 /// Create standard sinc interpolation parameters for audio resampling.
 fn sinc_resampling_params() -> SincInterpolationParameters {
@@ -491,6 +500,10 @@ impl VoiceController {
               partial_buffer_capacity_samples as f32 / actual_rate as f32,
               actual_rate);
 
+        // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
+        let level_emit_interval = Duration::from_millis(70);
+        let mut last_level_emit = Instant::now() - level_emit_interval;
+
         loop {
             // Check for control messages
             match control_rx.try_recv() {
@@ -512,6 +525,12 @@ impl VoiceController {
                         &last_buffer_arc,
                     );
 
+                    // Reset waveform to baseline when recording ends
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::AUDIO_LEVEL,
+                        serde_json::json!({ "level": 0.0_f32 }),
+                    );
+
                     break;
                 }
                 Err(TryRecvError::Empty) => {}
@@ -525,6 +544,18 @@ impl VoiceController {
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
                 audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
+
+                // Emit audio level at ~70ms intervals for waveform visualization
+                if last_level_emit.elapsed() >= level_emit_interval {
+                    let rms = calculate_rms_volume(&audio_chunk);
+                    // Scale: typical speech RMS 0.02–0.1 maps to ~0.2–1.0 display range
+                    let level = (rms * 10.0_f32).min(1.0_f32);
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::AUDIO_LEVEL,
+                        serde_json::json!({ "level": level }),
+                    );
+                    last_level_emit = Instant::now();
+                }
 
                 // Process partial transcriptions
                 if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {

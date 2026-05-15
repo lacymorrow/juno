@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
+import { useEventListener } from "@/hooks/useEventListener";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
@@ -169,20 +170,27 @@ const AudioLevelIndicator = ({
     return null;
   }
 
-  const normalizedLevel = Math.min(Math.max(audioLevel * 100, 0), 100);
-  const barCount = Math.ceil(normalizedLevel / 20);
+  // Bell-curve scaling: center bar tallest, outer bars shorter — matches natural waveform shape
+  const barScales = [0.5, 0.8, 1.0, 0.8, 0.5];
+  const minHeightPx = 2;
+  const maxHeightPx = 14;
+  const level = Math.min(Math.max(audioLevel, 0), 1);
 
   return (
-    <div className="flex items-center gap-0.5">
-      {[...Array(5)].map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            "w-0.5 h-2 rounded-full transition-all duration-100",
-            i < barCount ? "bg-blue-400" : "bg-white/20"
-          )}
-        />
-      ))}
+    <div className="flex items-end gap-0.5" aria-hidden="true">
+      {barScales.map((scale, i) => {
+        const height = minHeightPx + (maxHeightPx - minHeightPx) * level * scale;
+        return (
+          <div
+            key={i}
+            className="w-0.5 rounded-full bg-blue-400"
+            style={{
+              height: `${height}px`,
+              transition: "height 75ms linear",
+            }}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -212,6 +220,28 @@ const FloatingBarContent = () => {
   });
 
   const [localInputValue, setLocalInputValue] = useState("");
+
+  // Real-time audio level driven by voice-audio-level events from the plugin
+  const [audioLevel, setAudioLevel] = useState(0);
+
+  useEventListener<{ level: number }>(
+    EVENTS.VOICE_TRANSCRIPTION_AUDIO_LEVEL,
+    (payload) => {
+      setAudioLevel(payload.level);
+    }
+  );
+
+  // Reset to baseline when leaving a recording state
+  useEffect(() => {
+    const recordingStates = [
+      UI.BAR_STATES_LISTENING,
+      UI.BAR_STATES_TRANSCRIBING,
+      UI.BAR_STATES_ALWAYS_LISTENING,
+    ];
+    if (!recordingStates.includes(barState.barState as any)) {
+      setAudioLevel(0);
+    }
+  }, [barState.barState]);
 
   // === WINDOW CONFIGURATION ===
 
@@ -527,7 +557,7 @@ const FloatingBarContent = () => {
             </DynamicDescription>
           </DynamicDiv>
           <AudioLevelIndicator
-            audioLevel={barState.audioLevel}
+            audioLevel={audioLevel}
             currentUiState={currentUiState}
           />
         </DynamicContainer>
@@ -607,7 +637,7 @@ const FloatingBarContent = () => {
             Voice commands are active
           </DynamicDescription>
           <AudioLevelIndicator
-            audioLevel={barState.audioLevel}
+            audioLevel={audioLevel}
             currentUiState={currentUiState}
           />
         </DynamicContainer>
