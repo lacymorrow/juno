@@ -98,7 +98,7 @@ const ROLE_OPTIONS: RoleOption[] = [
   { id: "other", label: "Other", icon: MoreHorizontal, description: "Something else" },
 ];
 
-function RoleCard({
+const RoleCard = ({
   role,
   selected,
   onSelect,
@@ -106,7 +106,7 @@ function RoleCard({
   role: RoleOption;
   selected: boolean;
   onSelect: (id: string) => void;
-}) {
+}) => {
   const Icon = role.icon;
   return (
     <button
@@ -154,7 +154,7 @@ const getOnboardingSteps = (
     icon: null,
     action: "Continue",
   },
-    {
+  {
     id: "shortcut",
     title: "Learn the Magic Keys",
     subtitle: "Quick shortcuts to control Juno",
@@ -847,6 +847,8 @@ export default function OnboardingFlow({
 
   // Determine if continue button should be disabled
   const isContinueDisabled =
+    (step.id === "role" && !selectedRole) ||
+    (step.id === "role" && selectedRole === "other" && !customRole.trim()) ||
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||

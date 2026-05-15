@@ -343,6 +343,14 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 /// Persists to OnboardingSettings so it survives restarts.
 #[tauri::command]
 pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> {
+    let role = role.trim().to_string();
+    if role.is_empty() {
+        return Err("Role cannot be empty".to_string());
+    }
+    if role.chars().count() > 64 {
+        return Err("Role too long (max 64 characters)".to_string());
+    }
+
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
 
     let mut onboarding_settings = settings_manager
@@ -350,14 +358,12 @@ pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> 
         .await
         .map_err(|e| e.to_string())?;
 
-    onboarding_settings.user_role = Some(role.clone());
+    info!("User role saved: {}", role);
+    onboarding_settings.user_role = Some(role);
 
     settings_manager
         .set_onboarding_settings(&onboarding_settings)
         .await
-        .map_err(|e| e.to_string())?;
-
-    info!("User role saved: {}", role);
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
