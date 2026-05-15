@@ -817,23 +817,34 @@ pub async fn execute_computer_tool(
     let execution_start = std::time::Instant::now();
     let result = match action {
         "screenshot" => {
-            // Validate screen recording permission
-            handle_anthropic_result!(validate_permission(
-                app_handle,
-                RequiredPermission::ScreenRecording,
-                "computer (screenshot)"
-            ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+            // Use the pre-captured PTT screenshot if available (parallelized at PTT release).
+            // Falls back to a fresh capture if none is cached or serialization fails.
+            let app_state = app_handle.state::<crate::state::AppState>();
+            let pre_captured = app_state.take_pending_ptt_screenshot().await
+                .and_then(|s| serde_json::to_value(s).ok());
 
-            let screenshot_result = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
-                app_handle.clone(),
-                state_manager.clone()
-            ).await.map_err(|e| format!("Screenshot failed: {}", e)));
+            if let Some(value) = pre_captured {
+                info!("[Computer Use] Using pre-captured PTT screenshot (saved capture latency)");
+                Ok::<Value, String>(value)
+            } else {
+                // Validate screen recording permission
+                handle_anthropic_result!(validate_permission(
+                    app_handle,
+                    RequiredPermission::ScreenRecording,
+                    "computer (screenshot)"
+                ).await.map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
 
-            // The result is a struct with the screenshot data and dimensions.
-            // Serialize it to a JSON value to return to the agent.
-            match serde_json::to_value(screenshot_result) {
-                Ok(value) => Ok::<Value, String>(value),
-                Err(e) => Ok::<Value, String>(create_anthropic_error_response(format!("Failed to serialize screenshot data: {}", e)))
+                let screenshot_result = handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
+                    app_handle.clone(),
+                    state_manager.clone()
+                ).await.map_err(|e| format!("Screenshot failed: {}", e)));
+
+                // The result is a struct with the screenshot data and dimensions.
+                // Serialize it to a JSON value to return to the agent.
+                match serde_json::to_value(screenshot_result) {
+                    Ok(value) => Ok::<Value, String>(value),
+                    Err(e) => Ok::<Value, String>(create_anthropic_error_response(format!("Failed to serialize screenshot data: {}", e)))
+                }
             }
         }
         "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" |

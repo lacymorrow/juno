@@ -261,6 +261,10 @@ pub struct AppState {
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
 
+    // Pre-captured screenshot from PTT release (set during STT finalization, consumed on first agent screenshot call).
+    // Tuple stores (screenshot, capture_time) so stale entries can be discarded.
+    pub pending_ptt_screenshot: Arc<TokioMutex<Option<(crate::commands::core::ScreenshotResult, std::time::Instant)>>>,
+
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
     pub cloud_enabled: Arc<StdMutex<bool>>,
@@ -336,6 +340,7 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            pending_ptt_screenshot: Arc::new(TokioMutex::new(None)),
 
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
@@ -354,6 +359,34 @@ impl AppState {
     pub async fn initialize_rate_limiter_cleanup(&self) {
         info!("Starting rate limiter cleanup task");
         self.rate_limiters.clone().start_cleanup_task();
+    }
+
+    /// Maximum age for a cached PTT screenshot before it is considered stale.
+    const PTT_SCREENSHOT_TTL_SECS: u64 = 10;
+
+    /// Store a screenshot captured concurrently with PTT STT finalization.
+    /// Consumed on the agent's first `computer/screenshot` tool call.
+    pub async fn set_pending_ptt_screenshot(&self, screenshot: crate::commands::core::ScreenshotResult) {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        *guard = Some((screenshot, std::time::Instant::now()));
+    }
+
+    /// Take (and clear) the pre-captured PTT screenshot if one exists and is not stale.
+    /// Discards (and returns `None`) if the screenshot is older than `PTT_SCREENSHOT_TTL_SECS`.
+    pub async fn take_pending_ptt_screenshot(&self) -> Option<crate::commands::core::ScreenshotResult> {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        match guard.take() {
+            Some((screenshot, captured_at))
+                if captured_at.elapsed().as_secs() < Self::PTT_SCREENSHOT_TTL_SECS =>
+            {
+                Some(screenshot)
+            }
+            Some(_) => {
+                warn!("[PTT] Discarding stale pre-captured screenshot (older than {}s)", Self::PTT_SCREENSHOT_TTL_SECS);
+                None
+            }
+            None => None,
+        }
     }
 
     // Audio Settings - Getter/Setter methods that operate on actual shared state
