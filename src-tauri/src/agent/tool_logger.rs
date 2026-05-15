@@ -1349,14 +1349,99 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
     }
 }
 
+/// A parsed [POINT:x,y:label:screenN] tag from agent text output.
+struct PointTag {
+    x: f64,
+    y: f64,
+    label: Option<String>,
+    screen: Option<u32>,
+}
+
+/// Strip all `[POINT:x,y:label:screenN]` tags from `text`, returning the cleaned string
+/// and a list of parsed tags. Incomplete tags (no closing `]`) are left as-is.
+fn parse_point_tags(text: &str) -> (String, Vec<PointTag>) {
+    let mut result = String::with_capacity(text.len());
+    let mut tags = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find("[POINT:") {
+        result.push_str(&remaining[..start]);
+        let after_prefix = &remaining[start + 7..]; // skip "[POINT:"
+
+        if let Some(end) = after_prefix.find(']') {
+            let inner = &after_prefix[..end];
+            if let Some(tag) = parse_point_inner(inner) {
+                tags.push(tag);
+            } else {
+                // Malformed tag — preserve it in output
+                result.push_str("[POINT:");
+                result.push_str(&after_prefix[..end + 1]);
+            }
+            remaining = &after_prefix[end + 1..];
+        } else {
+            // No closing bracket in this chunk — preserve and stop
+            result.push_str("[POINT:");
+            remaining = after_prefix;
+            break;
+        }
+    }
+
+    result.push_str(remaining);
+    (result, tags)
+}
+
+/// Parse the interior of a POINT tag: `x,y` or `x,y:label` or `x,y:label:screenN`
+fn parse_point_inner(inner: &str) -> Option<PointTag> {
+    // Split at most into 3 parts: coords, label, screenN
+    let mut parts = inner.splitn(3, ':');
+
+    let coords_str = parts.next()?;
+    let mut coord_iter = coords_str.splitn(2, ',');
+    let x = coord_iter.next()?.trim().parse::<f64>().ok()?;
+    let y = coord_iter.next()?.trim().parse::<f64>().ok()?;
+
+    let label = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let screen = parts
+        .next()
+        .and_then(|s| s.trim().strip_prefix("screen"))
+        .and_then(|n| n.parse::<u32>().ok());
+
+    Some(PointTag { x, y, label, screen })
+}
+
+/// Emit a `cursor-point` Tauri event for a single parsed [POINT] tag.
+fn emit_cursor_point(app_handle: &AppHandle, tag: &PointTag) {
+    let event_data = serde_json::json!({
+        "x": tag.x,
+        "y": tag.y,
+        "label": tag.label,
+        "screen": tag.screen,
+    });
+
+    if let Err(e) = app_handle.emit(events::ui::CURSOR_POINT, event_data) {
+        warn!("Failed to emit cursor-point event: {}", e);
+    }
+}
+
 pub fn emit_streaming_text_chunk(
     app_handle: &AppHandle,
     text: String,
     message_id: Option<String>,
     tts_content: Option<String>,
 ) {
+    // Strip [POINT:x,y:label:screenN] tags and fire sidecar cursor-point events
+    let (cleaned_text, point_tags) = parse_point_tags(&text);
+    for tag in &point_tags {
+        emit_cursor_point(app_handle, tag);
+    }
+
     let event_data = serde_json::json!({
-        "chunk": text,
+        "chunk": cleaned_text,
         "message_id": message_id,
         "tts_content": tts_content, // Include TTS content for decorative display
         "metadata": {
@@ -1449,10 +1534,12 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
-    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
+    // Strip any [POINT] tags from the final accumulated text (tags were already emitted per-chunk)
+    let (cleaned_text, _) = parse_point_tags(&complete_text);
+    let is_jsx = crate::anthropic::is_jsx_content(&cleaned_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
-        "complete_text": complete_text,
+        "complete_text": cleaned_text,
         "is_jsx": is_jsx
     });
 
@@ -1467,10 +1554,12 @@ pub fn emit_stream_end_with_state(
     complete_text: String,
     agent_state: String,
 ) {
-    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
+    // Strip any [POINT] tags from the final accumulated text (tags were already emitted per-chunk)
+    let (cleaned_text, _) = parse_point_tags(&complete_text);
+    let is_jsx = crate::anthropic::is_jsx_content(&cleaned_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
-        "complete_text": complete_text,
+        "complete_text": cleaned_text,
         "agent_state": agent_state,
         "is_jsx": is_jsx
     });
