@@ -1,8 +1,9 @@
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
+import { useEventListener } from "@/hooks/useEventListener";
+import { EVENTS } from "@/lib/constants.generated";
 
-// Cursor highlight and click visualization types
 type CursorHighlight = {
   x: number;
   y: number;
@@ -18,30 +19,57 @@ type ClickVisualization = {
   timestamp: number;
 };
 
+type FlyingCursor = {
+  label: string | null;
+  arrived: boolean;
+};
+
+type CursorPointPayload = {
+  x: number;
+  y: number;
+  label: string | null;
+  screen: number | null;
+};
+
+// Quadratic bezier point: P(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+function bezier(t: number, p0: number, p1: number, p2: number): number {
+  const mt = 1 - t;
+  return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
+}
+
+const FLIGHT_DURATION = 380; // ms
+const LINGER_DURATION = 1600; // ms after landing before hiding
+const INDICATOR_SIZE = 56; // px — half-size for centering
+const LABEL_HEIGHT = 32; // extra window height when showing label
+
 const DesktopCursorOverlay = () => {
   const [cursorHighlight, setCursorHighlight] =
     useState<CursorHighlight | null>(null);
   const [clickVisualizations, setClickVisualizations] = useState<
     ClickVisualization[]
   >([]);
+  const [flyingCursor, setFlyingCursor] = useState<FlyingCursor | null>(null);
   const [isEnabled, setIsEnabled] = useState(
     localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false"
   );
-  const overlayWindowRef = useRef<any>(null);
 
-  // Initialize overlay window reference and create window if needed
+  const overlayWindowRef = useRef<WebviewWindow | null>(null);
+  const lastPositionUpdate = useRef<number>(0);
+  const positionUpdateThrottle = 16;
+  const flyAnimFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flyLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Remember last landed position so next flight can depart from there
+  const lastLandedRef = useRef<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
     const initializeOverlay = async () => {
-      // Try to get existing window
-      let window = WebviewWindow.getByLabel("desktop-cursor-overlay");
+      let window = await WebviewWindow.getByLabel("desktop-cursor-overlay");
 
       if (!window) {
-        // Window doesn't exist, create it
         try {
           const { invoke } = await import("@tauri-apps/api/core");
           await invoke("open_desktop_cursor_overlay");
-          // Get the window reference after creation
-          window = WebviewWindow.getByLabel("desktop-cursor-overlay");
+          window = await WebviewWindow.getByLabel("desktop-cursor-overlay");
         } catch (error) {
           console.error(
             "Failed to create desktop cursor overlay window:",
@@ -55,9 +83,13 @@ const DesktopCursorOverlay = () => {
     };
 
     initializeOverlay();
+
+    return () => {
+      if (flyAnimFrameRef.current) clearTimeout(flyAnimFrameRef.current);
+      if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
+    };
   }, []);
 
-  // Check localStorage for settings changes
   useEffect(() => {
     const checkSettings = () => {
       const enabled =
@@ -71,10 +103,6 @@ const DesktopCursorOverlay = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Position overlay window at cursor location with throttling
-  const lastPositionUpdate = useRef<number>(0);
-  const positionUpdateThrottle = 16; // ~60fps throttling
-
   const positionOverlay = async (
     x: number,
     y: number,
@@ -82,7 +110,6 @@ const DesktopCursorOverlay = () => {
   ) => {
     if (!overlayWindowRef.current) return;
 
-    // Throttle position updates unless forced (for initial positioning)
     const now = Date.now();
     if (!force && now - lastPositionUpdate.current < positionUpdateThrottle) {
       return;
@@ -90,28 +117,123 @@ const DesktopCursorOverlay = () => {
     lastPositionUpdate.current = now;
 
     try {
-      // Position the window slightly offset from cursor to center the visualization
-      const offsetX = Math.max(0, x - 100); // Center 200px visualization circle
+      const offsetX = Math.max(0, x - 100);
       const offsetY = Math.max(0, y - 100);
 
-      await overlayWindowRef.current.setPosition({
-        type: "Logical",
-        x: offsetX,
-        y: offsetY,
-      });
+      await overlayWindowRef.current.setPosition(
+        new LogicalPosition(offsetX, offsetY)
+      );
 
-      // Resize window to accommodate visualization (200x200 for circles)
-      await overlayWindowRef.current.setSize({
-        type: "Logical",
-        width: 200,
-        height: 200,
-      });
+      await overlayWindowRef.current.setSize(new LogicalSize(200, 200));
     } catch (error) {
       console.warn("Failed to position overlay window:", error);
     }
   };
 
-  // Listen for cursor highlight events
+  // Fly the overlay window from (startX,startY) to (targetX,targetY) along a bezier arc
+  const flyTo = useCallback(
+    async (targetX: number, targetY: number, label: string | null) => {
+      if (!overlayWindowRef.current) return;
+
+      // Cancel any previous flight
+      if (flyAnimFrameRef.current) clearTimeout(flyAnimFrameRef.current);
+      if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
+
+      const startX = lastLandedRef.current?.x ?? targetX - 250;
+      const startY = lastLandedRef.current?.y ?? targetY - 80;
+
+      // Control point: perpendicular offset from the midpoint of straight path
+      const midX = (startX + targetX) / 2;
+      const midY = (startY + targetY) / 2;
+      const dx = targetX - startX;
+      const dy = targetY - startY;
+      // Perpendicular offset = 15% of distance, capped so it feels natural
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const perpScale = Math.min(0.15, 80 / Math.max(dist, 1));
+      const ctrlX = midX - dy * perpScale;
+      const ctrlY = midY + dx * perpScale;
+
+      const windowW = INDICATOR_SIZE * 2;
+      const windowH = INDICATOR_SIZE * 2 + (label ? LABEL_HEIGHT : 0);
+
+      setFlyingCursor({ label, arrived: false });
+
+      // Show the window at start position
+      try {
+        await overlayWindowRef.current.setSize(new LogicalSize(windowW, windowH));
+        await overlayWindowRef.current.setPosition(
+          new LogicalPosition(startX - INDICATOR_SIZE, startY - INDICATOR_SIZE)
+        );
+        await overlayWindowRef.current.show();
+      } catch (err) {
+        console.warn("Failed to show overlay for flight:", err);
+      }
+
+      const startTime = Date.now();
+
+      const tick = async () => {
+        const elapsed = Date.now() - startTime;
+        const tRaw = Math.min(elapsed / FLIGHT_DURATION, 1);
+
+        // Ease-in-out cubic
+        const t =
+          tRaw < 0.5
+            ? 4 * tRaw * tRaw * tRaw
+            : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
+
+        const curX = bezier(t, startX, ctrlX, targetX);
+        const curY = bezier(t, startY, ctrlY, targetY);
+
+        try {
+          await overlayWindowRef.current?.setPosition(
+            new LogicalPosition(curX - INDICATOR_SIZE, curY - INDICATOR_SIZE)
+          );
+        } catch {
+          // Window may have been hidden — abort
+          return;
+        }
+
+        if (tRaw < 1) {
+          flyAnimFrameRef.current = setTimeout(tick, 16);
+        } else {
+          // Landed
+          lastLandedRef.current = { x: targetX, y: targetY };
+          setFlyingCursor({ label, arrived: true });
+
+          // Expand window if we have a label to display
+          if (label) {
+            try {
+              await overlayWindowRef.current?.setSize(
+                new LogicalSize(Math.max(windowW, label.length * 9 + 32), windowH)
+              );
+            } catch {
+              // ignore
+            }
+          }
+
+          flyLingerRef.current = setTimeout(async () => {
+            setFlyingCursor(null);
+            try {
+              await overlayWindowRef.current?.hide();
+            } catch {
+              // ignore
+            }
+          }, LINGER_DURATION);
+        }
+      };
+
+      flyAnimFrameRef.current = setTimeout(tick, 0);
+    },
+    []
+  );
+
+  // Listen for agent [POINT:x,y:label:screenN] events
+  useEventListener<CursorPointPayload>(EVENTS.UI_CURSOR_POINT, (payload) => {
+    if (!isEnabled) return;
+    flyTo(payload.x, payload.y, payload.label ?? null);
+  });
+
+  // Listen for cursor highlight events (manual/computer-use flow)
   useEffect(() => {
     if (!isEnabled) return;
 
@@ -120,7 +242,8 @@ const DesktopCursorOverlay = () => {
 
     const setupListeners = async () => {
       try {
-        // Cursor highlight start
+        const { listen } = await import("@tauri-apps/api/event");
+
         const unlistenStart = await listen<[number, number]>(
           "ui-cursor-highlight-start",
           async (event) => {
@@ -136,7 +259,6 @@ const DesktopCursorOverlay = () => {
         if (mounted) unlistenFns.push(unlistenStart);
         else unlistenStart();
 
-        // Cursor highlight move
         const unlistenMove = await listen<[number, number]>(
           "ui-cursor-highlight-move",
           async (event) => {
@@ -151,7 +273,6 @@ const DesktopCursorOverlay = () => {
         if (mounted) unlistenFns.push(unlistenMove);
         else unlistenMove();
 
-        // Cursor highlight stop
         const unlistenStop = await listen<[number, number]>(
           "ui-cursor-highlight-stop",
           async () => {
@@ -167,7 +288,6 @@ const DesktopCursorOverlay = () => {
         if (mounted) unlistenFns.push(unlistenStop);
         else unlistenStop();
 
-        // Click visualizations
         const unlistenClick = await listen<[number, number, string]>(
           "click-visualization",
           async (event) => {
@@ -210,7 +330,6 @@ const DesktopCursorOverlay = () => {
     };
   }, [isEnabled]);
 
-  // Clean up old click visualizations
   useEffect(() => {
     if (clickVisualizations.length === 0) return;
 
@@ -224,7 +343,6 @@ const DesktopCursorOverlay = () => {
     return () => clearTimeout(cleanupTimeout);
   }, [clickVisualizations]);
 
-  // Don't render if disabled
   if (!isEnabled) {
     return null;
   }
@@ -243,7 +361,101 @@ const DesktopCursorOverlay = () => {
         overflow: "visible",
       }}
     >
-      {/* Cursor highlight circle - smooth movement indicator */}
+      {/* Flying cursor — shown during agent [POINT] animation */}
+      {flyingCursor && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          {/* Cursor arrow SVG */}
+          <div
+            style={{
+              animation: flyingCursor.arrived
+                ? "point-land 0.25s ease-out forwards"
+                : "point-fly 0.38s ease-out forwards",
+            }}
+          >
+            <svg
+              width="36"
+              height="36"
+              viewBox="0 0 36 36"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {/* Drop shadow */}
+              <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow
+                  dx="1"
+                  dy="2"
+                  stdDeviation="2"
+                  floodColor="rgba(0,0,0,0.4)"
+                />
+              </filter>
+              {/* Cursor arrow */}
+              <path
+                d="M6 4L28 18L17 19.5L12 30L6 4Z"
+                fill="white"
+                stroke="#1a1a2e"
+                strokeWidth="2"
+                strokeLinejoin="round"
+                filter="url(#shadow)"
+              />
+              {/* Accent dot at tip */}
+              <circle cx="6.5" cy="4.5" r="2.5" fill="#6366f1" />
+            </svg>
+          </div>
+
+          {/* Label shown on arrival */}
+          {flyingCursor.arrived && flyingCursor.label && (
+            <div
+              style={{
+                backgroundColor: "rgba(15, 15, 30, 0.88)",
+                backdropFilter: "blur(8px)",
+                color: "#e2e8f0",
+                fontSize: "12px",
+                fontWeight: 500,
+                fontFamily: "system-ui, -apple-system, sans-serif",
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "1px solid rgba(99,102,241,0.4)",
+                whiteSpace: "nowrap",
+                animation: "label-appear 0.18s ease-out forwards",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
+              }}
+            >
+              {flyingCursor.label}
+            </div>
+          )}
+
+          {/* Landing ripple */}
+          {flyingCursor.arrived && (
+            <div
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "12px",
+                width: "40px",
+                height: "40px",
+                transform: "translate(-50%, -50%)",
+                borderRadius: "50%",
+                border: "2px solid rgba(99,102,241,0.6)",
+                animation: "point-ripple 0.6s ease-out forwards",
+                pointerEvents: "none",
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Cursor highlight circle — computer-use mouse tracking */}
       {cursorHighlight && cursorHighlight.active && (
         <div
           className="cursor-highlight-circle"
@@ -264,7 +476,6 @@ const DesktopCursorOverlay = () => {
         />
       )}
 
-      {/* Additional ripple effect for movement */}
       {cursorHighlight && cursorHighlight.active && (
         <div
           className="cursor-ripple"
@@ -303,47 +514,44 @@ const DesktopCursorOverlay = () => {
         />
       ))}
 
-      {/* Styles for animations */}
       <style>{`
+        @keyframes point-fly {
+          0% { opacity: 0; transform: scale(0.6) translateY(-6px); }
+          60% { opacity: 1; transform: scale(1.35) translateY(0); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        @keyframes point-land {
+          0% { transform: scale(1.1); }
+          50% { transform: scale(0.88); }
+          100% { transform: scale(1); }
+        }
+
+        @keyframes point-ripple {
+          0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0.8; }
+          100% { transform: translate(-50%, -50%) scale(2.4); opacity: 0; }
+        }
+
+        @keyframes label-appear {
+          0% { opacity: 0; transform: translateY(4px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
         @keyframes cursor-pulse {
-          0% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.1);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
+          0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+          50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
         }
 
         @keyframes cursor-ripple {
-          0% {
-            transform: translate(-50%, -50%) scale(0.8);
-            opacity: 0.6;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1.8);
-            opacity: 0;
-          }
+          0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.6; }
+          100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; }
         }
 
         @keyframes desktop-click-animation {
-          0% {
-            transform: translate(-50%, -50%) scale(0.3);
-            opacity: 1;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.2);
-            opacity: 0.8;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(2);
-            opacity: 0;
-          }
+          0% { transform: translate(-50%, -50%) scale(0.3); opacity: 1; }
+          50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.8; }
+          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
         }
       `}</style>
     </div>
