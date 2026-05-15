@@ -410,6 +410,51 @@ fn emit_ax_grounding_audit(
     }
 }
 
+/// Emit a preview event BEFORE a coordinate-based computer use action executes.
+///
+/// The desktop-cursor-overlay window listens for this event to show a targeting
+/// highlight ring at the click/move position, giving the user visual feedback
+/// about WHERE the agent is about to act before it acts.
+///
+/// Only fires for actions that carry a coordinate (clicks, move, scroll, drag).
+/// Read-only actions (screenshot, cursor_position) and text actions (key, type) are skipped.
+fn emit_computer_use_preview(app_handle: &tauri::AppHandle, action: &str, input: &Value) {
+    let coords: Option<(f64, f64)> = match action {
+        "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click"
+        | "mouse_move" | "left_mouse_down" | "left_mouse_up" | "scroll" => {
+            input["coordinate"].as_array().and_then(|arr| {
+                Some((arr.first()?.as_f64()?, arr.get(1)?.as_f64()?))
+            })
+        }
+        "left_click_drag" => {
+            // Show preview at the drag start position.
+            // start_coordinate takes precedence; fall back to coordinate (which is
+            // the start when end_coordinate is the destination).
+            let start = input["start_coordinate"]
+                .as_array()
+                .or_else(|| input["coordinate"].as_array());
+            start.and_then(|arr| Some((arr.first()?.as_f64()?, arr.get(1)?.as_f64()?)))
+        }
+        _ => None,
+    };
+
+    let Some((x, y)) = coords else { return };
+    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+
+    let payload = json!({
+        "action": action,
+        "coordinate": [screen_x, screen_y],
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis() as u64,
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::tools::COMPUTER_USE_PREVIEW, &payload) {
+        tracing::debug!("Failed to emit computer-use-preview: {}", e);
+    }
+}
+
 // --- Security and Validation Helpers ---
 
 /// Security configuration for text editor operations
@@ -812,6 +857,10 @@ pub async fn execute_computer_tool(
         target_app.as_deref(),
         sensitive_pattern,
     );
+
+    // 4. Emit preview event so the desktop overlay can highlight the target position
+    //    BEFORE the action fires. Fires only for coordinate-based actions.
+    emit_computer_use_preview(app_handle, action, &input);
 
     // Execute action
     let execution_start = std::time::Instant::now();

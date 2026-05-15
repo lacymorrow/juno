@@ -2,7 +2,6 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState, useRef } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-// Cursor highlight and click visualization types
 type CursorHighlight = {
   x: number;
   y: number;
@@ -18,29 +17,48 @@ type ClickVisualization = {
   timestamp: number;
 };
 
+type ComputerUsePreview = {
+  x: number;
+  y: number;
+  action: string;
+  id: number;
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  left_click: "clicking",
+  right_click: "right-clicking",
+  middle_click: "middle-clicking",
+  double_click: "double-clicking",
+  triple_click: "triple-clicking",
+  left_click_drag: "dragging",
+  mouse_move: "moving to",
+  left_mouse_down: "pressing",
+  left_mouse_up: "releasing",
+  scroll: "scrolling",
+};
+
 const DesktopCursorOverlay = () => {
   const [cursorHighlight, setCursorHighlight] =
     useState<CursorHighlight | null>(null);
   const [clickVisualizations, setClickVisualizations] = useState<
     ClickVisualization[]
   >([]);
+  const [computerUsePreview, setComputerUsePreview] =
+    useState<ComputerUsePreview | null>(null);
   const [isEnabled, setIsEnabled] = useState(
     localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false"
   );
   const overlayWindowRef = useRef<any>(null);
+  const previewDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize overlay window reference and create window if needed
   useEffect(() => {
     const initializeOverlay = async () => {
-      // Try to get existing window
       let window = WebviewWindow.getByLabel("desktop-cursor-overlay");
 
       if (!window) {
-        // Window doesn't exist, create it
         try {
           const { invoke } = await import("@tauri-apps/api/core");
           await invoke("open_desktop_cursor_overlay");
-          // Get the window reference after creation
           window = WebviewWindow.getByLabel("desktop-cursor-overlay");
         } catch (error) {
           console.error(
@@ -57,7 +75,6 @@ const DesktopCursorOverlay = () => {
     initializeOverlay();
   }, []);
 
-  // Check localStorage for settings changes
   useEffect(() => {
     const checkSettings = () => {
       const enabled =
@@ -71,9 +88,8 @@ const DesktopCursorOverlay = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Position overlay window at cursor location with throttling
   const lastPositionUpdate = useRef<number>(0);
-  const positionUpdateThrottle = 16; // ~60fps throttling
+  const positionUpdateThrottle = 16;
 
   const positionOverlay = async (
     x: number,
@@ -82,7 +98,6 @@ const DesktopCursorOverlay = () => {
   ) => {
     if (!overlayWindowRef.current) return;
 
-    // Throttle position updates unless forced (for initial positioning)
     const now = Date.now();
     if (!force && now - lastPositionUpdate.current < positionUpdateThrottle) {
       return;
@@ -90,8 +105,7 @@ const DesktopCursorOverlay = () => {
     lastPositionUpdate.current = now;
 
     try {
-      // Position the window slightly offset from cursor to center the visualization
-      const offsetX = Math.max(0, x - 100); // Center 200px visualization circle
+      const offsetX = Math.max(0, x - 100);
       const offsetY = Math.max(0, y - 100);
 
       await overlayWindowRef.current.setPosition({
@@ -100,7 +114,6 @@ const DesktopCursorOverlay = () => {
         y: offsetY,
       });
 
-      // Resize window to accommodate visualization (200x200 for circles)
       await overlayWindowRef.current.setSize({
         type: "Logical",
         width: 200,
@@ -111,7 +124,6 @@ const DesktopCursorOverlay = () => {
     }
   };
 
-  // Listen for cursor highlight events
   useEffect(() => {
     if (!isEnabled) return;
 
@@ -167,7 +179,7 @@ const DesktopCursorOverlay = () => {
         if (mounted) unlistenFns.push(unlistenStop);
         else unlistenStop();
 
-        // Click visualizations
+        // Click visualizations (post-action)
         const unlistenClick = await listen<[number, number, string]>(
           "click-visualization",
           async (event) => {
@@ -195,6 +207,38 @@ const DesktopCursorOverlay = () => {
         );
         if (mounted) unlistenFns.push(unlistenClick);
         else unlistenClick();
+
+        // Computer use preview (pre-action) — shows targeting highlight BEFORE the action fires
+        const unlistenPreview = await listen<{
+          action: string;
+          coordinate: [number, number];
+          timestamp: number;
+        }>("computer-use-preview", async (event) => {
+          if (!mounted) return;
+          const { action, coordinate } = event.payload;
+          const [x, y] = coordinate;
+
+          // Cancel any pending auto-dismiss from a previous preview
+          if (previewDismissRef.current !== null) {
+            clearTimeout(previewDismissRef.current);
+            previewDismissRef.current = null;
+          }
+
+          setComputerUsePreview({ x, y, action, id: Date.now() });
+          await positionOverlay(x, y, true);
+          if (overlayWindowRef.current) {
+            await overlayWindowRef.current.show();
+          }
+
+          // Auto-dismiss after 500ms — matches action cooldown with a small buffer
+          previewDismissRef.current = setTimeout(async () => {
+            if (!mounted) return;
+            setComputerUsePreview(null);
+            previewDismissRef.current = null;
+          }, 500);
+        });
+        if (mounted) unlistenFns.push(unlistenPreview);
+        else unlistenPreview();
       } catch (error) {
         console.error("Failed to setup cursor overlay listeners:", error);
       }
@@ -204,6 +248,9 @@ const DesktopCursorOverlay = () => {
 
     return () => {
       mounted = false;
+      if (previewDismissRef.current !== null) {
+        clearTimeout(previewDismissRef.current);
+      }
       for (const unlisten of unlistenFns) {
         unlisten();
       }
@@ -224,10 +271,13 @@ const DesktopCursorOverlay = () => {
     return () => clearTimeout(cleanupTimeout);
   }, [clickVisualizations]);
 
-  // Don't render if disabled
   if (!isEnabled) {
     return null;
   }
+
+  const previewLabel = computerUsePreview
+    ? ACTION_LABELS[computerUsePreview.action] ?? computerUsePreview.action
+    : null;
 
   return (
     <div
@@ -243,7 +293,82 @@ const DesktopCursorOverlay = () => {
         overflow: "visible",
       }}
     >
-      {/* Cursor highlight circle - smooth movement indicator */}
+      {/* Pre-action targeting highlight — appears BEFORE the agent acts */}
+      {computerUsePreview && (
+        <>
+          {/* Outer expanding ring */}
+          <div
+            key={`preview-outer-${computerUsePreview.id}`}
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: "80px",
+              height: "80px",
+              borderRadius: "50%",
+              border: "2px solid rgba(99, 179, 237, 0.5)",
+              transform: "translate(-50%, -50%)",
+              animation: "preview-expand 0.5s ease-out forwards",
+            }}
+          />
+          {/* Inner targeting reticle */}
+          <div
+            key={`preview-inner-${computerUsePreview.id}`}
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: "36px",
+              height: "36px",
+              borderRadius: "50%",
+              border: "2.5px solid rgba(66, 153, 225, 0.9)",
+              backgroundColor: "rgba(66, 153, 225, 0.15)",
+              transform: "translate(-50%, -50%)",
+              animation: "preview-pulse 0.5s ease-out forwards",
+              boxShadow:
+                "0 0 12px rgba(66, 153, 225, 0.6), inset 0 0 8px rgba(66, 153, 225, 0.2)",
+            }}
+          />
+          {/* Crosshair center dot */}
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              backgroundColor: "rgba(66, 153, 225, 0.9)",
+              transform: "translate(-50%, -50%)",
+              animation: "preview-dot 0.5s ease-out forwards",
+            }}
+          />
+          {/* Action label */}
+          {previewLabel && (
+            <div
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "calc(50% - 38px)",
+                transform: "translateX(-50%)",
+                fontSize: "10px",
+                fontWeight: 600,
+                color: "rgba(66, 153, 225, 0.95)",
+                whiteSpace: "nowrap",
+                textShadow:
+                  "0 1px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)",
+                letterSpacing: "0.02em",
+                animation: "preview-label 0.5s ease-out forwards",
+                fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+              }}
+            >
+              {previewLabel}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Cursor highlight circle — continuous movement indicator */}
       {cursorHighlight && cursorHighlight.active && (
         <div
           className="cursor-highlight-circle"
@@ -264,7 +389,7 @@ const DesktopCursorOverlay = () => {
         />
       )}
 
-      {/* Additional ripple effect for movement */}
+      {/* Additional ripple for cursor movement */}
       {cursorHighlight && cursorHighlight.active && (
         <div
           className="cursor-ripple"
@@ -282,7 +407,7 @@ const DesktopCursorOverlay = () => {
         />
       )}
 
-      {/* Click visualizations */}
+      {/* Post-action click flash */}
       {clickVisualizations.map((click) => (
         <div
           key={click.id}
@@ -303,8 +428,34 @@ const DesktopCursorOverlay = () => {
         />
       ))}
 
-      {/* Styles for animations */}
       <style>{`
+        @keyframes preview-expand {
+          0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0.8; }
+          60% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.5; }
+          100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0; }
+        }
+
+        @keyframes preview-pulse {
+          0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+          20% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+          80% { transform: translate(-50%, -50%) scale(1.0); opacity: 0.9; }
+          100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0; }
+        }
+
+        @keyframes preview-dot {
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+          20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          80% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+
+        @keyframes preview-label {
+          0% { opacity: 0; transform: translateX(-50%) translateY(4px); }
+          20% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          70% { opacity: 1; }
+          100% { opacity: 0; transform: translateX(-50%) translateY(-2px); }
+        }
+
         @keyframes cursor-pulse {
           0% {
             transform: translate(-50%, -50%) scale(1);
