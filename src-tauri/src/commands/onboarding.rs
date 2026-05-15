@@ -39,11 +39,17 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    let current_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+
     let onboarding_settings = OnboardingSettings {
         completed: true,
         completed_at: Some(now.clone()),
         skipped: false,
-        skip_count: 0,
+        skip_count: current_settings.skip_count,
+        user_role: current_settings.user_role,
     };
 
     settings_manager
@@ -83,6 +89,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         completed_at: Some(now.clone()),
         skipped: true,
         skip_count: current_settings.skip_count + 1,
+        user_role: current_settings.user_role.clone(),
     };
 
     settings_manager
@@ -118,6 +125,7 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
         completed_at: None,
         skipped: false,
         skip_count: 0,
+        user_role: None,
     };
 
     settings_manager
@@ -330,3 +338,26 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 
     Ok(())
 }
+
+/// Save the user's selected role during onboarding.
+/// Persists to OnboardingSettings so it survives restarts.
+#[tauri::command]
+pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
+
+    let mut onboarding_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    onboarding_settings.user_role = Some(role.clone());
+
+    settings_manager
+        .set_onboarding_settings(&onboarding_settings)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    info!("User role saved: {}", role);
+    Ok(())
+}
+

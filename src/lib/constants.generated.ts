@@ -448,6 +448,7 @@ export const COMMANDS = {
   SETTINGS_GET_ONBOARDING_SETTINGS: 'get_onboarding_settings',
   SETTINGS_SET_ONBOARDING_SETTINGS: 'set_onboarding_settings',
   SETTINGS_SET_AUTOSTART_ENABLED: 'set_autostart_enabled',
+  ONBOARDING_SAVE_USER_ROLE: 'save_user_role',
   CORE_GET_DEBUG_MODE: 'get_debug_mode',
   CORE_SET_DEBUG_MODE: 'set_debug_mode',
   CORE_GET_PERFORMANCE_MONITORING: 'get_performance_monitoring',

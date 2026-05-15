@@ -49,6 +49,14 @@ pub struct KeyboardShortcuts {
     pub dictation_input: String,
     pub stop_current_task: String,
     pub open_settings: String,
+    #[serde(default = "KeyboardShortcuts::default_voice_activation")]
+    pub voice_activation: String,
+}
+
+impl KeyboardShortcuts {
+    fn default_voice_activation() -> String {
+        defaults::VOICE_ACTIVATION.to_string()
+    }
 }
 
 /// Floating bar UI configuration
@@ -205,6 +213,9 @@ pub struct OnboardingSettings {
     pub completed_at: Option<String>,
     pub skipped: bool,
     pub skip_count: u32,
+    /// Role selected during onboarding (e.g. "engineer", "designer", "product", etc.)
+    #[serde(default)]
+    pub user_role: Option<String>,
 }
 
 /// CLI configuration settings
@@ -271,6 +282,7 @@ impl Default for KeyboardShortcuts {
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
+            voice_activation: defaults::VOICE_ACTIVATION.to_string(),
         }
     }
 }
@@ -369,6 +381,7 @@ impl Default for OnboardingSettings {
             completed_at: None,
             skipped: false,
             skip_count: 0,
+            user_role: None,
         }
     }
 }
