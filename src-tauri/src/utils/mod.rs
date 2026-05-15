@@ -688,6 +688,7 @@ pub struct RunningApplicationInfo {
     pub pid: i32,
     pub is_frontmost: bool,
     pub activation_policy: String,
+    pub windows: Vec<String>,
 }
 
 /// Information about an installed application
@@ -1154,6 +1155,101 @@ fn get_screen_resolution() -> Option<(u32, u32)> {
     }
 }
 
+/// Build a PID → window-title map from on-screen windows.
+/// Uses CGWindowListCopyWindowInfo (requires Screen Recording permission, already granted).
+#[cfg(target_os = "macos")]
+fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGWindowListCopyWindowInfo(
+            option: u32,
+            relative_to_window: u32,
+        ) -> *mut objc::runtime::Object;
+    }
+
+    // kCGWindowListOptionOnScreenOnly (1) | kCGWindowListExcludeDesktopElements (16)
+    const ON_SCREEN_NO_DESKTOP: u32 = 1 | (1 << 4);
+
+    let mut pid_to_windows: std::collections::HashMap<i32, Vec<String>> =
+        std::collections::HashMap::new();
+
+    unsafe {
+        let window_list: *mut objc::runtime::Object =
+            CGWindowListCopyWindowInfo(ON_SCREEN_NO_DESKTOP, 0);
+        if window_list.is_null() {
+            return pid_to_windows;
+        }
+
+        let count: usize = msg_send![window_list, count];
+
+        // Allocate lookup keys once — reused across every window in the list
+        let pid_key: *mut objc::runtime::Object = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"kCGWindowOwnerPID\0".as_ptr()
+        ];
+        let name_key: *mut objc::runtime::Object = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"kCGWindowName\0".as_ptr()
+        ];
+
+        for i in 0..count {
+            let dict: *mut objc::runtime::Object = msg_send![window_list, objectAtIndex: i];
+            if dict.is_null() {
+                continue;
+            }
+
+            // PID of the owning process
+            let pid_val: *mut objc::runtime::Object = msg_send![dict, objectForKey: pid_key];
+            if pid_val.is_null() {
+                continue;
+            }
+            let pid: i32 = msg_send![pid_val, intValue];
+
+            // Window title (absent for background/private windows)
+            let name_val: *mut objc::runtime::Object = msg_send![dict, objectForKey: name_key];
+            if name_val.is_null() {
+                continue;
+            }
+
+            let bytes: *const std::os::raw::c_char = msg_send![name_val, UTF8String];
+            if bytes.is_null() {
+                continue;
+            }
+            let len: usize = msg_send![name_val, lengthOfBytesUsingEncoding: 4u64];
+            if len == 0 {
+                continue;
+            }
+
+            let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+            let title = match std::str::from_utf8(bytes_slice) {
+                Ok(s) => {
+                    let s = s.trim();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    // Truncate very long titles to keep context concise
+                    if s.chars().count() > 60 {
+                        format!("{}...", s.chars().take(57).collect::<String>())
+                    } else {
+                        s.to_string()
+                    }
+                }
+                Err(_) => continue,
+            };
+
+            pid_to_windows.entry(pid).or_default().push(title);
+        }
+
+        // CGWindowListCopyWindowInfo follows the Create Rule: caller must release.
+        // CFArray is toll-free bridged, so ObjC release == CFRelease.
+        let _: () = msg_send![window_list, release];
+    }
+
+    pid_to_windows
+}
+
 /// Get information about currently running applications
 async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
     #[cfg(target_os = "macos")]
@@ -1161,6 +1257,7 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
         use objc::{class, msg_send, sel, sel_impl};
 
         let mut running_apps = Vec::new();
+        let window_titles_by_pid = get_window_titles_by_pid();
 
         unsafe {
             let workspace_class = class!(NSWorkspace);
@@ -1233,6 +1330,7 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
                     pid,
                     is_frontmost: pid == frontmost_pid,
                     activation_policy: activation_policy_str,
+                    windows: window_titles_by_pid.get(&pid).cloned().unwrap_or_default(),
                 });
             }
         }
@@ -2054,23 +2152,39 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
     }
 
-    // Add running applications information
+    // Add running applications with window titles (capped at 25 to prevent context overflow)
     if !context.running_applications.is_empty() {
         let app_list = context
             .running_applications
             .iter()
-            .take(10) // Limit to first 10 apps to avoid overwhelming the context
-            .map(|app| app.name.as_str())
+            .take(25)
+            .map(|app| {
+                if app.windows.is_empty() {
+                    format!("{} (no windows visible)", app.name)
+                } else {
+                    format!("{} ({})", app.name, app.windows.join(", "))
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
 
         context_parts.push(format!("Running applications: {}", app_list));
 
-        if context.running_applications.len() > 10 {
-            context_parts.push(format!(
-                "... and {} more applications",
-                context.running_applications.len() - 10
-            ));
+        // Flat summary of individual visible windows — helps agent identify active content
+        let visible_windows: Vec<String> = context
+            .running_applications
+            .iter()
+            .filter(|app| !app.windows.is_empty())
+            .flat_map(|app| {
+                let name = app.name.as_str();
+                app.windows
+                    .iter()
+                    .map(move |w| format!("{} ({})", name, w))
+            })
+            .collect();
+
+        if !visible_windows.is_empty() {
+            context_parts.push(format!("Visible windows: {}", visible_windows.join(", ")));
         }
     }
 

@@ -186,6 +186,212 @@ pub fn get_display_bounds_map() -> Result<HashMap<CGDirectDisplayID, CGRect>, Au
     Ok(bounds_map)
 }
 
+// ── Visible window listing via CGWindowListCopyWindowInfo ──────────────────
+
+use serde::Serialize;
+
+/// Window info returned by `list_visible_windows`.
+#[derive(Debug, Clone, Serialize)]
+pub struct VisibleWindowInfo {
+    pub app_name: String,
+    pub window_title: Option<String>,
+    /// (x, y) in screen coordinates (top-left origin, points)
+    pub position: (f64, f64),
+    /// (width, height) in points
+    pub size: (f64, f64),
+    pub is_frontmost: bool,
+    pub layer: i32,
+}
+
+// CGWindowListCopyWindowInfo is not wrapped by core-graphics crate at v0.24
+extern "C" {
+    fn CGWindowListCopyWindowInfo(
+        option: u32,
+        relative_to_window: u32,
+    ) -> core_foundation_sys::array::CFArrayRef;
+}
+
+const CG_WINDOW_LIST_OPTION_ON_SCREEN_ONLY: u32 = 1;
+const CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS: u32 = 1 << 4;
+
+// Convert a CFStringRef to a Rust String.
+// Caller must ensure `s` remains valid for the duration of the call.
+unsafe fn cfstring_to_rust(s: core_foundation_sys::string::CFStringRef) -> Option<String> {
+    use core_foundation_sys::base::CFIndex;
+    use core_foundation_sys::string::{CFStringGetCString, kCFStringEncodingUTF8};
+    use std::ffi::CStr;
+
+    if s.is_null() {
+        return None;
+    }
+    let mut buf = [0i8; 1024];
+    let ok = CFStringGetCString(s, buf.as_mut_ptr(), buf.len() as CFIndex, kCFStringEncodingUTF8);
+    if ok as u8 != 0 {
+        let cstr = CStr::from_ptr(buf.as_ptr());
+        Some(cstr.to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
+// Read an f64 from a CFNumberRef stored under `key` in a CFDictionaryRef.
+unsafe fn dict_get_f64(
+    dict: core_foundation_sys::dictionary::CFDictionaryRef,
+    key: &str,
+) -> Option<f64> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use core_foundation_sys::dictionary::CFDictionaryGetValue;
+    use core_foundation_sys::number::{kCFNumberFloat64Type, CFNumberGetValue, CFNumberRef};
+    use std::os::raw::c_void;
+
+    let key_cf = CFString::new(key);
+    let val = CFDictionaryGetValue(dict, key_cf.as_concrete_TypeRef() as *const c_void);
+    if val.is_null() {
+        return None;
+    }
+    let mut out: f64 = 0.0;
+    let ok = CFNumberGetValue(val as CFNumberRef, kCFNumberFloat64Type, &mut out as *mut f64 as *mut c_void);
+    if ok as u8 != 0 { Some(out) } else { None }
+}
+
+// Read an i32 from a CFNumberRef stored under `key` in a CFDictionaryRef.
+unsafe fn dict_get_i32(
+    dict: core_foundation_sys::dictionary::CFDictionaryRef,
+    key: &str,
+) -> Option<i32> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use core_foundation_sys::dictionary::CFDictionaryGetValue;
+    use core_foundation_sys::number::{kCFNumberSInt32Type, CFNumberGetValue, CFNumberRef};
+    use std::os::raw::c_void;
+
+    let key_cf = CFString::new(key);
+    let val = CFDictionaryGetValue(dict, key_cf.as_concrete_TypeRef() as *const c_void);
+    if val.is_null() {
+        return None;
+    }
+    let mut out: i32 = 0;
+    let ok = CFNumberGetValue(val as CFNumberRef, kCFNumberSInt32Type, &mut out as *mut i32 as *mut c_void);
+    if ok as u8 != 0 { Some(out) } else { None }
+}
+
+/// Returns all visible user application windows sorted front-to-back.
+///
+/// Requires Screen Recording permission on macOS 10.15+.  Without it the
+/// call succeeds but window titles will be missing.
+///
+/// Filters out system UI at layer ≥ 20 (menu bar, Dock) and windows owned
+/// by "Window Server" or "Notification Center".
+pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
+    use core_foundation_sys::base::{CFIndex, CFRelease};
+    use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
+    use core_foundation_sys::string::CFStringRef;
+    use std::os::raw::c_void;
+
+    let option = CG_WINDOW_LIST_OPTION_ON_SCREEN_ONLY | CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS;
+    let array_ref = unsafe { CGWindowListCopyWindowInfo(option, 0) };
+
+    if array_ref.is_null() {
+        return Err(AutomationError::PlatformError(
+            "CGWindowListCopyWindowInfo returned null \
+             — screen recording permission may be required"
+                .to_string(),
+        ));
+    }
+
+    let count = unsafe { CFArrayGetCount(array_ref) };
+    let mut windows = Vec::with_capacity(count as usize);
+    let mut first_user_window = true;
+
+    for i in 0..count {
+        unsafe {
+            let item = CFArrayGetValueAtIndex(array_ref, i as CFIndex);
+            if item.is_null() {
+                continue;
+            }
+            let dict_ref = item as CFDictionaryRef;
+
+            // Layer — skip system UI (≥20) and sub-desktop (<-1)
+            let layer = match dict_get_i32(dict_ref, "kCGWindowLayer") {
+                Some(l) => l,
+                None => continue,
+            };
+            if layer >= 20 || layer < -1 {
+                continue;
+            }
+
+            // App name — skip headless system processes
+            let owner_key = CFString::new("kCGWindowOwnerName");
+            let owner_ptr = CFDictionaryGetValue(
+                dict_ref,
+                owner_key.as_concrete_TypeRef() as *const c_void,
+            );
+            let app_name = match cfstring_to_rust(owner_ptr as CFStringRef) {
+                Some(n) => n,
+                None => continue,
+            };
+            if app_name == "Window Server" || app_name == "Notification Center" {
+                continue;
+            }
+
+            // Window title (optional — absent when screen recording not granted)
+            let name_key = CFString::new("kCGWindowName");
+            let name_ptr = CFDictionaryGetValue(
+                dict_ref,
+                name_key.as_concrete_TypeRef() as *const c_void,
+            );
+            let window_title = cfstring_to_rust(name_ptr as CFStringRef);
+
+            // Bounds — nested CFDictionary with keys "X", "Y", "Width", "Height"
+            let bounds_key = CFString::new("kCGWindowBounds");
+            let bounds_ptr = CFDictionaryGetValue(
+                dict_ref,
+                bounds_key.as_concrete_TypeRef() as *const c_void,
+            );
+            let (x, y, w, h) = if !bounds_ptr.is_null() {
+                let bd = bounds_ptr as CFDictionaryRef;
+                (
+                    dict_get_f64(bd, "X").unwrap_or(0.0),
+                    dict_get_f64(bd, "Y").unwrap_or(0.0),
+                    dict_get_f64(bd, "Width").unwrap_or(0.0),
+                    dict_get_f64(bd, "Height").unwrap_or(0.0),
+                )
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            };
+
+            // CGWindowListCopyWindowInfo returns front-to-back order; first layer-0
+            // window is the frontmost user app window. Modals/alerts sit at layer 1+
+            // so they won't receive this flag, but their position in the array still
+            // conveys that they are in front of normal windows.
+            let is_frontmost = layer == 0 && first_user_window;
+            if is_frontmost {
+                first_user_window = false;
+            }
+
+            windows.push(VisibleWindowInfo {
+                app_name,
+                window_title,
+                position: (x, y),
+                size: (w, h),
+                is_frontmost,
+                layer,
+            });
+        }
+    }
+
+    // CGWindowListCopyWindowInfo uses Create Rule — caller must release
+    unsafe { CFRelease(array_ref as *const c_void) };
+
+    Ok(windows)
+}
+
+// ── end visible window listing ──────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;

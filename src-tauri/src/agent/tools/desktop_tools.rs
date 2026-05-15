@@ -909,6 +909,16 @@ pub async fn setup_tools(
     // Register basic desktop tools (core functionality)
     register_desktop_tools(provider, state.clone(), app_handle.clone()).await;
 
+    // Register lightweight window listing (available to single-agent and specialist paths)
+    if let Err(e) = crate::agent::tools::visible_windows::register_visible_windows_tools(
+        provider,
+        app_handle.clone(),
+    )
+    .await
+    {
+        log::warn!("Failed to register visible_windows tools: {}", e);
+    }
+
     // MCP servers are initialized at app startup via state_management.rs to avoid
     // repeated initialization on every agent creation. Here we only refresh from cache.
 

@@ -29,6 +29,7 @@ pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
+pub mod cursor_scale;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
@@ -453,6 +454,12 @@ pub fn run() {
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
+            get_big_cursor_enabled,
+            set_big_cursor_enabled,
+            get_big_cursor_scale,
+            set_big_cursor_scale,
+            test_cursor_scale,
+            test_cursor_restore,
 
             // Sound Commands
             play_sound_by_type,

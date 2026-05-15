@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig};
+use crate::agent::tools::mcp_integration::MCPManager;
 use crate::agents::{
     AgentFactory, AgentStatus, AgentType, Orchestrator, OrchestratorConfig, Task, TaskPriority,
     TaskResult,
@@ -31,17 +31,8 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     // Create orchestrator
     let orchestrator = factory.create_orchestrator();
 
-    // Initialize MCP manager
+    // Initialize MCP manager (user-configured servers are loaded via AppState)
     let mcp_manager = Arc::new(MCPManager::new());
-
-    // Initialize default MCP servers in the background to not block app startup
-    let mcp_manager_bg = mcp_manager.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = initialize_default_mcp_servers_safely(&mcp_manager_bg).await {
-            tracing::warn!("Background MCP server initialization had issues: {}", e);
-            tracing::info!("MCP servers can be configured and started manually via Settings");
-        }
-    });
 
     // Store globally
     ORCHESTRATOR
@@ -51,154 +42,9 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
         .set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
-    tracing::info!("Enhanced multi-agent orchestrator system initialized successfully");
-    tracing::info!("MCP server initialization continues in background");
+    tracing::info!("Multi-agent orchestrator system initialized");
     Ok(())
 }
-
-/// Initialize default MCP servers safely without blocking app startup
-async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Result<(), String> {
-    // Add essential MCP servers that provide intelligent capabilities with improved configurations
-    let default_servers = vec![
-        // Core filesystem operations (this package exists) - DISABLED by default to prevent startup issues
-        MCPServerConfig {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "filesystem".to_string(),
-            description: Some("Secure file system operations and management".to_string()),
-            command: "npx".to_string(),
-            args: vec![
-                "@modelcontextprotocol/server-filesystem".to_string(),
-                "/Users".to_string(),
-            ],
-            working_directory: None,
-            environment_variables: {
-                let mut env = std::collections::HashMap::new();
-                // Prevent TLS warnings and improve stability
-                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert(
-                    "NODE_OPTIONS".to_string(),
-                    "--max-old-space-size=512".to_string(),
-                );
-                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
-                env
-            },
-            enabled: false, // Disabled by default to prevent startup blocking
-            auto_start: false,
-            timeout_seconds: 60,
-            max_retries: 1, // Reduced retries to prevent spam
-        },
-        // Everything server for comprehensive testing and development - DISABLED by default
-        MCPServerConfig {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "everything".to_string(),
-            description: Some(
-                "Reference server with comprehensive MCP features for testing".to_string(),
-            ),
-            command: "npx".to_string(),
-            args: vec!["@modelcontextprotocol/server-everything".to_string()],
-            working_directory: None,
-            environment_variables: {
-                let mut env = std::collections::HashMap::new();
-                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert(
-                    "NODE_OPTIONS".to_string(),
-                    "--max-old-space-size=512".to_string(),
-                );
-                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
-                // Limit event listeners to prevent memory leaks
-                env.insert("NODE_MAX_LISTENERS".to_string(), "20".to_string());
-                env
-            },
-            enabled: false, // Disabled by default to prevent EPIPE errors
-            auto_start: false,
-            timeout_seconds: 75,
-            max_retries: 1,
-        },
-        // Memory and sequential thinking - DISABLED by default
-        MCPServerConfig {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "memory".to_string(),
-            description: Some("Knowledge graph-based persistent memory system".to_string()),
-            command: "npx".to_string(),
-            args: vec!["@modelcontextprotocol/server-memory".to_string()],
-            working_directory: None,
-            environment_variables: {
-                let mut env = std::collections::HashMap::new();
-                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert(
-                    "NODE_OPTIONS".to_string(),
-                    "--max-old-space-size=256".to_string(),
-                );
-                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
-                env
-            },
-            enabled: false, // Disabled by default
-            auto_start: false,
-            timeout_seconds: 45,
-            max_retries: 1,
-        },
-        // Sequential thinking for problem solving - DISABLED by default
-        MCPServerConfig {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "sequential-thinking".to_string(),
-            description: Some("Sequential thinking and problem-solving capabilities".to_string()),
-            command: "npx".to_string(),
-            args: vec!["@modelcontextprotocol/server-sequential-thinking".to_string()],
-            working_directory: None,
-            environment_variables: {
-                let mut env = std::collections::HashMap::new();
-                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
-                env.insert(
-                    "NODE_OPTIONS".to_string(),
-                    "--max-old-space-size=256".to_string(),
-                );
-                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
-                env
-            },
-            enabled: false, // Disabled by default
-            auto_start: false,
-            timeout_seconds: 45,
-            max_retries: 1,
-        },
-    ];
-
-    tracing::info!(
-        "Adding {} default MCP server configurations (disabled by default)...",
-        default_servers.len()
-    );
-
-    let mut successful_configs = 0;
-    for config in default_servers {
-        match mcp_manager.add_server(config.clone()).await {
-            Ok(_) => {
-                successful_configs += 1;
-                tracing::info!(
-                    "Successfully added MCP server configuration '{}'",
-                    config.name
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
-                // Continue with other servers - don't let one failure block everything
-            }
-        }
-    }
-
-    tracing::info!(
-        "Successfully configured {}/{} default MCP servers",
-        successful_configs,
-        4
-    );
-    tracing::info!("MCP servers are disabled by default - enable them in Settings if needed");
-    tracing::info!(
-        "To prevent app startup delays, MCP servers must be manually enabled in Settings"
-    );
-
-    Ok(())
-}
-
-// Removed unused function: initialize_default_mcp_servers
-// It was just redirecting to initialize_default_mcp_servers_safely
 
 /// Get the global orchestrator instance
 async fn get_orchestrator() -> Result<Arc<Mutex<Orchestrator>>, String> {
@@ -857,9 +703,7 @@ pub async fn initialize_orchestrator_system() -> Result<(), String> {
         .set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
-    tracing::info!(
-        "Enhanced multi-agent orchestrator system initialized successfully (minimal mode)"
-    );
+    tracing::info!("Multi-agent orchestrator system initialized (minimal mode)");
     Ok(())
 }
 
