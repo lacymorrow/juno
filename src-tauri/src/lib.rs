@@ -72,7 +72,7 @@ use commands::{
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-            error_recovery::*, filesystem::*, keyboard::*, memory::*,
+            error_recovery::*, filesystem::*, keyboard::*, memory::*, persistent_memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_commands::*, ui_token_selection::*, window::*,
 };
@@ -317,6 +317,14 @@ pub fn run() {
             get_advanced_memory_metrics,
             force_memory_prune,
             get_tiered_memory_context,
+            // Persistent Cross-Session Memory Commands
+            get_persistent_memory_entries,
+            add_persistent_memory_entry,
+            update_persistent_memory_entry,
+            delete_persistent_memory_entry,
+            clear_all_persistent_memory,
+            prune_persistent_memory,
+            get_persistent_memory_prompt_preview,
             // Visual Context Compression Commands
             get_visual_summaries,
             update_visual_config,
