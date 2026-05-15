@@ -1646,7 +1646,7 @@ impl DefaultPrompts {
             name: "Companion Mode".to_string(),
             description: "Observe-only mode: Juno watches the screen and advises without taking any computer actions".to_string(),
             content,
-            variables: vec!["platform".to_string()],
+            variables: vec![],
             tags: vec!["companion".to_string(), "observe-only".to_string(), "vision".to_string(), "tts-enabled".to_string()],
             version: "1.0.0".to_string(),
             customizable: false,
