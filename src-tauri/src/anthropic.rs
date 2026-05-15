@@ -470,7 +470,13 @@ async fn execute_agent_internal(
         || lower_query.contains("spiral")
         || lower_query.contains("draw");
         
-    let effective_agent_mode = if contains_computer_keywords {
+    // Companion mode always runs single-agent — multi-agent + companion is contradictory
+    // (orchestrator would hold delegation tools while being told it can't act).
+    // Takes effect on the next query; current in-flight run keeps its tools.
+    let effective_agent_mode = if companion_mode {
+        info!("🔍 Companion mode: forcing single-agent path (no delegation)");
+        AgentMode::Single
+    } else if contains_computer_keywords {
         warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
         AgentMode::Single
     } else {
@@ -485,20 +491,27 @@ async fn execute_agent_internal(
             // Create a clean tool provider for single agent with direct tools only
             let mut single_agent_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-            // Register basic file/shell tools for single agent
-            register_basic_tools(&mut single_agent_tool_provider).await;
-            info!("✅ Registered basic tools for single agent");
+            // Companion mode: no action tools — agent is observe-only
+            if !companion_mode {
+                register_basic_tools(&mut single_agent_tool_provider).await;
+                info!("✅ Registered basic tools for single agent");
 
-            // Register desktop tools for single agent
-            let _shared_tool_provider = setup_tools(
-                &mut single_agent_tool_provider,
-                state.clone(),
-                app_handle.clone(),
-            ).await;
-            info!("✅ Registered desktop tools for single agent");
+                let _shared_tool_provider = setup_tools(
+                    &mut single_agent_tool_provider,
+                    state.clone(),
+                    app_handle.clone(),
+                ).await;
+                info!("✅ Registered desktop tools for single agent");
+            } else {
+                info!("🔍 Companion mode: skipping basic + desktop tool registration");
+            }
 
-            // Register browser tools for single agent
-            let browser_definitions = get_browser_tool_definitions();
+            // Register browser tools for single agent (skipped in companion mode — no action tools)
+            let browser_definitions: Vec<_> = if companion_mode {
+                vec![]
+            } else {
+                get_browser_tool_definitions()
+            };
             for definition in browser_definitions {
                 let tool_name = definition.name.clone();
                 let app_handle_for_tool_executor = app_handle.clone();

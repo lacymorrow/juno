@@ -320,10 +320,10 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
             </div>
 
             {companionMode && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="p-3 bg-muted border border-border rounded-lg">
                 <div className="flex items-start gap-2">
-                  <Eye className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-                  <div className="text-sm text-blue-800">
+                  <Eye className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="text-sm text-foreground">
                     <div className="font-medium">Companion Mode Active</div>
                     <div className="mt-1">
                       Juno can see your screen and answer questions about it,
