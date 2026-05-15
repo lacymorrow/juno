@@ -599,8 +599,10 @@ async fn execute_agent_internal(
                     }
                 };
 
-                // Derive available MCP tools from MCP manager
-                let mcp_tools: Vec<String> = {
+                // Derive available MCP tools — skipped in companion mode (prompt doesn't reference them)
+                let mcp_tools: Vec<String> = if companion_mode {
+                    Vec::new()
+                } else {
                     let mcp_manager = state.get_mcp_manager().await;
                     let guard = mcp_manager.lock().await;
                     guard.get_all_tools().await.into_iter().map(|t| t.tool_definition.name).collect()
@@ -704,9 +706,15 @@ async fn execute_agent_internal(
             // Create tool provider for specialist agents (used by delegation system)
             let mut specialist_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-            // Register basic file/shell tools for specialists
-            register_basic_tools(&mut specialist_tool_provider).await;
-            info!("✅ Registered basic tools for specialist agents");
+            // Companion mode always forces Single, so this block is unreachable when companion=true.
+            // Guards are applied here symmetrically with the Single path so the boundary holds
+            // even if the coercion above is ever removed or bypassed.
+            if !companion_mode {
+                register_basic_tools(&mut specialist_tool_provider).await;
+                info!("✅ Registered basic tools for specialist agents");
+            } else {
+                info!("🔍 Companion mode: skipping basic tool registration for specialist (unreachable — Single is forced)");
+            }
 
             // Setup desktop tools for specialists and get the shared provider
             let shared_tool_provider = setup_tools(
@@ -741,8 +749,12 @@ async fn execute_agent_internal(
                 guard.clone()
             };
 
-            // Register browser tools for specialist agents
-            let browser_definitions = get_browser_tool_definitions();
+            // Register browser tools for specialist agents (skipped in companion mode — defense-in-depth)
+            let browser_definitions: Vec<_> = if companion_mode {
+                vec![]
+            } else {
+                get_browser_tool_definitions()
+            };
             for definition in browser_definitions {
                 let tool_name = definition.name.clone();
                 let app_handle_for_tool_executor = app_handle.clone();
