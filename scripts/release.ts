@@ -8,10 +8,13 @@
  *   3. Git commit + tag + push  (v* tag triggers release-tauri.yml on GitHub)
  *   4. npm publish (juno-cua package)
  *   5. Homebrew formula update (juno-cua)
- *   6. Wait for CI to publish the Tauri DMG, then sync juno-www marketing site
  *
  * The Tauri DMG and updater latest.json are built and published by
  * `.github/workflows/release-tauri.yml`, triggered by the v* tag push.
+ *
+ * The juno-www marketing site fetches the latest release dynamically from
+ * the GitHub API (see juno-www/app/api/release/route.ts), so this script
+ * no longer waits for CI or syncs juno-www.
  *
  * Usage:
  *   bun run release              # interactive — prompts for bump type
@@ -19,7 +22,7 @@
  *   bun run release minor        # minor bump  (0.4.11 → 0.5.0)
  *   bun run release major        # major bump  (0.4.11 → 1.0.0)
  *   bun run release 1.0.0        # explicit version
- *   bun run release --cua-only   # only release juno-cua (skip juno-www wait)
+ *   bun run release --cua-only   # only release juno-cua
  */
 
 import * as p from "@clack/prompts";
@@ -31,7 +34,6 @@ import { resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const HOMEBREW_TAP = resolve(ROOT, "../homebrew-tap");
 const HOMEBREW_FORMULA = resolve(HOMEBREW_TAP, "Formula/juno-cua.rb");
-const JUNO_WWW = resolve(ROOT, "../juno-www");
 const NPM_PACKAGE = resolve(ROOT, "packages/juno-cua");
 
 const CUA_ONLY = process.argv.includes("--cua-only");
@@ -88,6 +90,54 @@ const GITHUB_REPO = "juno";
 async function waitForDmg(
 	tag: string,
 	timeoutMs = 45 * 60 * 1000,
+): Promise<{ name: string; url: string } | null> {
+	const spinner = p.spinner();
+	spinner.start(`Waiting for GitHub Actions to publish ${tag}'s DMG`);
+	const start = Date.now();
+	let lastStatus = "";
+
+	while (Date.now() - start < timeoutMs) {
+		try {
+			const json = run(`gh release view ${tag} --json assets 2>/dev/null`);
+			const parsed = JSON.parse(json) as { assets: { name: string }[] };
+			const dmg = parsed.assets.find((a) => a.name.toLowerCase().endsWith(".dmg"));
+			if (dmg) {
+				spinner.stop(pc.green(`Found ${dmg.name} in release ${tag}`));
+				return {
+					name: dmg.name,
+					url: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/${encodeURIComponent(dmg.name)}`,
+				};
+			}
+			const newStatus = `release exists, no DMG yet (${parsed.assets.length} assets)`;
+			if (newStatus !== lastStatus) {
+				spinner.message(`Waiting for ${tag} DMG — ${newStatus}`);
+				lastStatus = newStatus;
+			}
+		} catch {
+			const newStatus = "release not created yet";
+			if (newStatus !== lastStatus) {
+				spinner.message(`Waiting for ${tag} — ${newStatus}`);
+				lastStatus = newStatus;
+			}
+		}
+		await new Promise((r) => setTimeout(r, 15_000));
+	}
+
+	spinner.stop(pc.yellow(`Timed out after ${Math.round(timeoutMs / 60000)}m waiting for DMG`));
+	return null;
+}
+
+||||||| 226f8591
+const GITHUB_OWNER = "lacymorrow";
+const GITHUB_REPO = "juno";
+
+/**
+ * Poll `gh release view` for a tag until the universal .dmg asset shows up
+ * (i.e. release-tauri.yml CI has finished publishing). Returns the download URL.
+ */
+async function waitForDmg(
+	tag: string,
+	timeoutMs = 30 * 60 * 1000,
 ): Promise<{ name: string; url: string } | null> {
 	const spinner = p.spinner();
 	spinner.start(`Waiting for GitHub Actions to publish ${tag}'s DMG`);
@@ -409,46 +459,12 @@ async function main() {
 		p.log.warn("Skipping Homebrew — no SHA256 hashes available");
 	}
 
-	// 11. juno-www — wait for CI to publish, then sync marketing site
-	if (existsSync(JUNO_WWW) && !CUA_ONLY) {
-		const doWww = await p.confirm({
-			message: "Wait for CI and update juno-www marketing site?",
-			initialValue: true,
-		});
-		if (!p.isCancel(doWww) && doWww) {
-			const dmg = await waitForDmg(tag);
-			if (dmg) {
-				const wwwSpinner = p.spinner();
-				wwwSpinner.start("Updating juno-www");
-				try {
-					const releaseMeta = {
-						version: tag,
-						file: dmg.url,
-						releasedAt: new Date().toISOString(),
-					};
-					run(`mkdir -p "${JUNO_WWW}/public/downloads"`);
-					writeFileSync(
-						`${JUNO_WWW}/public/downloads/release.json`,
-						JSON.stringify(releaseMeta, null, 2) + "\n",
-					);
-					run(
-						`git add public/downloads/release.json && git commit -m "release: update download to Juno ${tag}" && git push origin main`,
-						{ cwd: JUNO_WWW },
-					);
-					wwwSpinner.stop(pc.green("juno-www updated"));
-				} catch (err: unknown) {
-					wwwSpinner.stop(pc.red("juno-www update failed"));
-					p.log.error(errorText(err));
-				}
-			} else {
-				p.log.warn(`No DMG found for ${tag} — update juno-www manually once CI publishes.`);
-			}
-		}
-	}
+	// juno-www marketing site fetches the latest release from the GitHub API
+	// at request time (cached 5min), so no sync step is needed here.
 
 	// Done
 	p.outro(
-		`${pc.green("Done!")} Released ${pc.green(tag)} — juno-cua, npm, Homebrew, www. Tauri DMG → GitHub Actions.`,
+		`${pc.green("Done!")} Released ${pc.green(tag)} — juno-cua, npm, Homebrew. Tauri DMG → GitHub Actions. juno-www updates automatically.`,
 	);
 }
 

@@ -335,9 +335,10 @@ pub async fn test_mcp_server_connection(
 #[tauri::command]
 pub async fn initialize_mcp_servers(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     info!("Initializing MCP servers from configuration");
-    state.initialize_mcp_servers().await
+    state.initialize_mcp_servers(Some(&app_handle)).await
 }
 
 /// Get detailed diagnostic information about MCP servers

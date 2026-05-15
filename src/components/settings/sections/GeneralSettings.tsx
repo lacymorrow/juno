@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
+import { Slider } from "@/components/ui/slider";
 import { RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
@@ -33,6 +34,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     UI.BAR_APPEARANCES_FLOATING
   );
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
+  const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
+  const [bigCursorScale, setBigCursorScale] = useState(3.0);
+  const [bigCursorLoading, setBigCursorLoading] = useState(false);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -53,6 +57,12 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         if (barConfig?.bar_appearance) {
           setBarAppearance(barConfig.bar_appearance);
         }
+
+        // Load big cursor settings
+        const cursorEnabled = await invoke<boolean>("get_big_cursor_enabled");
+        setBigCursorEnabled(cursorEnabled);
+        const cursorScale = await invoke<number>("get_big_cursor_scale");
+        setBigCursorScale(cursorScale);
       } catch (error) {
         console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
@@ -133,6 +143,34 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       });
     } finally {
       setBarAppearanceLoading(false);
+    }
+  };
+
+  const handleBigCursorEnabledChange = async (enabled: boolean) => {
+    if (bigCursorLoading) return;
+    setBigCursorLoading(true);
+    try {
+      await invoke("set_big_cursor_enabled", { enabled });
+      setBigCursorEnabled(enabled);
+    } catch (error) {
+      console.error("Failed to update big cursor setting:", error);
+      toast.error("Failed to update big cursor setting");
+    } finally {
+      setBigCursorLoading(false);
+    }
+  };
+
+  const handleBigCursorScaleChange = (value: number[]) => {
+    setBigCursorScale(value[0]);
+  };
+
+  const handleBigCursorScaleCommit = async (value: number[]) => {
+    const scale = value[0];
+    try {
+      await invoke("set_big_cursor_scale", { scale });
+    } catch (error) {
+      console.error("Failed to persist big cursor scale:", error);
+      toast.error("Failed to update cursor scale");
     }
   };
 
@@ -348,6 +386,88 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               release to stop (like dictation mode).
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Big Cursor</CardTitle>
+          <CardDescription>
+            Make the mouse cursor larger while the agent is controlling
+            your computer
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
+                Enable Big Cursor
+              </Label>
+              <p className="text-xs text-gray-500">
+                Enlarges the system cursor during agent execution so you can
+                easily track what the agent is doing
+              </p>
+            </div>
+            <Switch
+              id="big-cursor-enabled"
+              checked={bigCursorEnabled}
+              onCheckedChange={handleBigCursorEnabledChange}
+              disabled={bigCursorLoading}
+            />
+          </div>
+          {bigCursorEnabled && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">
+                  Cursor Scale
+                </Label>
+                <span className="text-sm text-gray-500 tabular-nums">
+                  {bigCursorScale.toFixed(1)}x
+                </span>
+              </div>
+              <Slider
+                value={[bigCursorScale]}
+                onValueChange={handleBigCursorScaleChange}
+                onValueCommit={handleBigCursorScaleCommit}
+                min={1.5}
+                max={10}
+                step={0.5}
+              />
+              <p className="text-xs text-gray-500">
+                How much larger to make the cursor (1.5x – 10x)
+              </p>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await invoke("test_cursor_scale", { scale: bigCursorScale });
+                      toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
+                    } catch (e) {
+                      toast.error("Failed to test cursor scale");
+                    }
+                  }}
+                >
+                  Test Scale
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await invoke("test_cursor_restore");
+                      toast.success("Cursor restored to normal");
+                    } catch (e) {
+                      toast.error("Failed to restore cursor");
+                    }
+                  }}
+                >
+                  Restore
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

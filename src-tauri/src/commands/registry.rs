@@ -89,6 +89,12 @@ macro_rules! generate_invoke_handler {
 
             // Production mouse operations (minimal set for system functions)
             get_cursor_position,
+            get_big_cursor_enabled,
+            set_big_cursor_enabled,
+            get_big_cursor_scale,
+            set_big_cursor_scale,
+            test_cursor_scale,
+            test_cursor_restore,
 
             // Production keyboard operations (minimal set for system functions)
             type_text,
@@ -119,6 +125,7 @@ macro_rules! generate_invoke_handler {
             // Application management
             open_application,
             open_url,
+            get_app_windows,
 
             // System utilities
             wait,
@@ -297,6 +304,12 @@ pub mod categories {
     /// Mouse interaction commands (minimal set - most operations use computer tool)
     pub const MOUSE: &[&str] = &[
         "get_cursor_position",
+        "get_big_cursor_enabled",
+        "set_big_cursor_enabled",
+        "get_big_cursor_scale",
+        "set_big_cursor_scale",
+        "test_cursor_scale",
+        "test_cursor_restore",
     ];
 
 
