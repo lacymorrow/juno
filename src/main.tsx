@@ -9,7 +9,7 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
-import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
+import { DesktopCursorOverlay } from "./components/DesktopCursorOverlay";
 import { BarHost } from "./components/bar/BarHost";
 
 import "./styles/globals.css";
