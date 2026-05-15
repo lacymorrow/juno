@@ -343,21 +343,26 @@ async fn execute_agent_internal(
         agent::config::MAX_ITERATIONS
     );
 
+    // Read agent settings once — used for big cursor and companion mode
+    let agent_settings = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
+        Some(mgr) => mgr.get_agent_settings().await.ok(),
+        None => None,
+    };
+
+    let companion_mode = agent_settings.as_ref().map(|s| s.companion_mode).unwrap_or(false);
+    if companion_mode {
+        info!("🔍 Companion mode enabled — computer use tools will be withheld");
+    }
+
     // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
-    let _cursor_guard = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
-        Some(mgr) => match mgr.get_agent_settings().await {
-            Ok(s) if s.big_cursor_enabled => {
-                info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
-                crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
-            }
-            Ok(_) => crate::cursor_scale::CursorScaleGuard::noop(),
-            Err(e) => {
-                warn!("[CursorScale] Failed to read agent settings, skipping cursor scaling: {}", e);
-                crate::cursor_scale::CursorScaleGuard::noop()
-            }
-        },
+    let _cursor_guard = match &agent_settings {
+        Some(s) if s.big_cursor_enabled => {
+            info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
+            crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
+        }
+        Some(_) => crate::cursor_scale::CursorScaleGuard::noop(),
         None => {
-            warn!("[CursorScale] SettingsManager not found in managed state, skipping cursor scaling");
+            warn!("[CursorScale] Agent settings unavailable, skipping cursor scaling");
             crate::cursor_scale::CursorScaleGuard::noop()
         }
     };
@@ -465,7 +470,13 @@ async fn execute_agent_internal(
         || lower_query.contains("spiral")
         || lower_query.contains("draw");
         
-    let effective_agent_mode = if contains_computer_keywords {
+    // Companion mode always runs single-agent — multi-agent + companion is contradictory
+    // (orchestrator would hold delegation tools while being told it can't act).
+    // Takes effect on the next query; current in-flight run keeps its tools.
+    let effective_agent_mode = if companion_mode {
+        info!("🔍 Companion mode: forcing single-agent path (no delegation)");
+        AgentMode::Single
+    } else if contains_computer_keywords {
         warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
         AgentMode::Single
     } else {
@@ -480,20 +491,27 @@ async fn execute_agent_internal(
             // Create a clean tool provider for single agent with direct tools only
             let mut single_agent_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-            // Register basic file/shell tools for single agent
-            register_basic_tools(&mut single_agent_tool_provider).await;
-            info!("✅ Registered basic tools for single agent");
+            // Companion mode: no action tools — agent is observe-only
+            if !companion_mode {
+                register_basic_tools(&mut single_agent_tool_provider).await;
+                info!("✅ Registered basic tools for single agent");
 
-            // Register desktop tools for single agent
-            let _shared_tool_provider = setup_tools(
-                &mut single_agent_tool_provider,
-                state.clone(),
-                app_handle.clone(),
-            ).await;
-            info!("✅ Registered desktop tools for single agent");
+                let _shared_tool_provider = setup_tools(
+                    &mut single_agent_tool_provider,
+                    state.clone(),
+                    app_handle.clone(),
+                ).await;
+                info!("✅ Registered desktop tools for single agent");
+            } else {
+                info!("🔍 Companion mode: skipping basic + desktop tool registration");
+            }
 
-            // Register browser tools for single agent
-            let browser_definitions = get_browser_tool_definitions();
+            // Register browser tools for single agent (skipped in companion mode — no action tools)
+            let browser_definitions: Vec<_> = if companion_mode {
+                vec![]
+            } else {
+                get_browser_tool_definitions()
+            };
             for definition in browser_definitions {
                 let tool_name = definition.name.clone();
                 let app_handle_for_tool_executor = app_handle.clone();
@@ -542,21 +560,25 @@ async fn execute_agent_internal(
                 info!("✅ Registered browser tool for single agent: {}", definition.name);
             }
 
-            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut single_agent_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // In companion mode, skip all computer use tools — agent observes only
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut single_agent_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for single agent mode");
+            } else {
+                info!("🔍 Companion mode: skipping Computer Use tools registration");
             }
-            info!("✅ Registered full Computer Use tools for single agent mode");
 
             // Create single agent brain with enriched system prompt including available MCP tools
             let brain_result = {
@@ -577,8 +599,10 @@ async fn execute_agent_internal(
                     }
                 };
 
-                // Derive available MCP tools from MCP manager
-                let mcp_tools: Vec<String> = {
+                // Derive available MCP tools — skipped in companion mode (prompt doesn't reference them)
+                let mcp_tools: Vec<String> = if companion_mode {
+                    Vec::new()
+                } else {
                     let mcp_manager = state.get_mcp_manager().await;
                     let guard = mcp_manager.lock().await;
                     guard.get_all_tools().await.into_iter().map(|t| t.tool_definition.name).collect()
@@ -603,8 +627,15 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
+                // Companion mode uses a vision-only advisory prompt
+                let prompt_type = if companion_mode {
+                    crate::agent::prompts::types::PromptType::SystemCompanion
+                } else {
+                    crate::agent::prompts::types::PromptType::SystemDefault
+                };
+
                 let system_prompt = prompt_manager
-                    .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
+                    .get_prompt(prompt_type, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
@@ -675,9 +706,15 @@ async fn execute_agent_internal(
             // Create tool provider for specialist agents (used by delegation system)
             let mut specialist_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-            // Register basic file/shell tools for specialists
-            register_basic_tools(&mut specialist_tool_provider).await;
-            info!("✅ Registered basic tools for specialist agents");
+            // Companion mode always forces Single, so this block is unreachable when companion=true.
+            // Guards are applied here symmetrically with the Single path so the boundary holds
+            // even if the coercion above is ever removed or bypassed.
+            if !companion_mode {
+                register_basic_tools(&mut specialist_tool_provider).await;
+                info!("✅ Registered basic tools for specialist agents");
+            } else {
+                info!("🔍 Companion mode: skipping basic tool registration for specialist (unreachable — Single is forced)");
+            }
 
             // Setup desktop tools for specialists and get the shared provider
             let shared_tool_provider = setup_tools(
@@ -686,21 +723,25 @@ async fn execute_agent_internal(
                 app_handle.clone(),
             ).await;
 
-            // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut specialist_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // In companion mode, skip all computer use tools — agent observes only
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut specialist_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for specialist mode");
+            } else {
+                info!("🔍 Companion mode: skipping Computer Use tools registration for specialist");
             }
-            info!("✅ Registered full Computer Use tools for specialist mode");
 
             // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
             let specialist_agent_tool_provider = {
@@ -708,8 +749,12 @@ async fn execute_agent_internal(
                 guard.clone()
             };
 
-            // Register browser tools for specialist agents
-            let browser_definitions = get_browser_tool_definitions();
+            // Register browser tools for specialist agents (skipped in companion mode — defense-in-depth)
+            let browser_definitions: Vec<_> = if companion_mode {
+                vec![]
+            } else {
+                get_browser_tool_definitions()
+            };
             for definition in browser_definitions {
                 let tool_name = definition.name.clone();
                 let app_handle_for_tool_executor = app_handle.clone();
@@ -817,8 +862,15 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
+                // Companion mode uses a vision-only advisory prompt even for orchestrator
+                let prompt_type = if companion_mode {
+                    crate::agent::prompts::types::PromptType::SystemCompanion
+                } else {
+                    crate::agent::prompts::types::PromptType::OrchestratorPersonality
+                };
+
                 let system_prompt = prompt_manager
-                    .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
+                    .get_prompt(prompt_type, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))

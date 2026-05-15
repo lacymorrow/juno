@@ -460,6 +460,8 @@ pub fn run() {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_companion_mode,
+            set_companion_mode,
 
             // Sound Commands
             play_sound_by_type,
