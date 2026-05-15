@@ -16,6 +16,8 @@ pub enum PromptType {
     DesktopExpert,
     GeneralExpert,
     FileExpert,
+    /// Companion/observe-only mode prompt (no computer use tools)
+    CompanionMode,
     /// Provider-specific prompts
     AnthropicDefault,
     OpenAIDefault,
@@ -34,6 +36,7 @@ impl PromptType {
             PromptType::DesktopExpert => "desktop_expert",
             PromptType::GeneralExpert => "general_expert",
             PromptType::FileExpert => "file_expert",
+            PromptType::CompanionMode => "companion_mode",
             PromptType::AnthropicDefault => "anthropic_default",
             PromptType::OpenAIDefault => "openai_default",
             PromptType::GeminiDefault => "gemini_default",
@@ -52,6 +55,7 @@ impl PromptType {
             "desktop_expert" => Some(PromptType::DesktopExpert),
             "general_expert" => Some(PromptType::GeneralExpert),
             "file_expert" => Some(PromptType::FileExpert),
+            "companion_mode" => Some(PromptType::CompanionMode),
             "anthropic_default" => Some(PromptType::AnthropicDefault),
             "openai_default" => Some(PromptType::OpenAIDefault),
             "gemini_default" => Some(PromptType::GeminiDefault),

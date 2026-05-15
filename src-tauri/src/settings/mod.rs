@@ -73,6 +73,9 @@ pub struct AgentSettings {
     pub big_cursor_enabled: bool,
     #[serde(default = "defaults::big_cursor_scale")]
     pub big_cursor_scale: f32,
+    /// Companion/observe-only mode: agent describes the screen without executing any actions
+    #[serde(default)]
+    pub companion_mode: bool,
 }
 
 /// AI provider configurations
@@ -295,6 +298,7 @@ impl Default for AgentSettings {
             execution_mode: defaults::AGENT_EXECUTION_MODE.to_string(),
             big_cursor_enabled: defaults::BIG_CURSOR_ENABLED,
             big_cursor_scale: defaults::BIG_CURSOR_SCALE,
+            companion_mode: false,
         }
     }
 }

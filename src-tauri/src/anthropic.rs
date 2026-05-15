@@ -473,6 +473,17 @@ async fn execute_agent_internal(
     };
     info!("Effective agent mode: {:?}", effective_agent_mode);
 
+    // Read companion mode once; used in both Single and Multi branches
+    let companion_mode = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
+        Some(mgr) => mgr.get_agent_settings().await
+            .map(|s| s.companion_mode)
+            .unwrap_or(false),
+        None => false,
+    };
+    if companion_mode {
+        info!("🔍 Companion mode active — computer use tools will NOT be registered");
+    }
+
     let agent_result = match effective_agent_mode {
         AgentMode::Single => {
             info!("🔧 Setting up SINGLE AGENT mode with direct tools (no delegation)");
@@ -543,20 +554,23 @@ async fn execute_agent_internal(
             }
 
             // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut single_agent_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // Skipped in companion mode — agent observes only, no actions.
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut single_agent_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for single agent mode");
             }
-            info!("✅ Registered full Computer Use tools for single agent mode");
 
             // Create single agent brain with enriched system prompt including available MCP tools
             let brain_result = {
@@ -603,8 +617,13 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
+                let prompt_type = if companion_mode {
+                    crate::agent::prompts::types::PromptType::CompanionMode
+                } else {
+                    crate::agent::prompts::types::PromptType::SystemDefault
+                };
                 let system_prompt = prompt_manager
-                    .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
+                    .get_prompt(prompt_type, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
@@ -687,20 +706,23 @@ async fn execute_agent_internal(
             ).await;
 
             // Register the complete Anthropic Computer Use tools (computer, bash, str_replace_based_edit_tool)
-            if let Err(e) = BrainFactory::register_computer_use_tools(
-                &mut specialist_tool_provider,
-                app_handle.clone(),
-            )
-            .await
-            {
-                let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
-                error!("{}", err_msg);
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
-                state.mark_agent_execution_finished();
-                return Err(err_msg);
+            // Skipped in companion mode — agent observes only, no actions.
+            if !companion_mode {
+                if let Err(e) = BrainFactory::register_computer_use_tools(
+                    &mut specialist_tool_provider,
+                    app_handle.clone(),
+                )
+                .await
+                {
+                    let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                    error!("{}", err_msg);
+                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    state.mark_agent_execution_finished();
+                    return Err(err_msg);
+                }
+                info!("✅ Registered full Computer Use tools for specialist mode");
             }
-            info!("✅ Registered full Computer Use tools for specialist mode");
 
             // Extract the tool provider from Arc<Mutex<>> for specialist agent creation
             let specialist_agent_tool_provider = {
