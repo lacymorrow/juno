@@ -344,8 +344,8 @@ async fn execute_agent_internal(
     );
 
     // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
-    let _cursor_guard = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
-        Ok(mgr) => match mgr.get_agent_settings().await {
+    let _cursor_guard = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
+        Some(mgr) => match mgr.get_agent_settings().await {
             Ok(s) if s.big_cursor_enabled => {
                 info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
                 crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
@@ -356,8 +356,8 @@ async fn execute_agent_internal(
                 crate::cursor_scale::CursorScaleGuard::noop()
             }
         },
-        Err(e) => {
-            warn!("[CursorScale] Failed to init settings manager, skipping cursor scaling: {}", e);
+        None => {
+            warn!("[CursorScale] SettingsManager not found in managed state, skipping cursor scaling");
             crate::cursor_scale::CursorScaleGuard::noop()
         }
     };

@@ -436,6 +436,36 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               <p className="text-xs text-gray-500">
                 How much larger to make the cursor (1.5x – 10x)
               </p>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await invoke("test_cursor_scale", { scale: bigCursorScale });
+                      toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
+                    } catch (e) {
+                      toast.error("Failed to test cursor scale");
+                    }
+                  }}
+                >
+                  Test Scale
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await invoke("test_cursor_restore");
+                      toast.success("Cursor restored to normal");
+                    } catch (e) {
+                      toast.error("Failed to restore cursor");
+                    }
+                  }}
+                >
+                  Restore
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
