@@ -1360,30 +1360,36 @@ impl AppState {
             );
         }
 
-        // Auto-disable servers that failed to start so they don't retry on every launch.
-        // Hold the ToolConfigManager lock across both update and save to prevent a race
-        // where get_tool_configurations re-loads stale enabled:true from the store.
+        // Auto-remove servers that failed to start — purge from config entirely.
+        // Hold the ToolConfigManager lock across both removal and save to prevent races.
         if !failed_server_ids.is_empty() {
-            warn!("Auto-disabling failed MCP servers: {} (re-enable in Settings)", failed_names.join(", "));
-            let config_manager = self.get_tool_config_manager().await;
-            let mut config_guard = config_manager.lock().await;
-            for failed_id in &failed_server_ids {
-                if let Some(mut server_config) = config_guard.get_mcp_server(failed_id) {
-                    server_config.enabled = false;
-                    config_guard.update_mcp_server(server_config);
+            warn!("Removing failed MCP servers: {} (re-add in Settings if needed)", failed_names.join(", "));
+
+            // Remove from MCP manager first (doesn't need ToolConfigManager lock)
+            {
+                let manager_guard = manager.lock().await;
+                for failed_id in &failed_server_ids {
+                    if let Err(e) = manager_guard.remove_server(failed_id).await {
+                        debug!("Failed to remove server '{}' from MCP manager: {}", failed_id, e);
+                    }
                 }
             }
 
-            // Persist while still holding the lock to prevent concurrent overwrites
+            let config_manager = self.get_tool_config_manager().await;
+            let mut config_guard = config_manager.lock().await;
+            for failed_id in &failed_server_ids {
+                config_guard.remove_mcp_server(failed_id);
+            }
+
             if let Some(handle) = app_handle {
                 match crate::settings::manager::SettingsManager::new(handle.clone()) {
                     Ok(settings_manager) => {
                         if let Err(e) = config_guard.save_to_centralized_settings(&settings_manager).await {
-                            warn!("Failed to persist auto-disabled MCP servers: {}", e);
+                            warn!("Failed to persist MCP server removal: {}", e);
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to create settings manager for auto-disable persist: {}", e);
+                        warn!("Failed to create settings manager for MCP cleanup: {}", e);
                     }
                 }
             }
