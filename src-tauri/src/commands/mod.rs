@@ -35,6 +35,7 @@ pub mod filesystem;
 pub mod keyboard;
 pub mod mcp;
 pub mod memory;
+pub mod persistent_memory;
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
@@ -98,6 +99,7 @@ pub use self::filesystem::{get_file_content, list_files, save_agent_response, se
 pub use self::ui_commands::*; // Re-export consolidated UI API commands
 pub use self::mcp::*;
 pub use self::memory::*;
+pub use self::persistent_memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::orchestrator::*;

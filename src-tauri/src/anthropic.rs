@@ -450,6 +450,15 @@ async fn execute_agent_internal(
         }
     }
 
+    // --- Load Persistent Memory (cross-session user knowledge) ---
+    let persistent_memory_section = {
+        let manager = crate::agent::implementations::persistent_memory::PersistentMemoryManager::new(app_handle.clone());
+        manager.format_for_prompt()
+    };
+    if !persistent_memory_section.is_empty() {
+        info!("Loaded persistent memory section ({} chars) for system prompt injection", persistent_memory_section.len());
+    }
+
     // --- Setup Tool Provider Based on Agent Mode ---
     let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
@@ -558,6 +567,12 @@ async fn execute_agent_internal(
             }
             info!("✅ Registered full Computer Use tools for single agent mode");
 
+            // Register persistent memory tool so agent can save facts across sessions
+            crate::agent::implementations::persistent_memory::register_remember_fact_tool(
+                &single_agent_tool_provider,
+                app_handle.clone(),
+            ).await;
+
             // Create single agent brain with enriched system prompt including available MCP tools
             let brain_result = {
                 // Load prompt manager to render system prompt with variables
@@ -603,9 +618,16 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
-                let system_prompt = prompt_manager
+                let base_prompt = prompt_manager
                     .get_prompt(crate::agent::prompts::types::PromptType::SystemDefault, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
+
+                // Append persistent memory section if any entries exist
+                let system_prompt = if persistent_memory_section.is_empty() {
+                    base_prompt
+                } else {
+                    format!("{}\n\n{}", base_prompt, persistent_memory_section)
+                };
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
@@ -770,6 +792,12 @@ async fn execute_agent_internal(
                 warn!("Failed to refresh MCP tools for orchestrator provider: {}", e);
             }
 
+            // Register persistent memory tool on orchestrator so it can save facts across sessions
+            crate::agent::implementations::persistent_memory::register_remember_fact_tool(
+                &orchestrator_tool_provider,
+                app_handle.clone(),
+            ).await;
+
             // Build orchestrator system prompt with available MCP tools listed for visibility
             let orchestrator_brain_result = {
                 // Settings → PromptManager
@@ -817,9 +845,16 @@ async fn execute_agent_internal(
                     custom_variables: std::collections::HashMap::new(),
                 };
 
-                let system_prompt = prompt_manager
+                let base_prompt = prompt_manager
                     .get_prompt(crate::agent::prompts::types::PromptType::OrchestratorPersonality, Some(prompt_context))
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
+
+                // Append persistent memory section if any entries exist
+                let system_prompt = if persistent_memory_section.is_empty() {
+                    base_prompt
+                } else {
+                    format!("{}\n\n{}", base_prompt, persistent_memory_section)
+                };
 
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
