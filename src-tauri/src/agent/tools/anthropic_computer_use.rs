@@ -294,13 +294,18 @@ fn is_interactive_ax_role(role: &str) -> bool {
             | "combobox"
             | "tab"
             | "menuitem"
-            | "menubuttom"
+            | "menubutton"       // fixed typo from "menubuttom"
             | "image"
             | "cell"
             | "searchfield"
             | "statictext"
             | "row"
             | "list"
+            | "slider"           // kAXIncrementAction / kAXDecrementAction
+            | "incrementor"      // steppers (NSStepper)
+            | "colorwell"        // color pickers
+            | "disclosuretrangle" // disclosure triangles
+            | "switch"           // toggle switches
     )
 }
 
@@ -348,11 +353,14 @@ fn try_ax_grounded_click(
         };
     }
 
-    // Attempt AX-native click. The UIElement API has click()/double_click()/right_click().
+    // Attempt AX-native action. Left/Double use semantic click; Right uses kAXShowMenuAction
+    // (the true macOS action for context menus — no cursor position required).
     let result = match kind {
         AxClickKind::Left => element.click().map(|_| ()),
         AxClickKind::Double => element.double_click().map(|_| ()),
-        AxClickKind::Right => element.right_click(),
+        // AXShowMenu is the semantic AX action for context menus. Falls back to coordinate
+        // right-click (via the outer caller) if the element doesn't support it.
+        AxClickKind::Right => element.perform_action("AXShowMenu"),
     };
 
     match result {
@@ -372,15 +380,54 @@ fn try_ax_grounded_click(
             }
         }
         Err(e) => {
-            tracing::debug!(
-                "AX grounding: AXPress failed for {} at ({:.0}, {:.0}): {} — falling back to coordinate",
-                role, screen_x, screen_y, e
+            // Warn-level so we can track AX fallback coverage over time and improve it.
+            tracing::warn!(
+                "⚠️ AX action failed, falling back to coordinate: {} '{}' at ({:.0}, {:.0}): {}",
+                role,
+                label.as_deref().unwrap_or("<unlabeled>"),
+                screen_x, screen_y, e
             );
             AxGroundingResult {
                 used_ax_click: false,
                 role: Some(role),
                 label,
             }
+        }
+    }
+}
+
+/// Try to type text directly into the currently focused AX element.
+///
+/// Fetches the system-wide focused element and calls `type_text()` on it, which
+/// first tries `kAXValueAttribute` (no cursor, no clipboard) and falls back to
+/// clipboard paste if that fails. Returns true if AX typing succeeded.
+///
+/// On any failure (no permissions, no focused element, element rejects AXValue),
+/// returns false so the caller can fall back to global keyboard simulation.
+fn try_ax_type_focused(app_handle: &tauri::AppHandle, text: &str) -> bool {
+    let state = app_handle.state::<AppState>();
+    match state.desktop.focused_element() {
+        Ok(element) => {
+            match element.type_text(text) {
+                Ok(()) => {
+                    info!(
+                        "✨ AX type: {} chars typed into focused element via AXValue",
+                        text.chars().count()
+                    );
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "AX type failed on focused element: {} — falling back to global keyboard",
+                        e
+                    );
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            tracing::debug!("Could not get focused element for AX type: {}", e);
+            false
         }
     }
 }
@@ -1135,14 +1182,21 @@ pub async fn execute_computer_tool(
                         None => return Ok(create_anthropic_error_response("Missing 'text' parameter".to_string())),
                     };
 
-                    handle_anthropic_result!(crate::commands::keyboard::type_text(
-                        text.to_string(),
-                        app_handle.clone(),
-                        state_manager,
-                    ).await.map_err(|e| format!("Type text failed: {}", e)));
+                    // Try AX-based typing first: finds the focused element and sets AXValue
+                    // directly (no cursor movement, no clipboard). Falls back to global
+                    // keyboard simulation (clipboard paste) when AX isn't supported.
+                    let typed_via_ax = try_ax_type_focused(app_handle, text);
+                    if !typed_via_ax {
+                        handle_anthropic_result!(crate::commands::keyboard::type_text(
+                            text.to_string(),
+                            app_handle.clone(),
+                            state_manager,
+                        ).await.map_err(|e| format!("Type text failed: {}", e)));
+                    }
 
                     Ok(json!({
-                        "success": true
+                        "success": true,
+                        "ax_grounded": typed_via_ax
                     }))
                 }
                 _ => unreachable!("Keyboard action already matched in outer pattern")
