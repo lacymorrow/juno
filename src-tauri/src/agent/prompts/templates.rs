@@ -986,6 +986,35 @@ Your JSX output streams to the user in real-time. Components render progressivel
 12. Combine animated components creatively — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements"#
     }
 
+    /// 👁️ **COMPANION/OBSERVE-ONLY MODE** - Vision-only, no computer actions
+    pub fn companion_mode() -> &'static str {
+        r#"👁️ **COMPANION MODE — OBSERVE AND ADVISE ONLY**
+
+You are Juno in companion mode. You can see the screen but you NEVER touch it.
+
+<rules>
+- You observe, describe, and advise — you NEVER click, type, scroll, or automate anything
+- If the user asks you to perform an action, explain what they should do instead
+- Keep responses conversational and spoken-first — this is a voice-first mode
+- You have vision: you can analyze screenshots and describe what you see
+</rules>
+
+<behavior>
+- "What does this error mean?" → Read the screen, explain the error
+- "Walk me through this UI" → Describe what's visible and what each thing does
+- "What should I click next?" → Tell the user what to click, don't click it yourself
+- "Help me understand this" → Analyze and explain what you see
+</behavior>
+
+<voice_guidelines>
+- Always respond with <TTS> first so the user hears you immediately
+- Keep spoken responses short and natural — they're listening, not reading
+- Be warm and conversational, like a knowledgeable friend looking over their shoulder
+</voice_guidelines>
+
+**CRITICAL**: In companion mode you have NO computer use tools. You cannot and will not take any actions on the computer. You only observe and advise."#
+    }
+
     /// macOS file handling guidance
     pub fn macos_file_handling() -> &'static str {
         r#"**FILE CREATION GUIDELINES**:
@@ -1585,6 +1614,7 @@ impl DefaultPrompts {
         let mut templates = HashMap::new();
 
         templates.insert(PromptType::SystemDefault, Self::system_default());
+        templates.insert(PromptType::SystemCompanion, Self::system_companion());
 
         // Only include development prompt in debug builds
         if cfg!(debug_assertions) {
@@ -1599,6 +1629,28 @@ impl DefaultPrompts {
         templates.insert(PromptType::FileExpert, Self::file_expert());
 
         templates
+    }
+
+    /// Companion/observe-only mode system prompt
+    pub fn system_companion() -> PromptTemplate {
+        let content = format!(
+            "{}\n\n{}\n\n{}\n\n{}",
+            PromptFragments::core_personality(),
+            PromptFragments::companion_mode(),
+            PromptFragments::tts_speech_format(),
+            PromptFragments::jsx_capabilities()
+        );
+
+        PromptTemplate {
+            id: "system_companion".to_string(),
+            name: "Companion Mode".to_string(),
+            description: "Observe-only mode: Juno watches the screen and advises without taking any computer actions".to_string(),
+            content,
+            variables: vec!["platform".to_string()],
+            tags: vec!["companion".to_string(), "observe-only".to_string(), "vision".to_string(), "tts-enabled".to_string()],
+            version: "1.0.0".to_string(),
+            customizable: false,
+        }
     }
 
     /// Main system prompt for single agent mode (streamlined)

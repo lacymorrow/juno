@@ -921,6 +921,28 @@ pub(crate) async fn set_big_cursor_scale(
     Ok(())
 }
 
+// === Companion Mode Settings ===
+
+#[tauri::command]
+pub(crate) async fn get_companion_mode(
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
+) -> Result<bool, String> {
+    let agent_settings = settings_manager.get_agent_settings().await?;
+    Ok(agent_settings.companion_mode)
+}
+
+#[tauri::command]
+pub(crate) async fn set_companion_mode(
+    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut agent_settings = settings_manager.get_agent_settings().await?;
+    agent_settings.companion_mode = enabled;
+    settings_manager.set_agent_settings(&agent_settings).await?;
+    info!("Companion mode {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
+}
+
 // Window-relative click functions removed due to missing DesktopWrapper functionality
 // TODO: Implement window bounds retrieval methods in DesktopWrapper to support:
 // - window_relative_click(window_id, relative_x, relative_y, modifier)
