@@ -144,9 +144,20 @@ impl WindowManager {
 
         // Apply macOS-specific styling after window is created
         #[cfg(target_os = "macos")]
-        if config.transparent_title_bar {
-            if let Err(e) = window.set_title_bar_style(TitleBarStyle::Transparent) {
-                warn!("Failed to set title bar style for {}: {}", config.label, e);
+        {
+            if config.transparent_title_bar {
+                if let Err(e) = window.set_title_bar_style(TitleBarStyle::Transparent) {
+                    warn!("Failed to set title bar style for {}: {}", config.label, e);
+                }
+            }
+            // Apply vibrancy to settings and onboarding windows for a native feel
+            if matches!(config.label.as_str(), "settings" | "onboarding") {
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+                if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, Some(10.0)) {
+                    warn!("Failed to apply vibrancy to {} window: {:?}", config.label, e);
+                } else {
+                    info!("macOS vibrancy applied to {} window.", config.label);
+                }
             }
         }
 

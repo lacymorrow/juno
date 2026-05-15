@@ -1,6 +1,6 @@
 {
   "name": "juno-cloud-backend",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Production WebSocket server for Juno AI cloud control and authentication",
   "main": "src/server.js",
   "type": "module",
