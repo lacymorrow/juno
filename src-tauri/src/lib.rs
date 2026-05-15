@@ -836,6 +836,13 @@ pub fn run() {
                 tracing::info!("Geolocation pre-loaded successfully");
             });
 
+            // --- Pre-warm TLS session for Anthropic API (removes ~200-500ms from first call) ---
+            // Sends a HEAD request to api.anthropic.com so the OS caches the TLS session ticket.
+            // The first POST /v1/messages then skips the full TLS handshake.
+            tauri::async_runtime::spawn(async {
+                crate::agent::providers::anthropic::warmup_anthropic_tls().await;
+            });
+
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {

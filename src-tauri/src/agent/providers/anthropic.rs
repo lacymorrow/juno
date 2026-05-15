@@ -185,6 +185,52 @@ enum ApiTool {
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
+/// The Anthropic API hostname used for TLS session warmup.
+/// Must match the base domain of ANTHROPIC_API_URL so the cached session ticket applies.
+const ANTHROPIC_HOST: &str = "https://api.anthropic.com";
+
+/// Warm up the TLS session to `api.anthropic.com` before the first real API call.
+///
+/// Sends a lightweight HEAD request to prime the OS-level TLS session ticket cache,
+/// saving ~200-500ms on the first `POST /v1/messages` call (eliminates the full TLS
+/// handshake on the first interaction). Inspired by Clicky's ClaudeAPI.swift:64-96.
+///
+/// This is best-effort — a failed warmup only means the first real call may be
+/// slightly slower. It never blocks startup or returns an error.
+pub async fn warmup_anthropic_tls() {
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("TLS warmup: failed to build client: {}", e);
+            return;
+        }
+    };
+
+    let start = std::time::Instant::now();
+    match client.head(ANTHROPIC_HOST).send().await {
+        Ok(resp) => {
+            log::info!(
+                "TLS warmup complete: {} {} in {}ms",
+                resp.status(),
+                ANTHROPIC_HOST,
+                start.elapsed().as_millis()
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "TLS warmup: HEAD {} failed in {}ms: {}",
+                ANTHROPIC_HOST,
+                start.elapsed().as_millis(),
+                e
+            );
+        }
+    }
+}
+
 /// Maximum number of recent screenshots to keep in conversation history.
 /// Older screenshots are replaced with text placeholders to reduce token usage.
 /// Following the pattern from Cua (only_n_most_recent_images=3).
