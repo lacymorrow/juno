@@ -261,6 +261,9 @@ pub struct AppState {
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
 
+    // Pre-captured screenshot from PTT release (set during STT finalization, consumed on first agent screenshot call)
+    pub pending_ptt_screenshot: Arc<TokioMutex<Option<crate::commands::core::ScreenshotResult>>>,
+
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
     pub cloud_enabled: Arc<StdMutex<bool>>,
@@ -336,6 +339,7 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            pending_ptt_screenshot: Arc::new(TokioMutex::new(None)),
 
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
@@ -354,6 +358,19 @@ impl AppState {
     pub async fn initialize_rate_limiter_cleanup(&self) {
         info!("Starting rate limiter cleanup task");
         self.rate_limiters.clone().start_cleanup_task();
+    }
+
+    /// Store a screenshot captured concurrently with PTT STT finalization.
+    /// Consumed on the agent's first `computer/screenshot` tool call.
+    pub async fn set_pending_ptt_screenshot(&self, screenshot: crate::commands::core::ScreenshotResult) {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        *guard = Some(screenshot);
+    }
+
+    /// Take (and clear) the pre-captured PTT screenshot, if any.
+    pub async fn take_pending_ptt_screenshot(&self) -> Option<crate::commands::core::ScreenshotResult> {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        guard.take()
     }
 
     // Audio Settings - Getter/Setter methods that operate on actual shared state
