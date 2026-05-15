@@ -1,3 +1,4 @@
+use crate::agent::providers::claude_cli::is_claude_cli_available;
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use tauri::{AppHandle, Manager};
 use tracing::{error, info, warn};
@@ -280,6 +281,13 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
 
     info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
     Ok(())
+}
+
+/// Check if the Claude CLI binary is available (exists in PATH).
+/// Returns true even if not authenticated — just checks binary presence.
+#[tauri::command]
+pub async fn check_claude_cli_available() -> Result<bool, String> {
+    Ok(is_claude_cli_available())
 }
 
 /// Initialize the onboarding system and check if onboarding should be shown

@@ -1,27 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
-import {
-  CheckCircle,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  Key,
-  Keyboard,
-  Monitor,
-  Shield,
-  Sparkles,
-  RefreshCw,
-  Settings,
-  AlertCircle,
-  Info,
-  Mic,
-} from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
 import AudioVisualizer from "../bar/audio-visualizer";
 
-// Permission status interface matching backend (snake_case)
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface PermissionStatus {
   permission_type: string;
   granted: boolean;
@@ -30,7 +16,6 @@ interface PermissionStatus {
   instructions: string;
 }
 
-// Complete permissions state interface (snake_case)
 interface PermissionsState {
   accessibility: PermissionStatus;
   screen_recording: PermissionStatus;
@@ -40,119 +25,62 @@ interface PermissionsState {
   app_name: string;
 }
 
-const permissions = [
+interface OnboardingFlowProps {
+  onComplete: () => void;
+  onSkip?: () => void;
+  permissionsAlreadyGranted?: boolean;
+  isDevelopmentMode?: boolean;
+}
+
+// Ordered permission sequence — simpler grants first (per spec)
+const PERMISSION_SEQUENCE = [
   {
-    id: "accessibility",
-    title: "Accessibility",
-    description: "Allow Juno to control your computer",
-    icon: <Eye className="w-5 h-5" />,
+    key: "screen_recording" as const,
+    label: "Screen Recording",
+    purpose: "See what's on your screen",
+    command: COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION,
     required: true,
   },
   {
-    id: "screen-recording",
-    title: "Screen Recording",
-    description: "Allow Juno to capture screen content",
-    icon: <Monitor className="w-5 h-5" />,
+    key: "accessibility" as const,
+    label: "Accessibility",
+    purpose: "Click, type, and navigate for you",
+    command: COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION,
     required: true,
   },
   {
-    id: "microphone",
-    title: "Microphone",
-    description: "Allow Juno to use voice features",
-    icon: <Sparkles className="w-5 h-5" />,
+    key: "input_monitoring" as const,
+    label: "Input Monitoring",
+    purpose: "Detect keyboard shortcuts globally",
+    command: COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION,
     required: false,
   },
   {
-    id: "input-monitoring",
-    title: "Input Monitoring",
-    description: "Allow Juno to monitor keyboard and mouse",
-    icon: <Keyboard className="w-5 h-5" />,
+    key: "microphone" as const,
+    label: "Microphone",
+    purpose: "Listen when you want to talk",
+    command: COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION,
     required: false,
   },
 ];
 
-const getOnboardingSteps = (
-  permissionsAlreadyGranted: boolean,
-  isDevelopmentMode: boolean = false,
-  apiKeysAvailable: boolean = false
-) => [
-  {
-    id: "welcome",
-    title: "Welcome to Juno",
-    subtitle: isDevelopmentMode
-      ? "Your intelligent Mac companion (Development Mode)"
-      : "Your intelligent Mac companion",
-    description: isDevelopmentMode
-      ? "Juno helps you automate tasks, manage your workflow, and get more done with your Mac. You're running in development mode, so onboarding will always show on startup."
-      : "Juno helps you automate tasks, manage your workflow, and get more done with your Mac.",
-    icon: (
-      <img src="/juno.png" alt="Juno" className="w-50 h-50 object-contain" />
-    ),
-    action: "Get Started",
-  },
-  {
-    id: "shortcut",
-    title: "Learn the Magic Keys",
-    subtitle: "Quick shortcuts to control Juno",
-    description:
-      "Try the agent mode shortcut below! This activates Juno from anywhere on your Mac. Watch the floating bar react — toggle it anytime with \u2318B.",
-    icon: null, // Floating bar rendered persistently outside AnimatePresence
-    action: "Continue",
-  },
-  {
-    id: "cancel",
-    title: "Escape to Cancel",
-    subtitle: "Stop any operation with a single key",
-    description:
-      "Sometimes you need to stop what Juno is doing. Press Escape and the floating bar will confirm it stopped.",
-    icon: null, // Floating bar rendered persistently outside AnimatePresence
-    action: "Continue",
-  },
-  ...(apiKeysAvailable
-    ? []
-    : [
-        {
-          id: "api-key",
-          title: "Connect Your AI Provider",
-          subtitle: "Paste your API key to get started",
-          description:
-            "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
-          icon: <Key className="w-12 h-12 text-primary" />,
-          action: "Continue",
-        },
-      ]),
-  ...(permissionsAlreadyGranted
-    ? []
-    : [
-        {
-          id: "permissions",
-          title: "Grant Permissions",
-          subtitle: "Required for full functionality",
-          description:
-            "Juno needs these permissions to automate tasks and interact with your Mac securely.",
-          icon: <Shield className="w-12 h-12 text-green-500" />,
-          action: "Continue",
-        },
-      ]),
-  {
-    id: "complete",
-    title: "Ready to Go",
-    subtitle: "AI-powered desktop automation",
-    description: "Juno can control your computer, browse the web, manage files, and execute tasks through natural language." + (permissionsAlreadyGranted
-      ? " Just describe what you need — use the shortcut you learned to activate Juno anytime."
-      : " You can always change permissions later in System Preferences."),
-    icon: <CheckCircle className="w-12 h-12 text-green-500" />,
-    action: "Start Using Juno",
-  },
-];
+// ─── Reduced motion hook ───────────────────────────────────────────────────────
 
-/**
- * Visual keyboard shortcut display.
- * This component is PURELY visual — it renders key boxes and animates them.
- * Shortcut detection is handled by the parent via backend Tauri events,
- * since global shortcuts (Option+D) are captured at the OS level and never
- * reach the webview as keydown events.
- */
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return reduced;
+}
+
+// ─── KeyboardShortcutDisplay ──────────────────────────────────────────────────
+
 function KeyboardShortcutDisplay({
   shortcutString,
   defaultShortcut = "Option+D",
@@ -162,416 +90,345 @@ function KeyboardShortcutDisplay({
   defaultShortcut?: string;
   isActivated: boolean;
 }) {
-  const parseShortcut = (shortcut: string) => {
-    const parts = shortcut.split("+").map((part) => part.trim().toLowerCase());
-    const modifiers = parts.slice(0, -1);
-    const key = parts[parts.length - 1];
-    return { modifiers, key };
+  const reduced = usePrefersReducedMotion();
+
+  const parseShortcut = (s: string) => {
+    const parts = s.split("+").map((p) => p.trim().toLowerCase());
+    return { modifiers: parts.slice(0, -1), key: parts[parts.length - 1] };
   };
 
   const { modifiers, key } = parseShortcut(shortcutString || defaultShortcut);
 
-  const displayKeys = () => {
-    const modifierKeys = modifiers.map((mod) => {
-      switch (mod) {
-        case "option":
-        case "alt":
-          return "\u2325";
-        case "cmd":
-        case "command":
-          return "\u2318";
-        case "ctrl":
-        case "control":
-          return "\u2303";
-        case "commandorcontrol":
-          return "\u2318";
-        case "shift":
-          return "\u21E7";
-        default:
-          return mod.toUpperCase();
-      }
-    });
-
-    const displayKey = (() => {
-      switch (key) {
-        case "escape":
-          return "Esc";
-        case "space":
-          return "Space";
-        case "enter":
-        case "return":
-          return "Return";
-        case "backspace":
-          return "Delete";
-        case "delete":
-          return "Fwd Del";
-        case "tab":
-          return "Tab";
-        default:
-          return key.toUpperCase();
-      }
-    })();
-
-    return [...modifierKeys, displayKey];
-  };
-
-  const keys = displayKeys();
-
-  return (
-    <div className="flex items-center justify-center gap-4 my-8 relative">
-      {keys.map((keySymbol, index) => (
-        <div key={index} className="flex items-center">
-          <motion.div
-            className={`relative flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all duration-200 ${
-              isActivated
-                ? "bg-primary border-primary text-primary-foreground shadow-lg scale-95"
-                : "bg-card border-border text-card-foreground shadow-sm"
-            }`}
-            animate={isActivated ? { scale: 0.95 } : { scale: 1 }}
-          >
-            <span className="text-lg font-semibold">{keySymbol}</span>
-          </motion.div>
-          {index < keys.length - 1 && (
-            <div className="text-2xl font-light text-muted-foreground mx-2">+</div>
-          )}
-        </div>
-      ))}
-
-      {isActivated && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-12 top-1/2 transform -translate-y-1/2"
-        >
-          <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
-            <CheckCircle className="w-5 h-5 text-white" />
-          </div>
-        </motion.div>
-      )}
-    </div>
-  );
-}
-
-// Component for individual permission card
-function PermissionCard({
-  permission,
-  permissionStatus,
-  onRequest,
-  isRequesting,
-}: {
-  permission: any;
-  permissionStatus: PermissionStatus | null;
-  onRequest: () => void;
-  isRequesting: boolean;
-}) {
-  const granted = permissionStatus?.granted ?? false;
-  const isRequired = permission.required;
-
-  // Map permission IDs to icons
-  const getPermissionIcon = () => {
-    switch (permission.id) {
-      case "accessibility":
-        return <Eye className="w-5 h-5" />;
-      case "screen-recording":
-        return <Monitor className="w-5 h-5" />;
-      case "microphone":
-        return <Mic className="w-5 h-5" />;
-      case "input-monitoring":
-        return <Keyboard className="w-5 h-5" />;
+  const renderModifier = (mod: string) => {
+    switch (mod) {
+      case "option":
+      case "alt":
+        return "⌥";
+      case "cmd":
+      case "command":
+      case "commandorcontrol":
+        return "⌘";
+      case "ctrl":
+      case "control":
+        return "⌃";
+      case "shift":
+        return "⇧";
       default:
-        return <Shield className="w-5 h-5" />;
+        return mod.toUpperCase();
     }
   };
 
+  const renderKey = (k: string) => {
+    switch (k) {
+      case "escape":
+        return "Esc";
+      case "space":
+        return "Space";
+      case "enter":
+      case "return":
+        return "Return";
+      case "backspace":
+        return "Delete";
+      case "tab":
+        return "Tab";
+      default:
+        return k.toUpperCase();
+    }
+  };
+
+  const allKeys = [...modifiers.map(renderModifier), renderKey(key)];
+
+  const allLabels = [
+    ...modifiers.map((mod) => {
+      const map: Record<string, string> = {
+        option: "Option",
+        alt: "Option",
+        cmd: "Command",
+        command: "Command",
+        commandorcontrol: "Command",
+        ctrl: "Control",
+        control: "Control",
+        shift: "Shift",
+      };
+      return map[mod] || mod;
+    }),
+    renderKey(key),
+  ];
+
   return (
     <div
-      className={`p-4 rounded-xl border-2 transition-all duration-200 ${
-        granted
-          ? "border-green-200 bg-green-50/30 dark:border-green-800 dark:bg-green-950/30"
-          : isRequired
-          ? "border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-red-950/30"
-          : "border-yellow-200 bg-yellow-50/30 dark:border-yellow-800 dark:bg-yellow-950/30"
-      }`}
+      className="flex items-center justify-center gap-2 my-8"
+      aria-label={`Keyboard shortcut: ${allLabels.join(" plus ")}`}
     >
-      <div className="flex items-start gap-4">
-        {/* Icon and Status */}
-        <div className="flex items-center gap-2">
-          <div
-            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-              granted
-                ? "bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400"
-                : isRequired
-                ? "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400"
-                : "bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-400"
-            }`}
-          >
-            {granted ? (
-              <CheckCircle className="w-5 h-5" />
-            ) : (
-              getPermissionIcon()
-            )}
-          </div>
-          {granted && (
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          )}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-semibold text-foreground">{permission.title}</h4>
-            {isRequired && (
-              <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 px-2 py-1 rounded-full font-medium">
-                Required
-              </span>
-            )}
-            {granted && (
-              <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 px-2 py-1 rounded-full font-medium">
-                Granted
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground mb-3">{permission.description}</p>
-
-          {!granted && permissionStatus && (
-            <div
-              className={`text-xs p-2 rounded-md mb-3 ${
-                isRequired
-                  ? "bg-red-50 border border-red-200 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300"
-                  : "bg-yellow-50 border border-yellow-200 text-yellow-700 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-300"
-              }`}
-            >
-              <div className="flex items-start gap-1">
-                {isRequired ? (
-                  <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                ) : (
-                  <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                )}
-                <span>{permissionStatus.instructions}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          {!granted && (
-            <div className="flex gap-2">
-              <button
-                onClick={onRequest}
-                disabled={isRequesting}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                  isRequired
-                    ? "bg-primary hover:bg-primary/90 text-primary-foreground"
-                    : "bg-muted-foreground hover:bg-muted-foreground/90 text-background"
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {isRequesting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Opening...
-                  </>
-                ) : (
-                  <>
-                    <Settings className="w-4 h-4" />
-                    Grant Permission
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {granted && (
-            <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-300">
-              <CheckCircle className="w-4 h-4" />
-              <span className="font-medium">Ready to use</span>
-            </div>
-          )}
-        </div>
-      </div>
+      {allKeys.map((symbol, i) => (
+        <motion.div
+          key={i}
+          className={`flex items-center justify-center w-14 h-14 rounded-xl border font-mono text-sm font-medium tracking-wide transition-colors duration-150 ${
+            isActivated
+              ? "bg-primary/20 border-primary text-primary"
+              : "bg-card border-border text-card-foreground"
+          }`}
+          animate={reduced ? {} : isActivated ? { scale: 0.95 } : { scale: 1 }}
+          transition={{ duration: 0.15 }}
+        >
+          {symbol}
+        </motion.div>
+      ))}
     </div>
   );
 }
 
-interface OnboardingFlowProps {
-  onComplete: () => void;
-  onSkip?: () => void;
-  permissionsAlreadyGranted?: boolean;
-  isDevelopmentMode?: boolean;
+// ─── PermissionItem ────────────────────────────────────────────────────────────
+
+function PermissionItem({
+  label,
+  purpose,
+  required,
+  granted,
+  waiting,
+  onGrant,
+  revealed,
+  reduced,
+}: {
+  label: string;
+  purpose: string;
+  required: boolean;
+  granted: boolean;
+  waiting: boolean;
+  onGrant: () => void;
+  revealed: boolean;
+  reduced: boolean;
+}) {
+  return (
+    <motion.div
+      initial={reduced ? { opacity: 0 } : { opacity: 0, y: -8 }}
+      animate={revealed ? { opacity: 1, y: 0 } : { opacity: 0, y: -8 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      aria-live="polite"
+      role="status"
+    >
+      <div
+        className={`flex items-center justify-between py-4 border-b border-border/40 last:border-0 transition-opacity duration-300 ${
+          granted ? "opacity-50" : "opacity-100"
+        }`}
+      >
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-foreground text-sm">{label}</span>
+            <span className="text-xs text-muted-foreground">
+              {required ? "Required" : "Optional"}
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-0.5">{purpose}</p>
+        </div>
+
+        <div className="flex-shrink-0 ml-4">
+          {granted ? (
+            <span className="text-sm text-primary font-medium">✓</span>
+          ) : (
+            <button
+              onClick={onGrant}
+              disabled={waiting}
+              className="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors duration-150 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {waiting ? "Waiting..." : "Grant"}
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
 }
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function OnboardingFlow({
   onComplete,
   onSkip,
   permissionsAlreadyGranted = false,
-  isDevelopmentMode = false,
+  isDevelopmentMode: _isDevelopmentMode = false,
 }: OnboardingFlowProps) {
-  console.log("OnboardingFlow: Component rendering with props:", {
-    permissionsAlreadyGranted,
-    isDevelopmentMode,
-  });
+  const reduced = usePrefersReducedMotion();
 
+  // ── Step state ──
   const [currentStep, setCurrentStep] = useState(0);
-  const [shortcutPressed, setShortcutPressed] = useState(false);
-  const [escapePressed, setEscapePressed] = useState(false);
-  const [_backendShortcutsWorking, setBackendShortcutsWorking] =
-    useState(false);
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
-  const [isComplete, setIsComplete] = useState(false);
-  const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
-    // Always start with false to ensure we re-check permissions on mount
-    // This is critical for the "Restart onboarding" functionality
-    false
-  );
 
-  // API key state
-  const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
+  // ── Welcome step ──
+  const [showSkip, setShowSkip] = useState(false);
+
+  // ── Keyboard step ──
+  const [keyPhase, setKeyPhase] = useState<"agent" | "escape">("agent");
+  const [agentShortcutPressed, setAgentShortcutPressed] = useState(false);
+  const [escapePressed, setEscapePressed] = useState(false);
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
+  const bothKeysConfirmed = agentShortcutPressed && escapePressed;
+
+  // ── Connect AI step ──
+  const [claudeCliAvailable, setClaudeCliAvailable] = useState<boolean | null>(null);
   const [apiKey, setApiKey] = useState("");
-  const [detectedProvider, setDetectedProvider] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [detectedProvider, setDetectedProvider] = useState<{ id: string; name: string } | null>(null);
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
 
-  // New state for granular permissions
-  const [permissionsState, setPermissionsState] =
-    useState<PermissionsState | null>(null);
-  const [isRequestingPermission, setIsRequestingPermission] = useState<
-    string | null
-  >(null);
-  const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  // ── Permissions step ──
+  const [permissionsState, setPermissionsState] = useState<PermissionsState | null>(null);
+  const [currentPermIdx, setCurrentPermIdx] = useState(0);
+  const [waitingPermission, setWaitingPermission] = useState<string | null>(null);
+  const [permPollInterval, setPermPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [allRequiredGranted, setAllRequiredGranted] = useState(permissionsAlreadyGranted);
 
+  // ── Misc ──
   const mountedRef = useRef(true);
-  const onboardingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      for (const timer of onboardingTimers.current) {
-        clearTimeout(timer);
-      }
-      onboardingTimers.current = [];
+      for (const t of timers.current) clearTimeout(t);
     };
   }, []);
 
+  // Show skip after 1.5s on welcome
+  useEffect(() => {
+    if (currentStep === 0) {
+      const t = setTimeout(() => {
+        if (mountedRef.current) setShowSkip(true);
+      }, 1500);
+      timers.current.push(t);
+    }
+  }, [currentStep]);
+
+  // Load initial data
+  useEffect(() => {
+    const load = async () => {
+      try {
+        // Keyboard shortcuts
+        try {
+          const info = await invoke<any>("get_onboarding_info");
+          if (mountedRef.current && info?.shortcuts) {
+            setKeyboardShortcuts(info.shortcuts);
+          }
+        } catch {}
+
+        // Claude CLI availability
+        try {
+          const available = await invoke<boolean>("check_claude_cli_available");
+          if (mountedRef.current) setClaudeCliAvailable(available);
+        } catch {
+          if (mountedRef.current) setClaudeCliAvailable(false);
+        }
+
+        // API keys already present?
+        try {
+          const keysAvail = await invoke<boolean>("check_api_keys_available");
+          if (mountedRef.current) setApiKeysAvailable(keysAvail);
+        } catch {}
+
+        // Permissions
+        try {
+          const perms = await invoke<PermissionsState>(
+            COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
+          );
+          if (mountedRef.current) {
+            setPermissionsState(perms);
+            setAllRequiredGranted(
+              perms.accessibility.granted && perms.screen_recording.granted
+            );
+          }
+        } catch {}
+      } catch {}
+    };
+    load();
+  }, []);
+
   // ── Backend-driven shortcut detection ──
-  // Global shortcuts (Option+D, Escape) are captured at the OS level by
-  // tauri_plugin_global_shortcut — they NEVER reach the webview as keydown events.
-  // The backend always emits these events even during onboarding (visual feedback mode).
-  // We use useEventListener (the project's canonical Tauri event hook) to detect them.
-  useEventListener<{ state: string; shortcut: string }>(
-    EVENTS.SHORTCUTS_AGENT_MODE,
-    (payload) => {
-      if (payload.state === "pressed" && !shortcutPressed) {
-        console.log("[Onboarding] Agent mode shortcut detected via backend event");
-        setShortcutPressed(true);
-      }
+  useEventListener<{ state: string }>(EVENTS.SHORTCUTS_AGENT_MODE, (payload) => {
+    if (payload.state === "pressed" && !agentShortcutPressed) {
+      setAgentShortcutPressed(true);
+      // Auto-advance to escape phase after brief delay
+      const t = setTimeout(() => {
+        if (mountedRef.current) setKeyPhase("escape");
+      }, 600);
+      timers.current.push(t);
     }
-  );
+  });
 
-  useEventListener<{ state: string; shortcut: string }>(
-    EVENTS.SHORTCUTS_ESCAPE_KEY,
-    (payload) => {
-      if (payload.state === "pressed" && !escapePressed) {
-        console.log("[Onboarding] Escape key detected via backend event");
-        setEscapePressed(true);
-      }
+  useEventListener<{ state: string }>(EVENTS.SHORTCUTS_ESCAPE_KEY, (payload) => {
+    if (payload.state === "pressed" && keyPhase === "escape" && !escapePressed) {
+      setEscapePressed(true);
+      // Auto-advance to next step 800ms after escape confirmed
+      const t = setTimeout(() => {
+        if (mountedRef.current) advanceStep();
+      }, 800);
+      timers.current.push(t);
     }
-  );
+  });
 
-  // Function to check current permissions status
-  const checkPermissionsStatus = async () => {
+  // ── Permissions polling ──
+  const checkPermissions = useCallback(async () => {
     try {
-      setPermissionsError(null);
       const result = await invoke<PermissionsState>(
         COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
       );
+      if (!mountedRef.current) return result;
       setPermissionsState(result);
-      setActualPermissionsGranted(result.all_granted);
-      console.log("OnboardingFlow: Updated permissions state:", result);
-      return result.all_granted;
-    } catch (error) {
-      console.warn("Failed to check permissions status:", error);
-      setPermissionsError(error as string);
-      return false;
-    }
-  };
-
-  // Check if required permissions (accessibility + screen recording) are granted
-  const areRequiredPermissionsGranted = (): boolean => {
-    if (!permissionsState) return false;
-    return (
-      permissionsState.accessibility.granted &&
-      permissionsState.screen_recording.granted
-    );
-  };
-
-  // Individual permission request functions
-  const requestPermission = async (permissionType: string) => {
-    try {
-      setIsRequestingPermission(permissionType);
-      setPermissionsError(null);
-
-      let commandName = "";
-      switch (permissionType) {
-        case "accessibility":
-          commandName = COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION;
-          break;
-        case "screen_recording":
-          commandName = COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION;
-          break;
-        case "microphone":
-          commandName = COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION;
-          break;
-        case "input_monitoring":
-          commandName = COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION;
-          break;
-        default:
-          throw new Error(`Unknown permission type: ${permissionType}`);
-      }
-
-      const granted = await invoke<boolean>(commandName);
-
-      if (granted) {
-        // Permission was already granted
-        await checkPermissionsStatus();
-      } else {
-        // System Settings should be open for user to grant permission
-        // Wait a moment and then refresh to check if user granted it
-        onboardingTimers.current.push(setTimeout(async () => {
-          if (mountedRef.current) await checkPermissionsStatus();
-        }, 2000));
-      }
-    } catch (error) {
-      console.error(`Error requesting ${permissionType} permission:`, error);
-      setPermissionsError(error as string);
-    } finally {
-      setIsRequestingPermission(null);
-    }
-  };
-
-  // Auto-detect provider from API key prefix
-  const detectProvider = useCallback(
-    (key: string): { id: string; name: string } | null => {
-      const trimmed = key.trim();
-      // Anthropic keys: sk-ant-api03-...
-      if (trimmed.startsWith("sk-ant-")) {
-        return { id: "anthropic", name: "Anthropic" };
-      }
-      // OpenAI keys: sk-proj-... (current) or sk-... (legacy, but not sk-ant-)
-      if (trimmed.startsWith("sk-proj-") || (trimmed.startsWith("sk-") && !trimmed.startsWith("sk-ant-"))) {
-        return { id: "openai", name: "OpenAI" };
-      }
-      // Google Gemini keys: AIza...
-      if (trimmed.startsWith("AIza")) {
-        return { id: "gemini", name: "Google Gemini" };
-      }
+      const reqGranted =
+        result.accessibility.granted && result.screen_recording.granted;
+      setAllRequiredGranted(reqGranted);
+      return result;
+    } catch {
       return null;
-    },
-    []
-  );
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    const interval = setInterval(async () => {
+      if (!mountedRef.current) return;
+      const result = await checkPermissions();
+      if (!result) return;
+
+      // Advance permission index if current one is now granted
+      const currentPerm = PERMISSION_SEQUENCE[currentPermIdx];
+      if (currentPerm) {
+        const permState = result[currentPerm.key] as PermissionStatus;
+        if (permState?.granted) {
+          setWaitingPermission(null);
+          setCurrentPermIdx((i) => Math.min(i + 1, PERMISSION_SEQUENCE.length));
+        }
+      }
+    }, 1000);
+    setPermPollInterval(interval);
+  }, [checkPermissions, currentPermIdx]);
+
+  const stopPolling = useCallback(() => {
+    if (permPollInterval) {
+      clearInterval(permPollInterval);
+      setPermPollInterval(null);
+    }
+  }, [permPollInterval]);
+
+  // Start polling when entering permissions step
+  useEffect(() => {
+    if (currentStep === 3 && !allRequiredGranted) {
+      checkPermissions();
+      startPolling();
+      return () => stopPolling();
+    }
+  }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Provider detection ──
+  const detectProvider = useCallback((key: string) => {
+    const k = key.trim();
+    if (k.startsWith("sk-ant-")) return { id: "anthropic", name: "Anthropic" };
+    if (k.startsWith("sk-proj-") || (k.startsWith("sk-") && !k.startsWith("sk-ant-")))
+      return { id: "openai", name: "OpenAI" };
+    if (k.startsWith("AIza")) return { id: "gemini", name: "Google Gemini" };
+    return null;
+  }, []);
 
   const handleApiKeyChange = useCallback(
     (value: string) => {
@@ -596,535 +453,544 @@ export default function OnboardingFlow({
         providerId: detectedProvider.id,
       });
       setApiKeySaved(true);
-    } catch (error) {
-      console.error("Failed to save API key:", error);
-      setApiKeyError(error as string);
+    } catch (err) {
+      setApiKeyError(err as string);
     } finally {
       setApiKeySaving(false);
     }
   }, [detectedProvider, apiKey]);
 
-  useEffect(() => {
-    let mounted = true;
-
-    const loadInitialData = async () => {
+  // ── Request a permission ──
+  const requestPermission = useCallback(
+    async (permKey: string, command: string) => {
+      setWaitingPermission(permKey);
       try {
-        console.log("OnboardingFlow: Loading initial data...");
-
-        // CRITICAL: Always re-check permissions when component mounts
-        console.log("OnboardingFlow: Re-checking permissions status...");
-        await checkPermissionsStatus();
-        if (!mounted) return;
-
-        // Check if API keys are already available (from store or .env)
-        try {
-          const keysAvailable = await invoke<boolean>("check_api_keys_available");
-          if (mounted) {
-            setApiKeysAvailable(keysAvailable);
-            if (keysAvailable) {
-              console.log("OnboardingFlow: API keys already available, skipping API key step");
-            }
-          }
-        } catch (error) {
-          console.warn("Failed to check API keys availability:", error);
-        }
-        if (!mounted) return;
-
-        // Load onboarding info and shortcuts
-        const onboardingInfo = await invoke("get_onboarding_info");
-        if (!mounted) return;
-        if (
-          onboardingInfo &&
-          typeof onboardingInfo === "object" &&
-          "shortcuts" in onboardingInfo
-        ) {
-          setKeyboardShortcuts((onboardingInfo as any).shortcuts);
-        }
-
-        // Test if backend shortcuts are working
-        const shortcutsWorking = await invoke<boolean>(
-          "test_global_shortcuts_working"
-        );
-        if (!mounted) return;
-        setBackendShortcutsWorking(shortcutsWorking);
-
-        // Load keyboard shortcuts as fallback
-        try {
-          const shortcuts = await invoke("get_keyboard_shortcuts");
-          if (mounted) {
-            setKeyboardShortcuts((prev: any) => prev ?? shortcuts);
-          }
-        } catch (error) {
-          console.warn("Failed to load keyboard shortcuts:", error);
-        }
-      } catch (error) {
-        console.error("Failed to load onboarding data:", error);
+        await invoke<boolean>(command);
+        // Polling handles the state update
+      } catch {
+        setWaitingPermission(null);
       }
-    };
-
-    // Add window focus listener to re-check permissions when window gains focus
-    const handleWindowFocus = async () => {
-      if (!mounted) return;
-      console.log(
-        "OnboardingFlow: Window gained focus, re-checking permissions"
-      );
-      await checkPermissionsStatus();
-    };
-
-    window.addEventListener("focus", handleWindowFocus);
-    loadInitialData();
-
-    return () => {
-      mounted = false;
-      window.removeEventListener("focus", handleWindowFocus);
-    };
-  }, []);
-
-  const onboardingSteps = getOnboardingSteps(
-    actualPermissionsGranted,
-    isDevelopmentMode,
-    apiKeysAvailable
+    },
+    []
   );
 
-  console.log(
-    "OnboardingFlow: Generated onboarding steps:",
-    onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
-  );
+  // ── Step management ──
+  const steps = [
+    "welcome",
+    "keys",
+    ...(apiKeysAvailable ? [] : ["connect"]),
+    ...(allRequiredGranted ? [] : ["permissions"]),
+    "ready",
+  ];
+
+  const advanceStep = useCallback(() => {
+    setCurrentStep((s) => Math.min(s + 1, steps.length - 1));
+  }, [steps.length]);
 
   const handleNext = useCallback(async () => {
-    // Block navigation from keyboard shortcut steps if shortcut hasn't been pressed
-    const currentStepData = onboardingSteps[currentStep];
-    if (currentStepData?.id === "shortcut" && !shortcutPressed) {
-      return;
-    }
-    if (currentStepData?.id === "cancel" && !escapePressed) {
-      return;
-    }
-    // Block navigation from permissions step if required permissions not granted
-    if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
-      return;
-    }
-    // Save API key before advancing from api-key step
-    if (currentStepData?.id === "api-key" && detectedProvider && !apiKeySaved) {
+    const step = steps[currentStep];
+
+    if (step === "keys" && !bothKeysConfirmed) return;
+    if (step === "permissions" && !allRequiredGranted) return;
+
+    if (step === "connect" && detectedProvider && !apiKeySaved) {
       await saveApiKey();
     }
 
-    if (currentStep < onboardingSteps.length - 1) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      setIsComplete(true);
+    if (currentStep >= steps.length - 1) {
       onComplete();
+    } else {
+      advanceStep();
     }
-  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
+  }, [currentStep, steps, bothKeysConfirmed, allRequiredGranted, detectedProvider, apiKeySaved, saveApiKey, onComplete, advanceStep]);
 
   const handleSkip = () => {
-    // Skip the current step by jumping to the end
-    setIsComplete(true);
-    if (onSkip) {
-      onSkip();
-    } else {
-      onComplete();
-    }
+    onSkip ? onSkip() : onComplete();
   };
 
-  const handleSkipStep = () => {
-    // Skip just the current step and move to the next one
-    if (currentStep < onboardingSteps.length - 1) {
-      // Reset step-specific states when skipping
-      const currentStepData = onboardingSteps[currentStep];
-      if (currentStepData?.id === "shortcut") {
-        setShortcutPressed(true); // Allow progression if they come back
-      }
-      setCurrentStep(currentStep + 1);
-    } else {
-      // If this is the last step, complete onboarding
-      setIsComplete(true);
-      if (onSkip) {
-        onSkip();
-      } else {
-        onComplete();
-      }
-    }
-  };
-
-  // Keyboard navigation: Enter key advances steps
+  // Enter key → advance
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
         handleNext();
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, [handleNext]);
 
-  if (isComplete) {
-    return null;
-  }
+  // ── Step renders ──
+  const step = steps[currentStep];
 
-  const step = onboardingSteps[currentStep];
-
-  // Determine if continue button should be disabled
   const isContinueDisabled =
-    (step.id === "shortcut" && !shortcutPressed) ||
-    (step.id === "cancel" && !escapePressed) ||
-    (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
-    (step.id === "api-key" && !detectedProvider) ||
-    (step.id === "api-key" && apiKeySaving);
+    (step === "keys" && !bothKeysConfirmed) ||
+    (step === "permissions" && !allRequiredGranted) ||
+    (step === "connect" && !apiKeysAvailable && !claudeCliAvailable && !detectedProvider) ||
+    (step === "connect" && apiKeySaving);
 
-  // Determine if skip should be hidden (permissions step with required perms not granted)
-  const isSkipHidden =
-    currentStep === onboardingSteps.length - 1 ||
-    (step.id === "permissions" && !areRequiredPermissionsGranted());
+  const transition = {
+    duration: reduced ? 0 : 0.4,
+    ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
+  };
+
+  const stepVariants = {
+    initial: { opacity: 0, y: reduced ? 0 : 15 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: reduced ? 0 : -15 },
+  };
 
   return (
-    <>
-      <div className="fixed inset-0 flex items-center justify-center z-50">
-        <div className="bg-background/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto p-10">
-          {/* Progress indicator */}
-          <div
-            className="flex gap-2 mb-10"
-            role="progressbar"
-            aria-valuenow={currentStep + 1}
-            aria-valuemax={onboardingSteps.length}
-            aria-label={`Step ${currentStep + 1} of ${onboardingSteps.length}`}
+    <div className="fixed inset-0 flex items-center justify-center bg-background">
+      {/* Skip link — welcome step only, appears after 1.5s */}
+      <AnimatePresence>
+        {currentStep === 0 && showSkip && (
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={handleSkip}
+            className="absolute top-6 right-6 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            {onboardingSteps.map((_, index) => (
-              <div
-                key={index}
-                className={`h-1 flex-1 rounded-full transition-all duration-500 ${
-                  index <= currentStep ? "bg-primary" : "bg-muted"
-                }`}
-              />
-            ))}
-          </div>
+            skip
+          </motion.button>
+        )}
+      </AnimatePresence>
 
-          {/* Persistent floating bar preview across shortcut & cancel steps */}
-          <AnimatePresence>
-            {(step.id === "shortcut" || step.id === "cancel") && (
-              <motion.div
-                key="floating-bar-preview"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-                className="flex justify-center mb-8"
-              >
-                <AudioVisualizer
-                  appState={
-                    (() => {
-                      if (step.id === "cancel") {
-                        return escapePressed ? "error" : "listening";
-                      }
-                      if (step.id === "shortcut") {
-                        return shortcutPressed ? "listening" : "idle";
-                      }
-                      return "idle";
-                    })()
-                  }
-                  width={350}
-                  height={60}
-                  enableMicrophone={false}
-                  intensity={step.id === "cancel" ? 1.8 : 1.2}
-                  animationStyle="organic"
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
+      <div className="w-full max-w-[440px] px-10 pt-12 pb-8">
+        {/* Progress bar */}
+        <div
+          className="flex gap-1.5 mb-12"
+          role="progressbar"
+          aria-valuenow={currentStep + 1}
+          aria-valuemax={steps.length}
+          aria-label={`Step ${currentStep + 1} of ${steps.length}`}
+        >
+          {steps.map((_, i) => (
+            <div
+              key={i}
+              className={`h-0.5 flex-1 rounded-full transition-all duration-500 ${
+                i <= currentStep ? "bg-primary" : "bg-border"
+              }`}
+            />
+          ))}
+        </div>
 
-          <AnimatePresence mode="wait">
+        {/* Floating bar — visible on keys step */}
+        <AnimatePresence>
+          {step === "keys" && (
             <motion.div
-              key={step.id}
-              initial={{ opacity: 0, y: 15 }}
+              key="bar-preview"
+              initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
-              className="text-center"
+              exit={{ opacity: 0, y: -8 }}
+              transition={transition}
+              className="flex justify-center mb-8"
             >
-              {/* Icon (null for shortcut/cancel — floating bar is above) */}
-              {step.icon && <div className="flex justify-center mb-8">{step.icon}</div>}
-
-              {/* Content */}
-              <div className="space-y-4 mb-10">
-                <div>
-                  <h2 className="text-3xl font-light text-foreground mb-3">
-                    {step.title}
-                  </h2>
-                  <p className="text-sm text-primary font-medium mb-4">
-                    {step.subtitle}
-                  </p>
-                </div>
-
-                <p className="text-muted-foreground leading-relaxed text-base">
-                  {step.description}
-                </p>
-
-                {/* Keyboard shortcut for shortcut step — visual only, detection via backend */}
-                {step.id === "shortcut" && (
-                  <div className="relative">
-                    <KeyboardShortcutDisplay
-                      shortcutString={keyboardShortcuts?.agent_mode}
-                      isActivated={shortcutPressed}
-                    />
-                    <p className="text-sm text-muted-foreground mt-4 text-center">
-                      {shortcutPressed
-                        ? "Perfect! You've got it."
-                        : keyboardShortcuts?.agent_mode
-                        ? `Press ${keyboardShortcuts.agent_mode.replace(
-                            /\+/g,
-                            " + "
-                          )} to activate agent mode`
-                        : "Press the keys above together to activate agent mode"}
-                    </p>
-                  </div>
-                )}
-
-                {/* Cancel shortcut for cancel step — visual only, detection via backend */}
-                {step.id === "cancel" && (
-                  <div className="relative">
-                    <KeyboardShortcutDisplay
-                      shortcutString={keyboardShortcuts?.stop_current_task}
-                      defaultShortcut="Escape"
-                      isActivated={escapePressed}
-                    />
-                    <p className="text-sm text-muted-foreground mt-4 text-center">
-                      {escapePressed
-                        ? "Perfect! You've got it."
-                        : keyboardShortcuts?.stop_current_task
-                        ? `Press ${keyboardShortcuts.stop_current_task.replace(
-                            /\+/g,
-                            " + "
-                          )} to stop Juno`
-                        : "Press the key above to stop Juno"}
-                    </p>
-                  </div>
-                )}
-
-                {/* API key input interface */}
-                {step.id === "api-key" && (
-                  <div className="space-y-4 mt-8 text-left">
-                    {/* API key input with show/hide toggle */}
-                    <div className="relative">
-                      <input
-                        type={showApiKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={(e) => handleApiKeyChange(e.target.value)}
-                        placeholder="Paste your API key here..."
-                        className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
-                        autoFocus
-                        spellCheck={false}
-                        autoComplete="off"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                      >
-                        {showApiKey ? (
-                          <EyeOff className="w-5 h-5" />
-                        ) : (
-                          <Eye className="w-5 h-5" />
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Provider detection badge */}
-                    {detectedProvider && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
-                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
-                            {detectedProvider.name} detected
-                          </span>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {/* Unknown key warning */}
-                    {apiKey.trim().length > 0 && !detectedProvider && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-50 border border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800">
-                          <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
-                          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
-                            Unrecognized key format
-                          </span>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {/* Save confirmation */}
-                    {apiKeySaved && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
-                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
-                            API key saved! {detectedProvider?.name} set as active provider.
-                          </span>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {/* Error message */}
-                    {apiKeyError && (
-                      <div className="p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
-                        <p className="text-sm text-red-700 dark:text-red-300">
-                          Failed to save: {apiKeyError}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Supported providers info */}
-                    <div className="text-center pt-2">
-                      <p className="text-xs text-muted-foreground">
-                        Supported: Anthropic (sk-ant-...) · OpenAI (sk-proj-...) · Google Gemini (AIza...)
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        You can skip this step and add your key later in Settings.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Granular permissions interface */}
-                {step.id === "permissions" && (
-                  <div className="space-y-4 mt-8 text-left">
-                    {/* Header */}
-                    <div className="text-center mb-6">
-                      <h3 className="text-lg font-semibold text-foreground mb-2">
-                        Grant Permissions
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Click "Grant Permission" for each item below to enable
-                        full functionality
-                      </p>
-                      {permissionsError && (
-                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
-                          <p className="text-sm text-red-700 dark:text-red-300">
-                            Error: {permissionsError}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Permission Cards */}
-                    <div className="space-y-3">
-                      {permissions.map((permission) => {
-                        const permissionKey = permission.id.replace(
-                          "-",
-                          "_"
-                        ) as keyof PermissionsState;
-                        const permissionStatus =
-                          (permissionsState?.[
-                            permissionKey
-                          ] as PermissionStatus) || null;
-
-                        return (
-                          <PermissionCard
-                            key={permission.id}
-                            permission={permission}
-                            permissionStatus={permissionStatus}
-                            onRequest={() =>
-                              requestPermission(permission.id.replace("-", "_"))
-                            }
-                            isRequesting={
-                              isRequestingPermission ===
-                              permission.id.replace("-", "_")
-                            }
-                          />
-                        );
-                      })}
-                    </div>
-
-                    {/* Summary */}
-                    {permissionsState && (
-                      <div className="mt-6 p-4 bg-muted rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {areRequiredPermissionsGranted() ? (
-                              <>
-                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                                <span className="font-medium text-green-800 dark:text-green-300">
-                                  All required permissions granted!
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                                <span className="font-medium text-orange-800 dark:text-orange-300">
-                                  Accessibility and Screen Recording are required to continue.
-                                </span>
-                              </>
-                            )}
-                          </div>
-                          <button
-                            onClick={checkPermissionsStatus}
-                            className="text-sm text-primary hover:text-primary/80 flex items-center gap-1"
-                            aria-label="Refresh permission status"
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                            Refresh
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-4">
-                {/* Skip button: hidden on final step and on permissions step when required perms not granted */}
-                {isSkipHidden ? null : currentStep === 0 ? (
-                  <button
-                    onClick={handleSkip}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
-                    aria-label="Skip onboarding"
-                  >
-                    Skip
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSkipStep}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
-                    aria-label="Skip this step"
-                  >
-                    Skip
-                  </button>
-                )}
-
-                {/* Continue button - disable for shortcut/cancel/permissions steps until conditions met */}
-                <button
-                  onClick={handleNext}
-                  disabled={isContinueDisabled}
-                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${
-                    isContinueDisabled
-                      ? "bg-muted text-muted-foreground cursor-not-allowed"
-                      : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl"
-                  }`}
-                  aria-label={step.action}
-                >
-                  {step.action}
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              <AudioVisualizer
+                appState={
+                  escapePressed
+                    ? "error"
+                    : agentShortcutPressed
+                    ? "listening"
+                    : "idle"
+                }
+                width={320}
+                height={52}
+                enableMicrophone={false}
+                intensity={escapePressed ? 1.8 : agentShortcutPressed ? 1.4 : 1.0}
+                animationStyle="organic"
+              />
             </motion.div>
-          </AnimatePresence>
+          )}
+        </AnimatePresence>
+
+        {/* Step content */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            variants={stepVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={transition}
+          >
+            {step === "welcome" && <WelcomeStep reduced={reduced} />}
+            {step === "keys" && (
+              <KeysStep
+                reduced={reduced}
+                keyPhase={keyPhase}
+                agentShortcutPressed={agentShortcutPressed}
+                escapePressed={escapePressed}
+                keyboardShortcuts={keyboardShortcuts}
+              />
+            )}
+            {step === "connect" && (
+              <ConnectStep
+                claudeCliAvailable={claudeCliAvailable}
+                apiKey={apiKey}
+                showApiKey={showApiKey}
+                onToggleShowApiKey={() => setShowApiKey((v) => !v)}
+                onApiKeyChange={handleApiKeyChange}
+                detectedProvider={detectedProvider}
+                apiKeySaved={apiKeySaved}
+                apiKeyError={apiKeyError}
+              />
+            )}
+            {step === "permissions" && (
+              <PermissionsStep
+                permissionsState={permissionsState}
+                currentPermIdx={currentPermIdx}
+                waitingPermission={waitingPermission}
+                allRequiredGranted={allRequiredGranted}
+                onGrant={requestPermission}
+                reduced={reduced}
+              />
+            )}
+            {step === "ready" && <ReadyStep keyboardShortcuts={keyboardShortcuts} />}
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Actions */}
+        <div className="flex gap-4 mt-10">
+          {currentStep > 0 &&
+            currentStep < steps.length - 1 &&
+            step !== "permissions" && (
+              <button
+                onClick={handleSkip}
+                className="flex-1 py-3 text-sm text-muted-foreground hover:text-foreground font-medium transition-colors"
+              >
+                Skip
+              </button>
+            )}
+
+          <motion.button
+            onClick={handleNext}
+            disabled={isContinueDisabled}
+            animate={
+              step === "permissions" && allRequiredGranted && !reduced
+                ? { scale: [1, 1.02, 1] }
+                : {}
+            }
+            transition={{ duration: 0.2 }}
+            className={`flex-1 py-3 px-6 text-sm font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 ${
+              isContinueDisabled
+                ? "bg-muted text-muted-foreground cursor-not-allowed"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            }`}
+          >
+            {step === "welcome"
+              ? "Let's go"
+              : step === "ready"
+              ? "Start using Juno"
+              : "Continue"}
+            <ChevronRight className="w-4 h-4" />
+          </motion.button>
         </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+// ─── Step sub-components ───────────────────────────────────────────────────────
+
+function WelcomeStep({ reduced }: { reduced: boolean }) {
+  return (
+    <div className="text-center space-y-6">
+      <motion.div
+        className="flex justify-center"
+        initial={reduced ? {} : { scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{
+          duration: reduced ? 0 : 0.8,
+          ease: [0.16, 1, 0.3, 1],
+        }}
+      >
+        <img src="/juno.png" alt="Juno" className="w-20 h-20 object-contain" />
+      </motion.div>
+
+      <div>
+        <h1 className="text-3xl font-light tracking-tight text-foreground">
+          Juno
+        </h1>
+        <motion.p
+          className="mt-3 text-base text-muted-foreground"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: reduced ? 0 : 0.4, duration: 0.4 }}
+        >
+          Desktop automation that works the way you think.
+        </motion.p>
+      </div>
+    </div>
+  );
+}
+
+function KeysStep({
+  reduced,
+  keyPhase,
+  agentShortcutPressed,
+  escapePressed,
+  keyboardShortcuts,
+}: {
+  reduced: boolean;
+  keyPhase: "agent" | "escape";
+  agentShortcutPressed: boolean;
+  escapePressed: boolean;
+  keyboardShortcuts: any;
+}) {
+  return (
+    <div className="text-center space-y-4">
+      <div>
+        <h2 className="text-3xl font-light tracking-tight text-foreground">
+          Two keys to know
+        </h2>
+        <p className="mt-3 text-sm text-primary font-medium">
+          These work from anywhere on your Mac.
+        </p>
+      </div>
+
+      <div className="relative min-h-[140px]">
+        <AnimatePresence mode="wait">
+          {keyPhase === "agent" ? (
+            <motion.div
+              key="agent-phase"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: reduced ? 0 : 0.3 }}
+            >
+              <KeyboardShortcutDisplay
+                shortcutString={keyboardShortcuts?.agent_mode}
+                defaultShortcut="Option+D"
+                isActivated={agentShortcutPressed}
+              />
+              <p className="text-sm text-muted-foreground">
+                {agentShortcutPressed
+                  ? "Got it."
+                  : keyboardShortcuts?.agent_mode
+                  ? `Hold these together to activate Juno.`
+                  : "Hold these together to activate Juno."}
+              </p>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="escape-phase"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: reduced ? 0 : 0.3 }}
+            >
+              <KeyboardShortcutDisplay
+                shortcutString={keyboardShortcuts?.stop_current_task}
+                defaultShortcut="Escape"
+                isActivated={escapePressed}
+              />
+              <p className="text-sm text-muted-foreground">
+                {escapePressed
+                  ? "You're in control."
+                  : "Press Escape to stop anything Juno is doing."}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function ConnectStep({
+  claudeCliAvailable,
+  apiKey,
+  showApiKey,
+  onToggleShowApiKey,
+  onApiKeyChange,
+  detectedProvider,
+  apiKeySaved,
+  apiKeyError,
+}: {
+  claudeCliAvailable: boolean | null;
+  apiKey: string;
+  showApiKey: boolean;
+  onToggleShowApiKey: () => void;
+  onApiKeyChange: (v: string) => void;
+  detectedProvider: { id: string; name: string } | null;
+  apiKeySaved: boolean;
+  apiKeyError: string | null;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-light tracking-tight text-foreground">
+          Connect to AI
+        </h2>
+      </div>
+
+      {/* Claude CLI card */}
+      <div className="p-4 rounded-xl border border-border space-y-2">
+        <p className="text-sm font-medium text-foreground">
+          Use your Claude subscription
+        </p>
+        <p className="text-sm text-muted-foreground">
+          If you have Claude Code installed, Juno can use it directly. No API key needed.
+        </p>
+        <div className="mt-2">
+          {claudeCliAvailable === null ? (
+            <span className="text-xs text-muted-foreground">Checking...</span>
+          ) : claudeCliAvailable ? (
+            <span className="text-xs text-primary font-medium">✓ Claude CLI detected</span>
+          ) : (
+            <a
+              href="https://claude.ai/code"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Not installed — Get Claude Code →
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* API key card */}
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-foreground">Or paste an API key</p>
+
+        <div className="relative">
+          <input
+            type={showApiKey ? "text" : "password"}
+            value={apiKey}
+            onChange={(e) => onApiKeyChange(e.target.value)}
+            placeholder="sk-ant-... or sk-proj-..."
+            className="w-full px-4 py-3 pr-16 rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            onClick={onToggleShowApiKey}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showApiKey ? "hide" : "show"}
+          </button>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {detectedProvider && (
+            <motion.p
+              key="detected"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="text-xs text-primary"
+            >
+              ✓ {detectedProvider.name} detected{apiKeySaved ? " — saved" : ""}
+            </motion.p>
+          )}
+          {apiKeyError && (
+            <motion.p
+              key="error"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-xs text-destructive"
+            >
+              {apiKeyError}
+            </motion.p>
+          )}
+        </AnimatePresence>
+
+        <p className="text-xs text-muted-foreground">
+          Works with Anthropic, OpenAI, and Google Gemini. You can add this later in Settings.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PermissionsStep({
+  permissionsState,
+  currentPermIdx,
+  waitingPermission,
+  allRequiredGranted,
+  onGrant,
+  reduced,
+}: {
+  permissionsState: PermissionsState | null;
+  currentPermIdx: number;
+  waitingPermission: string | null;
+  allRequiredGranted: boolean;
+  onGrant: (key: string, command: string) => void;
+  reduced: boolean;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-light tracking-tight text-foreground">
+          {allRequiredGranted ? "All set" : "A few things Juno needs"}
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground">
+          These let Juno see and interact with your screen.
+        </p>
+      </div>
+
+      <div>
+        {PERMISSION_SEQUENCE.map((perm, i) => {
+          const permState = permissionsState?.[perm.key] as PermissionStatus | undefined;
+          const granted = permState?.granted ?? false;
+          const revealed = i <= currentPermIdx;
+
+          return (
+            <PermissionItem
+              key={perm.key}
+              label={perm.label}
+              purpose={perm.purpose}
+              required={perm.required}
+              granted={granted}
+              waiting={waitingPermission === perm.key}
+              onGrant={() => onGrant(perm.key, perm.command)}
+              revealed={revealed}
+              reduced={reduced}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReadyStep({ keyboardShortcuts }: { keyboardShortcuts: any }) {
+  const agentShortcut = keyboardShortcuts?.agent_mode
+    ? keyboardShortcuts.agent_mode.replace("Option", "⌥").replace("+", "")
+    : "⌥D";
+
+  return (
+    <div className="space-y-8">
+      <div className="text-center">
+        <h2 className="text-3xl font-light tracking-tight text-foreground">
+          You're ready
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Here's what you need to remember.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border overflow-hidden">
+        {[
+          { keys: agentShortcut, desc: "Activate Juno" },
+          { keys: "Esc", desc: "Stop current task" },
+          { keys: "⌘B", desc: "Toggle floating bar" },
+        ].map(({ keys, desc }) => (
+          <div
+            key={keys}
+            className="flex items-center justify-between px-4 py-3 border-b border-border/40 last:border-0"
+          >
+            <code className="text-sm font-mono font-medium text-primary bg-primary/8 px-2 py-0.5 rounded">
+              {keys}
+            </code>
+            <span className="text-sm text-muted-foreground">{desc}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
