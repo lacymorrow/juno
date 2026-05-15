@@ -50,6 +50,27 @@ import { UI } from "@/lib/constants.generated";
 export type { ChatMessage } from "@/types/chat";
 import type { ChatMessage } from "@/types/chat";
 
+const ACTION_VERB: Record<string, string> = {
+  left_click: "Clicked",
+  right_click: "Right-clicked",
+  double_click: "Double-clicked",
+  middle_click: "Middle-clicked",
+};
+
+function formatAxActionTitle(msg: ChatMessage): string | undefined {
+  if (!msg.ax_action) return undefined;
+  const verb = ACTION_VERB[msg.ax_action] ?? msg.ax_action;
+  if (msg.ax_grounded && msg.ax_role) {
+    const label = msg.ax_label ? ` '${msg.ax_label}'` : "";
+    return `${verb} ${msg.ax_role}${label}`;
+  }
+  if (msg.ax_screen_coordinate) {
+    const [x, y] = msg.ax_screen_coordinate;
+    return `${verb} at (${Math.round(x)}, ${Math.round(y)})`;
+  }
+  return `${verb}`;
+}
+
 interface ChatMessageProps {
   msg: ChatMessage;
   index: number;
@@ -330,7 +351,7 @@ export function ChatMessageComponent({
             type="dynamic-tool"
             state={resultState}
             toolName={msg.tool_name || "unknown"}
-            title={msg.tool_name}
+            title={formatAxActionTitle(msg) ?? msg.tool_name}
           />
           <ToolContent>
             <ToolOutput

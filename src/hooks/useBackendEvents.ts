@@ -6,6 +6,16 @@ import { EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
 
+// AX grounding audit payload emitted before each computer use click
+type AxGroundingAuditEvent = {
+	action: string;
+	ax_grounded: boolean;
+	ax_role: string | null;
+	ax_label: string | null;
+	screen_coordinate: [number, number];
+	timestamp: number;
+};
+
 // Type definitions for backend events
 type SubmitQueryResult = {
 	text: string;
@@ -106,6 +116,9 @@ export function useBackendEvents({
 	setServerStatus,
 }: UseBackendEventsProps) {
 	const hasCheckedServer = useRef(false);
+	// Single-slot buffer: ax-grounding-audit fires before tool_call_result, so we
+	// store the latest unattached audit here and consume it when the result arrives.
+	const lastAxAudit = useRef<AxGroundingAuditEvent | null>(null);
 
 	// Handle backend responses via event listener.
 	// Use refs to keep the debounced function stable while always calling latest handler.
@@ -274,6 +287,10 @@ export function useBackendEvents({
 						timestamp: currentTime,
 					};
 				} else if (type === "tool_call_result" && payload.tool_name) {
+					// Consume the AX audit buffer for computer use tool results
+					const axAudit = payload.tool_name === "computer" ? lastAxAudit.current : null;
+					lastAxAudit.current = null;
+
 					newMessage = {
 						role: "tool_call_result",
 						tool_name: payload.tool_name,
@@ -285,6 +302,13 @@ export function useBackendEvents({
 								: `Tool ${payload.tool_name} failed.`),
 						screenshot_base64: payload.screenshot_base64,
 						timestamp: currentTime,
+						...(axAudit && {
+							ax_grounded: axAudit.ax_grounded,
+							ax_role: axAudit.ax_role,
+							ax_label: axAudit.ax_label,
+							ax_screen_coordinate: axAudit.screen_coordinate,
+							ax_action: axAudit.action,
+						}),
 					};
 				} else if (type === "generic_content" && payload.content) {
 					newMessage = {
@@ -325,6 +349,14 @@ export function useBackendEvents({
 					timestamp: payload.timestamp,
 				},
 			]);
+		}
+	);
+
+	// Buffer AX grounding audit events — consumed by the next tool_call_result for "computer" tool
+	useEventListener<AxGroundingAuditEvent>(
+		EVENTS.TOOLS_AX_GROUNDING_AUDIT,
+		(payload) => {
+			lastAxAudit.current = payload;
 		}
 	);
 
