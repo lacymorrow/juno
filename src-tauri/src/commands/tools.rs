@@ -8,16 +8,10 @@ use crate::agent::tools::{ToolCategory, tool_config::ToolConfigManager};
 /// Get all tool configurations organized by category
 #[tauri::command]
 pub async fn get_tool_configurations(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    // Reduced logging frequency - only log at debug level
     tracing::debug!("Getting tool configurations");
-
-    // Load tool configuration from file if needed
-    if let Err(e) = state.load_tool_config(&app_handle).await {
-        tracing::warn!("Failed to load tool config: {}, using defaults", e);
-    }
 
     let config_manager = state.get_tool_config_manager().await;
     let config_guard = config_manager.lock().await;
