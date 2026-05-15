@@ -10,6 +10,7 @@ pub mod always_listening;
 pub mod shared_whisper;
 pub mod constants;
 pub mod mic_permissions;
+pub mod providers;
 
 pub use config::VoiceTranscriptionConfig;
 pub use error::{Error, Result};
@@ -47,6 +48,9 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::check_microphone_permission,
             commands::request_microphone_permission,
             commands::ensure_microphone_ready,
+            commands::set_stt_provider,
+            commands::get_stt_provider,
+            commands::set_stt_api_key,
         ])
         .setup(move |app, _api| {
             tracing::info!("=== Voice Transcription Plugin Initialization Starting ===");

@@ -1,5 +1,40 @@
 use serde::{Deserialize, Serialize};
 
+/// Which speech-to-text backend to use for dictation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SttProvider {
+    /// Local Whisper model — no API key, works offline, results after recording ends.
+    #[default]
+    Whisper,
+    /// AssemblyAI real-time streaming — API key required, partial results while speaking.
+    AssemblyAi,
+    /// Deepgram real-time streaming — API key required, partial results while speaking.
+    Deepgram,
+}
+
+impl std::fmt::Display for SttProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SttProvider::Whisper => write!(f, "whisper"),
+            SttProvider::AssemblyAi => write!(f, "assembly_ai"),
+            SttProvider::Deepgram => write!(f, "deepgram"),
+        }
+    }
+}
+
+impl std::str::FromStr for SttProvider {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "whisper" => Ok(SttProvider::Whisper),
+            "assembly_ai" | "assemblyai" => Ok(SttProvider::AssemblyAi),
+            "deepgram" => Ok(SttProvider::Deepgram),
+            other => Err(format!("Unknown STT provider: {}", other)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceTranscriptionConfig {
     /// Path to the Whisper model file
@@ -29,6 +64,18 @@ pub struct VoiceTranscriptionConfig {
     /// Enable playback of the transcription
     #[serde(default = "default_enable_playback")]
     pub enable_playback: bool,
+
+    /// Which STT provider to use
+    #[serde(default)]
+    pub stt_provider: SttProvider,
+
+    /// AssemblyAI API key (required when stt_provider == AssemblyAi)
+    #[serde(default)]
+    pub assemblyai_api_key: Option<String>,
+
+    /// Deepgram API key (required when stt_provider == Deepgram)
+    #[serde(default)]
+    pub deepgram_api_key: Option<String>,
 }
 
 impl Default for VoiceTranscriptionConfig {
@@ -41,6 +88,9 @@ impl Default for VoiceTranscriptionConfig {
             partial_interval_ms: default_partial_interval_ms(),
             enable_partial_transcription: default_enable_partial_transcription(),
             enable_playback: default_enable_playback(),
+            stt_provider: SttProvider::Whisper,
+            assemblyai_api_key: None,
+            deepgram_api_key: None,
         }
     }
 }
@@ -64,6 +114,9 @@ impl VoiceTranscriptionConfig {
             partial_interval_ms,
             enable_partial_transcription,
             enable_playback,
+            stt_provider: SttProvider::Whisper,
+            assemblyai_api_key: None,
+            deepgram_api_key: None,
         }
     }
 }

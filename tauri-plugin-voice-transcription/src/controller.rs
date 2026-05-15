@@ -12,12 +12,36 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 use crate::constants;
 use crate::utils::filter_transcription_text;
+use crate::config::SttProvider;
 
 use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const SINC_LENGTH: usize = 256;
 const OVERSAMPLING_FACTOR: usize = 256;
+
+/// Resample `input` from `actual_rate` → `WHISPER_SAMPLE_RATE` if needed, then convert f32 → PCM16.
+/// Returns `None` when resampling is required but no resampler is supplied.
+fn resample_and_convert(
+    input: &[f32],
+    actual_rate: u32,
+    resampler: Option<&mut SincFixedIn<f32>>,
+) -> Option<Vec<i16>> {
+    let resampled = if actual_rate != WHISPER_SAMPLE_RATE {
+        let r = resampler?;
+        let waves_out = r.process(&[input.to_vec()], None).ok()?;
+        waves_out.into_iter().next()?
+    } else {
+        input.to_vec()
+    };
+
+    Some(
+        resampled
+            .iter()
+            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .collect(),
+    )
+}
 
 /// Create standard sinc interpolation parameters for audio resampling.
 fn sinc_resampling_params() -> SincInterpolationParameters {
@@ -44,6 +68,10 @@ pub struct VoiceController {
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>,
     is_initialized: bool,
     initialization_error: Option<String>,
+    /// Active STT provider (Whisper by default; streaming providers need API keys)
+    stt_provider: SttProvider,
+    assemblyai_api_key: Option<String>,
+    deepgram_api_key: Option<String>,
 }
 
 impl VoiceController {
@@ -66,6 +94,9 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: true,
             initialization_error: None,
+            stt_provider: SttProvider::Whisper,
+            assemblyai_api_key: None,
+            deepgram_api_key: None,
         })
     }
 
@@ -83,6 +114,9 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: true,
             initialization_error: None,
+            stt_provider: SttProvider::Whisper,
+            assemblyai_api_key: None,
+            deepgram_api_key: None,
         })
     }
 
@@ -97,6 +131,37 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: false,
             initialization_error: Some(error_message),
+            stt_provider: SttProvider::Whisper,
+            assemblyai_api_key: None,
+            deepgram_api_key: None,
+        }
+    }
+
+    /// Set the active STT provider.
+    pub fn set_stt_provider(&mut self, provider: SttProvider) {
+        info!("[VoiceController] STT provider changed to: {}", provider);
+        self.stt_provider = provider;
+    }
+
+    /// Get the active STT provider.
+    pub fn get_stt_provider(&self) -> &SttProvider {
+        &self.stt_provider
+    }
+
+    /// Store an API key for the given provider.
+    pub fn set_api_key(&mut self, provider: &SttProvider, key: String) {
+        match provider {
+            SttProvider::AssemblyAi => {
+                info!("[VoiceController] AssemblyAI API key updated");
+                self.assemblyai_api_key = Some(key);
+            }
+            SttProvider::Deepgram => {
+                info!("[VoiceController] Deepgram API key updated");
+                self.deepgram_api_key = Some(key);
+            }
+            SttProvider::Whisper => {
+                info!("[VoiceController] Whisper needs no API key — ignoring set_api_key call");
+            }
         }
     }
 
@@ -329,25 +394,89 @@ impl VoiceController {
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
 
-        let shared_context = self.ctx.as_ref()
-            .ok_or_else(|| Error::Whisper("Whisper context not initialized".to_string()))?
-            .clone();
+        // Snapshot provider state so the thread closures own their data.
+        let provider = self.stt_provider.clone();
+        let assemblyai_key = self.assemblyai_api_key.clone();
+        let deepgram_key = self.deepgram_api_key.clone();
 
-        let audio_thread_handle = thread::spawn(move || {
-            Self::audio_thread_worker(
-                shared_context,
-                last_buffer_arc_for_thread,
-                actual_rate_for_thread,
-                channels_for_thread,
-                app_handle_for_thread,
-                control_rx,
-                audio_data_tx,
-                audio_data_rx,
-                device,
-                config,
-                sample_format,
-            );
-        });
+        let audio_thread_handle = match provider {
+            SttProvider::Whisper => {
+                let shared_context = self.ctx.as_ref()
+                    .ok_or_else(|| Error::Whisper("Whisper context not initialized".to_string()))?
+                    .clone();
+
+                thread::spawn(move || {
+                    Self::audio_thread_worker(
+                        shared_context,
+                        last_buffer_arc_for_thread,
+                        actual_rate_for_thread,
+                        channels_for_thread,
+                        app_handle_for_thread,
+                        control_rx,
+                        audio_data_tx,
+                        audio_data_rx,
+                        device,
+                        config,
+                        sample_format,
+                    );
+                })
+            }
+            SttProvider::AssemblyAi => {
+                let api_key = assemblyai_key
+                    .ok_or_else(|| Error::ConfigError("AssemblyAI API key is not set. Call set_stt_api_key first.".to_string()))?;
+
+                let (audio_to_ws_tx, audio_to_ws_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<Option<Vec<i16>>>();
+
+                // app_handle_for_thread is moved (not cloned) into the WebSocket task.
+                tauri::async_runtime::spawn(crate::providers::assemblyai::streaming_task(
+                    api_key,
+                    audio_to_ws_rx,
+                    app_handle_for_thread,
+                ));
+
+                thread::spawn(move || {
+                    Self::streaming_audio_thread_worker(
+                        actual_rate_for_thread,
+                        channels_for_thread,
+                        control_rx,
+                        audio_data_tx,
+                        audio_data_rx,
+                        audio_to_ws_tx,
+                        device,
+                        config,
+                        sample_format,
+                    );
+                })
+            }
+            SttProvider::Deepgram => {
+                let api_key = deepgram_key
+                    .ok_or_else(|| Error::ConfigError("Deepgram API key is not set. Call set_stt_api_key first.".to_string()))?;
+
+                let (audio_to_ws_tx, audio_to_ws_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<Option<Vec<i16>>>();
+
+                tauri::async_runtime::spawn(crate::providers::deepgram::streaming_task(
+                    api_key,
+                    audio_to_ws_rx,
+                    app_handle_for_thread,
+                ));
+
+                thread::spawn(move || {
+                    Self::streaming_audio_thread_worker(
+                        actual_rate_for_thread,
+                        channels_for_thread,
+                        control_rx,
+                        audio_data_tx,
+                        audio_data_rx,
+                        audio_to_ws_tx,
+                        device,
+                        config,
+                        sample_format,
+                    );
+                })
+            }
+        };
 
         // Start the audio stream
         self.audio_thread = Some((audio_thread_handle, control_tx));
@@ -541,6 +670,150 @@ impl VoiceController {
                 }
             }
         }
+    }
+
+    /// Audio thread for streaming providers (AssemblyAI, Deepgram).
+    ///
+    /// Captures audio via cpal, resamples to 16 kHz, converts to PCM16, and sends 50 ms
+    /// chunks to the WebSocket task via `audio_to_ws_tx`.  A `None` value signals terminate.
+    #[allow(clippy::too_many_arguments)]
+    fn streaming_audio_thread_worker(
+        actual_rate: u32,
+        channels: u16,
+        control_rx: std::sync::mpsc::Receiver<AudioThreadMessage>,
+        audio_data_tx: std::sync::mpsc::Sender<Vec<f32>>,
+        audio_data_rx: std::sync::mpsc::Receiver<Vec<f32>>,
+        audio_to_ws_tx: tokio::sync::mpsc::UnboundedSender<Option<Vec<i16>>>,
+        device: cpal::Device,
+        config: cpal::StreamConfig,
+        sample_format: SampleFormat,
+    ) {
+        info!("[StreamingAudioThread] Thread started at {} Hz, {} ch.", actual_rate, channels);
+
+        // Build the cpal input stream (same pattern as Whisper worker).
+        let stream = match sample_format {
+            SampleFormat::F32 => {
+                let tx = audio_data_tx.clone();
+                match device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let mono: Vec<f32> = if channels == 2 {
+                            data.chunks_exact(2).map(|c| (c[0] + c[1]) / 2.0).collect()
+                        } else {
+                            data.to_vec()
+                        };
+                        let _ = tx.send(mono);
+                    },
+                    |err| tracing::error!("[StreamingAudioThread] cpal error: {}", err),
+                    None,
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("[StreamingAudioThread] Failed to build f32 stream: {:?}", e);
+                        crate::mic_permissions::invalidate_permission_cache();
+                        return;
+                    }
+                }
+            }
+            SampleFormat::I16 => {
+                let tx = audio_data_tx.clone();
+                match device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let mono_i16: Vec<i16> = if channels == 2 {
+                            data.chunks_exact(2)
+                                .map(|c| ((c[0] as i32 + c[1] as i32) / 2) as i16)
+                                .collect()
+                        } else {
+                            data.to_vec()
+                        };
+                        let mut f32_buf = vec![0.0f32; mono_i16.len()];
+                        if whisper_rs::convert_integer_to_float_audio(&mono_i16, &mut f32_buf).is_ok() {
+                            let _ = tx.send(f32_buf);
+                        }
+                    },
+                    |err| tracing::error!("[StreamingAudioThread] cpal error: {}", err),
+                    None,
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("[StreamingAudioThread] Failed to build i16 stream: {:?}", e);
+                        crate::mic_permissions::invalidate_permission_cache();
+                        return;
+                    }
+                }
+            }
+            _ => {
+                tracing::error!("[StreamingAudioThread] Unsupported sample format: {:?}", sample_format);
+                return;
+            }
+        };
+
+        if let Err(e) = stream.play() {
+            tracing::error!("[StreamingAudioThread] Failed to start audio stream: {:?}", e);
+            crate::mic_permissions::invalidate_permission_cache();
+            return;
+        }
+
+        // Resampler: buffer enough samples to fill a 50 ms chunk before resampling.
+        let chunk_ms: u64 = 50;
+        let chunk_size_at_actual_rate = (actual_rate as u64 * chunk_ms / 1000) as usize;
+
+        let mut chunk_resampler: Option<SincFixedIn<f32>> = if actual_rate != WHISPER_SAMPLE_RATE {
+            let params = sinc_resampling_params();
+            SincFixedIn::new(
+                WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
+                2.0,
+                params,
+                chunk_size_at_actual_rate,
+                1,
+            ).ok()
+        } else {
+            None
+        };
+
+        let mut resample_buf: Vec<f32> = Vec::new();
+
+        loop {
+            // Check for stop signal.
+            match control_rx.try_recv() {
+                Ok(AudioThreadMessage::Stop) => {
+                    info!("[StreamingAudioThread] Stop received — signalling WebSocket task.");
+                    // Flush remaining samples before terminating.
+                    if !resample_buf.is_empty() {
+                        if let Some(pcm16) = resample_and_convert(&resample_buf, actual_rate, chunk_resampler.as_mut()) {
+                            let _ = audio_to_ws_tx.send(Some(pcm16));
+                        }
+                    }
+                    let _ = audio_to_ws_tx.send(None);
+                    break;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    info!("[StreamingAudioThread] Control channel disconnected.");
+                    let _ = audio_to_ws_tx.send(None);
+                    break;
+                }
+            }
+
+            if let Ok(chunk_f32) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
+                resample_buf.extend_from_slice(&chunk_f32);
+
+                // Drain 50 ms chunks from the buffer and forward them.
+                while resample_buf.len() >= chunk_size_at_actual_rate {
+                    let input_chunk: Vec<f32> = resample_buf.drain(..chunk_size_at_actual_rate).collect();
+                    if let Some(pcm16) = resample_and_convert(&input_chunk, actual_rate, chunk_resampler.as_mut()) {
+                        if audio_to_ws_tx.send(Some(pcm16)).is_err() {
+                            info!("[StreamingAudioThread] WebSocket task dropped — stopping.");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        drop(stream);
+        info!("[StreamingAudioThread] Exited.");
     }
 
     fn process_partial_transcription<R: Runtime>(

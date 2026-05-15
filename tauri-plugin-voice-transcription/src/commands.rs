@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use crate::controller::VoiceController;
 use crate::always_listening::AlwaysListeningController;
 use crate::error::Error;
-use crate::config::VoiceTranscriptionConfig;
+use crate::config::{VoiceTranscriptionConfig, SttProvider};
 use crate::utils::resolve_model_path;
 use tracing::{info, error};
 use serde_json::json;
@@ -750,7 +750,7 @@ pub async fn request_microphone_permission() -> Result<String, Error> {
 #[tauri::command]
 pub async fn ensure_microphone_ready() -> Result<(), Error> {
     info!("[Plugin] ensure_microphone_ready command called");
-    
+
     match crate::mic_permissions::ensure_microphone_ready().await {
         Ok(()) => {
             info!("[Plugin] Microphone is ready");
@@ -761,4 +761,83 @@ pub async fn ensure_microphone_ready() -> Result<(), Error> {
             Err(Error::Other(e))
         }
     }
+}
+
+// STT Provider Commands
+
+/// Select which STT provider to use.
+/// `provider` must be one of: "whisper", "assembly_ai", "deepgram".
+#[tauri::command]
+pub async fn set_stt_provider(
+    provider: String,
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<(), Error> {
+    info!("[Plugin] set_stt_provider called with: {}", provider);
+
+    let parsed: SttProvider = provider
+        .parse()
+        .map_err(|e: String| Error::ConfigError(e))?;
+
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("VoiceController is busy — cannot change provider while dictating".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex poisoned: {}", e)));
+        }
+    };
+
+    voice_controller.set_stt_provider(parsed);
+    Ok(())
+}
+
+/// Return the currently active STT provider name.
+#[tauri::command]
+pub async fn get_stt_provider(
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<String, Error> {
+    let voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Ok("whisper".to_string()); // safe default while busy
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex poisoned: {}", e)));
+        }
+    };
+
+    Ok(voice_controller.get_stt_provider().to_string())
+}
+
+/// Store an API key for a streaming STT provider.
+/// `provider` must be "assembly_ai" or "deepgram".
+#[tauri::command]
+pub async fn set_stt_api_key(
+    provider: String,
+    api_key: String,
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<(), Error> {
+    info!("[Plugin] set_stt_api_key called for provider: {}", provider);
+
+    let parsed: SttProvider = provider
+        .parse()
+        .map_err(|e: String| Error::ConfigError(e))?;
+
+    if parsed == SttProvider::Whisper {
+        return Err(Error::ConfigError("Whisper does not use an API key".to_string()));
+    }
+
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError("VoiceController is busy — try again".to_string()));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!("VoiceController mutex poisoned: {}", e)));
+        }
+    };
+
+    voice_controller.set_api_key(&parsed, api_key);
+    Ok(())
 }
