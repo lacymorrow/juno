@@ -1360,7 +1360,9 @@ impl AppState {
             );
         }
 
-        // Auto-disable servers that failed to start so they don't retry on every launch
+        // Auto-disable servers that failed to start so they don't retry on every launch.
+        // Hold the ToolConfigManager lock across both update and save to prevent a race
+        // where get_tool_configurations re-loads stale enabled:true from the store.
         if !failed_server_ids.is_empty() {
             warn!("Auto-disabling failed MCP servers: {} (re-enable in Settings)", failed_names.join(", "));
             let config_manager = self.get_tool_config_manager().await;
@@ -1371,14 +1373,21 @@ impl AppState {
                     config_guard.update_mcp_server(server_config);
                 }
             }
-            drop(config_guard);
 
-            // Persist to settings store so disabled state survives app restart
+            // Persist while still holding the lock to prevent concurrent overwrites
             if let Some(handle) = app_handle {
-                if let Err(e) = self.save_tool_config(handle).await {
-                    warn!("Failed to persist auto-disabled MCP servers: {}", e);
+                match crate::settings::manager::SettingsManager::new(handle.clone()) {
+                    Ok(settings_manager) => {
+                        if let Err(e) = config_guard.save_to_centralized_settings(&settings_manager).await {
+                            warn!("Failed to persist auto-disabled MCP servers: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to create settings manager for auto-disable persist: {}", e);
+                    }
                 }
             }
+            drop(config_guard);
         }
 
         // Sync tools once at the end (unchanged)
