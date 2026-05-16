@@ -93,7 +93,7 @@ impl MemoryEntry {
         let age_days = age_secs as f64 / 86400.0;
         let decay = (-age_days / DECAY_HALF_LIFE_DAYS * std::f64::consts::LN_2).exp();
         // Small logarithmic boost for frequently-accessed entries
-        let access_boost = 1.0 + (self.access_count as f64).ln().max(0.0) * 0.1;
+        let access_boost = 1.0 + (1.0 + self.access_count as f64).ln() * 0.1;
         self.relevance_score * decay * access_boost
     }
 }
@@ -195,24 +195,35 @@ impl PersistentMemoryManager {
         self.save_entries(&[])
     }
 
-    /// Return top-N entries by decayed relevance score, updating access counts.
+    /// Return top-N entries by decayed relevance score, updating access counts
+    /// only for entries actually selected (preserves decay ranking for the rest).
     pub fn get_relevant_entries(&self, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let mut entries = self.load_entries()?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        for entry in &mut entries {
-            entry.access_count += 1;
-            entry.last_accessed = now;
+        if entries.is_empty() {
+            return Ok(Vec::new());
         }
+
+        // Sort first using existing timestamps so decay ranking is meaningful
         entries.sort_by(|a, b| {
             b.decayed_score()
                 .partial_cmp(&a.decayed_score())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        // Persist updated access counts (non-critical, ignore errors)
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Only update metadata for entries actually being returned
+        for entry in entries.iter_mut().take(limit) {
+            entry.access_count += 1;
+            entry.last_accessed = now;
+        }
+
+        // Persist updated metadata (non-critical, ignore errors)
         let _ = self.save_entries(&entries);
+
         entries.truncate(limit);
         Ok(entries)
     }
@@ -246,7 +257,7 @@ impl PersistentMemoryManager {
         let entries = match self.get_relevant_entries(PROMPT_INJECTION_LIMIT) {
             Ok(e) => e,
             Err(e) => {
-                log::warn!("Failed to load persistent memory for prompt: {}", e);
+                tracing::warn!("Failed to load persistent memory for prompt: {}", e);
                 return String::new();
             }
         };
@@ -361,7 +372,7 @@ pub async fn register_remember_fact_tool(
                 tags,
             )?;
 
-            log::info!(
+            tracing::info!(
                 "Agent saved persistent memory entry [{}]: {}",
                 entry.category.as_label(),
                 entry.id
@@ -376,5 +387,5 @@ pub async fn register_remember_fact_tool(
     };
 
     tool_provider.register_async_tool(definition, executor).await;
-    log::info!("Registered remember_fact tool for persistent cross-session memory");
+    tracing::info!("Registered remember_fact tool for persistent cross-session memory");
 }
