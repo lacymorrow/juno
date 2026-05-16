@@ -1,4 +1,4 @@
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -77,7 +77,7 @@ const settingsCategories: SettingsCategory[] = [
 
 export default function ModularSettingsWindow() {
   const [selectedCategory, setSelectedCategory] = useState("general");
-  const settings = useSettings();
+  const settings = useSettingsContext();
   const window = getCurrentWindow();
 
   useEffect(() => {
