@@ -427,7 +427,7 @@ where
             .collect();
         let max_risk = risk_levels
             .iter()
-            .copied()
+            .cloned()
             .max()
             .unwrap_or(RiskLevel::Low);
 
