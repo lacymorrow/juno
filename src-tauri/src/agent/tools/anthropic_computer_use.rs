@@ -25,6 +25,7 @@ use crate::utils::coordinate_validation::{
     CoordinateValidationError
 };
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::state::AgentCursorState;
 
 /// Minimum milliseconds between consecutive UI-modifying actions (click, type, key).
 /// Prevents "clicked too fast" failures when the UI is still loading/animating.
@@ -32,6 +33,63 @@ const ACTION_COOLDOWN_MS: u64 = 300;
 
 /// Timestamp (ms since epoch) of the last UI-modifying action.
 static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Monotonic counter for assigning unique cursor IDs to concurrent agent instances.
+static NEXT_AGENT_CURSOR_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Agent cursor color palette — each slot is used round-robin for up to 8 concurrent agents.
+const AGENT_CURSOR_COLORS: &[&str] = &[
+    "#8B5CF6", // violet  (matches default Juno cursor)
+    "#10B981", // emerald
+    "#F59E0B", // amber
+    "#EF4444", // red
+    "#3B82F6", // blue
+    "#EC4899", // pink
+    "#14B8A6", // teal
+    "#F97316", // orange
+];
+
+/// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
+fn emit_agent_cursor_update(
+    app_handle: &tauri::AppHandle,
+    agent_id: &str,
+    x: f64,
+    y: f64,
+    cursor_state: &str,
+    color: &str,
+) {
+    let state_manager = app_handle.state::<AppState>();
+    let cursor = AgentCursorState {
+        agent_id: agent_id.to_string(),
+        x,
+        y,
+        state: cursor_state.to_string(),
+        color: color.to_string(),
+    };
+    state_manager.update_agent_cursor(cursor.clone());
+    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
+        tracing::debug!("agent cursor update emit failed: {}", e);
+    }
+}
+
+/// Emit cursor removal for a named agent (call on agent completion or cancellation).
+fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
+    let state_manager = app_handle.state::<AppState>();
+    state_manager.remove_agent_cursor(agent_id);
+    let payload = serde_json::json!({ "agent_id": agent_id });
+    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
+        tracing::debug!("agent cursor remove emit failed: {}", e);
+    }
+}
+
+/// Extract [x, y] from a computer tool input's "coordinate" field.
+/// Returns None if the field is absent or malformed.
+fn extract_coordinate(input: &Value) -> Option<(f64, f64)> {
+    let arr = input["coordinate"].as_array()?;
+    let x = arr.first()?.as_f64()?;
+    let y = arr.get(1)?.as_f64()?;
+    Some((x, y))
+}
 
 /// Returns true if the action modifies the UI (click, type, key, scroll, drag).
 /// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
@@ -1851,6 +1909,14 @@ pub async fn register_anthropic_computer_use_tools_with_version(
 
     info!("Registering official Anthropic Computer Use tools (API version: {})...", version_info);
 
+    // Assign a unique cursor ID and color to this agent instance at registration time.
+    // The ID is captured by the closure so every tool call from this agent shares it.
+    let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
+    let agent_cursor_id = format!("agent-{}", cursor_slot);
+    let agent_cursor_color = AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()].to_string();
+
+    info!("🖱️ Agent cursor ID: {} (color: {})", agent_cursor_id, agent_cursor_color);
+
     // Create versioned tools
     let versioned_tools = create_versioned_tools(version_config);
     let tool_count = versioned_tools.len();
@@ -1860,10 +1926,33 @@ pub async fn register_anthropic_computer_use_tools_with_version(
             "computer" => {
                 provider.register_async_tool(tool, {
                     let handle = app_handle.clone();
+                    let cursor_id = agent_cursor_id.clone();
+                    let cursor_color = agent_cursor_color.clone();
                     move |input: Value| {
                         let handle = handle.clone();
+                        let cursor_id = cursor_id.clone();
+                        let cursor_color = cursor_color.clone();
                         async move {
-                            execute_computer_tool(&handle, input).await
+                            let result = execute_computer_tool(&handle, input.clone()).await;
+                            // Emit cursor position for the agent overlay (non-blocking)
+                            if result.is_ok() {
+                                let action = input["action"].as_str().unwrap_or("");
+                                if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
+                                    use crate::utils::coordinates;
+                                    let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
+                                    let cursor_state = match action {
+                                        "left_click" | "right_click" | "middle_click"
+                                        | "double_click" | "triple_click" => "clicking",
+                                        "mouse_move" => "moving",
+                                        _ => "idle",
+                                    };
+                                    emit_agent_cursor_update(&handle, &cursor_id, sx, sy, cursor_state, &cursor_color);
+                                } else if action == "screenshot" {
+                                    // Keep cursor visible in "thinking" state during screenshot analysis
+                                    // (no coordinate available — don't move the cursor)
+                                }
+                            }
+                            result
                         }
                     }
                 }).await;

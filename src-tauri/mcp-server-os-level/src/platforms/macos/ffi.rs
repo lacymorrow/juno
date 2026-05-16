@@ -7,6 +7,23 @@ extern "C" {
     pub(crate) fn AXIsProcessTrustedWithOptions(
         options: core_foundation::dictionary::CFDictionaryRef,
     ) -> bool;
+
+    /// Convert a PID to a ProcessSerialNumber (deprecated since 10.9 but still present
+    /// in macOS 13-15; used only by the SLPSPostEventRecordTo focus-without-raise path).
+    #[allow(dead_code)]
+    pub(crate) fn GetProcessForPID(
+        pid: libc::pid_t,
+        psn: *mut ProcessSerialNumber,
+    ) -> i32;
+}
+
+/// Carbon ProcessSerialNumber — required by SLPSPostEventRecordTo.
+/// Layout matches `struct ProcessSerialNumber { UInt32 high; UInt32 low; }`.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ProcessSerialNumber {
+    pub high_long_of_psn: u32,
+    pub low_long_of_psn: u32,
 }
 
 // Screen recording permission APIs from CoreGraphics
