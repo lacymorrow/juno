@@ -22,6 +22,9 @@ export type ChatMessage = {
   agent_state?: string;
   tool_id?: string;
   approval_state?: "pending" | "approved" | "denied";
+  risk_level?: "low" | "medium" | "high" | "critical";
+  target_app?: string;
+  approval_timeout_seconds?: number;
   continuation_request_id?: string;
   continuation_state?: "pending" | "stopped" | "continued";
   tts_metadata?: {
