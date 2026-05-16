@@ -9,7 +9,10 @@ import { useEventListener } from "@/hooks/useEventListener";
 type CursorState = "idle" | "moving" | "clicking" | "thinking";
 
 const TRAIL_COUNT = 5;
-const HOT_SPOT = 5; // px offset from SVG top-left to the arrow tip
+// Matches the cx/cy of the hot-spot circle in JunoCursorShape (SVG viewBox coords).
+// Update this if the SVG geometry changes — it controls transform-origin and the
+// translate offset so the arrow tip sits exactly at the reported screen coordinate.
+const HOT_SPOT = 5;
 const CURSOR_FADE_DELAY_MS = 1500;
 const CLICK_ANIM_DURATION_MS = 700;
 
@@ -216,9 +219,11 @@ export const DesktopCursorOverlay = () => {
     // Transparent fill matching the click color
     el.style.backgroundColor = `${color}18`;
 
-    // Restart the animation by removing the class, forcing reflow, then re-adding
+    // Remove → read offsetWidth (forces synchronous layout, committing the removal
+    // to the browser before re-adding) → add. Without the forced reflow, browsers
+    // batch-optimize the remove+add into a no-op and the animation never resets.
     el.classList.remove("juno-ripple-active");
-    void el.offsetWidth;
+    void el.offsetWidth; // intentional forced reflow — do not remove
     el.classList.add("juno-ripple-active");
   };
 
@@ -231,6 +236,8 @@ export const DesktopCursorOverlay = () => {
         const win = getCurrentWindow();
 
         // Resize to cover the full primary screen, position at origin
+        // Covers the primary monitor in logical (CSS) pixels.
+        // Multi-monitor support (spanning to secondary displays) is a future enhancement.
         await Promise.all([
           win.setSize(
             new LogicalSize(window.screen.width, window.screen.height)
