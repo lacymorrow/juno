@@ -1552,6 +1552,126 @@ type SLEventPostToPidFn = unsafe extern "C" fn(libc::pid_t, *mut c_void);
 
 static SKYLIGHT_FN: OnceLock<Option<SLEventPostToPidFn>> = OnceLock::new();
 
+// ── Focus-without-raise (Phase 4) ────────────────────────────────────────────
+//
+// SLPSPostEventRecordTo — redirects the WindowServer's input focus to a process
+// identified by its ProcessSerialNumber without changing window z-order or
+// switching Spaces. Technique first pioneered by yabai (skhd/kwm ecosystem).
+//
+// _AXObserverAddNotificationAndCheckRemote — private HIServices API that signals
+// remote observation capability to Chromium/Electron so they do not suspend their
+// AX tree when windows are backgrounded or occluded.
+
+type SLPSPostEventRecordToFn =
+    unsafe extern "C" fn(*mut ffi::ProcessSerialNumber, *mut c_void) -> i32;
+
+static SLPS_POST_EVENT_FN: OnceLock<Option<SLPSPostEventRecordToFn>> = OnceLock::new();
+
+fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
+    *SLPS_POST_EVENT_FN.get_or_init(|| {
+        let path = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
+        let sym_name = b"SLPSPostEventRecordTo\0";
+        unsafe {
+            let lib = libc::dlopen(
+                path.as_ptr() as *const libc::c_char,
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            );
+            if lib.is_null() {
+                return None;
+            }
+            let sym = libc::dlsym(lib, sym_name.as_ptr() as *const libc::c_char);
+            if sym.is_null() {
+                libc::dlclose(lib);
+                return None;
+            }
+            debug!("SkyLight SLPSPostEventRecordTo loaded — focus-without-raise available");
+            Some(std::mem::transmute::<*mut c_void, SLPSPostEventRecordToFn>(sym))
+        }
+    })
+}
+
+// _AXObserverAddNotificationAndCheckRemote:
+// (AXObserverRef, AXUIElementRef, CFStringRef, void* refcon, Boolean* isRemote) -> AXError
+type AXObserverCheckRemoteFn = unsafe extern "C" fn(
+    *mut c_void,   // AXObserverRef
+    *const c_void, // AXUIElementRef
+    *const c_void, // CFStringRef (notification name)
+    *mut c_void,   // refcon
+    *mut bool,     // is_remote (out)
+) -> i32;
+
+static AX_REMOTE_OBSERVER_FN: OnceLock<Option<AXObserverCheckRemoteFn>> = OnceLock::new();
+
+/// Attempt to load `_AXObserverAddNotificationAndCheckRemote` from HIServices.
+/// Returns the function pointer if available. Used to signal remote observation
+/// capability so Chromium/Electron do not suspend AX for backgrounded windows.
+pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> {
+    *AX_REMOTE_OBSERVER_FN.get_or_init(|| {
+        let path = b"/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices\0";
+        let sym_name = b"_AXObserverAddNotificationAndCheckRemote\0";
+        unsafe {
+            let lib = libc::dlopen(
+                path.as_ptr() as *const libc::c_char,
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            );
+            if lib.is_null() {
+                debug!("HIServices.framework not found at expected path — AX remote observation unavailable");
+                return None;
+            }
+            let sym = libc::dlsym(lib, sym_name.as_ptr() as *const libc::c_char);
+            if sym.is_null() {
+                debug!("_AXObserverAddNotificationAndCheckRemote not found in HIServices");
+                libc::dlclose(lib);
+                return None;
+            }
+            debug!("_AXObserverAddNotificationAndCheckRemote loaded — remote AX observation available");
+            Some(std::mem::transmute::<*mut c_void, AXObserverCheckRemoteFn>(sym))
+        }
+    })
+}
+
+/// Redirect input focus to `pid` without raising its windows.
+///
+/// Uses `SLPSPostEventRecordTo` (SkyLight private API) if available — this is the
+/// same technique used by yabai to enable keyboard input to background processes.
+/// Without this, `type` actions sent to backgrounded apps via `CGEventPostToPid`
+/// may be routed to the frontmost app instead.
+///
+/// Returns `true` if focus was successfully redirected, `false` on graceful fallback.
+/// In the fallback case `CGEventPostToPid` (Phase 3) still delivers mouse events;
+/// only keyboard routing to background apps is degraded.
+pub(crate) fn activate_without_raise(pid: i32) -> bool {
+    if let Some(slps_fn) = get_slps_post_event_record_to() {
+        let mut psn = ffi::ProcessSerialNumber::default();
+        // GetProcessForPID is deprecated since macOS 10.9 but still present in 13-15.
+        // It converts a PID to the PSN required by SLPSPostEventRecordTo.
+        let psn_result = unsafe { ffi::GetProcessForPID(pid, &mut psn) };
+        if psn_result == 0 {
+            // Passing a null event body redirects input focus without injecting an event.
+            let result = unsafe { slps_fn(&mut psn, std::ptr::null_mut()) };
+            if result == 0 {
+                debug!("SLPSPostEventRecordTo: redirected input focus to PID {}", pid);
+                return true;
+            }
+            debug!(
+                "SLPSPostEventRecordTo failed (err={}), falling back for PID {}",
+                result, pid
+            );
+        } else {
+            debug!(
+                "GetProcessForPID failed (err={}) for PID {} — SLPSPostEventRecordTo unavailable",
+                psn_result, pid
+            );
+        }
+    }
+    // No-op fallback: CGEventPostToPid (Phase 3) delivers mouse events without focus.
+    debug!(
+        "activate_without_raise: no SkyLight, CGEventPostToPid used directly for PID {}",
+        pid
+    );
+    false
+}
+
 /// Load `SLEventPostToPid` from SkyLight.framework at runtime.
 /// Returns `None` if the framework or symbol is unavailable (graceful fallback).
 fn get_sl_event_post_to_pid() -> Option<SLEventPostToPidFn> {
@@ -1668,12 +1788,12 @@ pub(crate) fn left_click_no_warp(
     y: f64,
     modifiers: Option<CGEventFlags>,
 ) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, None)
 }
 
 /// Perform a right click at screen coordinates without warping the system cursor.
 pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1)
+    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1, None)
 }
 
 /// Perform a double click at screen coordinates without warping the system cursor.
@@ -1682,11 +1802,13 @@ pub(crate) fn double_click_no_warp(
     y: f64,
     modifiers: Option<CGEventFlags>,
 ) -> Result<&'static str, AutomationError> {
-    // First click
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)?;
+    // Resolve the target PID once — get_pid_at_screen_point calls CGWindowListCopyWindowInfo
+    // which is an expensive kernel syscall; no need to repeat it for both click steps.
+    let pid = get_pid_at_screen_point(x, y);
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, pid)?;
     thread::sleep(Duration::from_millis(50));
     // Second click with click-state=2
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2)
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2, pid)
 }
 
 fn left_click_no_warp_inner(
@@ -1697,10 +1819,13 @@ fn left_click_no_warp_inner(
     button: CGMouseButton,
     modifiers: Option<CGEventFlags>,
     click_state: i64,
+    pid_override: Option<i32>,
 ) -> Result<&'static str, AutomationError> {
     let point = CGPoint::new(x, y);
 
-    if let Some(pid) = get_pid_at_screen_point(x, y) {
+    // Use pre-resolved PID when provided (e.g. from double_click_no_warp) to avoid
+    // calling CGWindowListCopyWindowInfo twice for the same target coordinate.
+    if let Some(pid) = pid_override.or_else(|| get_pid_at_screen_point(x, y)) {
         debug!(
             "No-warp click: targeting PID {} at ({:.0}, {:.0})",
             pid, x, y
@@ -1717,6 +1842,9 @@ fn left_click_no_warp_inner(
                     CGEvent::new_mouse_event(src, CGEventType::LeftMouseUp, primer_pt, CGMouseButton::Left),
                 ) {
                     post_cg_event_to_pid(pid, &pd);
+                    // Brief delay so Chromium's run-loop processes MouseDown before
+                    // MouseUp arrives — without this they may be coalesced.
+                    thread::sleep(Duration::from_millis(10));
                     post_cg_event_to_pid(pid, &pu);
                     debug!("Chromium primer click sent to PID {}", pid);
                 }
@@ -1766,16 +1894,16 @@ fn left_click_no_warp_inner(
         );
     }
 
-    // Last resort: HID with cursor save/restore to minimize warp window
+    // Last resort: HID with cursor save/restore to minimize warp window.
+    // Capture the error BEFORE restoring — ?-operator would skip restoration on failure.
     let saved_pos = get_cursor_position().ok();
-
-    left_click(x, y, modifiers)?;
-
+    let click_result = left_click(x, y, modifiers);
     if let Some((sx, sy)) = saved_pos {
-        // Brief delay so the click registers before we move the cursor back
-        thread::sleep(Duration::from_millis(10));
+        // Wait the full event-processing window before warping back, matching the
+        // delay used for process-targeted clicks (MOUSE_EVENT_DELAY_MS).
+        thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
         let _ = mouse_move(sx, sy);
     }
-
+    click_result?;
     Ok("HID-with-restore")
 }
