@@ -1552,6 +1552,126 @@ type SLEventPostToPidFn = unsafe extern "C" fn(libc::pid_t, *mut c_void);
 
 static SKYLIGHT_FN: OnceLock<Option<SLEventPostToPidFn>> = OnceLock::new();
 
+// ── Focus-without-raise (Phase 4) ────────────────────────────────────────────
+//
+// SLPSPostEventRecordTo — redirects the WindowServer's input focus to a process
+// identified by its ProcessSerialNumber without changing window z-order or
+// switching Spaces. Technique first pioneered by yabai (skhd/kwm ecosystem).
+//
+// _AXObserverAddNotificationAndCheckRemote — private HIServices API that signals
+// remote observation capability to Chromium/Electron so they do not suspend their
+// AX tree when windows are backgrounded or occluded.
+
+type SLPSPostEventRecordToFn =
+    unsafe extern "C" fn(*mut ffi::ProcessSerialNumber, *mut c_void) -> i32;
+
+static SLPS_POST_EVENT_FN: OnceLock<Option<SLPSPostEventRecordToFn>> = OnceLock::new();
+
+fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
+    *SLPS_POST_EVENT_FN.get_or_init(|| {
+        let path = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
+        let sym_name = b"SLPSPostEventRecordTo\0";
+        unsafe {
+            let lib = libc::dlopen(
+                path.as_ptr() as *const libc::c_char,
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            );
+            if lib.is_null() {
+                return None;
+            }
+            let sym = libc::dlsym(lib, sym_name.as_ptr() as *const libc::c_char);
+            if sym.is_null() {
+                libc::dlclose(lib);
+                return None;
+            }
+            debug!("SkyLight SLPSPostEventRecordTo loaded — focus-without-raise available");
+            Some(std::mem::transmute::<*mut c_void, SLPSPostEventRecordToFn>(sym))
+        }
+    })
+}
+
+// _AXObserverAddNotificationAndCheckRemote:
+// (AXObserverRef, AXUIElementRef, CFStringRef, void* refcon, Boolean* isRemote) -> AXError
+type AXObserverCheckRemoteFn = unsafe extern "C" fn(
+    *mut c_void,   // AXObserverRef
+    *const c_void, // AXUIElementRef
+    *const c_void, // CFStringRef (notification name)
+    *mut c_void,   // refcon
+    *mut bool,     // is_remote (out)
+) -> i32;
+
+static AX_REMOTE_OBSERVER_FN: OnceLock<Option<AXObserverCheckRemoteFn>> = OnceLock::new();
+
+/// Attempt to load `_AXObserverAddNotificationAndCheckRemote` from HIServices.
+/// Returns the function pointer if available. Used to signal remote observation
+/// capability so Chromium/Electron do not suspend AX for backgrounded windows.
+pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> {
+    *AX_REMOTE_OBSERVER_FN.get_or_init(|| {
+        let path = b"/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices\0";
+        let sym_name = b"_AXObserverAddNotificationAndCheckRemote\0";
+        unsafe {
+            let lib = libc::dlopen(
+                path.as_ptr() as *const libc::c_char,
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            );
+            if lib.is_null() {
+                debug!("HIServices.framework not found at expected path — AX remote observation unavailable");
+                return None;
+            }
+            let sym = libc::dlsym(lib, sym_name.as_ptr() as *const libc::c_char);
+            if sym.is_null() {
+                debug!("_AXObserverAddNotificationAndCheckRemote not found in HIServices");
+                libc::dlclose(lib);
+                return None;
+            }
+            debug!("_AXObserverAddNotificationAndCheckRemote loaded — remote AX observation available");
+            Some(std::mem::transmute::<*mut c_void, AXObserverCheckRemoteFn>(sym))
+        }
+    })
+}
+
+/// Redirect input focus to `pid` without raising its windows.
+///
+/// Uses `SLPSPostEventRecordTo` (SkyLight private API) if available — this is the
+/// same technique used by yabai to enable keyboard input to background processes.
+/// Without this, `type` actions sent to backgrounded apps via `CGEventPostToPid`
+/// may be routed to the frontmost app instead.
+///
+/// Returns `true` if focus was successfully redirected, `false` on graceful fallback.
+/// In the fallback case `CGEventPostToPid` (Phase 3) still delivers mouse events;
+/// only keyboard routing to background apps is degraded.
+pub(crate) fn activate_without_raise(pid: i32) -> bool {
+    if let Some(slps_fn) = get_slps_post_event_record_to() {
+        let mut psn = ffi::ProcessSerialNumber::default();
+        // GetProcessForPID is deprecated since macOS 10.9 but still present in 13-15.
+        // It converts a PID to the PSN required by SLPSPostEventRecordTo.
+        let psn_result = unsafe { ffi::GetProcessForPID(pid, &mut psn) };
+        if psn_result == 0 {
+            // Passing a null event body redirects input focus without injecting an event.
+            let result = unsafe { slps_fn(&mut psn, std::ptr::null_mut()) };
+            if result == 0 {
+                debug!("SLPSPostEventRecordTo: redirected input focus to PID {}", pid);
+                return true;
+            }
+            debug!(
+                "SLPSPostEventRecordTo failed (err={}), falling back for PID {}",
+                result, pid
+            );
+        } else {
+            debug!(
+                "GetProcessForPID failed (err={}) for PID {} — SLPSPostEventRecordTo unavailable",
+                psn_result, pid
+            );
+        }
+    }
+    // No-op fallback: CGEventPostToPid (Phase 3) delivers mouse events without focus.
+    debug!(
+        "activate_without_raise: no SkyLight, CGEventPostToPid used directly for PID {}",
+        pid
+    );
+    false
+}
+
 /// Load `SLEventPostToPid` from SkyLight.framework at runtime.
 /// Returns `None` if the framework or symbol is unavailable (graceful fallback).
 fn get_sl_event_post_to_pid() -> Option<SLEventPostToPidFn> {

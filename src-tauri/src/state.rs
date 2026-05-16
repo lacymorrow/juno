@@ -107,6 +107,18 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Per-agent cursor position for the desktop overlay (Phase 4 multi-agent cursors).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCursorState {
+    pub agent_id: String,
+    pub x: f64,
+    pub y: f64,
+    /// "idle" | "moving" | "clicking" | "thinking"
+    pub state: String,
+    /// CSS color string for this agent's cursor sprite
+    pub color: String,
+}
+
 /// Risk level for tool approval requests
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[serde(rename_all = "lowercase")]
@@ -307,6 +319,9 @@ pub struct AppState {
     // Rate limiting for command safety
     pub rate_limiters: Arc<GlobalRateLimiters>,
 
+    // Per-agent cursor positions for multi-agent overlay (Phase 4)
+    pub agent_cursors: Arc<StdMutex<HashMap<String, AgentCursorState>>>,
+
     // Dynamic storage for other state components
     state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
@@ -381,6 +396,9 @@ impl AppState {
 
             // Use the rate limiters created above
             rate_limiters,
+
+            // Initialize per-agent cursor tracking
+            agent_cursors: Arc::new(StdMutex::new(HashMap::new())),
 
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
@@ -1711,6 +1729,32 @@ impl AppState {
                 tokio::task::yield_now().await;
             }
         }
+    }
+
+    // ── Multi-agent cursor tracking (Phase 4) ────────────────────────────────
+
+    /// Update or insert the cursor state for a given agent.
+    pub fn update_agent_cursor(&self, cursor: AgentCursorState) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.insert(cursor.agent_id.clone(), cursor); }
+            Err(e) => warn!("Failed to update agent cursor: {}", e),
+        }
+    }
+
+    /// Remove an agent's cursor (call when the agent finishes or is cancelled).
+    pub fn remove_agent_cursor(&self, agent_id: &str) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.remove(agent_id); }
+            Err(e) => warn!("Failed to remove agent cursor: {}", e),
+        }
+    }
+
+    /// Snapshot of all active agent cursors (cloned for safe cross-thread use).
+    pub fn get_agent_cursors(&self) -> Vec<AgentCursorState> {
+        self.agent_cursors
+            .lock()
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     // TTS content is now handled via XML tags during streaming, no separate methods needed
