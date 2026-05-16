@@ -420,10 +420,14 @@ where
 
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
-        // Determine the highest risk level across all tools in this batch.
-        let max_risk = batch
+        // Classify each tool once and find the highest risk level.
+        let risk_levels: Vec<RiskLevel> = batch
             .iter()
             .map(|t| risk_classifier::classify_risk(&t.name, &t.input))
+            .collect();
+        let max_risk = risk_levels
+            .iter()
+            .copied()
             .max()
             .unwrap_or(RiskLevel::Low);
 
@@ -434,11 +438,14 @@ where
             return Ok(true);
         }
 
-        // Find the riskiest single tool to use as the display name and target app.
-        let riskiest_tool = batch
+        // Find the riskiest single tool using pre-computed classifications.
+        let riskiest_idx = risk_levels
             .iter()
-            .max_by_key(|t| risk_classifier::classify_risk(&t.name, &t.input))
-            .unwrap_or(&batch[0]);
+            .enumerate()
+            .max_by_key(|(_, r)| *r)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let riskiest_tool = &batch[riskiest_idx];
 
         let target_app =
             risk_classifier::extract_target_app(&riskiest_tool.name, &riskiest_tool.input);

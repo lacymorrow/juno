@@ -153,14 +153,17 @@ fn classify_file_write_risk(input: &Value) -> RiskLevel {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    // Writing to system directories is critical
-    if path.starts_with("/etc/")
-        || path.starts_with("/usr/")
-        || path.starts_with("/bin/")
-        || path.starts_with("/sbin/")
-        || path.starts_with("/System/")
-        || path.starts_with("/Library/")
-    {
+    // Directory traversal is always critical — could target any system path
+    if path.contains("..") {
+        return RiskLevel::Critical;
+    }
+
+    // Writing to system directories is critical (absolute or relative prefixes)
+    let system_prefixes: &[&str] = &[
+        "/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/Library/",
+        "etc/", "usr/", "bin/", "sbin/",
+    ];
+    if system_prefixes.iter().any(|prefix| path.starts_with(prefix)) {
         RiskLevel::Critical
     } else {
         RiskLevel::Low
@@ -252,5 +255,17 @@ mod tests {
     #[test]
     fn no_approval_for_low() {
         assert!(!needs_approval(&RiskLevel::Low));
+    }
+
+    #[test]
+    fn path_traversal_is_critical() {
+        let r = classify_risk("write_file", &json!({"path": "/tmp/../../etc/passwd"}));
+        assert_eq!(r, RiskLevel::Critical);
+    }
+
+    #[test]
+    fn relative_system_path_is_critical() {
+        let r = classify_risk("write_file", &json!({"path": "etc/passwd"}));
+        assert_eq!(r, RiskLevel::Critical);
     }
 }
