@@ -104,6 +104,7 @@ pub const UI_SLIDE_DELAY_MS: u64 = 600;
 pub const UI_NOTIFICATION_DISPLAY_MS: u64 = 3000;
 
 // Permission and system delays
+pub const PERMISSIONS_CACHE_TTL_SECONDS: u64 = 5; // TTL for check_permissions_status_native cache
 pub const PERMISSION_CHECK_DELAY_MS: u64 = 1000;
 pub const SCREEN_RECORDING_CHECK_DELAY_MS: u64 = 2000;
 pub const SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS: u64 = 3000;
