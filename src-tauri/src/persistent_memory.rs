@@ -71,7 +71,7 @@ impl PersistentMemoryEntry {
     fn priority(&self) -> f64 {
         let recency_weight = 0.3;
         let now = now_secs() as f64;
-        let age_days = (now - self.created_at as f64) / 86400.0;
+        let age_days = (now - self.updated_at as f64).max(0.0) / 86400.0;
         let recency = 1.0 / (1.0 + age_days * 0.1); // decays slowly over weeks
 
         let access_weight = 0.2;
@@ -139,13 +139,13 @@ impl PersistentMemoryStore {
         entries.push(entry.clone());
 
         if entries.len() > MAX_ENTRIES {
-            // Sort ascending by priority so we remove the least valuable entries
-            entries.sort_by(|a, b| a.priority().partial_cmp(&b.priority()).unwrap_or(std::cmp::Ordering::Equal));
+            // Sort descending by priority so truncate keeps the most valuable entries
+            entries.sort_by(|a, b| b.priority().partial_cmp(&a.priority()).unwrap_or(std::cmp::Ordering::Equal));
             entries.truncate(MAX_ENTRIES);
         }
 
         self.save_entries(&entries)?;
-        log::info!("Persistent memory: added entry '{}' ({})", entry.id, entry.category.as_str());
+        tracing::info!("Persistent memory: added entry '{}' ({})", entry.id, entry.category.as_str());
         Ok(entry)
     }
 
@@ -184,14 +184,14 @@ impl PersistentMemoryStore {
             return Err(format!("Memory entry not found: {}", id));
         }
         self.save_entries(&entries)?;
-        log::info!("Persistent memory: deleted entry '{}'", id);
+        tracing::info!("Persistent memory: deleted entry '{}'", id);
         Ok(())
     }
 
     /// Clear all entries
     pub fn clear_all(&self) -> Result<(), String> {
         self.save_entries(&[])?;
-        log::info!("Persistent memory: all entries cleared");
+        tracing::info!("Persistent memory: all entries cleared");
         Ok(())
     }
 
