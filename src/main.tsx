@@ -10,7 +10,7 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
-import DesktopCursorOverlay from "./components/DesktopCursorOverlay";
+import { DesktopCursorOverlay } from "./components/DesktopCursorOverlay";
 import { BarHost } from "./components/bar/BarHost";
 
 import "./styles/globals.css";
