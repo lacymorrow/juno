@@ -5,7 +5,7 @@
 //! Cocoa/AppKit integrations needed for proper macOS behavior.
 
 use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 use crate::constants;
 use crate::constants::{events, errors::templates};
 
@@ -248,7 +248,7 @@ pub mod mouse_tracking {
 
     /// Mouse entered event handler - now receives delegate pointer to identify window
     extern "C" fn mouse_entered(this: &Object, _cmd: Sel, _event: cocoa_id) {
-        info!("[Tracking Delegate] Mouse Entered");
+        debug!("[Tracking Delegate] Mouse Entered");
         let delegate_ptr = this as *const Object as u64;
 
         let app_handle = match APP_HANDLE.lock() {
@@ -271,7 +271,7 @@ pub mod mouse_tracking {
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_ENTERED_WINDOW, ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
+                    debug!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
                 }
@@ -283,7 +283,7 @@ pub mod mouse_tracking {
 
     /// Mouse exited event handler - now receives delegate pointer to identify window
     extern "C" fn mouse_exited(this: &Object, _cmd: Sel, _event: cocoa_id) {
-        info!("[Tracking Delegate] Mouse Exited");
+        debug!("[Tracking Delegate] Mouse Exited");
         let delegate_ptr = this as *const Object as u64;
 
         let app_handle = match APP_HANDLE.lock() {
@@ -306,7 +306,7 @@ pub mod mouse_tracking {
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_LEFT_WINDOW, ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
+                    debug!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);
                 }
@@ -319,7 +319,7 @@ pub mod mouse_tracking {
     /// Setup mouse tracking area for a window
     pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) -> Result<(), String> {
         let window_label = window.label().to_string();
-        info!("Setting up macOS tracking area for window: {}", window_label);
+        debug!("Setting up macOS tracking area for window: {}", window_label);
 
         // Store the AppHandle (only needs to be set once)
         let should_store_handle = match APP_HANDLE.lock() {
@@ -361,7 +361,7 @@ pub mod mouse_tracking {
 
             // Declare class only if it doesn't exist yet
             if delegate_class.is_none() {
-                info!("Declaring {} class...", delegate_class_name);
+                debug!("Declaring {} class...", delegate_class_name);
                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
                 let mut decl = match ClassDecl::new(&delegate_class_name, superclass) {
@@ -387,7 +387,7 @@ pub mod mouse_tracking {
                 );
 
                 delegate_class = Some(decl.register());
-                info!("{} class registered.", delegate_class_name);
+                debug!("{} class registered.", delegate_class_name);
             }
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
@@ -398,14 +398,14 @@ pub mod mouse_tracking {
                     return Err("Failed to get delegate class".to_string());
                 }
             };
-            info!("{} instance created: {:?}", delegate_class_name, delegate);
+            debug!("{} instance created: {:?}", delegate_class_name, delegate);
 
             // Store the mapping between delegate pointer and window label
             let delegate_ptr = delegate as u64;
             match TRACKED_WINDOWS.lock() {
                 Ok(mut tracked) => {
                     tracked.insert(delegate_ptr, window_label.clone());
-                    info!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
+                    debug!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
                 }
                 Err(e) => {
                     error!("Failed to register delegate pointer for window '{}': {}", window_label, e);
@@ -418,7 +418,7 @@ pub mod mouse_tracking {
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let bounds: NSRect = msg_send![view, bounds];
-            info!("Got view bounds for tracking area.");
+            debug!("Got view bounds for tracking area.");
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send and class! macros
             let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
@@ -430,7 +430,7 @@ pub mod mouse_tracking {
                 owner: delegate // Use the delegate instance as the owner
                 userInfo: nil
             ];
-            info!("NSTrackingArea created: {:?}", tracking_area_ptr);
+            debug!("NSTrackingArea created: {:?}", tracking_area_ptr);
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];
