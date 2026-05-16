@@ -43,9 +43,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
-      </SettingsProvider>
-      {/* Toast notifications */}
-      <Toaster
+        {/* Toast notifications */}
+        <Toaster
         position="top-center"
         expand={true}
         richColors={true}
@@ -55,6 +54,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           fontSize: "14px",
         }}
       />
+      </SettingsProvider>
     </VoiceProvider>
   </React.StrictMode>,
 );
