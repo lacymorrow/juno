@@ -304,7 +304,7 @@ fn is_interactive_ax_role(role: &str) -> bool {
             | "slider"           // kAXIncrementAction / kAXDecrementAction
             | "incrementor"      // steppers (NSStepper)
             | "colorwell"        // color pickers
-            | "disclosuretrangle" // disclosure triangles
+            | "disclosuretriangle" // disclosure triangles
             | "switch"           // toggle switches
     )
 }
@@ -930,8 +930,27 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Left click failed: {}", e)));
+                        // Tier 2-4: process-targeted injection (SkyLight → CGEventPostToPid → HID-restore)
+                        // Bypasses AX; works on canvas, games, Chromium web content, and non-AX apps.
+                        let click_method = state_manager.desktop.left_click_no_warp(
+                            screen_x,
+                            screen_y,
+                            modifier.as_deref(),
+                        );
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                // left_click_no_warp always has HID-restore as last resort;
+                                // reaching here means desktop is unavailable.
+                                handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Left click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
@@ -955,8 +974,20 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Right click failed: {}", e)));
+                        // Tier 2-4: process-targeted injection, no cursor warp
+                        let click_method = state_manager.desktop.right_click_no_warp(screen_x, screen_y);
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp right-click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Right click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
@@ -996,8 +1027,24 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Double click failed: {}", e)));
+                        // Tier 2-4: process-targeted double-click, no cursor warp
+                        let click_method = state_manager.desktop.double_click_no_warp(
+                            screen_x,
+                            screen_y,
+                            modifier.as_deref(),
+                        );
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp double-click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Double click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });

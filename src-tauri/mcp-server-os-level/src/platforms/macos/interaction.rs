@@ -1,8 +1,9 @@
 use accessibility::{AXAttribute, AXUIElement};
 use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
-use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
+use super::display::{adjust_coordinates_for_display, get_displays_debug_info, get_pid_at_screen_point};
 use super::element::MacOSUIElement;
+use super::ffi;
 use super::wrappers::ThreadSafeAXUIElement;
 use super::memory_safety::get_pooled_event_source;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
@@ -13,7 +14,10 @@ use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
 };
 use core_graphics::geometry::CGPoint;
+use foreign_types::ForeignType;
 use std::collections::HashMap;
+use std::os::raw::c_void;
+use std::sync::OnceLock;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
@@ -1533,4 +1537,245 @@ pub(crate) fn wait(duration_ms: u64) -> Result<(), AutomationError> {
 
     debug!("Wait completed");
     Ok(())
+}
+
+// ── Process-targeted event injection (Phase 3) ────────────────────────────────
+//
+// CGEventPostToPid and SLEventPostToPid post events directly to a process without
+// moving the system cursor. The event's CGPoint is metadata for the target app only.
+//
+// SkyLight (private framework) wraps events with a WindowServer trust envelope.
+// Chromium-based apps (Chrome, VS Code, Electron) check this trust level before
+// accepting events — so SLEventPostToPid is preferred when available.
+
+type SLEventPostToPidFn = unsafe extern "C" fn(libc::pid_t, *mut c_void);
+
+static SKYLIGHT_FN: OnceLock<Option<SLEventPostToPidFn>> = OnceLock::new();
+
+/// Load `SLEventPostToPid` from SkyLight.framework at runtime.
+/// Returns `None` if the framework or symbol is unavailable (graceful fallback).
+fn get_sl_event_post_to_pid() -> Option<SLEventPostToPidFn> {
+    *SKYLIGHT_FN.get_or_init(|| {
+        let path = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
+        let sym_name = b"SLEventPostToPid\0";
+
+        unsafe {
+            let lib = libc::dlopen(
+                path.as_ptr() as *const libc::c_char,
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            );
+            if lib.is_null() {
+                debug!("SkyLight.framework not available — will use CGEventPostToPid");
+                return None;
+            }
+            let sym = libc::dlsym(lib, sym_name.as_ptr() as *const libc::c_char);
+            if sym.is_null() {
+                debug!("SLEventPostToPid not found in SkyLight — will use CGEventPostToPid");
+                libc::dlclose(lib);
+                return None;
+            }
+            debug!("SkyLight SLEventPostToPid loaded — Chromium trust envelope available");
+            Some(std::mem::transmute::<*mut c_void, SLEventPostToPidFn>(sym))
+        }
+    })
+}
+
+/// Post a single CGEvent to `pid` using SkyLight (preferred) or CGEventPostToPid.
+/// The system cursor does NOT move — `position` is metadata for the target process.
+///
+/// `CGEvent` is a `foreign_type!` wrapper. `ForeignType::as_ptr` gives the raw
+/// `*mut sys::CGEvent` which is the `CGEventRef` the C API expects.
+fn post_cg_event_to_pid(pid: i32, event: &CGEvent) {
+    let event_ptr = ForeignType::as_ptr(event) as *mut c_void;
+    unsafe {
+        if let Some(sl_post) = get_sl_event_post_to_pid() {
+            sl_post(pid, event_ptr);
+        } else {
+            ffi::CGEventPostToPid(pid, event_ptr);
+        }
+    }
+}
+
+/// Post a mouse event directly to a specific process without warping the cursor.
+///
+/// `position` is delivered to the target app as the click location; the macOS
+/// system cursor stays where it is. Tries SLEventPostToPid first (required for
+/// Chromium/Electron), falls back to CGEventPostToPid (public macOS API).
+pub(crate) fn post_mouse_event_to_pid(
+    pid: i32,
+    event_type: CGEventType,
+    position: CGPoint,
+    button: CGMouseButton,
+    modifiers: Option<CGEventFlags>,
+) -> Result<(), AutomationError> {
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!(
+            "Failed to create event source for PID-targeted click: {}",
+            e
+        ))
+    })?;
+
+    let event = CGEvent::new_mouse_event(source, event_type, position, button).map_err(|_| {
+        AutomationError::PlatformError(
+            "Failed to create mouse event for PID-targeted click".to_string(),
+        )
+    })?;
+
+    if let Some(flags) = modifiers {
+        event.set_flags(flags);
+    }
+
+    post_cg_event_to_pid(pid, &event);
+    Ok(())
+}
+
+/// Post a key event directly to a specific process without affecting focus.
+///
+/// Does NOT move the system cursor or change the focused application. Useful for
+/// sending keystrokes to background or canvas-based apps that lack AX elements.
+pub(crate) fn post_key_event_to_pid(
+    pid: i32,
+    keycode: u16,
+    key_down: bool,
+) -> Result<(), AutomationError> {
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!(
+            "Failed to create event source for PID-targeted key event: {}",
+            e
+        ))
+    })?;
+
+    let event = CGEvent::new_keyboard_event(source, keycode, key_down).map_err(|_| {
+        AutomationError::PlatformError(
+            "Failed to create key event for PID-targeted injection".to_string(),
+        )
+    })?;
+
+    post_cg_event_to_pid(pid, &event);
+    Ok(())
+}
+
+/// Perform a left click at screen coordinates without warping the system cursor.
+///
+/// Tiered fallback chain:
+/// 1. SLEventPostToPid via SkyLight — stamps WindowServer trust (Chromium compat)
+/// 2. CGEventPostToPid — public macOS API, cursor stays in place
+/// 3. CGEventPost(HID) with cursor save/restore — last resort, minimal warp window
+///
+/// Returns a string label of the method used. Never panics.
+pub(crate) fn left_click_no_warp(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<&'static str, AutomationError> {
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)
+}
+
+/// Perform a right click at screen coordinates without warping the system cursor.
+pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, AutomationError> {
+    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1)
+}
+
+/// Perform a double click at screen coordinates without warping the system cursor.
+pub(crate) fn double_click_no_warp(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<&'static str, AutomationError> {
+    // First click
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)?;
+    thread::sleep(Duration::from_millis(50));
+    // Second click with click-state=2
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2)
+}
+
+fn left_click_no_warp_inner(
+    x: f64,
+    y: f64,
+    down_type: CGEventType,
+    up_type: CGEventType,
+    button: CGMouseButton,
+    modifiers: Option<CGEventFlags>,
+    click_state: i64,
+) -> Result<&'static str, AutomationError> {
+    let point = CGPoint::new(x, y);
+
+    if let Some(pid) = get_pid_at_screen_point(x, y) {
+        debug!(
+            "No-warp click: targeting PID {} at ({:.0}, {:.0})",
+            pid, x, y
+        );
+
+        // Chromium primer: a decoy mouse-down/up at (-1, -1) advances Chromium's
+        // internal user-activation gate without hitting any real UI element.
+        // Only needed when SkyLight trust envelope is available.
+        if get_sl_event_post_to_pid().is_some() {
+            let primer_pt = CGPoint::new(-1.0, -1.0);
+            if let Ok(src) = get_pooled_event_source() {
+                if let (Ok(pd), Ok(pu)) = (
+                    CGEvent::new_mouse_event(src.clone(), CGEventType::LeftMouseDown, primer_pt, CGMouseButton::Left),
+                    CGEvent::new_mouse_event(src, CGEventType::LeftMouseUp, primer_pt, CGMouseButton::Left),
+                ) {
+                    post_cg_event_to_pid(pid, &pd);
+                    post_cg_event_to_pid(pid, &pu);
+                    debug!("Chromium primer click sent to PID {}", pid);
+                }
+            }
+        }
+
+        // Build and post the actual down/up pair
+        let post_pair = || -> Result<(), AutomationError> {
+            let src = get_pooled_event_source().map_err(|e| {
+                AutomationError::PlatformError(format!("Event source error: {}", e))
+            })?;
+            let down = CGEvent::new_mouse_event(src.clone(), down_type, point, button)
+                .map_err(|_| AutomationError::PlatformError("Failed to create mouse-down".to_string()))?;
+            let up = CGEvent::new_mouse_event(src, up_type, point, button)
+                .map_err(|_| AutomationError::PlatformError("Failed to create mouse-up".to_string()))?;
+
+            if let Some(flags) = modifiers {
+                down.set_flags(flags);
+                up.set_flags(flags);
+            }
+            if click_state > 1 {
+                down.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+                up.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+            }
+
+            post_cg_event_to_pid(pid, &down);
+            thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
+            post_cg_event_to_pid(pid, &up);
+            Ok(())
+        };
+
+        if post_pair().is_ok() {
+            let method = if get_sl_event_post_to_pid().is_some() {
+                "SkyLight/SLEventPostToPid"
+            } else {
+                "CGEventPostToPid"
+            };
+            debug!("No-warp click via {} to PID {}", method, pid);
+            return Ok(method);
+        }
+
+        debug!("Process-targeted click failed for PID {}, falling back to HID", pid);
+    } else {
+        debug!(
+            "No-warp click: no window PID found at ({:.0}, {:.0}), using HID",
+            x, y
+        );
+    }
+
+    // Last resort: HID with cursor save/restore to minimize warp window
+    let saved_pos = get_cursor_position().ok();
+
+    left_click(x, y, modifiers)?;
+
+    if let Some((sx, sy)) = saved_pos {
+        // Brief delay so the click registers before we move the cursor back
+        thread::sleep(Duration::from_millis(10));
+        let _ = mouse_move(sx, sy);
+    }
+
+    Ok("HID-with-restore")
 }
