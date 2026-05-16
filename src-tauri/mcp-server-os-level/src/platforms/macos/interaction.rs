@@ -1788,12 +1788,12 @@ pub(crate) fn left_click_no_warp(
     y: f64,
     modifiers: Option<CGEventFlags>,
 ) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, None)
 }
 
 /// Perform a right click at screen coordinates without warping the system cursor.
 pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1)
+    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1, None)
 }
 
 /// Perform a double click at screen coordinates without warping the system cursor.
@@ -1802,11 +1802,13 @@ pub(crate) fn double_click_no_warp(
     y: f64,
     modifiers: Option<CGEventFlags>,
 ) -> Result<&'static str, AutomationError> {
-    // First click
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1)?;
+    // Resolve the target PID once — get_pid_at_screen_point calls CGWindowListCopyWindowInfo
+    // which is an expensive kernel syscall; no need to repeat it for both click steps.
+    let pid = get_pid_at_screen_point(x, y);
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, pid)?;
     thread::sleep(Duration::from_millis(50));
     // Second click with click-state=2
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2)
+    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2, pid)
 }
 
 fn left_click_no_warp_inner(
@@ -1817,10 +1819,13 @@ fn left_click_no_warp_inner(
     button: CGMouseButton,
     modifiers: Option<CGEventFlags>,
     click_state: i64,
+    pid_override: Option<i32>,
 ) -> Result<&'static str, AutomationError> {
     let point = CGPoint::new(x, y);
 
-    if let Some(pid) = get_pid_at_screen_point(x, y) {
+    // Use pre-resolved PID when provided (e.g. from double_click_no_warp) to avoid
+    // calling CGWindowListCopyWindowInfo twice for the same target coordinate.
+    if let Some(pid) = pid_override.or_else(|| get_pid_at_screen_point(x, y)) {
         debug!(
             "No-warp click: targeting PID {} at ({:.0}, {:.0})",
             pid, x, y
@@ -1837,6 +1842,9 @@ fn left_click_no_warp_inner(
                     CGEvent::new_mouse_event(src, CGEventType::LeftMouseUp, primer_pt, CGMouseButton::Left),
                 ) {
                     post_cg_event_to_pid(pid, &pd);
+                    // Brief delay so Chromium's run-loop processes MouseDown before
+                    // MouseUp arrives — without this they may be coalesced.
+                    thread::sleep(Duration::from_millis(10));
                     post_cg_event_to_pid(pid, &pu);
                     debug!("Chromium primer click sent to PID {}", pid);
                 }
@@ -1886,16 +1894,16 @@ fn left_click_no_warp_inner(
         );
     }
 
-    // Last resort: HID with cursor save/restore to minimize warp window
+    // Last resort: HID with cursor save/restore to minimize warp window.
+    // Capture the error BEFORE restoring — ?-operator would skip restoration on failure.
     let saved_pos = get_cursor_position().ok();
-
-    left_click(x, y, modifiers)?;
-
+    let click_result = left_click(x, y, modifiers);
     if let Some((sx, sy)) = saved_pos {
-        // Brief delay so the click registers before we move the cursor back
-        thread::sleep(Duration::from_millis(10));
+        // Wait the full event-processing window before warping back, matching the
+        // delay used for process-targeted clicks (MOUSE_EVENT_DELAY_MS).
+        thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
         let _ = mouse_move(sx, sy);
     }
-
+    click_result?;
     Ok("HID-with-restore")
 }
