@@ -42,8 +42,12 @@ import {
   WifiOff,
   Square,
   Play,
+  AlertTriangle,
+  ShieldAlert,
+  Clock,
+  AppWindow,
 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { UI } from "@/lib/constants.generated";
 
@@ -223,6 +227,108 @@ function ContinuationActions({
   );
 }
 
+type RiskLevel = "low" | "medium" | "high" | "critical";
+
+const RISK_CONFIG: Record<
+  RiskLevel,
+  { label: string; className: string; Icon: React.ElementType }
+> = {
+  low: {
+    label: "Low risk",
+    className: "text-muted-foreground bg-muted/40",
+    Icon: ShieldAlert,
+  },
+  medium: {
+    label: "Medium risk",
+    className: "text-yellow-700 dark:text-yellow-400 bg-yellow-50/60 dark:bg-yellow-950/30",
+    Icon: AlertTriangle,
+  },
+  high: {
+    label: "High risk",
+    className: "text-orange-700 dark:text-orange-400 bg-orange-50/60 dark:bg-orange-950/30",
+    Icon: AlertTriangle,
+  },
+  critical: {
+    label: "Critical",
+    className: "text-red-700 dark:text-red-400 bg-red-50/60 dark:bg-red-950/30",
+    Icon: ShieldAlert,
+  },
+};
+
+function RiskBadge({ level }: { level: RiskLevel }) {
+  const { label, className, Icon } = RISK_CONFIG[level] ?? RISK_CONFIG.low;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${className}`}
+    >
+      <Icon className="size-3" />
+      {label}
+    </span>
+  );
+}
+
+function ApprovalCountdown({
+  timeoutSeconds,
+  isPending,
+}: {
+  timeoutSeconds: number;
+  isPending: boolean;
+}) {
+  const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isPending) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
+    }
+    setTimeLeft(timeoutSeconds);
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [isPending, timeoutSeconds]);
+
+  if (!isPending) return null;
+
+  const pct = (timeLeft / timeoutSeconds) * 100;
+  const urgentColor =
+    timeLeft <= 10
+      ? "text-red-600 dark:text-red-400"
+      : timeLeft <= 20
+        ? "text-orange-600 dark:text-orange-400"
+        : "text-muted-foreground";
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <Clock className={`size-3 shrink-0 ${urgentColor}`} />
+      <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ${
+            timeLeft <= 10
+              ? "bg-red-500"
+              : timeLeft <= 20
+                ? "bg-orange-500"
+                : "bg-primary/40"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className={`text-xs tabular-nums ${urgentColor}`}>
+        {timeLeft}s
+      </span>
+    </div>
+  );
+}
+
 export function ChatMessageComponent({
   msg,
   index,
@@ -298,14 +404,34 @@ export function ChatMessageComponent({
                 }
               >
                 <ConfirmationRequest>
-                  <ConfirmationActions>
-                    <ConfirmationAction onClick={() => handleApprove(msg.tool_id!)}>
-                      Approve
-                    </ConfirmationAction>
-                    <ConfirmationAction variant="outline" onClick={() => handleDeny(msg.tool_id!)}>
-                      Deny
-                    </ConfirmationAction>
-                  </ConfirmationActions>
+                  <div className="flex flex-col gap-2 py-1">
+                    {/* Risk level + target app row */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {msg.risk_level && msg.risk_level !== "low" && (
+                        <RiskBadge level={msg.risk_level} />
+                      )}
+                      {msg.target_app && (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <AppWindow className="size-3" />
+                          {msg.target_app}
+                        </span>
+                      )}
+                    </div>
+
+                    <ConfirmationActions>
+                      <ConfirmationAction onClick={() => handleApprove(msg.tool_id!)}>
+                        Approve
+                      </ConfirmationAction>
+                      <ConfirmationAction variant="outline" onClick={() => handleDeny(msg.tool_id!)}>
+                        Deny
+                      </ConfirmationAction>
+                    </ConfirmationActions>
+
+                    <ApprovalCountdown
+                      timeoutSeconds={msg.approval_timeout_seconds ?? 60}
+                      isPending={msg.approval_state === "pending"}
+                    />
+                  </div>
                 </ConfirmationRequest>
                 <ConfirmationAccepted>Tool execution approved</ConfirmationAccepted>
                 <ConfirmationRejected>Tool execution denied</ConfirmationRejected>

@@ -107,6 +107,17 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Risk level for tool approval requests
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    #[default]
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 /// Tool approval request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolApprovalRequest {
@@ -116,6 +127,9 @@ pub struct ToolApprovalRequest {
     pub description: String,
     pub timestamp: u64,
     pub approved: Option<bool>, // None = pending, Some(true) = approved, Some(false) = denied
+    pub risk_level: RiskLevel,
+    pub target_app: Option<String>,
+    pub timeout_seconds: u64,
 }
 
 impl ToolApprovalRequest {
@@ -127,10 +141,28 @@ impl ToolApprovalRequest {
             description,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
             approved: None,
+            risk_level: RiskLevel::default(),
+            target_app: None,
+            timeout_seconds: 60,
         }
+    }
+
+    pub fn with_risk(mut self, risk_level: RiskLevel) -> Self {
+        self.risk_level = risk_level;
+        self
+    }
+
+    pub fn with_target_app(mut self, app: String) -> Self {
+        self.target_app = Some(app);
+        self
+    }
+
+    pub fn with_timeout(mut self, seconds: u64) -> Self {
+        self.timeout_seconds = seconds;
+        self
     }
 }
 

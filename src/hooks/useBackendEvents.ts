@@ -309,6 +309,9 @@ export function useBackendEvents({
 		tool_input: any;
 		description: string;
 		timestamp: number;
+		risk_level?: "low" | "medium" | "high" | "critical";
+		target_app?: string;
+		timeout_seconds?: number;
 	}>(
 		"tool-approval-request",
 		(payload) => {
@@ -322,6 +325,9 @@ export function useBackendEvents({
 					tool_args: payload.tool_input,
 					tool_id: payload.tool_id,
 					approval_state: "pending",
+					risk_level: payload.risk_level,
+					target_app: payload.target_app,
+					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
 				},
 			]);

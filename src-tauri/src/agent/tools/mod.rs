@@ -40,6 +40,7 @@ pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
 // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
 
+pub mod risk_classifier; // Automatic risk level classification for tool approval gating
 pub mod timer_tools; // Add timer tools for agent scheduling
 pub mod tool_config; // Configuration and category management for all tools
 pub mod tool_mapping; // Add tool mapping service

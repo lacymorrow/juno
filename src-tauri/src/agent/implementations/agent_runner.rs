@@ -405,55 +405,116 @@ where
         Ok(true)
     }
 
-    /// Check approval for a batch of tools
+    /// Check approval for a batch of tools.
+    ///
+    /// Approval is required when:
+    /// - The global `tool_approval_required` flag is set, OR
+    /// - Any tool in the batch has a High or Critical risk level (auto-detected).
     async fn check_batch_approval(
         &self,
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<bool, AgentError> {
+        use crate::agent::tools::risk_classifier;
+        use crate::state::RiskLevel;
+
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
-        if !app_state.is_tool_approval_required() {
+        // Classify each tool once and find the highest risk level.
+        let risk_levels: Vec<RiskLevel> = batch
+            .iter()
+            .map(|t| risk_classifier::classify_risk(&t.name, &t.input))
+            .collect();
+        let max_risk = risk_levels
+            .iter()
+            .cloned()
+            .max()
+            .unwrap_or(RiskLevel::Low);
+
+        // Gate: skip approval unless the global flag is set OR any tool is risky.
+        if !app_state.is_tool_approval_required()
+            && !risk_classifier::needs_approval(&max_risk)
+        {
             return Ok(true);
         }
 
-        // Create batch approval request
-        let batch_description = format!(
-            "Execute batch of {} tools: {}",
-            batch.len(),
-            batch
-                .iter()
-                .take(3)
-                .map(|t| t.name.as_str())
-                .collect::<Vec<_>>()
-                .join(" → ")
-                + if batch.len() > 3 { " ..." } else { "" }
-        );
+        // Find the riskiest single tool using pre-computed classifications.
+        let riskiest_idx = risk_levels
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, r)| *r)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let riskiest_tool = &batch[riskiest_idx];
+
+        let target_app =
+            risk_classifier::extract_target_app(&riskiest_tool.name, &riskiest_tool.input);
+
+        // Build a human-readable description.
+        let batch_description = if batch.len() == 1 {
+            format!(
+                "Run {} — {}",
+                riskiest_tool.name,
+                riskiest_tool
+                    .input
+                    .get("command")
+                    .or_else(|| riskiest_tool.input.get("url"))
+                    .or_else(|| riskiest_tool.input.get("path"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(no details)")
+                    .chars()
+                    .take(120)
+                    .collect::<String>()
+            )
+        } else {
+            format!(
+                "Execute {} tools: {}{}",
+                batch.len(),
+                batch
+                    .iter()
+                    .take(3)
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → "),
+                if batch.len() > 3 { " ..." } else { "" }
+            )
+        };
 
         let batch_id = uuid::Uuid::new_v4().to_string();
         let approval_request = crate::state::ToolApprovalRequest::new(
             batch_id.clone(),
-            "batch_execution".to_string(),
+            riskiest_tool.name.clone(),
             serde_json::json!({
                 "batch_size": batch.len(),
                 "tools": batch.iter().map(|t| &t.name).collect::<Vec<_>>()
             }),
             batch_description.clone(),
-        );
+        )
+        .with_risk(max_risk.clone())
+        .with_timeout(60);
+
+        let approval_request = if let Some(ref app) = target_app {
+            approval_request.with_target_app(app.clone())
+        } else {
+            approval_request
+        };
 
         // Add to pending approvals
         app_state
             .add_pending_tool_approval(approval_request.clone())
             .await;
 
-        // Emit batch approval request event
+        // Emit approval request event (risk_level + target_app added for UI)
         let approval_event = serde_json::json!({
             "tool_name": approval_request.tool_name,
             "tool_id": approval_request.tool_id,
             "tool_input": approval_request.tool_input,
             "description": approval_request.description,
             "timestamp": approval_request.timestamp,
-            "is_batch": true,
+            "risk_level": approval_request.risk_level,
+            "target_app": approval_request.target_app,
+            "timeout_seconds": approval_request.timeout_seconds,
+            "is_batch": batch.len() > 1,
             "batch_size": batch.len()
         });
 
@@ -464,20 +525,20 @@ where
             log::error!("Failed to emit batch approval request: {}", e);
         }
 
-        // Wait for batch approval
         log::info!(
-            "Waiting for user approval for tool batch: {}",
-            batch_description
+            "Waiting for user approval — batch: {}, risk: {:?}",
+            batch_description,
+            max_risk
         );
 
-        // PERFORMANCE OPTIMIZATION: Faster polling with adjusted timeout counter
-        // 60 seconds * 20 polls per second = 1200 iterations
-        let mut approval_timeout = 1200; // 60 seconds at 50ms intervals
+        // Poll for up to timeout_seconds at 50 ms intervals.
+        let poll_iterations = (approval_request.timeout_seconds * 1000 / 50) as i64;
+        let mut remaining = poll_iterations;
         let mut approved = false;
 
-        while approval_timeout > 0 && !approved {
+        while remaining > 0 && !approved {
             if *cancel_rx.borrow() {
-                log::info!("Cancellation detected during batch approval wait");
+                log::info!("Cancellation detected during approval wait");
                 app_state.remove_tool_approval(&batch_id).await;
                 return Err(AgentError::Terminated);
             }
@@ -489,34 +550,27 @@ where
                     break;
                 }
                 Some(false) => {
-                    log::info!("Tool batch denied");
+                    log::info!("Tool batch denied by user");
                     break;
                 }
-                None => {} // Still pending
+                None => {}
             }
 
-            // PERFORMANCE OPTIMIZATION: Reduce polling interval from 1000ms to 50ms
-            // for 20x more responsive approval handling
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            approval_timeout -= 1;
+            remaining -= 1;
         }
 
         app_state.remove_tool_approval(&batch_id).await;
 
         if !approved {
-            let reason = if approval_timeout <= 0 {
-                "timeout"
-            } else {
-                "user denied"
-            };
+            let reason = if remaining <= 0 { "timeout" } else { "user denied" };
             log::warn!("Tool batch execution denied: {}", reason);
 
-            // Add denial message for all tools in batch
             for tool_call in batch {
                 let mut mem = self.memory.lock().await;
                 mem.add_message(crate::agent::core::Message {
                     role: crate::agent::core::Role::Tool,
-                    content: format!("Tool execution was denied as part of batch - {}", reason),
+                    content: format!("Tool execution was denied ({})", reason),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
