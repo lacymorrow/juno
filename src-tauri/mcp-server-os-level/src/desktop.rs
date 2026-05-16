@@ -116,6 +116,21 @@ impl Desktop {
         self.engine.left_click(x, y, modifiers)
     }
 
+    /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    pub fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.engine.left_click_no_warp(x, y, modifiers)
+    }
+
+    /// Right-click without warping the cursor.
+    pub fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
+        self.engine.right_click_no_warp(x, y)
+    }
+
+    /// Double-click without warping the cursor.
+    pub fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.engine.double_click_no_warp(x, y, modifiers)
+    }
+
     /// Simulate a right click (down + up) at specified coordinates.
     pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
         self.engine.right_click(x, y, modifiers)

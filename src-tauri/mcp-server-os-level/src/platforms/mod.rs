@@ -107,6 +107,36 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     /// Simulate a standard left click (down + up) at specified coordinates.
     fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
+    /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    /// Default impl falls back to `left_click` for platforms that don't support process-targeted events.
+    fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.left_click(x, y, modifiers)?;
+        Ok("HID-default")
+    }
+
+    /// Right-click without warping the cursor. Default falls back to `right_click`.
+    fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
+        self.right_click(x, y, None)?;
+        Ok("HID-default")
+    }
+
+    /// Double-click without warping the cursor. Default falls back to `double_click`.
+    fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.double_click(x, y, modifiers)?;
+        Ok("HID-default")
+    }
+
+    /// Post a mouse event directly to a process by PID without moving the cursor.
+    /// Default is a no-op (only meaningful on macOS).
+    fn post_mouse_event_to_pid(&self, _pid: i32, _event_type_str: &str, _x: f64, _y: f64) -> Result<(), AutomationError> {
+        Ok(())
+    }
+
+    /// Post a key event directly to a process by PID without affecting focus.
+    fn post_key_event_to_pid(&self, _pid: i32, _keycode: u16, _key_down: bool) -> Result<(), AutomationError> {
+        Ok(())
+    }
+
     /// Simulate a right click (down + up) at specified coordinates.
     fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
