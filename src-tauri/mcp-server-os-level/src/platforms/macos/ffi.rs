@@ -1,3 +1,6 @@
+// libc is needed for pid_t in CGEventPostToPid
+extern crate libc;
+
 // Import the C function for setting attributes
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -16,6 +19,12 @@ extern "C" {
     /// Request screen recording permission, may show a system prompt
     /// Returns true if permission is granted after request
     pub fn CGRequestScreenCaptureAccess() -> bool;
+
+    /// Post a CGEvent to a specific process by PID without moving the system cursor.
+    /// The event's position field is metadata for the target process only.
+    /// Public API since macOS 10.11. Declared here because the core-graphics crate
+    /// does not expose this function.
+    pub(crate) fn CGEventPostToPid(pid: libc::pid_t, event: *mut ::std::os::raw::c_void);
 }
 
 // Add these extern "C" declarations if not already present
