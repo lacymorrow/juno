@@ -304,7 +304,7 @@ fn is_interactive_ax_role(role: &str) -> bool {
             | "slider"           // kAXIncrementAction / kAXDecrementAction
             | "incrementor"      // steppers (NSStepper)
             | "colorwell"        // color pickers
-            | "disclosuretrangle" // disclosure triangles
+            | "disclosuretriangle" // disclosure triangles
             | "switch"           // toggle switches
     )
 }
