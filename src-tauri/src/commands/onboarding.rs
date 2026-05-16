@@ -258,9 +258,10 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 /// shortcut. This lets the Rust backend detect escape while the key still passes
 /// through to HTML dropdowns, dialogs, and other applications.
 ///
-/// Called by the frontend when the onboarding component mounts, and also by
-/// `initialize_onboarding_system` in the backend. Idempotent — safe to call
-/// multiple times with the same `active` value.
+/// Called by `initialize_onboarding_system` before the window opens (sets active=true)
+/// and by `complete_onboarding`/`skip_onboarding` when the flow ends (sets active=false).
+/// The frontend only calls this on real unmount (window destroyed). Idempotent — safe to
+/// call multiple times with the same `active` value.
 #[tauri::command]
 pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), String> {
     let app_state = app.state::<crate::state::AppState>();
@@ -302,8 +303,8 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 
         // CRITICAL: Set onboarding_active in the backend BEFORE opening the window.
         // This ensures shortcut handlers (dictation, agent) will see onboarding as active
-        // immediately, without waiting for the frontend to mount and call back via invoke().
-        // The frontend useEffect call to set_onboarding_active(true) is a no-op (idempotent).
+        // immediately. The frontend no longer calls set_onboarding_active(true) on mount —
+        // it only clears the flag on real unmount (window destroyed).
         if let Err(e) = set_onboarding_active(app_handle.clone(), true).await {
             error!("[Onboarding] Failed to set onboarding active during init: {}", e);
         }
