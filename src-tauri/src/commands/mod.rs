@@ -35,6 +35,7 @@ pub mod filesystem;
 pub mod keyboard;
 pub mod mcp;
 pub mod memory;
+pub mod persistent_memory;
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
