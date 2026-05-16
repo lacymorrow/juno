@@ -1,351 +1,398 @@
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState, useRef } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useEffect, useRef } from "react";
+import {
+  getCurrentWindow,
+  LogicalSize,
+  PhysicalPosition,
+} from "@tauri-apps/api/window";
+import { useEventListener } from "@/hooks/useEventListener";
 
-// Cursor highlight and click visualization types
-type CursorHighlight = {
-  x: number;
-  y: number;
-  active: boolean;
-  timestamp: number;
-};
+type CursorState = "idle" | "moving" | "clicking" | "thinking";
 
-type ClickVisualization = {
-  x: number;
-  y: number;
-  color: string;
-  id: number;
-  timestamp: number;
-};
+const TRAIL_COUNT = 5;
+// Matches the cx/cy of the hot-spot circle in JunoCursorShape (SVG viewBox coords).
+// Update this if the SVG geometry changes — it controls transform-origin and the
+// translate offset so the arrow tip sits exactly at the reported screen coordinate.
+const HOT_SPOT = 5;
+const CURSOR_FADE_DELAY_MS = 1500;
+const CLICK_ANIM_DURATION_MS = 700;
 
-const DesktopCursorOverlay = () => {
-  const [cursorHighlight, setCursorHighlight] =
-    useState<CursorHighlight | null>(null);
-  const [clickVisualizations, setClickVisualizations] = useState<
-    ClickVisualization[]
-  >([]);
-  const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false"
-  );
-  const overlayWindowRef = useRef<any>(null);
+// ─── CSS Animations ───────────────────────────────────────────────────────────
+// All cursor animations live here to keep them out of the component render path.
+const CURSOR_CSS = `
+  .juno-cursor {
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+    will-change: transform, opacity;
+    transition: opacity 0.35s ease;
+  }
 
-  // Initialize overlay window reference and create window if needed
-  useEffect(() => {
-    const initializeOverlay = async () => {
-      // Try to get existing window
-      let window = WebviewWindow.getByLabel("desktop-cursor-overlay");
+  /* Idle: soft breathing pulse around the hot-spot */
+  .juno-cursor--idle svg {
+    animation: juno-breathe 3s ease-in-out infinite;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
 
-      if (!window) {
-        // Window doesn't exist, create it
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("open_desktop_cursor_overlay");
-          // Get the window reference after creation
-          window = WebviewWindow.getByLabel("desktop-cursor-overlay");
-        } catch (error) {
-          console.error(
-            "Failed to create desktop cursor overlay window:",
-            error
-          );
-          return;
-        }
-      }
+  /* Thinking: Codex-style gentle lateral wobble */
+  .juno-cursor--thinking svg {
+    animation: juno-wobble 0.55s ease-in-out infinite;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
 
-      overlayWindowRef.current = window;
-    };
+  /* Clicking: quick snap-back recoil on the tip */
+  .juno-cursor--clicking svg {
+    animation: juno-recoil 0.22s ease-out;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
 
-    initializeOverlay();
-  }, []);
+  @keyframes juno-breathe {
+    0%, 100% { opacity: 0.72; transform: scale(1); }
+    50%       { opacity: 0.96; transform: scale(1.05); }
+  }
 
-  // Check localStorage for settings changes
-  useEffect(() => {
-    const checkSettings = () => {
-      const enabled =
-        localStorage.getItem("juno-show-desktop-cursor-visualization") !==
-        "false";
-      setIsEnabled(enabled);
-    };
+  @keyframes juno-wobble {
+    0%, 100% { transform: rotate(0deg)   translateX(0px); }
+    20%      { transform: rotate(-5deg)  translateX(-1.5px); }
+    40%      { transform: rotate(4deg)   translateX(1.5px); }
+    60%      { transform: rotate(-3deg)  translateX(-1px); }
+    80%      { transform: rotate(2.5deg) translateX(0.8px); }
+  }
 
-    checkSettings();
-    const interval = setInterval(checkSettings, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  @keyframes juno-recoil {
+    0%   { transform: scale(1)    rotate(0deg); }
+    30%  { transform: scale(0.83) rotate(-7deg); }
+    100% { transform: scale(1)    rotate(0deg); }
+  }
 
-  // Position overlay window at cursor location with throttling
-  const lastPositionUpdate = useRef<number>(0);
-  const positionUpdateThrottle = 16; // ~60fps throttling
+  /* Click ripple: emanates from click position, uses left/top for placement */
+  @keyframes juno-ripple {
+    0%   { transform: scale(0.2); opacity: 1; }
+    100% { transform: scale(3.2); opacity: 0; }
+  }
+  .juno-ripple-active {
+    animation: juno-ripple 0.7s ease-out forwards;
+  }
+`;
 
-  const positionOverlay = async (
-    x: number,
-    y: number,
-    force: boolean = false
-  ) => {
-    if (!overlayWindowRef.current) return;
+// ─── Juno Cursor SVG ──────────────────────────────────────────────────────────
+// Distinctive arrow cursor: hot-spot at (5, 5), gradient body, glowing tip.
+// The arrow points upper-left so the very tip is at the registered hot-spot.
+const JunoCursorShape = () => (
+  <svg
+    width="36"
+    height="44"
+    viewBox="0 0 36 44"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    style={{ display: "block" }}
+    aria-hidden="true"
+  >
+    <defs>
+      <filter id="juno-glow" x="-65%" y="-55%" width="230%" height="210%">
+        <feGaussianBlur stdDeviation="2.5" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      {/* Purple-to-dark gradient body */}
+      <linearGradient
+        id="juno-body"
+        x1="5"
+        y1="5"
+        x2="30"
+        y2="42"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="0%" stopColor="rgba(139, 92, 246, 0.95)" />
+        <stop offset="100%" stopColor="rgba(12, 8, 55, 0.92)" />
+      </linearGradient>
+    </defs>
 
-    // Throttle position updates unless forced (for initial positioning)
-    const now = Date.now();
-    if (!force && now - lastPositionUpdate.current < positionUpdateThrottle) {
-      return;
-    }
-    lastPositionUpdate.current = now;
+    {/* Soft drop shadow (offset copy, no stroke) */}
+    <path
+      d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
+      fill="rgba(0,0,0,0.32)"
+      transform="translate(1.5, 1.5)"
+    />
 
-    try {
-      // Position the window slightly offset from cursor to center the visualization
-      const offsetX = Math.max(0, x - 100); // Center 200px visualization circle
-      const offsetY = Math.max(0, y - 100);
+    {/* Main arrow body */}
+    <path
+      d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
+      fill="url(#juno-body)"
+      stroke="rgba(167, 139, 250, 0.88)"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+      filter="url(#juno-glow)"
+    />
 
-      await overlayWindowRef.current.setPosition({
-        type: "Logical",
-        x: offsetX,
-        y: offsetY,
-      });
+    {/* Hot-spot outer glow ring */}
+    <circle
+      cx="5"
+      cy="5"
+      r="4.5"
+      fill="rgba(139, 92, 246, 0.45)"
+      filter="url(#juno-glow)"
+    />
+    {/* Hot-spot bright core */}
+    <circle cx="5" cy="5" r="2" fill="white" />
+  </svg>
+);
 
-      // Resize window to accommodate visualization (200x200 for circles)
-      await overlayWindowRef.current.setSize({
-        type: "Logical",
-        width: 200,
-        height: 200,
-      });
-    } catch (error) {
-      console.warn("Failed to position overlay window:", error);
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export const DesktopCursorOverlay = () => {
+  // DOM refs — manipulated directly to avoid React state re-renders at 60 fps
+  const cursorRef = useRef<HTMLDivElement>(null);
+  const trailRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const rippleRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // Animation state — refs only, no React state
+  const trailBuffer = useRef<{ x: number; y: number }[]>([]);
+  const stateRef = useRef<CursorState>("idle");
+  const nextRippleIdx = useRef(0);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Imperative helpers ───────────────────────────────────────────────────
+
+  const applyState = (state: CursorState) => {
+    stateRef.current = state;
+    if (cursorRef.current) {
+      cursorRef.current.className = `juno-cursor juno-cursor--${state}`;
     }
   };
 
-  // Listen for cursor highlight events
+  const moveCursorTo = (x: number, y: number) => {
+    if (!cursorRef.current) return;
+    // Offset by HOT_SPOT so the arrow tip sits exactly at (x, y)
+    cursorRef.current.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
+
+    // Update circular trail buffer
+    trailBuffer.current.push({ x, y });
+    if (trailBuffer.current.length > TRAIL_COUNT) {
+      trailBuffer.current.shift();
+    }
+
+    // Reposition trail dots (oldest = most transparent, furthest behind)
+    const isMoving = stateRef.current === "moving";
+    trailRefs.current.forEach((el, i) => {
+      if (!el) return;
+      const pos = trailBuffer.current[trailBuffer.current.length - 1 - i];
+      if (pos && isMoving) {
+        el.style.transform = `translate(${pos.x - 4}px, ${pos.y - 4}px)`;
+        el.style.opacity = String(((TRAIL_COUNT - i) / TRAIL_COUNT) * 0.22);
+      } else {
+        el.style.opacity = "0";
+      }
+    });
+  };
+
+  const revealCursor = () => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    if (cursorRef.current) cursorRef.current.style.opacity = "1";
+  };
+
+  const scheduleFade = (delayMs: number) => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      if (cursorRef.current) cursorRef.current.style.opacity = "0";
+      // Clear trail dots
+      trailBuffer.current = [];
+      trailRefs.current.forEach((el) => {
+        if (el) el.style.opacity = "0";
+      });
+    }, delayMs);
+  };
+
+  const fireRipple = (x: number, y: number, color: string) => {
+    const idx = nextRippleIdx.current % rippleRefs.current.length;
+    nextRippleIdx.current++;
+    const el = rippleRefs.current[idx];
+    if (!el) return;
+
+    // Position via left/top so the CSS animation can freely use transform:scale
+    el.style.left = `${x - 20}px`;
+    el.style.top = `${y - 20}px`;
+    el.style.borderColor = color;
+    // Transparent fill matching the click color
+    el.style.backgroundColor = `${color}18`;
+
+    // Remove → read offsetWidth (forces synchronous layout, committing the removal
+    // to the browser before re-adding) → add. Without the forced reflow, browsers
+    // batch-optimize the remove+add into a no-op and the animation never resets.
+    el.classList.remove("juno-ripple-active");
+    void el.offsetWidth; // intentional forced reflow — do not remove
+    el.classList.add("juno-ripple-active");
+  };
+
+  // ── Window setup (runs once on mount) ────────────────────────────────────
   useEffect(() => {
-    if (!isEnabled) return;
-
     let mounted = true;
-    const unlistenFns: (() => void)[] = [];
 
-    const setupListeners = async () => {
+    const setupWindow = async () => {
       try {
-        // Cursor highlight start
-        const unlistenStart = await listen<[number, number]>(
-          "ui-cursor-highlight-start",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y] = event.payload;
-            setCursorHighlight({ x, y, active: true, timestamp: Date.now() });
-            await positionOverlay(x, y, true);
-            if (overlayWindowRef.current) {
-              await overlayWindowRef.current.show();
-            }
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenStart);
-        else unlistenStart();
+        const win = getCurrentWindow();
 
-        // Cursor highlight move
-        const unlistenMove = await listen<[number, number]>(
-          "ui-cursor-highlight-move",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y] = event.payload;
-            setCursorHighlight((prev) =>
-              prev ? { ...prev, x, y, timestamp: Date.now() } : null
-            );
-            await positionOverlay(x, y);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenMove);
-        else unlistenMove();
+        // Resize to cover the full primary screen, position at origin
+        // Covers the primary monitor in logical (CSS) pixels.
+        // Multi-monitor support (spanning to secondary displays) is a future enhancement.
+        await Promise.all([
+          win.setSize(
+            new LogicalSize(window.screen.width, window.screen.height)
+          ),
+          win.setPosition(new PhysicalPosition(0, 0)),
+          // Make the entire window click-through — interaction still handled by AX/CGEvent
+          win.setIgnoreCursorEvents(true),
+        ]);
 
-        // Cursor highlight stop
-        const unlistenStop = await listen<[number, number]>(
-          "ui-cursor-highlight-stop",
-          async () => {
-            if (!mounted) return;
-            setCursorHighlight(null);
-            setTimeout(async () => {
-              if (mounted && overlayWindowRef.current) {
-                await overlayWindowRef.current.hide();
-              }
-            }, 500);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenStop);
-        else unlistenStop();
-
-        // Click visualizations
-        const unlistenClick = await listen<[number, number, string]>(
-          "click-visualization",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y, color] = event.payload;
-            const newClick: ClickVisualization = {
-              x,
-              y,
-              color,
-              id: Date.now(),
-              timestamp: Date.now(),
-            };
-
-            setClickVisualizations((prev) => [...prev, newClick]);
-            await positionOverlay(x, y, true);
-            if (overlayWindowRef.current) {
-              await overlayWindowRef.current.show();
-            }
-            setTimeout(async () => {
-              if (mounted && overlayWindowRef.current) {
-                await overlayWindowRef.current.hide();
-              }
-            }, 1000);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenClick);
-        else unlistenClick();
-      } catch (error) {
-        console.error("Failed to setup cursor overlay listeners:", error);
+        if (mounted) {
+          // Show the window now — cursor sprite starts hidden (opacity: 0)
+          // and is revealed on first cursor event, so the user never sees a flash
+          await win.show();
+        }
+      } catch (err) {
+        console.error("[JunoCursor] Window setup failed:", err);
       }
     };
 
-    setupListeners();
+    setupWindow();
 
     return () => {
       mounted = false;
-      for (const unlisten of unlistenFns) {
-        unlisten();
-      }
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (clickTimer.current) clearTimeout(clickTimer.current);
     };
-  }, [isEnabled]);
+  }, []);
 
-  // Clean up old click visualizations
-  useEffect(() => {
-    if (clickVisualizations.length === 0) return;
+  // ── Cursor movement events ────────────────────────────────────────────────
 
-    const cleanupTimeout = setTimeout(() => {
-      const now = Date.now();
-      setClickVisualizations((prev) =>
-        prev.filter((click) => now - click.timestamp < 1500)
-      );
-    }, 100);
+  useEventListener<[number, number]>("ui-cursor-highlight-start", ([x, y]) => {
+    revealCursor();
+    moveCursorTo(x, y);
+    applyState("moving");
+  });
 
-    return () => clearTimeout(cleanupTimeout);
-  }, [clickVisualizations]);
+  useEventListener<[number, number]>("ui-cursor-highlight-move", ([x, y]) => {
+    moveCursorTo(x, y);
+    // Don't interrupt the click recoil animation mid-flight
+    if (stateRef.current !== "clicking") applyState("moving");
+  });
 
-  // Don't render if disabled
-  if (!isEnabled) {
-    return null;
-  }
+  useEventListener<[number, number]>("ui-cursor-highlight-stop", ([x, y]) => {
+    moveCursorTo(x, y);
+    applyState("idle");
+    scheduleFade(CURSOR_FADE_DELAY_MS);
+  });
+
+  // ── Click visualization ───────────────────────────────────────────────────
+
+  useEventListener<[number, number, string]>(
+    "click-visualization",
+    ([x, y, color]) => {
+      revealCursor();
+      moveCursorTo(x, y);
+      fireRipple(x, y, color);
+      applyState("clicking");
+
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = setTimeout(() => {
+        applyState("idle");
+        scheduleFade(CURSOR_FADE_DELAY_MS);
+      }, CLICK_ANIM_DURATION_MS);
+    }
+  );
+
+  // ── Agent thinking state ──────────────────────────────────────────────────
+  // agent-thinking-start/end fire during Claude's extended thinking feature;
+  // show cursor in "thinking" mode only when not already moving.
+
+  useEventListener("agent-thinking-start", () => {
+    if (stateRef.current === "idle") {
+      revealCursor();
+      applyState("thinking");
+    }
+  });
+
+  useEventListener("agent-thinking-end", () => {
+    if (stateRef.current === "thinking") {
+      applyState("idle");
+      scheduleFade(CURSOR_FADE_DELAY_MS);
+    }
+  });
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div
-      className="desktop-cursor-overlay"
       style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        width: "200px",
-        height: "200px",
+        inset: 0,
         pointerEvents: "none",
-        zIndex: 999999,
-        overflow: "visible",
+        overflow: "hidden",
+        background: "transparent",
       }}
     >
-      {/* Cursor highlight circle - smooth movement indicator */}
-      {cursorHighlight && cursorHighlight.active && (
-        <div
-          className="cursor-highlight-circle"
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "60px",
-            height: "60px",
-            borderRadius: "50%",
-            border: "3px solid rgba(74, 144, 226, 0.8)",
-            backgroundColor: "rgba(74, 144, 226, 0.1)",
-            transform: "translate(-50%, -50%)",
-            animation: "cursor-pulse 1.5s ease-in-out infinite",
-            boxShadow:
-              "0 0 20px rgba(74, 144, 226, 0.4), inset 0 0 20px rgba(74, 144, 226, 0.1)",
-          }}
-        />
-      )}
+      <style>{CURSOR_CSS}</style>
 
-      {/* Additional ripple effect for movement */}
-      {cursorHighlight && cursorHighlight.active && (
+      {/* Motion trail: 5 small dots, updated imperatively during movement */}
+      {Array.from({ length: TRAIL_COUNT }, (_, i) => (
         <div
-          className="cursor-ripple"
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "100px",
-            height: "100px",
-            borderRadius: "50%",
-            border: "2px solid rgba(74, 144, 226, 0.3)",
-            transform: "translate(-50%, -50%)",
-            animation: "cursor-ripple 2s ease-out infinite",
+          key={`trail-${i}`}
+          ref={(el) => {
+            trailRefs.current[i] = el;
           }}
-        />
-      )}
-
-      {/* Click visualizations */}
-      {clickVisualizations.map((click) => (
-        <div
-          key={click.id}
-          className="desktop-click-indicator"
           style={{
             position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "40px",
-            height: "40px",
+            top: 0,
+            left: 0,
+            width: 8,
+            height: 8,
             borderRadius: "50%",
-            backgroundColor: `${click.color}60`,
-            border: `3px solid ${click.color}`,
-            transform: "translate(-50%, -50%)",
-            animation: "desktop-click-animation 1s ease-out forwards",
-            boxShadow: `0 0 15px ${click.color}40`,
+            background: "rgba(139, 92, 246, 0.65)",
+            opacity: 0,
+            transform: "translate(-200px, -200px)",
+            pointerEvents: "none",
+            willChange: "transform, opacity",
           }}
         />
       ))}
 
-      {/* Styles for animations */}
-      <style>{`
-        @keyframes cursor-pulse {
-          0% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.1);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
-        }
+      {/* Click ripple pool: 5 elements reused in round-robin for rapid clicks */}
+      {Array.from({ length: 5 }, (_, i) => (
+        <div
+          key={`ripple-${i}`}
+          ref={(el) => {
+            rippleRefs.current[i] = el;
+          }}
+          style={{
+            position: "absolute",
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            border: "2px solid",
+            opacity: 0,
+            pointerEvents: "none",
+          }}
+        />
+      ))}
 
-        @keyframes cursor-ripple {
-          0% {
-            transform: translate(-50%, -50%) scale(0.8);
-            opacity: 0.6;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1.8);
-            opacity: 0;
-          }
-        }
-
-        @keyframes desktop-click-animation {
-          0% {
-            transform: translate(-50%, -50%) scale(0.3);
-            opacity: 1;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.2);
-            opacity: 0.8;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(2);
-            opacity: 0;
-          }
-        }
-      `}</style>
+      {/* Juno cursor sprite — hot-spot offset baked into transform via moveCursorTo() */}
+      <div
+        ref={cursorRef}
+        className="juno-cursor juno-cursor--idle"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          opacity: 0, // hidden until first cursor event
+          transform: "translate(-200px, -200px)",
+          pointerEvents: "none",
+        }}
+      >
+        <JunoCursorShape />
+      </div>
     </div>
   );
 };
