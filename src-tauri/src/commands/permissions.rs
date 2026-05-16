@@ -46,10 +46,16 @@ static MONITORING_TASK: std::sync::LazyLock<MonitoringTask> = std::sync::LazyLoc
     Arc::new(Mutex::new(None))
 });
 
-// Short-TTL cache for check_permissions_status_native — eliminates redundant native calls during startup
+// Short-TTL cache for check_permissions_status_native — eliminates redundant native calls during startup.
+// INVARIANT: lock must NEVER be held across an .await point — always released within its own {} scope.
 type PermissionsCache = Mutex<Option<(Instant, PermissionsState)>>;
 static PERMISSIONS_CACHE: std::sync::LazyLock<PermissionsCache> =
     std::sync::LazyLock::new(|| Mutex::new(None));
+
+/// Returns true if a cache entry timestamped at `cached_at` is still within the TTL window.
+fn is_cache_fresh(cached_at: Instant) -> bool {
+    cached_at.elapsed() < Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS)
+}
 
 /// Check the status of all required macOS permissions using NATIVE APIs ONLY
 #[tauri::command]
@@ -61,7 +67,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
             .lock()
             .map_err(|_| "Permissions cache lock poisoned".to_string())?;
         if let Some((cached_at, ref state)) = *cache {
-            if cached_at.elapsed() < Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS) {
+            if is_cache_fresh(cached_at) {
                 debug!("Returning cached permissions state (age: {:?})", cached_at.elapsed());
                 return Ok(state.clone());
             }
@@ -110,6 +116,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
 
 /// Invalidate the permissions cache so the next call fetches fresh data from native APIs.
 /// Call this after a permission request dialog has been shown to the user.
+#[allow(dead_code)] // called only from #[cfg(target_os = "macos")] blocks; dead on other platforms
 pub fn invalidate_permissions_cache() {
     match PERMISSIONS_CACHE.lock() {
         Ok(mut cache) => *cache = None,
@@ -710,15 +717,12 @@ mod tests {
 
     #[test]
     fn test_permissions_cache_ttl_respected() {
-        // A cache entry timestamped far in the past (beyond TTL) should not be served.
-        // We simulate this by checking the elapsed duration directly.
-        let old_instant = Instant::now() - Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS + 1);
-        let is_expired = old_instant.elapsed() >= Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS);
-        assert!(is_expired, "entries older than TTL should be considered expired");
+        // Verify is_cache_fresh() correctly classifies entries on both sides of the TTL boundary.
+        let expired = Instant::now() - Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS + 1);
+        assert!(!is_cache_fresh(expired), "entry older than TTL should not be fresh");
 
-        let fresh_instant = Instant::now();
-        let is_fresh = fresh_instant.elapsed() < Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS);
-        assert!(is_fresh, "entries younger than TTL should be considered fresh");
+        let fresh = Instant::now();
+        assert!(is_cache_fresh(fresh), "entry just created should be fresh");
     }
 
     #[test]
