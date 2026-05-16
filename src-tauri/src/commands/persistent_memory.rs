@@ -26,7 +26,13 @@ pub async fn get_persistent_memory_entries(
     app_handle: AppHandle,
 ) -> Result<Vec<MemoryEntry>, String> {
     let manager = PersistentMemoryManager::new(app_handle);
-    manager.load_entries()
+    let mut entries = manager.load_entries()?;
+    entries.sort_by(|a, b| {
+        b.decayed_score()
+            .partial_cmp(&a.decayed_score())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(entries)
 }
 
 /// Add a new persistent memory entry
