@@ -963,4 +963,9 @@ pub(crate) fn test_cursor_restore() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub(crate) fn get_system_cursor_size() -> Result<f64, String> {
+    Ok(crate::cursor_scale::get_system_cursor_size())
+}
+
 

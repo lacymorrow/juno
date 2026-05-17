@@ -129,6 +129,10 @@ mod inner {
     pub fn is_cursor_scaled() -> bool {
         SCALE_REFCOUNT.load(Ordering::Acquire) > 0
     }
+
+    pub fn get_system_cursor_size() -> f64 {
+        read_cursor_size()
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -138,6 +142,9 @@ mod inner {
     pub fn force_restore_cursor_scale() {}
     pub fn is_cursor_scaled() -> bool {
         false
+    }
+    pub fn get_system_cursor_size() -> f64 {
+        1.0
     }
 }
 

@@ -460,6 +460,7 @@ pub fn run() {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
 
@@ -881,6 +882,22 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
+            // Restore cursor if it was left enlarged from a previous session crash.
+            // Only act if big_cursor feature is enabled (meaning Juno likely caused it).
+            {
+                let app_for_cursor = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(sm) = crate::settings::manager::SettingsManager::new(app_for_cursor) {
+                        if let Ok(agent_settings) = sm.get_agent_settings().await {
+                            if agent_settings.big_cursor_enabled && cursor_scale::get_system_cursor_size() > 1.0 {
+                                info!("Detected enlarged cursor from previous session — resetting to normal");
+                                cursor_scale::force_restore_cursor_scale();
+                            }
+                        }
+                    }
+                });
+            }
+
             // Sweep orphaned temp browser profile directories from previous sessions
             tauri::async_runtime::spawn(async {
                 crate::agent::tools::browser_controller::BrowserController::cleanup_orphaned_temp_profiles().await;
@@ -918,6 +935,10 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                    }
+                    tauri::RunEvent::ExitRequested { .. } => {
+                        // Restore cursor scale on app exit — prevents stuck big cursor
+                        cursor_scale::force_restore_cursor_scale();
                     }
                     tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                         // Clean up escape key registration when onboarding window is closed
