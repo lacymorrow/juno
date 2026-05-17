@@ -485,6 +485,44 @@ pub async fn set_tts_provider_command(
     Ok(())
 }
 
+// Command to get the Kokoro voice from centralized settings
+#[tauri::command]
+pub async fn get_kokoro_voice_command(
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    Ok(audio_settings.kokoro_voice)
+}
+
+// Command to set the Kokoro voice in centralized settings
+#[tauri::command]
+pub async fn set_kokoro_voice_command(
+    voice: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting Kokoro voice to: {}", voice);
+
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    audio_settings.kokoro_voice = voice.clone();
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    state.set_kokoro_voice(voice.clone())
+        .map_err(|e| format!("Failed to set kokoro_voice in state: {}", e))?;
+
+    info!("Kokoro voice set to: {}", voice);
+    Ok(())
+}
+
 // New command to get current TTS provider
 #[tauri::command]
 pub async fn get_tts_provider_command(
@@ -784,7 +822,13 @@ pub async fn invoke_tts_for_provider(
 
     match provider.to_lowercase().as_str() {
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
-        "kokoro" => kokoro::invoke_kokoro_tts(text).await,
+        "kokoro" => {
+            let voice = _state
+                .as_ref()
+                .and_then(|s| s.get_kokoro_voice().ok())
+                .unwrap_or_else(|| "af_bella".to_string());
+            kokoro::invoke_kokoro_tts(text, voice).await
+        }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "system" => system::invoke_system_tts(text).await,
         "off" => {

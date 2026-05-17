@@ -233,16 +233,17 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
         .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
-    // Create voice transcription config based on centralized settings
-    let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
-        model_path: "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
-        sample_rate: 16000,
-        channels: 1,
-        buffer_duration_ms: 1500,
-        partial_interval_ms: 500,
-        enable_partial_transcription: true,
-        enable_playback: audio_settings.sound_enabled,
-    };
+    // Create voice transcription config based on centralized settings.
+    // Use from_centralized_settings to handle stt_provider/parakeet_model_dir defaults.
+    let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig::from_centralized_settings(
+        "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
+        16000,
+        1,
+        1500,
+        500,
+        true,
+        audio_settings.sound_enabled,
+    );
 
     // Note: The voice transcription plugin currently uses stub implementation
     // When it's fully implemented, we would apply the config here

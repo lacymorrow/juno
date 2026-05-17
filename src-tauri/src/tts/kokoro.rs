@@ -11,25 +11,22 @@ use tracing::{error, info};
 // TtsModel: Send + Sync, so Box<dyn TtsModel> is safe in a static.
 static KOKORO_MODEL: OnceLock<StdMutex<Option<Box<dyn any_tts::TtsModel>>>> = OnceLock::new();
 
-fn kokoro_voice() -> String {
-    std::env::var("KOKORO_VOICE").unwrap_or_else(|_| "af_bella".to_string())
-}
-
 /// Invoke Kokoro-82M TTS synthesis.
 ///
-/// Returns base64-encoded WAV audio on success. Model is lazily loaded on
-/// first call (downloads ~82MB from HuggingFace Hub if not cached). afplay on
-/// macOS reads format from magic bytes, not extension, so WAV bytes work fine
-/// in the .m4a temp file that play_base64_audio_with_tracking creates.
-pub async fn invoke_kokoro_tts(text: String) -> Result<String, String> {
-    info!("[Kokoro] TTS requested: {} chars", text.chars().count());
+/// `voice` is read from the centralized settings manager (via AppState) by the
+/// caller in `invoke_tts_for_provider`, keeping runtime configuration in the
+/// Tauri Store rather than env vars. Returns base64-encoded WAV audio on success.
+/// Model is lazily loaded on first call (downloads ~82MB from HuggingFace Hub if
+/// not cached). afplay on macOS reads format from magic bytes, not extension, so
+/// WAV bytes work fine in the .m4a temp file that play_base64_audio_with_tracking
+/// creates.
+pub async fn invoke_kokoro_tts(text: String, voice: String) -> Result<String, String> {
+    info!("[Kokoro] TTS requested: {} chars, voice: {}", text.chars().count(), voice);
 
     if crate::tts::is_tts_stop_requested() {
         info!("[Kokoro] Stop requested before start, aborting");
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
-
-    let voice = kokoro_voice();
 
     // Candle inference is synchronous — must run off the async executor
     let base64_audio = tokio::task::spawn_blocking(move || -> Result<String, String> {
