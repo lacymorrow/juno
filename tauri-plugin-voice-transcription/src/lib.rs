@@ -127,67 +127,82 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Resolve Parakeet model directory
             let parakeet_model_dir = resolve_model_path(app, &config.parakeet_model_dir);
 
-            // Initialize STT engine via EngineManager (defaults to Whisper)
-            tracing::info!("Initializing STT engine: '{}'", config.stt_provider);
-            let engine = match EngineManager::initialize(
-                config.stt_provider,
+            // Manage uninitialized controllers immediately so Tauri state is always
+            // valid (commands won't panic on missing state) even before the engine loads.
+            let voice_arc = Arc::new(Mutex::new(VoiceController::new_uninitialized(
                 &active_model_path,
-                Some(&parakeet_model_dir),
-            ) {
-                Ok(engine) => {
-                    tracing::info!("STT engine '{}' initialized successfully", engine.name());
-                    engine
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to initialize STT engine '{}': {}. Voice features will be unavailable.",
-                        config.stt_provider, e
-                    );
+                "Engine initializing in background".to_string(),
+            )));
+            let alc_arc = Arc::new(Mutex::new(AlwaysListeningController::new_uninitialized(
+                &active_model_path,
+            )));
+            app.manage(voice_arc.clone());
+            app.manage(alc_arc.clone());
 
-                    // Create uninitialized controllers so Tauri state is always managed
-                    let uninitialized_controller =
-                        VoiceController::new_uninitialized(&active_model_path, e.to_string());
-                    app.manage(Arc::new(Mutex::new(uninitialized_controller)));
+            // Load the STT model in a background task — model files can be >1 GB
+            // and would freeze the Tauri startup if loaded on the setup thread.
+            let provider = config.stt_provider;
+            let model_path_bg = active_model_path.clone();
+            let parakeet_dir_bg = parakeet_model_dir.clone();
+            let app_handle_bg = app.clone();
 
-                    tracing::warn!("Skipping AlwaysListeningController initialization due to engine failure");
-                    return Ok(());
-                }
-            };
+            tracing::info!("Spawning background task to initialize '{}' engine...", provider);
+            tauri::async_runtime::spawn(async move {
+                let model_path_bl = model_path_bg.clone();
+                let parakeet_bl = parakeet_dir_bg.clone();
 
-            // Initialize VoiceController with the engine
-            tracing::info!("Creating VoiceController with '{}' engine", engine.name());
-            let controller = match VoiceController::new_with_engine(&active_model_path, engine.clone()) {
-                Ok(c) => {
-                    tracing::info!("VoiceController initialized");
-                    c
-                }
-                Err(e) => {
-                    tracing::error!("Failed to initialize VoiceController: {}. Creating uninitialized controller.", e);
-                    VoiceController::new_uninitialized(&active_model_path, e.to_string())
-                }
-            };
-            app.manage(Arc::new(Mutex::new(controller)));
-
-            // Initialize AlwaysListeningController with the same engine
-            tracing::info!("Creating AlwaysListeningController with '{}' engine", engine.name());
-            let always_listening_controller =
-                match AlwaysListeningController::new_with_engine(&active_model_path, engine) {
-                    Ok(c) => {
-                        tracing::info!("AlwaysListeningController initialized");
-                        c
-                    }
-                    Err(e) => {
+                let engine = match tokio::task::spawn_blocking(move || {
+                    EngineManager::initialize(provider, &model_path_bl, Some(&parakeet_bl))
+                })
+                .await
+                {
+                    Ok(Ok(engine)) => engine,
+                    Ok(Err(e)) => {
                         tracing::error!(
-                            "Failed to initialize AlwaysListeningController: {}. Registering uninitialized controller.",
-                            e
+                            "[VoicePlugin] Failed to initialize '{}' engine: {}. Voice features unavailable.",
+                            provider, e
                         );
-                        AlwaysListeningController::new_uninitialized(&active_model_path)
+                        if let Ok(mut vc) = voice_arc.lock() {
+                            *vc = VoiceController::new_uninitialized(&model_path_bg, e);
+                        }
+                        return;
+                    }
+                    Err(join_err) => {
+                        tracing::error!("[VoicePlugin] Engine init task panicked: {}", join_err);
+                        return;
                     }
                 };
-            app.manage(Arc::new(Mutex::new(always_listening_controller)));
 
-            tracing::info!("=== Voice Transcription Plugin Initialization Complete ===");
-            tracing::info!("💡 Both controllers share the '{}' engine", EngineManager::current_provider_name());
+                let engine_name = engine.name();
+                tracing::info!("[VoicePlugin] Engine '{}' ready — updating controllers", engine_name);
+
+                match VoiceController::new_with_engine(&model_path_bg, engine.clone()) {
+                    Ok(new_vc) => {
+                        if let Ok(mut vc) = voice_arc.lock() {
+                            *vc = new_vc;
+                            tracing::info!("[VoicePlugin] VoiceController initialized");
+                        }
+                    }
+                    Err(e) => tracing::error!("[VoicePlugin] VoiceController creation failed: {}", e),
+                }
+
+                match AlwaysListeningController::new_with_engine(&model_path_bg, engine) {
+                    Ok(new_alc) => {
+                        if let Ok(mut alc) = alc_arc.lock() {
+                            *alc = new_alc;
+                            tracing::info!("[VoicePlugin] AlwaysListeningController initialized");
+                        }
+                    }
+                    Err(e) => tracing::error!("[VoicePlugin] AlwaysListeningController creation failed: {}", e),
+                }
+
+                tracing::info!("=== Voice Transcription Plugin Initialization Complete (background) ===");
+                let _ = app_handle_bg.emit(
+                    "voice-engine-ready",
+                    serde_json::json!({ "provider": engine_name }),
+                );
+            });
+
             Ok(())
         })
         .build()

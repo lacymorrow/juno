@@ -218,7 +218,12 @@ async fn download_to_disk(
     models_dir: &PathBuf,
     filename: &str,
 ) -> Result<(), String> {
-    std::fs::create_dir_all(models_dir)
+    // Guard against directory traversal (e.g. a crafted filename containing "..")
+    if models_dir.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err("Invalid models directory: path traversal not allowed".to_string());
+    }
+    tokio::fs::create_dir_all(models_dir)
+        .await
         .map_err(|e| format!("Failed to create models directory: {}", e))?;
 
     let client = reqwest::Client::builder()
