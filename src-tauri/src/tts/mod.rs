@@ -1,4 +1,5 @@
 pub mod elevenlabs;
+pub mod kokoro;
 pub mod replicate;
 pub mod system;
 
@@ -460,7 +461,7 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate"];
+    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro"];
     if !valid_providers.contains(&provider.as_str()) {
         return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
     }
@@ -703,8 +704,9 @@ async fn execute_tts_with_fallback(
 
     // Define the provider fallback order based on the primary provider
     let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "system"],
-        "elevenlabs" => vec!["elevenlabs", "system"],
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
         "system" => vec!["system"],
         "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
         _ => {
@@ -782,6 +784,7 @@ pub async fn invoke_tts_for_provider(
 
     match provider.to_lowercase().as_str() {
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "kokoro" => kokoro::invoke_kokoro_tts(text).await,
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "system" => system::invoke_system_tts(text).await,
         "off" => {

@@ -40,6 +40,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
               <SelectContent>
                 <SelectItem value="off">Off</SelectItem>
                 <SelectItem value="system">System</SelectItem>
+                <SelectItem value="kokoro">Kokoro (Local)</SelectItem>
                 <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
                 <SelectItem value="replicate">Replicate</SelectItem>
               </SelectContent>

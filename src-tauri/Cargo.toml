@@ -104,6 +104,9 @@ lru = "0.12"
 walkdir = "2.4"
 # System-level utilities for shell session management
 libc = "0.2"
+# Local TTS: Kokoro-82M via any-tts (Candle-based, Metal GPU on Apple Silicon)
+# kokoro-only features to avoid pulling in OmniVoice/Qwen3/VibeVoice/Voxtral backends
+any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
