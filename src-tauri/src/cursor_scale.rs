@@ -62,6 +62,7 @@ mod inner {
         }
     }
 
+    /// Enlarge cursor AND increment refcount. Only call from CursorScaleGuard::new().
     pub fn set_cursor_scale(scale: f64) {
         let scale = scale.clamp(1.0, 10.0);
 
@@ -81,6 +82,34 @@ mod inner {
             scale,
             SCALE_REFCOUNT.load(Ordering::Acquire)
         );
+    }
+
+    /// Write cursor size without touching refcount. Use for preview/test operations
+    /// where no RAII guard will issue a matching decrement.
+    pub fn write_cursor_size_preview(scale: f64) {
+        let scale = scale.clamp(1.0, 10.0);
+
+        // Capture original if not already saved (so reset_cursor_to_default works)
+        if let Ok(mut orig) = ORIGINAL_SIZE.lock() {
+            if orig.is_none() {
+                let current = read_cursor_size();
+                info!("[CursorScale] Saved original cursor size: {:.2}", current);
+                *orig = Some(current);
+            }
+        }
+
+        write_cursor_size(scale);
+        info!("[CursorScale] Preview: wrote cursor scale {:.1} (refcount unchanged)", scale);
+    }
+
+    /// Update cursor size while it is already scaled by an active guard.
+    /// Does NOT touch refcount — only changes the visual size.
+    pub fn update_active_scale(scale: f64) {
+        let scale = scale.clamp(1.0, 10.0);
+        if SCALE_REFCOUNT.load(Ordering::Acquire) > 0 {
+            write_cursor_size(scale);
+            info!("[CursorScale] Updated active cursor scale to {:.1}", scale);
+        }
     }
 
     pub fn restore_cursor_scale() {
@@ -114,19 +143,16 @@ mod inner {
 
     pub fn force_restore_cursor_scale() {
         SCALE_REFCOUNT.store(0, Ordering::Release);
-        let orig = ORIGINAL_SIZE.lock().ok().and_then(|mut g| g.take());
-        match orig {
-            Some(size) => {
-                write_cursor_size(size);
-                info!(
-                    "[CursorScale] Force-restored cursor to original size {:.2}",
-                    size
-                );
-            }
-            None => {
-                info!("[CursorScale] Force-restore called but no original size captured — no-op");
-            }
-        }
+        let orig = ORIGINAL_SIZE
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+            .unwrap_or(1.0);
+        write_cursor_size(orig);
+        info!(
+            "[CursorScale] Force-restored cursor to {:.2}",
+            orig
+        );
     }
 
     pub fn is_cursor_scaled() -> bool {
@@ -159,6 +185,8 @@ mod inner {
         1.0
     }
     pub fn reset_cursor_to_default() {}
+    pub fn write_cursor_size_preview(_scale: f64) {}
+    pub fn update_active_scale(_scale: f64) {}
 }
 
 pub use inner::*;

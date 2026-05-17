@@ -881,13 +881,12 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
-            // On startup, if cursor is enlarged from a previous crash, emit a
-            // notification so the frontend can show the "Reset to Normal" banner.
-            // We do NOT auto-reset here because the user may have their own
-            // accessibility cursor size that we must not clobber.
-            if cursor_scale::get_system_cursor_size() > 1.0 {
+            // Log if cursor is enlarged (from a previous crash or user accessibility).
+            // We do NOT auto-reset — the settings UI shows a "Reset to Normal" banner.
+            let startup_cursor_size = cursor_scale::get_system_cursor_size();
+            if startup_cursor_size > 1.0 {
                 info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
-                    cursor_scale::get_system_cursor_size());
+                    startup_cursor_size);
             }
 
             // Sweep orphaned temp browser profile directories from previous sessions
