@@ -54,8 +54,7 @@ pub(crate) struct ChatterboxInput {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_url: Option<String>, // Optional URL to reference audio for voice cloning
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exaggeration: Option<f64>, // Emotion exaggeration level 0.0-1.0
+    exaggeration: Option<f64>, // Emotion exaggeration level 0.0-2.0
 }
 
 #[derive(Serialize)]
@@ -63,7 +62,6 @@ pub(crate) struct ChatterboxRequest {
     input: ChatterboxInput,
 }
 // --- End Chatterbox API Structures ---
-
 // Command to invoke Replicate TTS
 #[tauri::command]
 pub async fn invoke_replicate_tts(
@@ -316,20 +314,16 @@ pub async fn invoke_chatterbox_tts(
     let start_url = format!("https://api.replicate.com/v1/models/resemble-ai/{}/predictions", model_name);
     info!("Using Chatterbox model endpoint: {}", start_url);
 
-    let client = Client::new();
-
-    let exaggeration_val = if (exaggeration - 0.5_f32).abs() < f32::EPSILON {
-        // Only send if non-default to keep payload minimal
-        None
-    } else {
-        Some(exaggeration as f64)
-    };
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Failed to create Chatterbox HTTP client: {}", e))?;
 
     let request_payload = ChatterboxRequest {
         input: ChatterboxInput {
             text: text.clone(),
             audio_url: reference_audio_url,
-            exaggeration: exaggeration_val,
+            exaggeration: Some(exaggeration as f64),
         },
     };
 
