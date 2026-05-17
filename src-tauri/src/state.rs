@@ -141,6 +141,9 @@ impl ToolApprovalRequest {
 pub struct AudioSettings {
     pub tts_provider: String,
     pub kokoro_voice: String,
+    pub chatterbox_reference_audio_url: Option<String>,
+    pub chatterbox_exaggeration: f32,
+    pub chatterbox_use_hd: bool,
     pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
@@ -165,6 +168,9 @@ impl Default for AudioSettings {
                 }
             },
             kokoro_voice: "af_bella".to_string(),
+            chatterbox_reference_audio_url: None,
+            chatterbox_exaggeration: 0.5,
+            chatterbox_use_hd: false,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
@@ -418,6 +424,48 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.kokoro_voice = voice)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "Kokoro voice", e))
+    }
+
+    pub fn get_chatterbox_reference_audio_url(&self) -> Result<Option<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_reference_audio_url.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn set_chatterbox_reference_audio_url(&self, url: Option<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_reference_audio_url = url)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn get_chatterbox_exaggeration(&self) -> Result<f32, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox exaggeration", e))
+    }
+
+    pub fn set_chatterbox_exaggeration(&self, exaggeration: f32) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_exaggeration = exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox exaggeration", e))
+    }
+
+    pub fn get_chatterbox_use_hd(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox HD mode", e))
+    }
+
+    pub fn set_chatterbox_use_hd(&self, use_hd: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_use_hd = use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox HD mode", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {

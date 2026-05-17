@@ -348,6 +348,8 @@ pub fn run() {
             tts::get_tts_provider_command, // Added for TTS provider selection
             tts::set_kokoro_voice_command, // Kokoro voice selection via settings
             tts::get_kokoro_voice_command, // Kokoro voice selection via settings
+            tts::get_chatterbox_settings_command, // Chatterbox TTS settings
+            tts::set_chatterbox_settings_command, // Chatterbox TTS settings
             tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,

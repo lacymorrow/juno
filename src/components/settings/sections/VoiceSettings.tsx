@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Download, Save } from "lucide-react";
+import { useState } from "react";
 import { SettingsSectionProps } from "../types";
 
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
@@ -28,10 +29,23 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     whisperDownloadProgress,
     handleWhisperModelChange,
     handleWhisperModelDownload,
+    chatterboxReferenceAudioUrl,
+    chatterboxExaggeration,
+    chatterboxUseHd,
+    handleChatterboxSettingsChange,
   } = settings;
 
   const selectedModel = whisperModels.find((m) => m.id === currentWhisperModel);
   const downloadingModel = whisperModels.find((m) => m.id === whisperDownloading);
+
+  // Local draft state for Chatterbox settings (save on blur/button)
+  const [chatterboxRefUrl, setChatterboxRefUrl] = useState<string>(chatterboxReferenceAudioUrl ?? "");
+  const [chatterboxExag, setChatterboxExag] = useState<number>(chatterboxExaggeration ?? 0.5);
+  const [chatterboxHd, setChatterboxHd] = useState<boolean>(chatterboxUseHd ?? false);
+
+  const saveChatterboxSettings = () => {
+    handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, chatterboxHd);
+  };
 
   return (
     <div className="space-y-6">
@@ -56,9 +70,79 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value="kokoro">Kokoro (Local)</SelectItem>
                 <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
                 <SelectItem value="replicate">Replicate</SelectItem>
+                <SelectItem value="chatterbox">Chatterbox (Cloud)</SelectItem>
               </SelectContent>
             </Select>
           </div>
+
+          {settings.ttsProvider === "chatterbox" && (
+            <div className="mt-4 space-y-4 rounded-md border p-4">
+              <p className="text-xs text-muted-foreground">
+                Chatterbox is MIT-licensed and runs on Replicate (~$0.006/sec).
+                Requires a Replicate API key.
+              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="chatterbox-ref-audio">
+                  Reference Audio URL (optional)
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="chatterbox-ref-audio"
+                    value={chatterboxRefUrl}
+                    onChange={(e) => setChatterboxRefUrl(e.target.value)}
+                    placeholder="https://example.com/voice-sample.wav"
+                    className="flex-1"
+                  />
+                  <Button size="sm" onClick={saveChatterboxSettings} variant="outline">
+                    <Save className="h-3 w-3" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  5–10s WAV/MP3 URL for voice cloning. Leave blank for default voice.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="chatterbox-exaggeration">
+                  Emotion Exaggeration:{" "}
+                  {chatterboxExag.toFixed(2)}
+                </Label>
+                <input
+                  type="range"
+                  id="chatterbox-exaggeration"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value={chatterboxExag}
+                  onChange={(e) => setChatterboxExag(parseFloat(e.target.value))}
+                  onMouseUp={saveChatterboxSettings}
+                  onTouchEnd={saveChatterboxSettings}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <p className="text-xs text-muted-foreground">
+                  0 = neutral, 1 = natural, 2 = very expressive
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="chatterbox-hd">Use Chatterbox HD</Label>
+                  <p className="text-xs text-gray-500">
+                    Higher quality, slightly slower (resemble-ai/chatterbox-hd)
+                  </p>
+                </div>
+                <Switch
+                  id="chatterbox-hd"
+                  checked={chatterboxHd}
+                  onCheckedChange={(checked) => {
+                    setChatterboxHd(checked);
+                    handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, checked);
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
