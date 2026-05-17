@@ -62,7 +62,6 @@ pub(crate) struct ChatterboxRequest {
     input: ChatterboxInput,
 }
 // --- End Chatterbox API Structures ---
-
 // Command to invoke Replicate TTS
 #[tauri::command]
 pub async fn invoke_replicate_tts(
