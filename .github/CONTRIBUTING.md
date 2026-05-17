@@ -21,9 +21,13 @@ bun run dev
 
 See [`CLAUDE.md`](../CLAUDE.md) for the full architecture guide, including the multi-agent orchestrator, MCP server layout, and platform-specific crates.
 
+## Asking questions
+
+Have a usage question, want to share what you built with Juno, or trade ideas with other users? Start a thread in [**Discussions**](https://github.com/lacymorrow/juno/discussions) — that's the right place for anything that isn't a confirmed bug or feature request.
+
 ## Reporting bugs
 
-Open an issue using the **Bug Report** template. Include your Juno version (Juno › About), macOS version, exact steps to reproduce, and any Console.app logs filtered to `Juno`.
+Open an issue using the **Bug Report** template. Include your Juno version (Juno › About), macOS version, exact steps to reproduce, and any Console.app logs filtered to `Juno`. If you're unsure whether something is a bug, ask in Discussions first.
 
 ## Proposing changes
 
