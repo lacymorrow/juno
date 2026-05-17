@@ -235,7 +235,7 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
 
     // Create voice transcription config based on centralized settings
     let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
-        model_path: "models/ggml-tiny.en.bin".to_string(),
+        model_path: "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
         sample_rate: 16000,
         channels: 1,
         buffer_duration_ms: 1500,

@@ -135,6 +135,12 @@ use crate::commands::enhanced_visual_reasoning_commands::{
     validate_visual_analysis_request,
 };
 
+// Import whisper model management commands
+use crate::commands::whisper_model::{
+    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
+    get_whisper_models, set_whisper_model,
+};
+
 // Added for selector parsing
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
@@ -618,6 +624,12 @@ pub fn run() {
             set_audio_level_monitoring,
             test_whisper_model,
             force_transcription_test,
+            // Whisper Model Management Commands
+            get_whisper_models,
+            get_current_whisper_model,
+            download_whisper_model,
+            set_whisper_model,
+            get_whisper_download_status,
             // Environment Commands
             load_bundled_environment,
             test_environment_variables,
@@ -778,6 +790,11 @@ pub fn run() {
 
             // Manage the SettingsManager state
             app.manage(settings_manager);
+
+            // --- Initialize Whisper Download State ---
+            app.manage(std::sync::Arc::new(std::sync::Mutex::new(
+                crate::commands::whisper_model::WhisperDownloadState::new(),
+            )));
 
             // --- Initialize Application State Management ---
             let state_app_handle = app_handle.clone();

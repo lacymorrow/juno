@@ -393,7 +393,7 @@ impl Default for CLISettings {
 impl Default for VoiceTranscriptionSettings {
     fn default() -> Self {
         Self {
-            model_path: "models/ggml-tiny.en.bin".to_string(),
+            model_path: "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
             sample_rate: 16000,
             channels: 1,
             buffer_duration_ms: 1500,

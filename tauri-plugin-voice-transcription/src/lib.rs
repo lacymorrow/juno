@@ -1,4 +1,4 @@
-use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime};
+use tauri::{plugin::{Builder, TauriPlugin}, Emitter, Manager, Runtime};
 use std::sync::{Arc, Mutex};
 
 pub mod controller;
@@ -83,7 +83,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             tracing::info!("Model path exists: {}", model_path_exists);
 
             if !model_path_exists {
-                tracing::error!("Model file does not exist at resolved path: {}", resolved_model_path);
+                tracing::warn!("Preferred model not found at: {}", resolved_model_path);
                 // List available files in the models directory for debugging
                 if let Ok(entries) = std::fs::read_dir("models") {
                     tracing::info!("Available files in models directory:");
@@ -93,60 +93,73 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
                 } else {
                     tracing::warn!("Could not read models directory");
                 }
+                // Notify frontend so it can offer to download the preferred model
+                let _ = app.emit("whisper-model-not-found", serde_json::json!({
+                    "preferred": &config.model_path,
+                    "resolved": &resolved_model_path
+                }));
             }
 
-                        // Initialize shared Whisper context ONCE for both controllers
-            tracing::info!("🚀 Initializing shared Whisper context with path: {}", resolved_model_path);
-            let shared_context = match SharedWhisperManager::initialize(&resolved_model_path) {
+            // Fallback: if preferred model missing, try tiny.en as a working fallback
+            let active_model_path = if !model_path_exists {
+                let fallback_path = resolve_model_path(app, "models/ggml-tiny.en.bin");
+                if std::path::Path::new(&fallback_path).exists() {
+                    tracing::info!("Falling back to tiny model: {}", fallback_path);
+                    fallback_path
+                } else {
+                    tracing::warn!("Fallback tiny model also missing — voice will be unavailable until a model is downloaded");
+                    resolved_model_path.clone()
+                }
+            } else {
+                resolved_model_path.clone()
+            };
+
+            // Initialize shared Whisper context ONCE for both controllers
+            tracing::info!("Initializing shared Whisper context with path: {}", active_model_path);
+            let shared_context = match SharedWhisperManager::initialize(&active_model_path) {
                 Ok(context) => {
-                    tracing::info!("✅ Shared Whisper context initialized successfully (will be reused by both controllers)");
-
-                    // Log performance information
+                    tracing::info!("Shared Whisper context initialized successfully");
                     let perf_info = SharedWhisperManager::get_performance_info();
-                    tracing::info!("📊 Performance optimization: {}", serde_json::to_string_pretty(&perf_info).unwrap_or_default());
-
+                    tracing::info!("Performance: {}", serde_json::to_string_pretty(&perf_info).unwrap_or_default());
                     context
                 }
                 Err(e) => {
-                    tracing::error!("❌ Failed to initialize shared Whisper context: {}. Voice features will be unavailable.", e);
-                    tracing::error!("Error details: {:?}", e);
-                    tracing::error!("💡 This means both VoiceController and AlwaysListeningController will fail to initialize");
+                    tracing::error!("Failed to initialize shared Whisper context: {}. Voice features will be unavailable.", e);
 
                     // Create uninitialized controllers
-                    let uninitialized_controller = VoiceController::new_uninitialized(&resolved_model_path, e.to_string());
+                    let uninitialized_controller = VoiceController::new_uninitialized(&active_model_path, e.to_string());
                     app.manage(Arc::new(Mutex::new(uninitialized_controller)));
 
-                    // Don't attempt to create AlwaysListeningController either
-                    tracing::warn!("🚫 Skipping AlwaysListeningController initialization due to shared context failure");
+                    tracing::warn!("Skipping AlwaysListeningController initialization due to shared context failure");
                     return Ok(());
                 }
             };
 
             // Initialize voice controller using shared context
-            tracing::info!("Creating VoiceController with shared Whisper context (no duplicate model loading)");
-            let controller = match VoiceController::new_with_shared_context(&resolved_model_path, shared_context.clone()) {
+            tracing::info!("Creating VoiceController with shared Whisper context");
+            let controller = match VoiceController::new_with_shared_context(&active_model_path, shared_context.clone()) {
                 Ok(controller) => {
-                    tracing::info!("✅ VoiceController initialized with shared context");
+                    tracing::info!("VoiceController initialized with shared context");
                     controller
                 }
                 Err(e) => {
-                    tracing::error!("❌ Failed to initialize voice controller with shared context: {}. Creating uninitialized controller.", e);
-                    VoiceController::new_uninitialized(&resolved_model_path, e.to_string())
+                    tracing::error!("Failed to initialize voice controller: {}. Creating uninitialized controller.", e);
+                    VoiceController::new_uninitialized(&active_model_path, e.to_string())
                 }
             };
 
             app.manage(Arc::new(Mutex::new(controller)));
 
             // Initialize always listening controller using shared context
-            tracing::info!("Creating AlwaysListeningController with shared Whisper context (no duplicate model loading)");
-            let always_listening_controller = match AlwaysListeningController::new_with_shared_context(&resolved_model_path, shared_context) {
+            tracing::info!("Creating AlwaysListeningController with shared Whisper context");
+            let always_listening_controller = match AlwaysListeningController::new_with_shared_context(&active_model_path, shared_context) {
                 Ok(always_listening_controller) => {
                     tracing::info!("AlwaysListeningController initialized with shared context");
                     always_listening_controller
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize always listening controller: {}. Registering uninitialized controller.", e);
-                    AlwaysListeningController::new_uninitialized(&resolved_model_path)
+                    AlwaysListeningController::new_uninitialized(&active_model_path)
                 }
             };
 

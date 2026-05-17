@@ -57,6 +57,7 @@ pub mod tools;
 pub mod tray_commands;
 pub mod ui_commands; // Consolidated UI API for all floating elements
 pub mod ui_token_selection;
+pub mod whisper_model;
 pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
@@ -111,6 +112,10 @@ pub use self::sound::*;
 pub use self::stop_operations::*;
 pub use self::tool_choice::*;
 pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
+pub use self::whisper_model::{
+    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
+    get_whisper_models, set_whisper_model,
+};
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
