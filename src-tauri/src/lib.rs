@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
 use tracing::{error, info, warn};
@@ -468,6 +467,7 @@ pub fn run() {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
 
@@ -889,6 +889,14 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
+            // Log if cursor is enlarged (from a previous crash or user accessibility).
+            // We do NOT auto-reset — the settings UI shows a "Reset to Normal" banner.
+            let startup_cursor_size = cursor_scale::get_system_cursor_size();
+            if startup_cursor_size > 1.0 {
+                info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
+                    startup_cursor_size);
+            }
+
             // Sweep orphaned temp browser profile directories from previous sessions
             tauri::async_runtime::spawn(async {
                 crate::agent::tools::browser_controller::BrowserController::cleanup_orphaned_temp_profiles().await;
@@ -926,6 +934,10 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                    }
+                    tauri::RunEvent::ExitRequested { .. } => {
+                        // Restore cursor scale on app exit — prevents stuck big cursor
+                        cursor_scale::force_restore_cursor_scale();
                     }
                     tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                         // Clean up escape key registration when onboarding window is closed
