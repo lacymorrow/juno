@@ -5,6 +5,9 @@ use crate::always_listening::AlwaysListeningController;
 use crate::error::Error;
 use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
+use crate::engine::SttProvider;
+use crate::engine_manager::EngineManager;
+use crate::engine_parakeet::ParakeetModelStatus;
 use tracing::{info, error};
 use serde_json::json;
 use crate::constants;
@@ -750,7 +753,7 @@ pub async fn request_microphone_permission() -> Result<String, Error> {
 #[tauri::command]
 pub async fn ensure_microphone_ready() -> Result<(), Error> {
     info!("[Plugin] ensure_microphone_ready command called");
-    
+
     match crate::mic_permissions::ensure_microphone_ready().await {
         Ok(()) => {
             info!("[Plugin] Microphone is ready");
@@ -761,4 +764,81 @@ pub async fn ensure_microphone_ready() -> Result<(), Error> {
             Err(Error::Other(e))
         }
     }
+}
+
+#[tauri::command]
+pub fn get_stt_provider() -> Result<String, Error> {
+    info!("[Plugin] get_stt_provider called");
+    Ok(EngineManager::current_provider_name().to_string())
+}
+
+#[tauri::command]
+pub async fn set_stt_provider<R: tauri::Runtime>(
+    provider: String,
+    app: AppHandle<R>,
+) -> Result<String, Error> {
+    info!("[Plugin] set_stt_provider called with provider: {}", provider);
+
+    let stt_provider: SttProvider = match provider.to_lowercase().as_str() {
+        "whisper" => SttProvider::Whisper,
+        "parakeet" => SttProvider::Parakeet,
+        other => return Err(Error::Other(format!("Unknown STT provider: '{}'", other))),
+    };
+
+    // Resolve paths needed for engine initialization
+    let config = VoiceTranscriptionConfig::default();
+    let whisper_path = resolve_model_path(&app, &config.model_path);
+    let parakeet_dir = resolve_model_path(&app, &config.parakeet_model_dir);
+
+    let engine = EngineManager::switch(stt_provider, &whisper_path, Some(&parakeet_dir))
+        .map_err(|e| Error::ModelError(format!("Failed to switch STT engine: {}", e)))?;
+
+    let provider_name = engine.name().to_string();
+    info!("[Plugin] STT engine switched to '{}'", provider_name);
+
+    // Push new engine to VoiceController
+    if let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+        match vc_state.try_lock() {
+            Ok(mut vc) => {
+                if let Err(e) = vc.update_engine(engine.clone()) {
+                    error!("[Plugin] Failed to update VoiceController engine: {}", e);
+                }
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                error!("[Plugin] VoiceController busy - engine swap will take effect on next recording");
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                error!("[Plugin] VoiceController mutex poisoned: {}", e);
+            }
+        }
+    }
+
+    // Push new engine to AlwaysListeningController
+    if let Some(al_state) = app.try_state::<Arc<Mutex<AlwaysListeningController>>>() {
+        match al_state.try_lock() {
+            Ok(mut al) => {
+                if let Err(e) = al.update_engine(engine) {
+                    error!("[Plugin] Failed to update AlwaysListeningController engine: {}", e);
+                }
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                error!("[Plugin] AlwaysListeningController busy - engine swap will take effect on next session");
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                error!("[Plugin] AlwaysListeningController mutex poisoned: {}", e);
+            }
+        }
+    }
+
+    Ok(provider_name)
+}
+
+#[tauri::command]
+pub fn get_parakeet_model_status<R: tauri::Runtime>(
+    app: AppHandle<R>,
+) -> Result<ParakeetModelStatus, Error> {
+    info!("[Plugin] get_parakeet_model_status called");
+    let config = VoiceTranscriptionConfig::default();
+    let parakeet_dir = resolve_model_path(&app, &config.parakeet_model_dir);
+    Ok(ParakeetModelStatus::check(std::path::Path::new(&parakeet_dir)))
 }

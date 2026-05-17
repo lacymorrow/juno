@@ -119,6 +119,11 @@ export function useSettings() {
 	// TTS Settings
 	const [ttsProvider, setTtsProvider] = useState<string>("system");
 
+	// Chatterbox TTS Settings
+	const [chatterboxReferenceAudioUrl, setChatterboxReferenceAudioUrl] = useState<string>("");
+	const [chatterboxExaggeration, setChatterboxExaggeration] = useState<number>(0.5);
+	const [chatterboxUseHd, setChatterboxUseHd] = useState<boolean>(false);
+
 	// AI Provider Settings
 	const [providers, setProviders] = useState<ProviderInfo[]>([]);
 	const [activeProvider, setActiveProvider] = useState<string>("");
@@ -417,6 +422,20 @@ export function useSettings() {
 			setAlwaysListeningWakeWords(wakeWords);
 			setWakeWordsInput(wakeWords.join(", "));
 
+			// Load Chatterbox-specific settings
+			try {
+				const chatterboxSettings = await invokeCommand<{
+					reference_audio_url: string | null;
+					exaggeration: number;
+					use_hd: boolean;
+				}>("get_chatterbox_settings_command");
+				setChatterboxReferenceAudioUrl(chatterboxSettings.reference_audio_url ?? "");
+				setChatterboxExaggeration(chatterboxSettings.exaggeration);
+				setChatterboxUseHd(chatterboxSettings.use_hd);
+			} catch (error) {
+				console.warn("Failed to load Chatterbox settings:", error);
+			}
+
 			if (currentActiveProvider) {
 				const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
 					providerId: currentActiveProvider,
@@ -582,6 +601,29 @@ export function useSettings() {
 		);
 		invalidateCache('ttsProvider');
 		setTtsProvider(newProvider);
+	}, [invokeCommand]);
+
+	const handleChatterboxSettingsChange = useCallback(async (
+		referenceAudioUrl: string,
+		exaggeration: number,
+		useHd: boolean,
+	) => {
+		await invokeCommand(
+			"set_chatterbox_settings_command",
+			{
+				referenceAudioUrl: referenceAudioUrl || null,
+				exaggeration,
+				useHd,
+			},
+			{
+				showSuccessToast: true,
+				successMessage: "Chatterbox settings saved",
+				errorMessage: "Failed to save Chatterbox settings",
+			}
+		);
+		setChatterboxReferenceAudioUrl(referenceAudioUrl);
+		setChatterboxExaggeration(exaggeration);
+		setChatterboxUseHd(useHd);
 	}, [invokeCommand]);
 
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
@@ -864,6 +906,9 @@ export function useSettings() {
 	return {
 		// State
 		ttsProvider,
+		chatterboxReferenceAudioUrl,
+		chatterboxExaggeration,
+		chatterboxUseHd,
 		providers,
 		activeProvider,
 		providerSettings,
@@ -905,6 +950,7 @@ export function useSettings() {
 		// Actions
 		loadAllSettings,
 		handleTtsProviderChange,
+		handleChatterboxSettingsChange,
 		handleActiveProviderChange,
 		handleSaveProviderSettings,
 		handleSoundEnabledChange,

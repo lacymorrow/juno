@@ -119,6 +119,12 @@ pub struct AudioSettings {
     pub tts_provider: String,
     #[serde(default = "AudioSettings::default_kokoro_voice")]
     pub kokoro_voice: String,
+    #[serde(default)]
+    pub chatterbox_reference_audio_url: Option<String>,
+    #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
+    pub chatterbox_exaggeration: f32,
+    #[serde(default)]
+    pub chatterbox_use_hd: bool,
     pub sound_enabled: bool,
     pub dictation_clipboard_enabled: bool,
     pub dictation_trigger_mode: String, // "tap" or "hold"
@@ -132,7 +138,12 @@ impl AudioSettings {
     fn default_kokoro_voice() -> String {
         "af_bella".to_string()
     }
+
+    fn default_chatterbox_exaggeration() -> f32 {
+        0.5
+    }
 }
+
 
 /// Tool enable/disable configurations
 /// Replaces: tool_config.json
@@ -342,6 +353,9 @@ impl Default for AudioSettings {
         Self {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
             kokoro_voice: Self::default_kokoro_voice(),
+            chatterbox_reference_audio_url: None,
+            chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
+            chatterbox_use_hd: false,
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_trigger_mode: "hold".to_string(),

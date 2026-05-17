@@ -461,7 +461,7 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro"];
+    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro", "chatterbox"];
     if !valid_providers.contains(&provider.as_str()) {
         return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
     }
@@ -522,6 +522,62 @@ pub async fn set_kokoro_voice_command(
     info!("Kokoro voice set to: {}", voice);
     Ok(())
 }
+
+// Command to get Chatterbox settings
+#[tauri::command]
+pub async fn get_chatterbox_settings_command(
+    app_handle: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    Ok(serde_json::json!({
+        "reference_audio_url": audio_settings.chatterbox_reference_audio_url,
+        "exaggeration": audio_settings.chatterbox_exaggeration,
+        "use_hd": audio_settings.chatterbox_use_hd,
+    }))
+}
+
+// Command to update Chatterbox settings
+#[tauri::command]
+pub async fn set_chatterbox_settings_command(
+    reference_audio_url: Option<String>,
+    exaggeration: f32,
+    use_hd: bool,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting Chatterbox settings: ref_audio={:?}, exaggeration={:.2}, hd={}", reference_audio_url, exaggeration, use_hd);
+
+    if !(0.0..=2.0).contains(&exaggeration) {
+        return Err(format!("Chatterbox exaggeration must be between 0.0 and 2.0, got {}", exaggeration));
+    }
+
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    audio_settings.chatterbox_reference_audio_url = reference_audio_url.clone();
+    audio_settings.chatterbox_exaggeration = exaggeration;
+    audio_settings.chatterbox_use_hd = use_hd;
+
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save Chatterbox settings: {}", e))?;
+
+    state.set_chatterbox_reference_audio_url(reference_audio_url)
+        .map_err(|e| format!("Failed to set Chatterbox reference audio URL in state: {}", e))?;
+    state.set_chatterbox_exaggeration(exaggeration)
+        .map_err(|e| format!("Failed to set Chatterbox exaggeration in state: {}", e))?;
+    state.set_chatterbox_use_hd(use_hd)
+        .map_err(|e| format!("Failed to set Chatterbox HD mode in state: {}", e))?;
+
+    info!("Chatterbox settings saved");
+    Ok(())
+}
+
 
 // New command to get current TTS provider
 #[tauri::command]
@@ -598,8 +654,11 @@ async fn execute_tts_with_completion_tracking(
 ) -> Result<String, String> {
     info!("Starting TTS with provider: {}", primary_provider);
 
+    // Clone AppState (cheap — all fields are Arc<>) so settings propagate to provider dispatch
+    let app_state = (**state).clone();
+
     // Execute TTS with fallback logic
-    let result = match execute_tts_with_fallback(text, primary_provider).await {
+    let result = match execute_tts_with_fallback(text, primary_provider, app_state).await {
         Ok(result) => {
             if result == "TTS_STOPPED_BY_USER" {
                 info!("TTS was stopped by user during execution");
@@ -726,9 +785,10 @@ async fn execute_tts_with_completion_tracking(
 async fn execute_tts_with_fallback(
     text: String,
     primary_provider: &str,
+    app_state: AppState,
 ) -> Result<String, String> {
     // Check network connectivity for cloud-based providers
-    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
+    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs" | "chatterbox");
 
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
@@ -736,7 +796,7 @@ async fn execute_tts_with_fallback(
         let is_online = crate::utils::network::is_online().await;
         if !is_online {
             warn!("Device appears offline, using system TTS directly");
-            return invoke_tts_for_provider(text, None, "system").await;
+            return invoke_tts_for_provider(text, Some(app_state), "system").await;
         }
     }
 
@@ -744,6 +804,7 @@ async fn execute_tts_with_fallback(
     let fallback_providers = match primary_provider.to_lowercase().as_str() {
         "replicate" => vec!["replicate", "kokoro", "system"],
         "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
         "kokoro" => vec!["kokoro", "system"],
         "system" => vec!["system"],
         "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
@@ -765,7 +826,7 @@ async fn execute_tts_with_fallback(
         let is_primary = index == 0;
         info!("Attempting TTS with provider: {} ({})", fallback_provider, if is_primary { "primary" } else { "fallback" });
 
-        match invoke_tts_for_provider(text.clone(), None, fallback_provider).await {
+        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
@@ -784,7 +845,7 @@ async fn execute_tts_with_fallback(
                 if is_primary && is_network_error {
                     warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
                     // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), None, "system").await {
+                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system").await {
                         Ok(system_result) => {
                             warn!("Network error detected, successfully fell back to system TTS");
                             return Ok(system_result);
@@ -809,7 +870,7 @@ async fn execute_tts_with_fallback(
 // Invoke TTS for a specific provider name
 pub async fn invoke_tts_for_provider(
     text: String,
-    _state: Option<State<'_, AppState>>, // _state might not be needed if provider is always passed
+    _state: Option<AppState>,
     provider: &str,
 ) -> Result<String, String> {
     info!("Invoking TTS for provider: {}", provider);
@@ -830,6 +891,17 @@ pub async fn invoke_tts_for_provider(
             kokoro::invoke_kokoro_tts(text, voice).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,
+        "chatterbox" => {
+            let (ref_url, exaggeration, use_hd) = _state
+                .as_ref()
+                .map(|s| (
+                    s.get_chatterbox_reference_audio_url().ok().flatten(),
+                    s.get_chatterbox_exaggeration().unwrap_or(0.5),
+                    s.get_chatterbox_use_hd().unwrap_or(false),
+                ))
+                .unwrap_or((None, 0.5, false));
+            replicate::invoke_chatterbox_tts(text, ref_url, exaggeration, use_hd).await
+        }
         "system" => system::invoke_system_tts(text).await,
         "off" => {
              warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
