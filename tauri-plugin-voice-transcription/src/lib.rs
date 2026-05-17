@@ -10,6 +10,10 @@ pub mod always_listening;
 pub mod shared_whisper;
 pub mod constants;
 pub mod mic_permissions;
+pub mod engine;
+pub mod engine_whisper;
+pub mod engine_parakeet;
+pub mod engine_manager;
 
 pub use config::VoiceTranscriptionConfig;
 pub use error::{Error, Result};
@@ -17,6 +21,8 @@ pub use controller::VoiceController;
 pub use always_listening::AlwaysListeningController;
 pub use utils::resolve_model_path;
 pub use shared_whisper::SharedWhisperManager;
+pub use engine::{SttProvider, TranscriptionEngine, TranscriptionSession};
+pub use engine_manager::EngineManager;
 
 
 
@@ -47,6 +53,9 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::check_microphone_permission,
             commands::request_microphone_permission,
             commands::ensure_microphone_ready,
+            commands::get_stt_provider,
+            commands::set_stt_provider,
+            commands::get_parakeet_model_status,
         ])
         .setup(move |app, _api| {
             tracing::info!("=== Voice Transcription Plugin Initialization Starting ===");
@@ -73,6 +82,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
             tracing::info!("Default config model path: {}", config.model_path);
+            tracing::info!("Default STT provider: {}", config.stt_provider);
 
             // Try to resolve the model path for both development and production
             let resolved_model_path = resolve_model_path(app, &config.model_path);
@@ -114,63 +124,70 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
                 resolved_model_path.clone()
             };
 
-            // Initialize shared Whisper context ONCE for both controllers
-            tracing::info!("Initializing shared Whisper context with path: {}", active_model_path);
-            let shared_context = match SharedWhisperManager::initialize(&active_model_path) {
-                Ok(context) => {
-                    tracing::info!("Shared Whisper context initialized successfully");
-                    let perf_info = SharedWhisperManager::get_performance_info();
-                    tracing::info!("Performance: {}", serde_json::to_string_pretty(&perf_info).unwrap_or_default());
-                    context
+            // Resolve Parakeet model directory
+            let parakeet_model_dir = resolve_model_path(app, &config.parakeet_model_dir);
+
+            // Initialize STT engine via EngineManager (defaults to Whisper)
+            tracing::info!("Initializing STT engine: '{}'", config.stt_provider);
+            let engine = match EngineManager::initialize(
+                config.stt_provider,
+                &active_model_path,
+                Some(&parakeet_model_dir),
+            ) {
+                Ok(engine) => {
+                    tracing::info!("STT engine '{}' initialized successfully", engine.name());
+                    engine
                 }
                 Err(e) => {
-                    tracing::error!("Failed to initialize shared Whisper context: {}. Voice features will be unavailable.", e);
+                    tracing::error!(
+                        "Failed to initialize STT engine '{}': {}. Voice features will be unavailable.",
+                        config.stt_provider, e
+                    );
 
-                    // Create uninitialized controllers
-                    let uninitialized_controller = VoiceController::new_uninitialized(&active_model_path, e.to_string());
+                    // Create uninitialized controllers so Tauri state is always managed
+                    let uninitialized_controller =
+                        VoiceController::new_uninitialized(&active_model_path, e.to_string());
                     app.manage(Arc::new(Mutex::new(uninitialized_controller)));
 
-                    tracing::warn!("Skipping AlwaysListeningController initialization due to shared context failure");
+                    tracing::warn!("Skipping AlwaysListeningController initialization due to engine failure");
                     return Ok(());
                 }
             };
 
-            // Initialize voice controller using shared context
-            tracing::info!("Creating VoiceController with shared Whisper context");
-            let controller = match VoiceController::new_with_shared_context(&active_model_path, shared_context.clone()) {
-                Ok(controller) => {
-                    tracing::info!("VoiceController initialized with shared context");
-                    controller
+            // Initialize VoiceController with the engine
+            tracing::info!("Creating VoiceController with '{}' engine", engine.name());
+            let controller = match VoiceController::new_with_engine(&active_model_path, engine.clone()) {
+                Ok(c) => {
+                    tracing::info!("VoiceController initialized");
+                    c
                 }
                 Err(e) => {
-                    tracing::error!("Failed to initialize voice controller: {}. Creating uninitialized controller.", e);
+                    tracing::error!("Failed to initialize VoiceController: {}. Creating uninitialized controller.", e);
                     VoiceController::new_uninitialized(&active_model_path, e.to_string())
                 }
             };
-
             app.manage(Arc::new(Mutex::new(controller)));
 
-            // Initialize always listening controller using shared context
-            tracing::info!("Creating AlwaysListeningController with shared Whisper context");
-            let always_listening_controller = match AlwaysListeningController::new_with_shared_context(&active_model_path, shared_context) {
-                Ok(always_listening_controller) => {
-                    tracing::info!("AlwaysListeningController initialized with shared context");
-                    always_listening_controller
-                }
-                Err(e) => {
-                    tracing::error!("Failed to initialize always listening controller: {}. Registering uninitialized controller.", e);
-                    AlwaysListeningController::new_uninitialized(&active_model_path)
-                }
-            };
-
+            // Initialize AlwaysListeningController with the same engine
+            tracing::info!("Creating AlwaysListeningController with '{}' engine", engine.name());
+            let always_listening_controller =
+                match AlwaysListeningController::new_with_engine(&active_model_path, engine) {
+                    Ok(c) => {
+                        tracing::info!("AlwaysListeningController initialized");
+                        c
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to initialize AlwaysListeningController: {}. Registering uninitialized controller.",
+                            e
+                        );
+                        AlwaysListeningController::new_uninitialized(&active_model_path)
+                    }
+                };
             app.manage(Arc::new(Mutex::new(always_listening_controller)));
 
-            // Final status check
-            let status = SharedWhisperManager::get_status();
-            tracing::info!("🎯 Final shared Whisper status: {}", serde_json::to_string_pretty(&status).unwrap_or_default());
-
             tracing::info!("=== Voice Transcription Plugin Initialization Complete ===");
-            tracing::info!("💡 Both controllers now share the same Whisper model instance - memory optimized!");
+            tracing::info!("💡 Both controllers share the '{}' engine", EngineManager::current_provider_name());
             Ok(())
         })
         .build()
