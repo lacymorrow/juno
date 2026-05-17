@@ -578,6 +578,7 @@ pub async fn set_chatterbox_settings_command(
     Ok(())
 }
 
+
 // New command to get current TTS provider
 #[tauri::command]
 pub async fn get_tts_provider_command(

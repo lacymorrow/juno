@@ -47,6 +47,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, chatterboxHd);
   };
 
+
   return (
     <div className="space-y-6">
       <Card>
@@ -143,6 +144,112 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Speech-to-Text Model</CardTitle>
+          <CardDescription>
+            Choose the Whisper model used for transcription. Larger models are
+            more accurate but require a one-time download.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {whisperDownloading && (
+            <div className="space-y-2 rounded-md border p-3 bg-muted/40">
+              <p className="text-sm font-medium">
+                Downloading {downloadingModel?.display_name ?? whisperDownloading}…
+              </p>
+              {whisperDownloadProgress ? (
+                <>
+                  <Progress value={whisperDownloadProgress.percent} className="h-2" />
+                  <p className="text-xs text-muted-foreground">
+                    {(whisperDownloadProgress.bytes_downloaded / 1024 / 1024).toFixed(0)} MB
+                    {whisperDownloadProgress.total_bytes > 0
+                      ? ` / ${(whisperDownloadProgress.total_bytes / 1024 / 1024).toFixed(0)} MB`
+                      : ""}{" "}
+                    — {whisperDownloadProgress.percent.toFixed(0)}%
+                  </p>
+                </>
+              ) : (
+                <Progress className="h-2 animate-pulse" />
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="whisper-model">Active Model</Label>
+            <Select
+              value={currentWhisperModel}
+              onValueChange={(id) => {
+                const model = whisperModels.find((m) => m.id === id);
+                if (model?.downloaded) {
+                  handleWhisperModelChange(id);
+                }
+              }}
+              disabled={!!whisperDownloading}
+            >
+              <SelectTrigger id="whisper-model">
+                <SelectValue placeholder="Select model" />
+              </SelectTrigger>
+              <SelectContent>
+                {whisperModels.map((model) => (
+                  <SelectItem
+                    key={model.id}
+                    value={model.id}
+                    disabled={!model.downloaded}
+                  >
+                    {model.display_name}
+                    {model.is_default ? " (Recommended)" : ""}
+                    {!model.downloaded ? " — not downloaded" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedModel && (
+              <p className="text-xs text-muted-foreground">
+                {selectedModel.downloaded
+                  ? `Active — ${selectedModel.size_mb} MB`
+                  : `Not downloaded yet — ${selectedModel.size_mb} MB`}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Download a Model</Label>
+            <div className="grid gap-2">
+              {whisperModels
+                .filter((m) => !m.downloaded)
+                .map((model) => (
+                  <div
+                    key={model.id}
+                    className="flex items-center justify-between rounded-md border px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{model.display_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {model.size_mb} MB
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleWhisperModelDownload(model.id)}
+                      disabled={!!whisperDownloading}
+                    >
+                      <Download className="mr-1 h-3 w-3" />
+                      Download
+                    </Button>
+                  </div>
+                ))}
+              {whisperModels.filter((m) => !m.downloaded).length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  All available models are downloaded.
+                </p>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
