@@ -156,7 +156,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       await invoke("set_big_cursor_enabled", { enabled });
       setBigCursorEnabled(enabled);
       if (!enabled) {
-        setSystemCursorSize(1.0);
+        const sysSize = await invoke<number>("get_system_cursor_size");
+        setSystemCursorSize(sysSize);
       }
     } catch (error) {
       console.error("Failed to update big cursor setting:", error);
@@ -415,7 +416,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 onClick={async () => {
                   try {
                     await invoke("test_cursor_restore");
-                    setSystemCursorSize(1.0);
+                    const sysSize = await invoke<number>("get_system_cursor_size");
+                    setSystemCursorSize(sysSize);
                     toast.success("Cursor restored to normal");
                   } catch (e) {
                     toast.error("Failed to restore cursor");
@@ -487,7 +489,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_restore");
-                      setSystemCursorSize(1.0);
+                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      setSystemCursorSize(sysSize);
                       toast.success("Cursor restored to normal");
                     } catch (e) {
                       toast.error("Failed to restore cursor");

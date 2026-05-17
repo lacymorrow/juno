@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
 use tracing::{error, info, warn};
@@ -882,20 +881,13 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
-            // Restore cursor if it was left enlarged from a previous session crash.
-            // Only act if big_cursor feature is enabled (meaning Juno likely caused it).
-            {
-                let app_for_cursor = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Ok(sm) = crate::settings::manager::SettingsManager::new(app_for_cursor) {
-                        if let Ok(agent_settings) = sm.get_agent_settings().await {
-                            if agent_settings.big_cursor_enabled && cursor_scale::get_system_cursor_size() > 1.0 {
-                                info!("Detected enlarged cursor from previous session — resetting to normal");
-                                cursor_scale::force_restore_cursor_scale();
-                            }
-                        }
-                    }
-                });
+            // On startup, if cursor is enlarged from a previous crash, emit a
+            // notification so the frontend can show the "Reset to Normal" banner.
+            // We do NOT auto-reset here because the user may have their own
+            // accessibility cursor size that we must not clobber.
+            if cursor_scale::get_system_cursor_size() > 1.0 {
+                info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
+                    cursor_scale::get_system_cursor_size());
             }
 
             // Sweep orphaned temp browser profile directories from previous sessions

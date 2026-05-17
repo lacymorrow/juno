@@ -114,16 +114,19 @@ mod inner {
 
     pub fn force_restore_cursor_scale() {
         SCALE_REFCOUNT.store(0, Ordering::Release);
-        let orig = ORIGINAL_SIZE
-            .lock()
-            .ok()
-            .and_then(|mut g| g.take())
-            .unwrap_or(1.0);
-        write_cursor_size(orig);
-        info!(
-            "[CursorScale] Force-restored cursor to original size {:.2} (user disabled)",
-            orig
-        );
+        let orig = ORIGINAL_SIZE.lock().ok().and_then(|mut g| g.take());
+        match orig {
+            Some(size) => {
+                write_cursor_size(size);
+                info!(
+                    "[CursorScale] Force-restored cursor to original size {:.2}",
+                    size
+                );
+            }
+            None => {
+                info!("[CursorScale] Force-restore called but no original size captured — no-op");
+            }
+        }
     }
 
     pub fn is_cursor_scaled() -> bool {
@@ -132,6 +135,15 @@ mod inner {
 
     pub fn get_system_cursor_size() -> f64 {
         read_cursor_size()
+    }
+
+    /// Unconditionally resets cursor to macOS default (1.0x).
+    /// Used for explicit user-initiated resets (e.g., "Reset to Normal" button).
+    pub fn reset_cursor_to_default() {
+        SCALE_REFCOUNT.store(0, Ordering::Release);
+        let _ = ORIGINAL_SIZE.lock().ok().map(|mut g| g.take());
+        write_cursor_size(1.0);
+        info!("[CursorScale] Reset cursor to default (1.0x) by user request");
     }
 }
 
@@ -146,6 +158,7 @@ mod inner {
     pub fn get_system_cursor_size() -> f64 {
         1.0
     }
+    pub fn reset_cursor_to_default() {}
 }
 
 pub use inner::*;
