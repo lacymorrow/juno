@@ -1,4 +1,5 @@
 pub mod elevenlabs;
+pub mod kokoro;
 pub mod replicate;
 pub mod system;
 
@@ -460,7 +461,7 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate"];
+    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro"];
     if !valid_providers.contains(&provider.as_str()) {
         return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
     }
@@ -481,6 +482,44 @@ pub async fn set_tts_provider_command(
     state.set_tts_provider(provider.clone()).map_err(|e| format!("Failed to set tts_provider: {}", e))?;
 
     info!("TTS provider set to: {} (saved to centralized settings)", provider);
+    Ok(())
+}
+
+// Command to get the Kokoro voice from centralized settings
+#[tauri::command]
+pub async fn get_kokoro_voice_command(
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    Ok(audio_settings.kokoro_voice)
+}
+
+// Command to set the Kokoro voice in centralized settings
+#[tauri::command]
+pub async fn set_kokoro_voice_command(
+    voice: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting Kokoro voice to: {}", voice);
+
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    audio_settings.kokoro_voice = voice.clone();
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    state.set_kokoro_voice(voice.clone())
+        .map_err(|e| format!("Failed to set kokoro_voice in state: {}", e))?;
+
+    info!("Kokoro voice set to: {}", voice);
     Ok(())
 }
 
@@ -703,8 +742,9 @@ async fn execute_tts_with_fallback(
 
     // Define the provider fallback order based on the primary provider
     let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "system"],
-        "elevenlabs" => vec!["elevenlabs", "system"],
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
         "system" => vec!["system"],
         "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
         _ => {
@@ -782,6 +822,13 @@ pub async fn invoke_tts_for_provider(
 
     match provider.to_lowercase().as_str() {
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "kokoro" => {
+            let voice = _state
+                .as_ref()
+                .and_then(|s| s.get_kokoro_voice().ok())
+                .unwrap_or_else(|| "af_bella".to_string());
+            kokoro::invoke_kokoro_tts(text, voice).await
+        }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "system" => system::invoke_system_tts(text).await,
         "off" => {

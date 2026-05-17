@@ -117,6 +117,8 @@ pub struct CloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    #[serde(default = "AudioSettings::default_kokoro_voice")]
+    pub kokoro_voice: String,
     pub sound_enabled: bool,
     pub dictation_clipboard_enabled: bool,
     pub dictation_trigger_mode: String, // "tap" or "hold"
@@ -124,6 +126,12 @@ pub struct AudioSettings {
     pub always_listening_sensitivity: f32,
     pub always_listening_wake_words: Vec<String>,
     pub performance_monitoring_enabled: bool,
+}
+
+impl AudioSettings {
+    fn default_kokoro_voice() -> String {
+        "af_bella".to_string()
+    }
 }
 
 /// Tool enable/disable configurations
@@ -333,6 +341,7 @@ impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
+            kokoro_voice: Self::default_kokoro_voice(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_trigger_mode: "hold".to_string(),
@@ -393,7 +402,7 @@ impl Default for CLISettings {
 impl Default for VoiceTranscriptionSettings {
     fn default() -> Self {
         Self {
-            model_path: "models/ggml-tiny.en.bin".to_string(),
+            model_path: "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
             sample_rate: 16000,
             channels: 1,
             buffer_duration_ms: 1500,

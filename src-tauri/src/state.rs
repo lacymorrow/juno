@@ -184,6 +184,7 @@ impl ToolApprovalRequest {
 #[derive(Clone, Debug)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    pub kokoro_voice: String,
     pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
@@ -207,6 +208,7 @@ impl Default for AudioSettings {
                     "elevenlabs".to_string()
                 }
             },
+            kokoro_voice: "af_bella".to_string(),
             dictation_active: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
@@ -452,6 +454,20 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.tts_provider = provider)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "TTS provider", e))
+    }
+
+    pub fn get_kokoro_voice(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.kokoro_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Kokoro voice", e))
+    }
+
+    pub fn set_kokoro_voice(&self, voice: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.kokoro_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Kokoro voice", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
