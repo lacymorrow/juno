@@ -177,6 +177,8 @@ pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
     pub const RESTART_REQUIRED: &str = "permissions-restart-required";
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
+    /// Emitted when a specific permission flips from denied → granted during polling
+    pub const GRANTED: &str = "permission-granted";
 }
 
 /// Development tool events
@@ -224,6 +226,19 @@ pub mod system {
 pub mod onboarding {
     pub const COMPLETE: &str = "onboarding-complete";
     pub const SKIPPED: &str = "onboarding-skipped";
+    pub const STATE_CHANGED: &str = "onboarding-state-changed";
+}
+
+/// Cursor overlay animation events (used by onboarding cursor guidance)
+pub mod cursor {
+    /// Per-frame position event for animated cursor movement (60fps)
+    pub const ANIMATION_FRAME: &str = "cursor-animation-frame";
+    /// Show a pulsing highlight ring at a target position
+    pub const HIGHLIGHT: &str = "cursor-highlight";
+    /// Show a speech bubble at a position
+    pub const BUBBLE: &str = "cursor-bubble";
+    /// Dismiss the cursor overlay with a fade-out
+    pub const DISMISS_OVERLAY: &str = "cursor-dismiss-overlay";
 }
 
 /// Notification events
