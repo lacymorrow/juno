@@ -44,6 +44,8 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
+    // Preserve skip_count — it is historical data (how many times the user
+    // previously skipped). reset_onboarding() zeroes it explicitly.
     let onboarding_settings = OnboardingSettings {
         completed: true,
         completed_at: Some(now.clone()),
