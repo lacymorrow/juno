@@ -93,7 +93,7 @@ pub mod ui {
     pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
     /// Emitted when the agent uses [POINT:x,y:label:screenN] to guide attention.
     /// Payload fields: x, y (f64), label (Option<String>), screen (Option<u32>)
-    pub const CURSOR_POINT: &str = "cursor-point";
+    pub const CURSOR_POINT: &str = "ui-cursor-point";
 
     // Multi-agent cursor events (Phase 4)
     /// Payload: { agent_id, x, y, state, color }
