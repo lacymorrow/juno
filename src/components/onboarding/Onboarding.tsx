@@ -150,7 +150,7 @@ const getOnboardingSteps = (
     title: "What's your role?",
     subtitle: "Personalize your experience",
     description:
-      "Juno adapts to how you work. Select your role to get relevant suggestions and defaults. You can change this anytime in Settings.",
+      "Juno adapts to how you work. Optionally select your role to get relevant suggestions and defaults — or skip to continue. You can change this anytime in Settings.",
     icon: null,
     action: "Continue",
   },
@@ -846,8 +846,8 @@ export default function OnboardingFlow({
   const step = onboardingSteps[currentStep];
 
   // Determine if continue button should be disabled
+  // Role step is intentionally optional — no guard here; handleNext saves only when a role is selected
   const isContinueDisabled =
-    (step.id === "role" && (!selectedRole || (selectedRole === "other" && !customRole.trim()))) ||
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
