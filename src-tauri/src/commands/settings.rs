@@ -241,38 +241,6 @@ pub async fn set_autostart_enabled(
         .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))
 }
 
-/// Get companion/observe-only mode enabled state
-#[command]
-pub async fn get_companion_mode(
-    app_handle: AppHandle,
-) -> Result<bool, String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
-
-    let agent = settings_manager.get_agent_settings().await
-        .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::AGENT_SETTINGS, e))?;
-
-    Ok(agent.companion_mode)
-}
-
-/// Set companion/observe-only mode enabled state
-#[command]
-pub async fn set_companion_mode(
-    app_handle: AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
-
-    let mut agent = settings_manager.get_agent_settings().await
-        .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, actions::AGENT_SETTINGS, e))?;
-
-    agent.companion_mode = enabled;
-
-    settings_manager.set_agent_settings(&agent).await
-        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AGENT_SETTINGS, e))
-}
-
 /// Reset all settings to defaults
 #[command]
 pub async fn reset_centralized_settings(

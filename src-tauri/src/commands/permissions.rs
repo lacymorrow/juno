@@ -7,6 +7,7 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::async_runtime::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -45,9 +46,34 @@ static MONITORING_TASK: std::sync::LazyLock<MonitoringTask> = std::sync::LazyLoc
     Arc::new(Mutex::new(None))
 });
 
+// Short-TTL cache for check_permissions_status_native — eliminates redundant native calls during startup.
+// INVARIANT: lock must NEVER be held across an .await point — always released within its own {} scope.
+type PermissionsCache = Mutex<Option<(Instant, PermissionsState)>>;
+static PERMISSIONS_CACHE: std::sync::LazyLock<PermissionsCache> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+/// Returns true if a cache entry timestamped at `cached_at` is still within the TTL window.
+fn is_cache_fresh(cached_at: Instant) -> bool {
+    cached_at.elapsed() < Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS)
+}
+
 /// Check the status of all required macOS permissions using NATIVE APIs ONLY
 #[tauri::command]
 pub async fn check_permissions_status_native(app: AppHandle) -> Result<PermissionsState, String> {
+    // Check cache before making expensive native calls — permissions don't change sub-second.
+    // Lock is held only for the duration of the cache read, released before any await points.
+    {
+        let cache = PERMISSIONS_CACHE
+            .lock()
+            .map_err(|_| "Permissions cache lock poisoned".to_string())?;
+        if let Some((cached_at, ref state)) = *cache {
+            if is_cache_fresh(cached_at) {
+                debug!("Returning cached permissions state (age: {:?})", cached_at.elapsed());
+                return Ok(state.clone());
+            }
+        }
+    }
+
     info!("Checking macOS permissions status using native APIs (no password prompts)");
 
     let app_name = app.package_info().name.clone();
@@ -78,7 +104,24 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
 
     info!("Native permissions checked - no password prompts required");
     debug!("Permissions state: {:?}", permissions_state);
+
+    // Store result in cache for subsequent calls within the TTL window.
+    match PERMISSIONS_CACHE.lock() {
+        Ok(mut cache) => *cache = Some((Instant::now(), permissions_state.clone())),
+        Err(_) => warn!("Failed to update permissions cache — lock poisoned"),
+    }
+
     Ok(permissions_state)
+}
+
+/// Invalidate the permissions cache so the next call fetches fresh data from native APIs.
+/// Call this after a permission request dialog has been shown to the user.
+#[allow(dead_code)] // called only from #[cfg(target_os = "macos")] blocks; dead on other platforms
+pub fn invalidate_permissions_cache() {
+    match PERMISSIONS_CACHE.lock() {
+        Ok(mut cache) => *cache = None,
+        Err(_) => warn!("Failed to invalidate permissions cache — lock poisoned"),
+    }
 }
 
 /// Convert native permission status to frontend format
@@ -115,7 +158,7 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
 
     #[cfg(target_os = "macos")]
     {
-        match NativePermissionChecker::check_accessibility_permission() {
+        let result = match NativePermissionChecker::check_accessibility_permission() {
             Ok(true) => {
                 info!("Accessibility permissions already granted");
                 Ok(true)
@@ -151,7 +194,9 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
                 error!("Error checking accessibility permissions: {}", e);
                 Err(format!("Failed to check accessibility permissions: {}", e))
             }
-        }
+        };
+        invalidate_permissions_cache();
+        result
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -167,7 +212,7 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
 
     #[cfg(target_os = "macos")]
     {
-        match NativePermissionChecker::check_microphone_permission() {
+        let result = match NativePermissionChecker::check_microphone_permission() {
             Ok(true) => {
                 info!("Microphone permissions already granted");
                 Ok(true)
@@ -193,7 +238,9 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
                 error!("Error checking microphone permissions: {}", e);
                 Err(format!("Failed to check microphone permissions: {}", e))
             }
-        }
+        };
+        invalidate_permissions_cache();
+        result
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -209,7 +256,7 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
 
     #[cfg(target_os = "macos")]
     {
-        match NativePermissionChecker::check_screen_recording_permission() {
+        let result = match NativePermissionChecker::check_screen_recording_permission() {
             Ok(true) => {
                 info!("Screen recording permissions already granted");
                 Ok(true)
@@ -245,7 +292,9 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
                 error!("Error checking screen recording permissions: {}", e);
                 Err(format!("Failed to check screen recording permissions: {}", e))
             }
-        }
+        };
+        invalidate_permissions_cache();
+        result
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -261,7 +310,7 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
 
     #[cfg(target_os = "macos")]
     {
-        match NativePermissionChecker::check_input_monitoring_permission() {
+        let result = match NativePermissionChecker::check_input_monitoring_permission() {
             Ok(true) => {
                 info!("Input monitoring permissions already granted");
                 Ok(true)
@@ -297,7 +346,9 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
                 error!("Error checking input monitoring permissions: {}", e);
                 Err(format!("Failed to check input monitoring permissions: {}", e))
             }
-        }
+        };
+        invalidate_permissions_cache();
+        result
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -608,6 +659,71 @@ fn determine_microphone_recommendation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_permissions_cache_invalidation() {
+        // Seed the cache with a dummy entry
+        let dummy = PermissionsState {
+            accessibility: PermissionStatus {
+                permission_type: "accessibility".to_string(),
+                granted: true,
+                required: true,
+                description: String::new(),
+                instructions: String::new(),
+            },
+            screen_recording: PermissionStatus {
+                permission_type: "screen_recording".to_string(),
+                granted: true,
+                required: true,
+                description: String::new(),
+                instructions: String::new(),
+            },
+            microphone: PermissionStatus {
+                permission_type: "microphone".to_string(),
+                granted: false,
+                required: false,
+                description: String::new(),
+                instructions: String::new(),
+            },
+            input_monitoring: PermissionStatus {
+                permission_type: "input_monitoring".to_string(),
+                granted: false,
+                required: false,
+                description: String::new(),
+                instructions: String::new(),
+            },
+            all_granted: true,
+            app_name: "test".to_string(),
+        };
+
+        {
+            let mut cache = PERMISSIONS_CACHE.lock().unwrap();
+            *cache = Some((Instant::now(), dummy));
+        }
+
+        // Cache should be populated
+        {
+            let cache = PERMISSIONS_CACHE.lock().unwrap();
+            assert!(cache.is_some(), "cache should hold a value after seeding");
+        }
+
+        // Invalidation should clear it
+        invalidate_permissions_cache();
+        {
+            let cache = PERMISSIONS_CACHE.lock().unwrap();
+            assert!(cache.is_none(), "cache should be None after invalidation");
+        }
+    }
+
+    #[test]
+    fn test_permissions_cache_ttl_respected() {
+        // Verify is_cache_fresh() correctly classifies entries on both sides of the TTL boundary.
+        let expired = Instant::now() - Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS + 1);
+        assert!(!is_cache_fresh(expired), "entry older than TTL should not be fresh");
+
+        let fresh = Instant::now();
+        assert!(is_cache_fresh(fresh), "entry just created should be fresh");
+    }
 
     #[test]
     fn test_permission_status_creation() {

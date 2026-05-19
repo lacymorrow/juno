@@ -1349,14 +1349,99 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
     }
 }
 
+/// A parsed [POINT:x,y:label:screenN] tag from agent text output.
+struct PointTag {
+    x: f64,
+    y: f64,
+    label: Option<String>,
+    screen: Option<u32>,
+}
+
+/// Strip all `[POINT:x,y:label:screenN]` tags from `text`, returning the cleaned string
+/// and a list of parsed tags. Incomplete tags (no closing `]`) are left as-is.
+fn parse_point_tags(text: &str) -> (String, Vec<PointTag>) {
+    let mut result = String::with_capacity(text.len());
+    let mut tags = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find("[POINT:") {
+        result.push_str(&remaining[..start]);
+        let after_prefix = &remaining[start + 7..]; // skip "[POINT:"
+
+        if let Some(end) = after_prefix.find(']') {
+            let inner = &after_prefix[..end];
+            if let Some(tag) = parse_point_inner(inner) {
+                tags.push(tag);
+            } else {
+                // Malformed tag — preserve it in output
+                result.push_str("[POINT:");
+                result.push_str(&after_prefix[..end + 1]);
+            }
+            remaining = &after_prefix[end + 1..];
+        } else {
+            // No closing bracket in this chunk — preserve and stop
+            result.push_str("[POINT:");
+            remaining = after_prefix;
+            break;
+        }
+    }
+
+    result.push_str(remaining);
+    (result, tags)
+}
+
+/// Parse the interior of a POINT tag: `x,y` or `x,y:label` or `x,y:label:screenN`
+fn parse_point_inner(inner: &str) -> Option<PointTag> {
+    // Split at most into 3 parts: coords, label, screenN
+    let mut parts = inner.splitn(3, ':');
+
+    let coords_str = parts.next()?;
+    let mut coord_iter = coords_str.splitn(2, ',');
+    let x = coord_iter.next()?.trim().parse::<f64>().ok()?;
+    let y = coord_iter.next()?.trim().parse::<f64>().ok()?;
+
+    let label = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let screen = parts
+        .next()
+        .and_then(|s| s.trim().strip_prefix("screen"))
+        .and_then(|n| n.parse::<u32>().ok());
+
+    Some(PointTag { x, y, label, screen })
+}
+
+/// Emit a `cursor-point` Tauri event for a single parsed [POINT] tag.
+fn emit_cursor_point(app_handle: &AppHandle, tag: &PointTag) {
+    let event_data = serde_json::json!({
+        "x": tag.x,
+        "y": tag.y,
+        "label": tag.label,
+        "screen": tag.screen,
+    });
+
+    if let Err(e) = app_handle.emit(events::ui::CURSOR_POINT, event_data) {
+        warn!("Failed to emit cursor-point event: {}", e);
+    }
+}
+
 pub fn emit_streaming_text_chunk(
     app_handle: &AppHandle,
     text: String,
     message_id: Option<String>,
     tts_content: Option<String>,
 ) {
+    // Strip [POINT:x,y:label:screenN] tags and fire sidecar cursor-point events
+    let (cleaned_text, point_tags) = parse_point_tags(&text);
+    for tag in &point_tags {
+        emit_cursor_point(app_handle, tag);
+    }
+
     let event_data = serde_json::json!({
-        "chunk": text,
+        "chunk": cleaned_text,
         "message_id": message_id,
         "tts_content": tts_content, // Include TTS content for decorative display
         "metadata": {
@@ -1449,10 +1534,12 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
-    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
+    // Strip any [POINT] tags from the final accumulated text (tags were already emitted per-chunk)
+    let (cleaned_text, _) = parse_point_tags(&complete_text);
+    let is_jsx = crate::anthropic::is_jsx_content(&cleaned_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
-        "complete_text": complete_text,
+        "complete_text": cleaned_text,
         "is_jsx": is_jsx
     });
 
@@ -1467,15 +1554,115 @@ pub fn emit_stream_end_with_state(
     complete_text: String,
     agent_state: String,
 ) {
-    let is_jsx = crate::anthropic::is_jsx_content(&complete_text);
+    // Strip any [POINT] tags from the final accumulated text (tags were already emitted per-chunk)
+    let (cleaned_text, _) = parse_point_tags(&complete_text);
+    let is_jsx = crate::anthropic::is_jsx_content(&cleaned_text);
     let event_data = serde_json::json!({
         "message_id": message_id,
-        "complete_text": complete_text,
+        "complete_text": cleaned_text,
         "agent_state": agent_state,
         "is_jsx": is_jsx
     });
 
     if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {
         warn!("Failed to emit agent-stream-end event: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_tag_with_label() {
+        let (text, tags) = parse_point_tags("See [POINT:100,200:button] here");
+        assert_eq!(text, "See  here");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 100.0);
+        assert_eq!(tags[0].y, 200.0);
+        assert_eq!(tags[0].label.as_deref(), Some("button"));
+        assert_eq!(tags[0].screen, None);
+    }
+
+    #[test]
+    fn parse_tag_with_screen() {
+        let (text, tags) = parse_point_tags("[POINT:1920,1080:title bar:screen1]");
+        assert_eq!(text, "");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 1920.0);
+        assert_eq!(tags[0].y, 1080.0);
+        assert_eq!(tags[0].label.as_deref(), Some("title bar"));
+        assert_eq!(tags[0].screen, Some(1));
+    }
+
+    #[test]
+    fn parse_coords_only() {
+        let (_, tags) = parse_point_tags("[POINT:50.5,75.0]");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 50.5);
+        assert_eq!(tags[0].y, 75.0);
+        assert_eq!(tags[0].label, None);
+        assert_eq!(tags[0].screen, None);
+    }
+
+    #[test]
+    fn parse_multiple_tags() {
+        let (text, tags) = parse_point_tags("First [POINT:10,20:A] then [POINT:30,40:B]");
+        assert_eq!(text, "First  then ");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].x, 10.0);
+        assert_eq!(tags[1].x, 30.0);
+    }
+
+    #[test]
+    fn preserve_incomplete_tag_no_closing_bracket() {
+        let (text, tags) = parse_point_tags("Incomplete [POINT:10,20");
+        assert_eq!(text, "Incomplete [POINT:10,20");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn preserve_malformed_tag_bad_coords() {
+        let (text, tags) = parse_point_tags("[POINT:abc,def:label]");
+        assert_eq!(text, "[POINT:abc,def:label]");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn empty_label_coerces_to_none() {
+        let (_, tags) = parse_point_tags("[POINT:100,200::screen0]");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].label, None);
+        assert_eq!(tags[0].screen, Some(0));
+    }
+
+    #[test]
+    fn no_tags_returns_input_unchanged() {
+        let (text, tags) = parse_point_tags("No tags here");
+        assert_eq!(text, "No tags here");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn unicode_context_around_tag() {
+        let (text, tags) = parse_point_tags("文字 [POINT:10,20:ボタン] テスト");
+        assert_eq!(text, "文字  テスト");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].label.as_deref(), Some("ボタン"));
+    }
+
+    #[test]
+    fn decimal_coordinates() {
+        let (_, tags) = parse_point_tags("[POINT:123.45,678.9:label]");
+        assert_eq!(tags.len(), 1);
+        assert!((tags[0].x - 123.45).abs() < f64::EPSILON);
+        assert!((tags[0].y - 678.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn adjacent_tags_no_separator() {
+        let (text, tags) = parse_point_tags("[POINT:1,2:a][POINT:3,4:b]");
+        assert_eq!(text, "");
+        assert_eq!(tags.len(), 2);
     }
 }

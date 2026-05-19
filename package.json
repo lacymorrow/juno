@@ -1,8 +1,27 @@
 {
   "name": "Juno",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
+  "description": "AI that controls your Mac. Describe a task. Watch it happen.",
+  "author": "Lacy Morrow <lacy@lacymorrow.com> (https://lacymorrow.com)",
+  "homepage": "https://junebug.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lacymorrow/juno"
+  },
+  "keywords": [
+    "ai",
+    "computer-use",
+    "desktop-automation",
+    "macos",
+    "tauri",
+    "anthropic",
+    "agent",
+    "accessibility",
+    "voice-control",
+    "mcp"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -16,7 +35,7 @@
     "tauri:dev:multi": "node scripts/dev-multi-instance.js",
     "tauri:dev:instance2": "node scripts/dev-multi-instance.js --port=1422",
     "tauri:dev:instance3": "node scripts/dev-multi-instance.js --port=1424",
-    "release": "bun run scripts/release.ts",
+    "release": "shipx",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -109,7 +128,7 @@
     "zod": "^3.25.57"
   },
   "devDependencies": {
-    "@clack/prompts": "^1.1.0",
+    "@lacymorrow/shipx": "^0.1.2",
     "@tauri-apps/cli": "^2.11.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",

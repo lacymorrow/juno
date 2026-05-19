@@ -23,7 +23,7 @@ import {
   ModelSelectorLogo,
   ModelSelectorName,
 } from "@/components/ai-elements/model-selector";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { COMMANDS } from "@/lib/constants.generated";
 
 interface ChatInputProps {
@@ -43,7 +43,7 @@ export const ChatInput = React.memo(function ChatInput({
   onSubmit,
   onStop,
 }: ChatInputProps) {
-  const settings = useSettings();
+  const settings = useSettingsContext();
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   const chatStatus: ChatStatus = isProcessing ? "streaming" : "ready";
