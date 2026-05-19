@@ -39,11 +39,17 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    let current_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+
     let onboarding_settings = OnboardingSettings {
         completed: true,
         completed_at: Some(now.clone()),
         skipped: false,
-        skip_count: 0,
+        skip_count: current_settings.skip_count,
+        user_role: current_settings.user_role,
     };
 
     settings_manager
@@ -83,6 +89,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         completed_at: Some(now.clone()),
         skipped: true,
         skip_count: current_settings.skip_count + 1,
+        user_role: current_settings.user_role.clone(),
     };
 
     settings_manager
@@ -118,6 +125,7 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
         completed_at: None,
         skipped: false,
         skip_count: 0,
+        user_role: None,
     };
 
     settings_manager
@@ -258,9 +266,10 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 /// shortcut. This lets the Rust backend detect escape while the key still passes
 /// through to HTML dropdowns, dialogs, and other applications.
 ///
-/// Called by the frontend when the onboarding component mounts, and also by
-/// `initialize_onboarding_system` in the backend. Idempotent — safe to call
-/// multiple times with the same `active` value.
+/// Called by `initialize_onboarding_system` before the window opens (sets active=true)
+/// and by `complete_onboarding`/`skip_onboarding` when the flow ends (sets active=false).
+/// The frontend only calls this on real unmount (window destroyed). Idempotent — safe to
+/// call multiple times with the same `active` value.
 #[tauri::command]
 pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), String> {
     let app_state = app.state::<crate::state::AppState>();
@@ -302,8 +311,8 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 
         // CRITICAL: Set onboarding_active in the backend BEFORE opening the window.
         // This ensures shortcut handlers (dictation, agent) will see onboarding as active
-        // immediately, without waiting for the frontend to mount and call back via invoke().
-        // The frontend useEffect call to set_onboarding_active(true) is a no-op (idempotent).
+        // immediately. The frontend no longer calls set_onboarding_active(true) on mount —
+        // it only clears the flag on real unmount (window destroyed).
         if let Err(e) = set_onboarding_active(app_handle.clone(), true).await {
             error!("[Onboarding] Failed to set onboarding active during init: {}", e);
         }
@@ -330,3 +339,32 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 
     Ok(())
 }
+
+/// Save the user's selected role during onboarding.
+/// Persists to OnboardingSettings so it survives restarts.
+#[tauri::command]
+pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> {
+    let role = role.trim().to_string();
+    if role.is_empty() {
+        return Err("Role cannot be empty".to_string());
+    }
+    if role.chars().count() > 64 {
+        return Err("Role too long (max 64 characters)".to_string());
+    }
+
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
+
+    let mut onboarding_settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    info!("User role saved: {}", role);
+    onboarding_settings.user_role = Some(role);
+
+    settings_manager
+        .set_onboarding_settings(&onboarding_settings)
+        .await
+        .map_err(|e| e.to_string())
+}
+

@@ -30,6 +30,7 @@ pub mod keyboard_keys {
     pub const DICTATION_INPUT: &str = "dictation_input";
     pub const STOP_CURRENT_TASK: &str = "stop_current_task";
     pub const OPEN_SETTINGS: &str = "open_settings";
+    pub const VOICE_ACTIVATION: &str = "voice_activation";
 }
 
 /// Onboarding setting keys
@@ -160,6 +161,12 @@ pub mod defaults {
     pub const OPEN_SETTINGS: &str = "Cmd+Comma";
     #[cfg(not(target_os = "macos"))]
     pub const OPEN_SETTINGS: &str = "Ctrl+Comma";
+
+    // Global voice activation — always-on, works from any app without focusing main window
+    #[cfg(target_os = "macos")]
+    pub const VOICE_ACTIVATION: &str = "Option+Shift+V";
+    #[cfg(not(target_os = "macos"))]
+    pub const VOICE_ACTIVATION: &str = "Alt+Shift+V";
 }
 
 /// Command names for settings operations (to prevent duplication)

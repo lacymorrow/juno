@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::engine::SttProvider;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceTranscriptionConfig {
@@ -29,6 +30,15 @@ pub struct VoiceTranscriptionConfig {
     /// Enable playback of the transcription
     #[serde(default = "default_enable_playback")]
     pub enable_playback: bool,
+
+    /// Which STT engine to use. Defaults to Whisper (backward-compatible).
+    #[serde(default)]
+    pub stt_provider: SttProvider,
+
+    /// Directory containing Parakeet ONNX model files.
+    /// Populated on first download via the `download_parakeet_model` command.
+    #[serde(default = "default_parakeet_model_dir")]
+    pub parakeet_model_dir: String,
 }
 
 impl Default for VoiceTranscriptionConfig {
@@ -41,6 +51,8 @@ impl Default for VoiceTranscriptionConfig {
             partial_interval_ms: default_partial_interval_ms(),
             enable_partial_transcription: default_enable_partial_transcription(),
             enable_playback: default_enable_playback(),
+            stt_provider: SttProvider::default(),
+            parakeet_model_dir: default_parakeet_model_dir(),
         }
     }
 }
@@ -64,12 +76,14 @@ impl VoiceTranscriptionConfig {
             partial_interval_ms,
             enable_partial_transcription,
             enable_playback,
+            stt_provider: SttProvider::default(),
+            parakeet_model_dir: default_parakeet_model_dir(),
         }
     }
 }
 
 fn default_model_path() -> String {
-    "models/ggml-tiny.en.bin".to_string()
+    "models/ggml-large-v3-turbo-q5_0.bin".to_string()
 }
 
 fn default_sample_rate() -> u32 {
@@ -94,4 +108,8 @@ fn default_enable_partial_transcription() -> bool {
 
 fn default_enable_playback() -> bool {
     true
+}
+
+fn default_parakeet_model_dir() -> String {
+    "models/parakeet-ctc".to_string()
 }

@@ -48,6 +48,20 @@ pub(crate) struct ReplicateStatusResponse {
 
 const _REPLICATE_API_BASE: &str = "https://api.replicate.com/v1";
 
+// --- Chatterbox API Structures (model-based endpoint, no version pin) ---
+#[derive(Serialize)]
+pub(crate) struct ChatterboxInput {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_url: Option<String>, // Optional URL to reference audio for voice cloning
+    exaggeration: Option<f64>, // Emotion exaggeration level 0.0-2.0
+}
+
+#[derive(Serialize)]
+pub(crate) struct ChatterboxRequest {
+    input: ChatterboxInput,
+}
+// --- End Chatterbox API Structures ---
 // Command to invoke Replicate TTS
 #[tauri::command]
 pub async fn invoke_replicate_tts(
@@ -273,6 +287,178 @@ pub async fn invoke_replicate_tts(
                 let err_msg = format!("Unknown Replicate prediction status: {}", status_data.status);
                 error!("{}", err_msg);
                 return Err(err_msg);
+            }
+        }
+    }
+}
+
+/// Invoke Chatterbox TTS via the Replicate model-based endpoint.
+/// Uses resemble-ai/chatterbox (or chatterbox-hd) with optional voice cloning.
+pub async fn invoke_chatterbox_tts(
+    text: String,
+    reference_audio_url: Option<String>,
+    exaggeration: f32,
+    use_hd: bool,
+) -> Result<String, String> {
+    info!("Invoking Chatterbox TTS (hd={}, exaggeration={:.2})", use_hd, exaggeration);
+
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop requested before Chatterbox TTS, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    let api_key = env::var("REPLICATE_API_KEY")
+        .map_err(|_| "REPLICATE_API_KEY environment variable not set".to_string())?;
+
+    let model_name = if use_hd { "chatterbox-hd" } else { "chatterbox" };
+    let start_url = format!("https://api.replicate.com/v1/models/resemble-ai/{}/predictions", model_name);
+    info!("Using Chatterbox model endpoint: {}", start_url);
+
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Failed to create Chatterbox HTTP client: {}", e))?;
+
+    let request_payload = ChatterboxRequest {
+        input: ChatterboxInput {
+            text: text.clone(),
+            audio_url: reference_audio_url,
+            exaggeration: Some(exaggeration as f64),
+        },
+    };
+
+    match serde_json::to_string(&request_payload) {
+        Ok(json_string) => info!("Sending Chatterbox payload: {}", json_string),
+        Err(e) => warn!("Failed to serialize Chatterbox payload for logging: {}", e),
+    }
+
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop requested before Chatterbox initial request, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    let initial_res = client
+        .post(&start_url)
+        .header("Authorization", format!("Token {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send initial request to Chatterbox: {}", e))?;
+
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop requested after Chatterbox initial response, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    if !initial_res.status().is_success() {
+        let status = initial_res.status();
+        let error_body = initial_res.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+        let err_msg = format!("Chatterbox initial API request failed: {} - {}", status, error_body);
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    let initial_response_text = initial_res.text().await
+        .map_err(|e| format!("Failed to read Chatterbox initial response body: {}", e))?;
+    info!("Chatterbox initial response: {}", initial_response_text);
+
+    let initial_data = serde_json::from_str::<ReplicateInitialResponse>(&initial_response_text)
+        .map_err(|e| format!("Failed to parse Chatterbox initial response: {}. Body: {}", e, initial_response_text))?;
+
+    let get_url = initial_data.urls.get;
+    info!("Chatterbox prediction started (ID: {}). Polling at: {}", initial_data.id, get_url);
+
+    // Poll for result with timeout
+    let start_time = std::time::Instant::now();
+    let timeout_duration = Duration::from_secs(timeouts::REPLICATE_TIMEOUT_SECONDS);
+
+    loop {
+        if crate::tts::is_tts_stop_requested() {
+            info!("TTS stop requested during Chatterbox polling, aborting");
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+
+        if start_time.elapsed() > timeout_duration {
+            return Err(format!(
+                "Chatterbox prediction timed out after {} seconds (ID: {})",
+                timeouts::REPLICATE_TIMEOUT_SECONDS,
+                initial_data.id
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let status_res = match client
+            .get(&get_url)
+            .header("Authorization", format!("Token {}", api_key))
+            .send()
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                warn!("Failed to poll Chatterbox status: {}. Retrying...", e);
+                continue;
+            }
+        };
+
+        if !status_res.status().is_success() {
+            warn!("Chatterbox status poll failed: {}. Retrying...", status_res.status());
+            continue;
+        }
+
+        let status_data = match status_res.json::<ReplicateStatusResponse>().await {
+            Ok(data) => data,
+            Err(e) => {
+                warn!("Failed to parse Chatterbox status response: {}. Retrying...", e);
+                continue;
+            }
+        };
+
+        info!("Chatterbox prediction status: {:?} (elapsed: {:.1}s)", status_data.status, start_time.elapsed().as_secs_f32());
+
+        match status_data.status.as_str() {
+            "succeeded" => {
+                if crate::tts::is_tts_stop_requested() {
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
+                if let Some(output_url) = status_data.output {
+                    info!("Chatterbox prediction succeeded. Downloading audio from: {}", output_url);
+                    match client.get(&output_url).send().await {
+                        Ok(audio_res) => {
+                            if crate::tts::is_tts_stop_requested() {
+                                return Ok("TTS_STOPPED_BY_USER".to_string());
+                            }
+                            if audio_res.status().is_success() {
+                                match audio_res.bytes().await {
+                                    Ok(audio_bytes) => {
+                                        if crate::tts::is_tts_stop_requested() {
+                                            return Ok("TTS_STOPPED_BY_USER".to_string());
+                                        }
+                                        let base64_audio = base64::engine::general_purpose::STANDARD.encode(&audio_bytes);
+                                        info!("Chatterbox audio downloaded successfully ({} bytes).", audio_bytes.len());
+                                        return Ok(base64_audio);
+                                    }
+                                    Err(e) => return Err(format!("Failed to read Chatterbox audio bytes: {}", e)),
+                                }
+                            } else {
+                                return Err(format!("Failed to download Chatterbox audio (status: {})", audio_res.status()));
+                            }
+                        }
+                        Err(e) => return Err(format!("Failed to download Chatterbox audio: {}", e)),
+                    }
+                } else {
+                    return Err("Chatterbox prediction succeeded but no output URL provided.".to_string());
+                }
+            }
+            "failed" | "canceled" => {
+                let error_message = status_data.error.unwrap_or_else(|| "Unknown error".to_string());
+                return Err(format!("Chatterbox prediction {}: {}", status_data.status, error_message));
+            }
+            "processing" | "starting" => continue,
+            _ => {
+                return Err(format!("Unknown Chatterbox prediction status: {}", status_data.status));
             }
         }
     }

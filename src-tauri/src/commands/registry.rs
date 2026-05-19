@@ -95,6 +95,9 @@ macro_rules! generate_invoke_handler {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_system_cursor_size,
+            get_companion_mode,
+            set_companion_mode,
 
             // Production keyboard operations (minimal set for system functions)
             type_text,
@@ -167,8 +170,6 @@ macro_rules! generate_invoke_handler {
             reset_settings,
             export_settings,
             import_settings,
-            get_companion_mode,
-            set_companion_mode,
 
             // Provider management
             get_providers,
@@ -312,6 +313,9 @@ pub mod categories {
         "set_big_cursor_scale",
         "test_cursor_scale",
         "test_cursor_restore",
+        "get_system_cursor_size",
+        "get_companion_mode",
+        "set_companion_mode",
     ];
 
 

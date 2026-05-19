@@ -76,8 +76,10 @@
       {
         "label": "desktop-cursor-overlay",
         "url": "/desktop-cursor-overlay",
-        "width": 1,
-        "height": 1,
+        "width": 2560,
+        "height": 1600,
+        "x": 0,
+        "y": 0,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

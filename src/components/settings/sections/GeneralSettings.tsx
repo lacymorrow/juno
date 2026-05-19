@@ -39,6 +39,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [bigCursorLoading, setBigCursorLoading] = useState(false);
   const [companionMode, setCompanionMode] = useState(false);
   const [companionModeLoading, setCompanionModeLoading] = useState(false);
+  const [systemCursorSize, setSystemCursorSize] = useState(1.0);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -69,6 +70,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         // Load companion mode
         const companionEnabled = await invoke<boolean>("get_companion_mode");
         setCompanionMode(companionEnabled);
+        const sysSize = await invoke<number>("get_system_cursor_size");
+        setSystemCursorSize(sysSize);
       } catch (error) {
         console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
@@ -158,6 +161,10 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     try {
       await invoke("set_big_cursor_enabled", { enabled });
       setBigCursorEnabled(enabled);
+      if (!enabled) {
+        const sysSize = await invoke<number>("get_system_cursor_size");
+        setSystemCursorSize(sysSize);
+      }
     } catch (error) {
       console.error("Failed to update big cursor setting:", error);
       toast.error("Failed to update big cursor setting");
@@ -454,6 +461,29 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {systemCursorSize > 1.0 && (
+            <div className="flex items-center justify-between rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                Cursor is currently enlarged ({systemCursorSize.toFixed(1)}x)
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await invoke("test_cursor_restore");
+                    const sysSize = await invoke<number>("get_system_cursor_size");
+                    setSystemCursorSize(sysSize);
+                    toast.success("Cursor restored to normal");
+                  } catch (e) {
+                    toast.error("Failed to restore cursor");
+                  }
+                }}
+              >
+                Reset to Normal
+              </Button>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
@@ -499,6 +529,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_scale", { scale: bigCursorScale });
+                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      setSystemCursorSize(sysSize);
                       toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
                     } catch (e) {
                       toast.error("Failed to test cursor scale");
@@ -513,6 +545,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_restore");
+                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      setSystemCursorSize(sysSize);
                       toast.success("Cursor restored to normal");
                     } catch (e) {
                       toast.error("Failed to restore cursor");

@@ -2,13 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
+  BookOpen,
+  BarChart3,
   CheckCircle,
   ChevronRight,
+  Code2,
+  DollarSign,
   Eye,
   EyeOff,
   Key,
   Keyboard,
+  Megaphone,
+  MoreHorizontal,
   Monitor,
+  Palette,
   Shield,
   Sparkles,
   RefreshCw,
@@ -16,8 +23,10 @@ import {
   AlertCircle,
   Info,
   Mic,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useEventListener } from "@/hooks/useEventListener";
 import AudioVisualizer from "../bar/audio-visualizer";
 
@@ -71,6 +80,52 @@ const permissions = [
   },
 ];
 
+interface RoleOption {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+}
+
+const ROLE_OPTIONS: RoleOption[] = [
+  { id: "engineer", label: "Engineer", icon: Code2, description: "Software developer or engineer" },
+  { id: "designer", label: "Designer", icon: Palette, description: "UI/UX or product designer" },
+  { id: "product", label: "Product", icon: BarChart3, description: "Product manager or owner" },
+  { id: "marketing", label: "Marketing", icon: Megaphone, description: "Marketing or content creator" },
+  { id: "finance", label: "Finance", icon: DollarSign, description: "Finance or accounting" },
+  { id: "student", label: "Student", icon: BookOpen, description: "Student or learner" },
+  { id: "team", label: "Team Lead", icon: Users, description: "Team lead or manager" },
+  { id: "other", label: "Other", icon: MoreHorizontal, description: "Something else" },
+];
+
+const RoleCard = ({
+  role,
+  selected,
+  onSelect,
+}: {
+  role: RoleOption;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) => {
+  const Icon = role.icon;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(role.id)}
+      className={`p-3 rounded-xl border-2 text-left transition-all duration-200 flex flex-col items-center gap-2 ${
+        selected
+          ? "border-primary bg-primary/10 text-foreground"
+          : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground"
+      }`}
+      aria-pressed={selected}
+      aria-label={role.label}
+    >
+      <Icon className={`w-5 h-5 ${selected ? "text-primary" : ""}`} />
+      <span className="text-xs font-medium text-center leading-tight">{role.label}</span>
+    </button>
+  );
+}
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false,
@@ -89,6 +144,15 @@ const getOnboardingSteps = (
       <img src="/juno.png" alt="Juno" className="w-50 h-50 object-contain" />
     ),
     action: "Get Started",
+  },
+  {
+    id: "role",
+    title: "What's your role?",
+    subtitle: "Personalize your experience",
+    description:
+      "Juno adapts to how you work. Select your role to get relevant suggestions and defaults. You can change this anytime in Settings.",
+    icon: null,
+    action: "Continue",
   },
   {
     id: "shortcut",
@@ -422,6 +486,10 @@ export default function OnboardingFlow({
     false
   );
 
+  // Role selection state
+  const [selectedRole, setSelectedRole] = useState("");
+  const [customRole, setCustomRole] = useState("");
+
   // API key state
   const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -704,6 +772,18 @@ export default function OnboardingFlow({
     if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
       return;
     }
+    // Save role before advancing from role step
+    if (currentStepData?.id === "role") {
+      const roleToSave = selectedRole === "other" ? customRole.trim() : selectedRole;
+      if (roleToSave) {
+        try {
+          await invoke(COMMANDS.ONBOARDING_SAVE_USER_ROLE, { role: roleToSave });
+        } catch (error) {
+          console.warn("Failed to save user role:", error);
+        }
+      }
+    }
+
     // Save API key before advancing from api-key step
     if (currentStepData?.id === "api-key" && detectedProvider && !apiKeySaved) {
       await saveApiKey();
@@ -715,7 +795,7 @@ export default function OnboardingFlow({
       setIsComplete(true);
       onComplete();
     }
-  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
+  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, selectedRole, customRole, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
@@ -767,6 +847,8 @@ export default function OnboardingFlow({
 
   // Determine if continue button should be disabled
   const isContinueDisabled =
+    (step.id === "role" && !selectedRole) ||
+    (step.id === "role" && selectedRole === "other" && !customRole.trim()) ||
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
@@ -898,6 +980,50 @@ export default function OnboardingFlow({
                           )} to stop Juno`
                         : "Press the key above to stop Juno"}
                     </p>
+                  </div>
+                )}
+
+                {/* Role selection grid */}
+                {step.id === "role" && (
+                  <div className="mt-6">
+                    <div className="grid grid-cols-4 gap-3">
+                      {ROLE_OPTIONS.map((role) => (
+                        <RoleCard
+                          key={role.id}
+                          role={role}
+                          selected={selectedRole === role.id}
+                          onSelect={setSelectedRole}
+                        />
+                      ))}
+                    </div>
+
+                    {selectedRole === "other" && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="mt-4"
+                      >
+                        <input
+                          type="text"
+                          value={customRole}
+                          onChange={(e) => setCustomRole(e.target.value)}
+                          placeholder="Tell us your role..."
+                          className="w-full px-4 py-3 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors text-sm"
+                          autoFocus
+                          maxLength={64}
+                        />
+                      </motion.div>
+                    )}
+
+                    {selectedRole && selectedRole !== "other" && (
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="mt-4 text-center text-sm text-muted-foreground"
+                      >
+                        {ROLE_OPTIONS.find((r) => r.id === selectedRole)?.description}
+                      </motion.p>
+                    )}
                   </div>
                 )}
 

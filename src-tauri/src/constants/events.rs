@@ -91,7 +91,16 @@ pub mod ui {
     pub const UI_CURSOR_HIGHLIGHT_START: &str = "ui-cursor-highlight-start";
     pub const UI_CURSOR_HIGHLIGHT_MOVE: &str = "ui-cursor-highlight-move";
     pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
-    
+    /// Emitted when the agent uses [POINT:x,y:label:screenN] to guide attention.
+    /// Payload fields: x, y (f64), label (Option<String>), screen (Option<u32>)
+    pub const CURSOR_POINT: &str = "ui-cursor-point";
+
+    // Multi-agent cursor events (Phase 4)
+    /// Payload: { agent_id, x, y, state, color }
+    pub const AGENT_CURSOR_UPDATE: &str = "agent-cursor-update";
+    /// Payload: { agent_id }
+    pub const AGENT_CURSOR_REMOVE: &str = "agent-cursor-remove";
+
     // Element management events
     pub const ELEMENT_CREATED: &str = "ui-element-created";
     pub const ELEMENT_UPDATED: &str = "ui-element-updated";
@@ -271,6 +280,7 @@ pub mod shortcuts {
     pub const AGENT_MODE: &str = "shortcut-agent-mode";
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
     pub const ESCAPE_KEY: &str = "shortcut-escape-key";
+    pub const VOICE_ACTIVATION: &str = "shortcut-voice-activation";
 }
 
 /// Tool choice events
