@@ -1568,3 +1568,101 @@ pub fn emit_stream_end_with_state(
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_tag_with_label() {
+        let (text, tags) = parse_point_tags("See [POINT:100,200:button] here");
+        assert_eq!(text, "See  here");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 100.0);
+        assert_eq!(tags[0].y, 200.0);
+        assert_eq!(tags[0].label.as_deref(), Some("button"));
+        assert_eq!(tags[0].screen, None);
+    }
+
+    #[test]
+    fn parse_tag_with_screen() {
+        let (text, tags) = parse_point_tags("[POINT:1920,1080:title bar:screen1]");
+        assert_eq!(text, "");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 1920.0);
+        assert_eq!(tags[0].y, 1080.0);
+        assert_eq!(tags[0].label.as_deref(), Some("title bar"));
+        assert_eq!(tags[0].screen, Some(1));
+    }
+
+    #[test]
+    fn parse_coords_only() {
+        let (_, tags) = parse_point_tags("[POINT:50.5,75.0]");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].x, 50.5);
+        assert_eq!(tags[0].y, 75.0);
+        assert_eq!(tags[0].label, None);
+        assert_eq!(tags[0].screen, None);
+    }
+
+    #[test]
+    fn parse_multiple_tags() {
+        let (text, tags) = parse_point_tags("First [POINT:10,20:A] then [POINT:30,40:B]");
+        assert_eq!(text, "First  then ");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].x, 10.0);
+        assert_eq!(tags[1].x, 30.0);
+    }
+
+    #[test]
+    fn preserve_incomplete_tag_no_closing_bracket() {
+        let (text, tags) = parse_point_tags("Incomplete [POINT:10,20");
+        assert_eq!(text, "Incomplete [POINT:10,20");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn preserve_malformed_tag_bad_coords() {
+        let (text, tags) = parse_point_tags("[POINT:abc,def:label]");
+        assert_eq!(text, "[POINT:abc,def:label]");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn empty_label_coerces_to_none() {
+        let (_, tags) = parse_point_tags("[POINT:100,200::screen0]");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].label, None);
+        assert_eq!(tags[0].screen, Some(0));
+    }
+
+    #[test]
+    fn no_tags_returns_input_unchanged() {
+        let (text, tags) = parse_point_tags("No tags here");
+        assert_eq!(text, "No tags here");
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn unicode_context_around_tag() {
+        let (text, tags) = parse_point_tags("文字 [POINT:10,20:ボタン] テスト");
+        assert_eq!(text, "文字  テスト");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].label.as_deref(), Some("ボタン"));
+    }
+
+    #[test]
+    fn decimal_coordinates() {
+        let (_, tags) = parse_point_tags("[POINT:123.45,678.9:label]");
+        assert_eq!(tags.len(), 1);
+        assert!((tags[0].x - 123.45).abs() < f64::EPSILON);
+        assert!((tags[0].y - 678.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn adjacent_tags_no_separator() {
+        let (text, tags) = parse_point_tags("[POINT:1,2:a][POINT:3,4:b]");
+        assert_eq!(text, "");
+        assert_eq!(tags.len(), 2);
+    }
+}

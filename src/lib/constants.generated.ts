@@ -58,7 +58,7 @@ export const EVENTS = {
   UI_UI_CURSOR_HIGHLIGHT_START: 'ui-cursor-highlight-start',
   UI_UI_CURSOR_HIGHLIGHT_MOVE: 'ui-cursor-highlight-move',
   UI_UI_CURSOR_HIGHLIGHT_STOP: 'ui-cursor-highlight-stop',
-  UI_CURSOR_POINT: 'cursor-point',
+  UI_CURSOR_POINT: 'ui-cursor-point',
   UI_ELEMENT_CREATED: 'ui-element-created',
   UI_ELEMENT_UPDATED: 'ui-element-updated',
   UI_ELEMENT_DELETED: 'ui-element-deleted',
