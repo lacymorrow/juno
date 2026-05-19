@@ -663,6 +663,7 @@ pub fn run() {
             commands::get_onboarding_info,
             commands::test_global_shortcuts_working,
             commands::set_onboarding_active,
+            commands::save_user_role,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
