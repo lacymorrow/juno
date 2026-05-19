@@ -7,15 +7,10 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::state;
 use crate::constants::{events, errors::templates};
-
-// Helper function for error formatting - properly handles template substitution
-fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
-}
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -24,7 +19,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 /// Handle global shortcut events
 pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
-    println!(
+    debug!(
         "[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}",
         shortcut,
         event.state()
@@ -36,7 +31,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{}", format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!("{}", crate::format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -53,14 +48,14 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let voice_activation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.voice_activation);
 
-    // Debug logging
-    println!("[DEBUG] Current shortcuts from state:");
-    println!("  Stop: {} -> {:?}", current_shortcuts.stop_current_task, stop_shortcut);
-    println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode, agent_shortcut);
-    println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
-    println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
-    println!("  Voice: {} -> {:?}", current_shortcuts.voice_activation, voice_activation_shortcut);
-    println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
+    debug!("Current shortcuts — stop:{} agent:{} dictation:{} settings:{} voice:{} | incoming:{:?}",
+        current_shortcuts.stop_current_task,
+        current_shortcuts.agent_mode,
+        current_shortcuts.dictation_input,
+        current_shortcuts.open_settings,
+        current_shortcuts.voice_activation,
+        shortcut
+    );
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if let Some(stop_shortcut_obj) = stop_shortcut {
@@ -84,14 +79,9 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 
     // Check dictation shortcut separately (not as else-if to avoid exclusion)
     if let Some(dictation_shortcut_obj) = dictation_shortcut {
-        println!("[DEBUG] Checking dictation shortcut: incoming {:?} == expected {:?} -> {}",
-                 shortcut, dictation_shortcut_obj, *shortcut == dictation_shortcut_obj);
         if *shortcut == dictation_shortcut_obj {
-            println!("[DEBUG] Dictation shortcut matched! Calling handler...");
             handle_dictation_input_shortcut(app, event);
         }
-    } else {
-        println!("[DEBUG] No dictation shortcut configured or failed to parse");
     }
 
     // Check voice activation shortcut
@@ -332,11 +322,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     }
 }
 
-/// Handle the global voice activation shortcut (Option+Shift+V by default).
-///
-/// This is an always-on tap-to-toggle shortcut that starts/stops voice recording
-/// from anywhere on macOS without requiring the main window to be focused.
-/// It always uses tap-mode behavior regardless of the dictation trigger mode setting.
+/// Always-on tap-to-toggle voice recording from anywhere on macOS (Option+Shift+V default).
 fn handle_voice_activation_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     // Only fire on key press — this is a stateless toggle, no hold semantics
     if event.state() != ShortcutState::Pressed {
@@ -387,7 +373,7 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(format_error(templates::FAILED_TO_EMIT, "test event", e));
+        return Err(crate::format_error(templates::FAILED_TO_EMIT, "test event", e));
     }
 
     Ok(())
