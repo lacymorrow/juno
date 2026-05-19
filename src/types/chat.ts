@@ -22,6 +22,11 @@ export type ChatMessage = {
   agent_state?: string;
   tool_id?: string;
   approval_state?: "pending" | "approved" | "denied";
+  ax_grounded?: boolean;
+  ax_role?: string | null;
+  ax_label?: string | null;
+  ax_screen_coordinate?: [number, number];
+  ax_action?: string;
   risk_level?: "low" | "medium" | "high" | "critical";
   target_app?: string;
   approval_timeout_seconds?: number;
