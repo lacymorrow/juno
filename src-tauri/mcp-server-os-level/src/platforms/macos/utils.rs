@@ -537,7 +537,7 @@ pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>
 #[cfg(feature = "screencapturekit-backend")]
 fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
-    use screencapturekit::shareable_content::{SCShareableContent, SCWindow};
+    use screencapturekit::shareable_content::SCShareableContent;
     use screencapturekit::stream::content_filter::SCContentFilter;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
 
@@ -561,9 +561,16 @@ fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result
     // sees the companion UI in screenshots. Uses PID (not bundle ID) so this works for
     // both dev and production builds. Covers: main window, floating panel, floating bar,
     // desktop cursor overlay, onboarding window, and settings window.
-    let current_pid = std::process::id() as i32;
+    let raw_pid = std::process::id();
+    let current_pid = match i32::try_from(raw_pid) {
+        Ok(p) => p,
+        Err(_) => {
+            warn!("PID {raw_pid} does not fit in i32; skipping self-exclusion from screenshot");
+            -1 // matches no window — falls back to capturing everything
+        }
+    };
     let all_windows = content.windows();
-    let own_windows: Vec<&SCWindow> = all_windows
+    let own_windows: Vec<_> = all_windows
         .iter()
         .filter(|w| {
             w.owning_application()
@@ -829,7 +836,10 @@ mod tests {
     fn test_screenshot_self_exclusion() {
         use screencapturekit::shareable_content::SCShareableContent;
 
-        let current_pid = std::process::id() as i32;
+        let current_pid = match i32::try_from(std::process::id()) {
+            Ok(p) => p,
+            Err(_) => return, // extremely unlikely; skip rather than panic
+        };
 
         let content = match SCShareableContent::get() {
             Ok(c) => c,
@@ -846,8 +856,6 @@ mod tests {
             })
             .count();
 
-        // The test binary has no visible windows, so own_count should be zero here.
-        // When run from a full Juno process it should equal the number of open windows.
         println!("PID {current_pid}: {own_count} own-process window(s) found in SCK enumeration");
 
         // The full capture pipeline must succeed without panicking
