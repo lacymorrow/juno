@@ -507,8 +507,9 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                     break;
                 }
                 _ = interval.tick() => {
-                    // Bypass the short-TTL cache so we detect changes within 1s.
-                    // We call the native checker directly and emit changed/granted events.
+                    // Bypass the short-TTL cache (5s) so we detect changes within 1s.
+                    // Invalidate before each poll so the native APIs are always queried.
+                    invalidate_permissions_cache();
                     match check_permissions_status_native(app_clone.clone()).await {
                         Ok(status) => {
                             // Always emit the full state for UI reactivity

@@ -1,6 +1,6 @@
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use serde::{Deserialize, Serialize};
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, LazyLock};
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
@@ -78,9 +78,12 @@ static ONBOARDING_PHASE: LazyLock<TokioMutex<OnboardingPhase>> =
 
 // ── Cursor animation cancellation ────────────────────────────────────────────
 
-/// Set to true to abort any in-flight cursor animation.
-static ANIMATION_CANCELLED: LazyLock<Arc<AtomicBool>> =
-    LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+/// Monotonically increasing generation counter. Each `animate_cursor_to` call
+/// increments this and records its own generation. A running animation task
+/// self-aborts when it detects a newer generation has started, making
+/// cancellation race-free without any sleep-based synchronization.
+static ANIMATION_GENERATION: LazyLock<Arc<AtomicU64>> =
+    LazyLock::new(|| Arc::new(AtomicU64::new(0)));
 
 /// Check if we're running in development mode
 fn is_development_mode() -> bool {
@@ -520,17 +523,12 @@ pub async fn animate_cursor_to(
     to_y: f64,
     style: Option<String>,
 ) -> Result<(), String> {
-    // Cancel any in-flight animation
-    ANIMATION_CANCELLED.store(true, Ordering::Release);
-
-    let cancel_flag = ANIMATION_CANCELLED.clone();
+    // Claim a new generation — any older task will self-abort when it next checks.
+    let my_gen = ANIMATION_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let gen_ref = ANIMATION_GENERATION.clone();
     let style_str = style.unwrap_or_else(|| "arc".to_string());
 
     tauri::async_runtime::spawn(async move {
-        // Brief yield to let any previous task observe the cancel flag
-        tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        cancel_flag.store(false, Ordering::Release);
-
         let dx = to_x - from_x;
         let dy = to_y - from_y;
         let distance = (dx * dx + dy * dy).sqrt();
@@ -542,24 +540,24 @@ pub async fn animate_cursor_to(
         // Duration proportional to distance, clamped to [0.4, 1.2] seconds
         let duration_secs = (0.4_f64 + 0.8 * (distance / 2000.0)).clamp(0.4, 1.2);
         let total_frames = (duration_secs * 60.0).ceil() as u64;
-        let frame_ms = (duration_secs * 1000.0 / total_frames as f64) as u64;
+        let frame_ms = (duration_secs * 1000.0 / total_frames as f64).max(1.0) as u64;
 
-        // Control point: midpoint offset perpendicular to the chord
+        // Control point: midpoint offset perpendicular to the chord (arcs upward/left)
         let arc_height = distance * 0.25;
-        // Perpendicular (rotated 90° left)
         let perp_x = -dy / distance * arc_height;
         let perp_y =  dx / distance * arc_height;
         let cx = (from_x + to_x) / 2.0 + perp_x;
         let cy = (from_y + to_y) / 2.0 + perp_y;
 
         for frame in 0..=total_frames {
-            if cancel_flag.load(Ordering::Acquire) {
+            // Self-abort if a newer animation has been requested
+            if gen_ref.load(Ordering::Acquire) != my_gen {
                 break;
             }
 
-            // Linear t in [0,1]
+            // Linear t in [0, 1]
             let t_linear = frame as f64 / total_frames as f64;
-            // Smoothstep easing
+            // Smoothstep easing: t² × (3 - 2t)
             let t = t_linear * t_linear * (3.0 - 2.0 * t_linear);
 
             // Quadratic Bezier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
@@ -569,12 +567,7 @@ pub async fn animate_cursor_to(
 
             if let Err(e) = app.emit(
                 events::cursor::ANIMATION_FRAME,
-                serde_json::json!({
-                    "x": x,
-                    "y": y,
-                    "t": t_linear,
-                    "style": style_str
-                }),
+                serde_json::json!({ "x": x, "y": y, "t": t_linear, "style": style_str }),
             ) {
                 warn!("Failed to emit cursor animation frame: {}", e);
                 break;
@@ -630,7 +623,8 @@ pub async fn show_cursor_bubble(
 /// Cancel any running animation and dismiss the cursor overlay with a fade-out.
 #[tauri::command]
 pub async fn dismiss_cursor_overlay(app: AppHandle) -> Result<(), String> {
-    ANIMATION_CANCELLED.store(true, Ordering::Release);
+    // Bump generation so any in-flight animation task self-aborts
+    ANIMATION_GENERATION.fetch_add(1, Ordering::AcqRel);
 
     app.emit(events::cursor::DISMISS_OVERLAY, serde_json::json!({ "animate": true }))
         .map_err(|e| format!("Failed to emit cursor dismiss: {}", e))
