@@ -3,6 +3,25 @@
   "private": true,
   "version": "0.6.0",
   "type": "module",
+  "description": "AI that controls your Mac. Describe a task. Watch it happen.",
+  "author": "Lacy Morrow <lacy@lacymorrow.com> (https://lacymorrow.com)",
+  "homepage": "https://junebug.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lacymorrow/juno"
+  },
+  "keywords": [
+    "ai",
+    "computer-use",
+    "desktop-automation",
+    "macos",
+    "tauri",
+    "anthropic",
+    "agent",
+    "accessibility",
+    "voice-control",
+    "mcp"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
