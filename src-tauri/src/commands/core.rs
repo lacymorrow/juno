@@ -644,14 +644,9 @@ pub async fn set_agent_trigger_mode(
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    // Get current settings or create default
+    // Get current settings or create default — use struct update so new fields inherit defaults
     let mut agent_settings = settings_manager.get_agent_settings().await
-        .unwrap_or_else(|_| AgentSettings {
-            trigger_mode: mode.clone(),
-            execution_mode: "multi".to_string(),
-            big_cursor_enabled: crate::constants::settings::defaults::BIG_CURSOR_ENABLED,
-            big_cursor_scale: crate::constants::settings::defaults::BIG_CURSOR_SCALE,
-        });
+        .unwrap_or_else(|_| AgentSettings { trigger_mode: mode.clone(), ..AgentSettings::default() });
 
     // Update trigger mode
     agent_settings.trigger_mode = mode.clone();

@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use std::env;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
 use tracing::{error, info, warn};
@@ -47,6 +46,7 @@ pub mod utils;
 pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
 pub mod testing; // Test harness and mock implementations for headless integration tests
+pub mod persistent_memory; // Cross-session persistent user memory
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes
@@ -72,7 +72,7 @@ use commands::{
     safari_get_url, safari_navigate, safari_list_clickable_elements,
     safari_execute_javascript, safari_clear_cache, execute_safari_tool,
     always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-            error_recovery::*, filesystem::*, keyboard::*, memory::*,
+            error_recovery::*, filesystem::*, keyboard::*, memory::*, persistent_memory::*,
     mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
     ui_commands::*, ui_token_selection::*, window::*,
 };
@@ -133,6 +133,12 @@ use crate::commands::enhanced_visual_reasoning_commands::{
     get_scene_types, get_visual_reasoning_capabilities, get_visual_reasoning_statistics,
     initialize_visual_reasoning_state, test_visual_reasoning_engine,
     validate_visual_analysis_request,
+};
+
+// Import whisper model management commands
+use crate::commands::whisper_model::{
+    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
+    get_whisper_models, set_whisper_model,
 };
 
 // Added for selector parsing
@@ -323,6 +329,13 @@ pub fn run() {
             get_visual_config,
             compress_all_screenshots,
             configure_screenshot_compression,
+            // Persistent Cross-Session Memory Commands
+            get_persistent_memory,
+            add_persistent_memory,
+            update_persistent_memory,
+            delete_persistent_memory,
+            clear_persistent_memory,
+            preview_memory_injection,
             // Error Recovery Commands
             initialize_error_recovery,
             create_checkpoint,
@@ -340,6 +353,10 @@ pub fn run() {
             tts::invoke_tts,               // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
             tts::get_tts_provider_command, // Added for TTS provider selection
+            tts::set_kokoro_voice_command, // Kokoro voice selection via settings
+            tts::get_kokoro_voice_command, // Kokoro voice selection via settings
+            tts::get_chatterbox_settings_command, // Chatterbox TTS settings
+            tts::set_chatterbox_settings_command, // Chatterbox TTS settings
             tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
@@ -460,6 +477,9 @@ pub fn run() {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_system_cursor_size,
+            get_companion_mode,
+            set_companion_mode,
 
             // Sound Commands
             play_sound_by_type,
@@ -616,6 +636,12 @@ pub fn run() {
             set_audio_level_monitoring,
             test_whisper_model,
             force_transcription_test,
+            // Whisper Model Management Commands
+            get_whisper_models,
+            get_current_whisper_model,
+            download_whisper_model,
+            set_whisper_model,
+            get_whisper_download_status,
             // Environment Commands
             load_bundled_environment,
             test_environment_variables,
@@ -778,6 +804,11 @@ pub fn run() {
             // Manage the SettingsManager state
             app.manage(settings_manager);
 
+            // --- Initialize Whisper Download State ---
+            app.manage(std::sync::Arc::new(std::sync::Mutex::new(
+                crate::commands::whisper_model::WhisperDownloadState::new(),
+            )));
+
             // --- Initialize Application State Management ---
             let state_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -880,6 +911,14 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
+            // Log if cursor is enlarged (from a previous crash or user accessibility).
+            // We do NOT auto-reset — the settings UI shows a "Reset to Normal" banner.
+            let startup_cursor_size = cursor_scale::get_system_cursor_size();
+            if startup_cursor_size > 1.0 {
+                info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
+                    startup_cursor_size);
+            }
+
             // Sweep orphaned temp browser profile directories from previous sessions
             tauri::async_runtime::spawn(async {
                 crate::agent::tools::browser_controller::BrowserController::cleanup_orphaned_temp_profiles().await;
@@ -917,6 +956,10 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                    }
+                    tauri::RunEvent::ExitRequested { .. } => {
+                        // Restore cursor scale on app exit — prevents stuck big cursor
+                        cursor_scale::force_restore_cursor_scale();
                     }
                     tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                         // Clean up escape key registration when onboarding window is closed

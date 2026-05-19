@@ -81,6 +81,9 @@ pub struct AgentSettings {
     pub big_cursor_enabled: bool,
     #[serde(default = "defaults::big_cursor_scale")]
     pub big_cursor_scale: f32,
+    /// Companion/observe-only mode — agent sees screen but never takes actions
+    #[serde(default)]
+    pub companion_mode: bool,
 }
 
 /// AI provider configurations
@@ -122,6 +125,14 @@ pub struct CloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    #[serde(default = "AudioSettings::default_kokoro_voice")]
+    pub kokoro_voice: String,
+    #[serde(default)]
+    pub chatterbox_reference_audio_url: Option<String>,
+    #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
+    pub chatterbox_exaggeration: f32,
+    #[serde(default)]
+    pub chatterbox_use_hd: bool,
     pub sound_enabled: bool,
     pub dictation_clipboard_enabled: bool,
     pub dictation_trigger_mode: String, // "tap" or "hold"
@@ -130,6 +141,17 @@ pub struct AudioSettings {
     pub always_listening_wake_words: Vec<String>,
     pub performance_monitoring_enabled: bool,
 }
+
+impl AudioSettings {
+    fn default_kokoro_voice() -> String {
+        "af_bella".to_string()
+    }
+
+    fn default_chatterbox_exaggeration() -> f32 {
+        0.5
+    }
+}
+
 
 /// Tool enable/disable configurations
 /// Replaces: tool_config.json
@@ -307,6 +329,7 @@ impl Default for AgentSettings {
             execution_mode: defaults::AGENT_EXECUTION_MODE.to_string(),
             big_cursor_enabled: defaults::BIG_CURSOR_ENABLED,
             big_cursor_scale: defaults::BIG_CURSOR_SCALE,
+            companion_mode: false,
         }
     }
 }
@@ -341,6 +364,10 @@ impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
+            kokoro_voice: Self::default_kokoro_voice(),
+            chatterbox_reference_audio_url: None,
+            chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
+            chatterbox_use_hd: false,
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_trigger_mode: "hold".to_string(),
@@ -402,7 +429,7 @@ impl Default for CLISettings {
 impl Default for VoiceTranscriptionSettings {
     fn default() -> Self {
         Self {
-            model_path: "models/ggml-tiny.en.bin".to_string(),
+            model_path: "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
             sample_rate: 16000,
             channels: 1,
             buffer_duration_ms: 1500,

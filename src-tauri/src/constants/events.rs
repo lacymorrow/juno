@@ -94,7 +94,13 @@ pub mod ui {
     /// Emitted when the agent uses [POINT:x,y:label:screenN] to guide attention.
     /// Payload fields: x, y (f64), label (Option<String>), screen (Option<u32>)
     pub const CURSOR_POINT: &str = "cursor-point";
-    
+
+    // Multi-agent cursor events (Phase 4)
+    /// Payload: { agent_id, x, y, state, color }
+    pub const AGENT_CURSOR_UPDATE: &str = "agent-cursor-update";
+    /// Payload: { agent_id }
+    pub const AGENT_CURSOR_REMOVE: &str = "agent-cursor-remove";
+
     // Element management events
     pub const ELEMENT_CREATED: &str = "ui-element-created";
     pub const ELEMENT_UPDATED: &str = "ui-element-updated";

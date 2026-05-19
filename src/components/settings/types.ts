@@ -1,5 +1,5 @@
 import React from "react";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 
 export interface SettingsCategory {
   id: string;
@@ -74,7 +74,7 @@ export interface MCPToolInfo {
 }
 
 export interface SettingsSectionProps {
-  settings: ReturnType<typeof useSettings>;
+  settings: ReturnType<typeof useSettingsContext>;
   onNavigateToDevTools?: () => void;
   onNavigateToChat?: () => void;
   onNavigateToPermissions?: () => void;
