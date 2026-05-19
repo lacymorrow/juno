@@ -1,10 +1,11 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
   getCurrentWindow,
   LogicalSize,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { useEventListener } from "@/hooks/useEventListener";
+import { EVENTS } from "@/lib/constants.generated";
 
 type CursorState = "idle" | "moving" | "clicking" | "thinking";
 
@@ -15,6 +16,23 @@ const TRAIL_COUNT = 5;
 const HOT_SPOT = 5;
 const CURSOR_FADE_DELAY_MS = 1500;
 const CLICK_ANIM_DURATION_MS = 700;
+
+// ─── POINT flying cursor ───────────────────────────────────────────────────────
+const FLIGHT_DURATION = 380; // ms — bezier arc from last landed to target
+const LINGER_DURATION = 1600; // ms — display time after landing before hiding
+
+type CursorPointPayload = {
+  x: number;
+  y: number;
+  label: string | null;
+  screen: number | null;
+};
+
+// Quadratic bezier: P(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+function bezier(t: number, p0: number, p1: number, p2: number): number {
+  const mt = 1 - t;
+  return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
+}
 
 // ─── CSS Animations ───────────────────────────────────────────────────────────
 const CURSOR_CSS = `
@@ -190,6 +208,14 @@ export const DesktopCursorOverlay = () => {
   // Tracks which slots are currently occupied
   const occupiedSlots = useRef<Set<number>>(new Set());
 
+  // ── POINT flying cursor refs ───────────────────────────────────────────────
+  const flyDivRef = useRef<HTMLDivElement | null>(null);
+  const flyLabelRef = useRef<HTMLDivElement | null>(null);
+  const flyRippleRef = useRef<HTMLDivElement | null>(null);
+  const flyAnimFrameRef = useRef<number | null>(null);
+  const flyLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLandedRef = useRef<{ x: number; y: number } | null>(null);
+
   // ── Slot allocation ────────────────────────────────────────────────────────
   const getOrAssignSlot = (agentId: string, map: SlotMap): number | null => {
     const existing = map.get(agentId);
@@ -261,6 +287,68 @@ export const DesktopCursorOverlay = () => {
     el.classList.add("juno-ripple-active");
   };
 
+  // ── POINT: fly cursor to (targetX, targetY) along a bezier arc ───────────
+  const flyTo = useCallback((targetX: number, targetY: number, label: string | null) => {
+    if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
+    if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
+
+    const startX = lastLandedRef.current?.x ?? targetX - 250;
+    const startY = lastLandedRef.current?.y ?? targetY - 80;
+
+    // Perpendicular bezier control point — 15% of flight distance, max 80px arc
+    const midX = (startX + targetX) / 2;
+    const midY = (startY + targetY) / 2;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const perp = Math.min(0.15, 80 / Math.max(dist, 1));
+    const ctrlX = midX - dy * perp;
+    const ctrlY = midY + dx * perp;
+
+    if (flyDivRef.current) {
+      flyDivRef.current.style.opacity = "1";
+      flyDivRef.current.style.transform = `translate(${startX}px, ${startY}px)`;
+    }
+    if (flyLabelRef.current) {
+      flyLabelRef.current.style.opacity = "0";
+      flyLabelRef.current.textContent = label ?? "";
+    }
+    if (flyRippleRef.current) {
+      flyRippleRef.current.style.opacity = "0";
+      flyRippleRef.current.classList.remove("juno-ripple-active");
+    }
+
+    const startTime = Date.now();
+    const tick = () => {
+      const elapsed = Date.now() - startTime;
+      const tRaw = Math.min(elapsed / FLIGHT_DURATION, 1);
+      // Ease-in-out cubic
+      const t = tRaw < 0.5 ? 4 * tRaw * tRaw * tRaw : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
+      const curX = bezier(t, startX, ctrlX, targetX);
+      const curY = bezier(t, startY, ctrlY, targetY);
+      if (flyDivRef.current) {
+        flyDivRef.current.style.transform = `translate(${curX}px, ${curY}px)`;
+      }
+      if (tRaw < 1) {
+        flyAnimFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        lastLandedRef.current = { x: targetX, y: targetY };
+        if (label && flyLabelRef.current) flyLabelRef.current.style.opacity = "1";
+        if (flyRippleRef.current) {
+          flyRippleRef.current.style.opacity = "1";
+          flyRippleRef.current.classList.remove("juno-ripple-active");
+          void flyRippleRef.current.offsetWidth;
+          flyRippleRef.current.classList.add("juno-ripple-active");
+        }
+        flyLingerRef.current = setTimeout(() => {
+          if (flyDivRef.current) flyDivRef.current.style.opacity = "0";
+          if (flyLabelRef.current) flyLabelRef.current.style.opacity = "0";
+        }, LINGER_DURATION);
+      }
+    };
+    flyAnimFrameRef.current = requestAnimationFrame(tick);
+  }, []);
+
   // ── Window setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
@@ -284,6 +372,8 @@ export const DesktopCursorOverlay = () => {
         if (slot.hideTimer) clearTimeout(slot.hideTimer);
         if (slot.clickTimer) clearTimeout(slot.clickTimer);
       });
+      if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
+      if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
     };
   }, []);
 
@@ -380,6 +470,13 @@ export const DesktopCursorOverlay = () => {
     if (slot.state === "thinking") { applySlotState(slot, "idle"); scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS); }
   });
 
+  // ── POINT teaching cursor — agent [POINT:x,y:label:screenN] ──────────────
+  // payload.screen is parsed + forwarded but coordinates are treated as global
+  // screen space. TODO: map screenN to display origin for multi-monitor support.
+  useEventListener<CursorPointPayload>(EVENTS.UI_CURSOR_POINT, (payload) => {
+    flyTo(payload.x, payload.y, payload.label ?? null);
+  });
+
   // ── Render: N cursor sprites ───────────────────────────────────────────────
 
   return (
@@ -456,6 +553,84 @@ export const DesktopCursorOverlay = () => {
           </div>
         );
       })}
+
+      {/* POINT teaching cursor — flies to agent-pointed coordinates */}
+      <div
+        ref={flyDivRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          opacity: 0,
+          transform: "translate(-200px, -200px)",
+          pointerEvents: "none",
+          willChange: "transform, opacity",
+        }}
+      >
+        <svg
+          width="36"
+          height="36"
+          viewBox="0 0 36 36"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <defs>
+            <filter id="point-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="1" dy="2" stdDeviation="2" floodColor="rgba(0,0,0,0.4)" />
+            </filter>
+          </defs>
+          <path
+            d="M6 4L28 18L17 19.5L12 30L6 4Z"
+            fill="white"
+            stroke="#1a1a2e"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            filter="url(#point-shadow)"
+          />
+          <circle cx="6.5" cy="4.5" r="2.5" fill="#6366f1" />
+        </svg>
+
+        {/* Label tooltip — fades in on landing */}
+        <div
+          ref={flyLabelRef}
+          style={{
+            position: "absolute",
+            top: "40px",
+            left: 0,
+            backgroundColor: "rgba(15, 15, 30, 0.88)",
+            backdropFilter: "blur(8px)",
+            color: "#e2e8f0",
+            fontSize: "12px",
+            fontWeight: 500,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid rgba(99,102,241,0.4)",
+            whiteSpace: "nowrap",
+            opacity: 0,
+            transition: "opacity 0.18s ease-out",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
+          }}
+        />
+
+        {/* Landing ripple — reuses .juno-ripple-active keyframe */}
+        <div
+          ref={flyRippleRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: 40,
+            height: 40,
+            transform: "translate(-8px, -8px)",
+            borderRadius: "50%",
+            border: "2px solid rgba(99,102,241,0.6)",
+            opacity: 0,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
     </div>
   );
 };
