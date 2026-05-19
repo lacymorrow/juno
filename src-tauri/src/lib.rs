@@ -639,6 +639,14 @@ pub fn run() {
             commands::get_onboarding_info,
             commands::test_global_shortcuts_working,
             commands::set_onboarding_active,
+            // Guided onboarding state machine
+            commands::get_onboarding_state,
+            commands::onboarding_action,
+            // Cursor overlay animation (onboarding guidance)
+            commands::animate_cursor_to,
+            commands::show_cursor_highlight,
+            commands::show_cursor_bubble,
+            commands::dismiss_cursor_overlay,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,

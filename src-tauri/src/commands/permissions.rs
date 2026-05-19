@@ -6,13 +6,29 @@ use crate::commands::native_permissions::{NativePermissionChecker, NativePermiss
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::async_runtime::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use crate::constants::events;
 use crate::constants::errors::templates::FAILED_TO_EMIT;
+
+// ── Per-permission dialog deduplication ──────────────────────────────────────
+//
+// Each AtomicBool tracks whether the native system dialog was already shown
+// during this launch. First call → trigger the OS dialog. Subsequent calls →
+// open System Settings directly (avoids no-op dialog re-shows).
+// Reset automatically on each app launch via LazyLock initialization.
+
+static SCREEN_RECORDING_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(false));
+static ACCESSIBILITY_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(false));
+static MICROPHONE_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(false));
+static INPUT_MONITORING_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(false));
 
 /// Helper function to format error messages with proper template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -151,7 +167,10 @@ pub async fn get_permissions_state(app: AppHandle) -> Result<PermissionsState, S
     check_permissions_status_native(app).await
 }
 
-/// Request accessibility permissions using native APIs - NO password prompts
+/// Request accessibility permissions using native APIs - NO password prompts.
+///
+/// First call: triggers the native OS dialog (AXIsProcessTrustedWithOptions).
+/// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
 pub async fn request_accessibility_permission_native() -> Result<bool, String> {
     info!("Requesting accessibility permissions using native APIs");
@@ -164,29 +183,38 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
                 Ok(true)
             }
             Ok(false) => {
-                info!("Requesting accessibility permissions with native prompt");
-                match NativePermissionChecker::request_accessibility_permission() {
-                    Ok(()) => {
-                        info!("Accessibility permission request triggered successfully");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
-                        match NativePermissionChecker::check_accessibility_permission() {
-                            Ok(granted) => {
-                                if granted {
-                                    info!("Accessibility permissions now granted");
-                                } else {
-                                    info!("Accessibility permissions still not granted - user needs to manually enable in System Settings");
+                let already_shown = ACCESSIBILITY_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
+                if already_shown {
+                    info!("Accessibility dialog already shown this launch — opening System Settings directly");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+                        .status();
+                    Ok(false)
+                } else {
+                    info!("Requesting accessibility permissions with native prompt (first time this launch)");
+                    match NativePermissionChecker::request_accessibility_permission() {
+                        Ok(()) => {
+                            info!("Accessibility permission request triggered successfully");
+                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            match NativePermissionChecker::check_accessibility_permission() {
+                                Ok(granted) => {
+                                    if granted {
+                                        info!("Accessibility permissions now granted");
+                                    } else {
+                                        info!("Accessibility permissions still not granted - user needs to manually enable in System Settings");
+                                    }
+                                    Ok(granted)
                                 }
-                                Ok(granted)
-                            }
-                            Err(e) => {
-                                error!("Error checking accessibility permissions after request: {}", e);
-                                Ok(false)
+                                Err(e) => {
+                                    error!("Error checking accessibility permissions after request: {}", e);
+                                    Ok(false)
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        error!("Error requesting accessibility permissions: {}", e);
-                        Err(format!("Failed to request accessibility permissions: {}", e))
+                        Err(e) => {
+                            error!("Error requesting accessibility permissions: {}", e);
+                            Err(format!("Failed to request accessibility permissions: {}", e))
+                        }
                     }
                 }
             }
@@ -205,7 +233,10 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
     }
 }
 
-/// Request microphone permissions using native APIs - NO password prompts
+/// Request microphone permissions using native APIs - NO password prompts.
+///
+/// First call: triggers the native TCC dialog.
+/// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
 pub async fn request_microphone_permission_native() -> Result<bool, String> {
     info!("Requesting microphone permissions using native APIs");
@@ -218,19 +249,28 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
                 Ok(true)
             }
             Ok(false) => {
-                info!("Requesting microphone permissions with native dialog");
-                match NativePermissionChecker::request_microphone_permission().await {
-                    Ok(granted) => {
-                        if granted {
-                            info!("Microphone permissions granted by user");
-                        } else {
-                            info!("Microphone permissions denied by user");
+                let already_shown = MICROPHONE_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
+                if already_shown {
+                    info!("Microphone dialog already shown this launch — opening System Settings directly");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+                        .status();
+                    Ok(false)
+                } else {
+                    info!("Requesting microphone permissions with native dialog (first time this launch)");
+                    match NativePermissionChecker::request_microphone_permission().await {
+                        Ok(granted) => {
+                            if granted {
+                                info!("Microphone permissions granted by user");
+                            } else {
+                                info!("Microphone permissions denied by user");
+                            }
+                            Ok(granted)
                         }
-                        Ok(granted)
-                    }
-                    Err(e) => {
-                        error!("Error requesting microphone permissions: {}", e);
-                        Err(format!("Failed to request microphone permissions: {}", e))
+                        Err(e) => {
+                            error!("Error requesting microphone permissions: {}", e);
+                            Err(format!("Failed to request microphone permissions: {}", e))
+                        }
                     }
                 }
             }
@@ -249,7 +289,10 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
     }
 }
 
-/// Request screen recording permissions using native APIs - NO password prompts
+/// Request screen recording permissions using native APIs - NO password prompts.
+///
+/// First call: triggers the native OS dialog (CGRequestScreenCaptureAccess).
+/// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
 pub async fn request_screen_recording_permission_native() -> Result<bool, String> {
     info!("Requesting screen recording permissions using native APIs");
@@ -262,29 +305,38 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
                 Ok(true)
             }
             Ok(false) => {
-                info!("Requesting screen recording permissions with native prompt");
-                match NativePermissionChecker::request_screen_recording_permission() {
-                    Ok(()) => {
-                        info!("Screen recording permission request triggered successfully");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
-                        match NativePermissionChecker::check_screen_recording_permission() {
-                            Ok(granted) => {
-                                if granted {
-                                    info!("Screen recording permissions now granted");
-                                } else {
-                                    info!("Screen recording permissions still not granted - user needs to manually enable in System Settings");
+                let already_shown = SCREEN_RECORDING_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
+                if already_shown {
+                    info!("Screen recording dialog already shown this launch — opening System Settings directly");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+                        .status();
+                    Ok(false)
+                } else {
+                    info!("Requesting screen recording permissions with native prompt (first time this launch)");
+                    match NativePermissionChecker::request_screen_recording_permission() {
+                        Ok(()) => {
+                            info!("Screen recording permission request triggered successfully");
+                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            match NativePermissionChecker::check_screen_recording_permission() {
+                                Ok(granted) => {
+                                    if granted {
+                                        info!("Screen recording permissions now granted");
+                                    } else {
+                                        info!("Screen recording permissions still not granted - user needs to manually enable in System Settings");
+                                    }
+                                    Ok(granted)
                                 }
-                                Ok(granted)
-                            }
-                            Err(e) => {
-                                error!("Error checking screen recording permissions after request: {}", e);
-                                Ok(false)
+                                Err(e) => {
+                                    error!("Error checking screen recording permissions after request: {}", e);
+                                    Ok(false)
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        error!("Error requesting screen recording permissions: {}", e);
-                        Err(format!("Failed to request screen recording permissions: {}", e))
+                        Err(e) => {
+                            error!("Error requesting screen recording permissions: {}", e);
+                            Err(format!("Failed to request screen recording permissions: {}", e))
+                        }
                     }
                 }
             }
@@ -303,7 +355,10 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
     }
 }
 
-/// Request input monitoring permissions using native APIs - NO password prompts
+/// Request input monitoring permissions using native APIs - NO password prompts.
+///
+/// First call: triggers the native OS prompt.
+/// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
 pub async fn request_input_monitoring_permission_native() -> Result<bool, String> {
     info!("Requesting input monitoring permissions using native APIs");
@@ -316,29 +371,38 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
                 Ok(true)
             }
             Ok(false) => {
-                info!("Requesting input monitoring permissions with native prompt");
-                match NativePermissionChecker::request_input_monitoring_permission() {
-                    Ok(()) => {
-                        info!("Input monitoring permission request triggered successfully");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
-                        match NativePermissionChecker::check_input_monitoring_permission() {
-                            Ok(granted) => {
-                                if granted {
-                                    info!("Input monitoring permissions now granted");
-                                } else {
-                                    info!("Input monitoring permissions still not granted - user needs to manually enable in System Settings");
+                let already_shown = INPUT_MONITORING_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
+                if already_shown {
+                    info!("Input monitoring dialog already shown this launch — opening System Settings directly");
+                    let _ = Command::new("open")
+                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+                        .status();
+                    Ok(false)
+                } else {
+                    info!("Requesting input monitoring permissions with native prompt (first time this launch)");
+                    match NativePermissionChecker::request_input_monitoring_permission() {
+                        Ok(()) => {
+                            info!("Input monitoring permission request triggered successfully");
+                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            match NativePermissionChecker::check_input_monitoring_permission() {
+                                Ok(granted) => {
+                                    if granted {
+                                        info!("Input monitoring permissions now granted");
+                                    } else {
+                                        info!("Input monitoring permissions still not granted - user needs to manually enable in System Settings");
+                                    }
+                                    Ok(granted)
                                 }
-                                Ok(granted)
-                            }
-                            Err(e) => {
-                                error!("Error checking input monitoring permissions after request: {}", e);
-                                Ok(false)
+                                Err(e) => {
+                                    error!("Error checking input monitoring permissions after request: {}", e);
+                                    Ok(false)
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        error!("Error requesting input monitoring permissions: {}", e);
-                        Err(format!("Failed to request input monitoring permissions: {}", e))
+                        Err(e) => {
+                            error!("Error requesting input monitoring permissions: {}", e);
+                            Err(format!("Failed to request input monitoring permissions: {}", e))
+                        }
                     }
                 }
             }
@@ -402,10 +466,14 @@ pub async fn open_system_settings_enhanced(permission_type: String) -> Result<()
     open_system_preferences(permission_type).await
 }
 
-/// Start monitoring permission changes in the background
+/// Start continuous permission monitoring at 1-second intervals.
+///
+/// Emits `permissions-changed` on every poll tick.
+/// Emits `permission-granted` with the permission type immediately when a specific
+/// permission flips from denied → granted, enabling onboarding auto-advance.
 #[tauri::command]
 pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> {
-    info!("Starting permissions monitoring");
+    info!("Starting permissions monitoring (1s continuous polling)");
 
     let task_handle = MONITORING_TASK.clone();
     let mut task_guard = task_handle.lock().map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
@@ -417,13 +485,20 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
         info!("Stopped existing permissions monitoring");
     }
 
-    // Start new monitoring task
     let cancellation_token = CancellationToken::new();
     let token_clone = cancellation_token.clone();
     let app_clone = app.clone();
 
     let handle = tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        // 1-second tick for responsive onboarding auto-advance
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+
+        // Track the last known grant state for delta detection
+        let mut last_accessibility = false;
+        let mut last_screen_recording = false;
+        let mut last_microphone = false;
+        let mut last_input_monitoring = false;
+        let mut initialized = false;
 
         loop {
             tokio::select! {
@@ -432,11 +507,28 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                     break;
                 }
                 _ = interval.tick() => {
+                    // Bypass the short-TTL cache so we detect changes within 1s.
+                    // We call the native checker directly and emit changed/granted events.
                     match check_permissions_status_native(app_clone.clone()).await {
                         Ok(status) => {
+                            // Always emit the full state for UI reactivity
                             if let Err(e) = app_clone.emit(events::permissions::CHANGED, &status) {
                                 warn!("{}", format_error(FAILED_TO_EMIT, "permissions change", e));
                             }
+
+                            // On first tick just record baseline; don't emit false "granted" events
+                            if initialized {
+                                emit_granted_if_flipped(&app_clone, "accessibility",     last_accessibility,     status.accessibility.granted);
+                                emit_granted_if_flipped(&app_clone, "screen_recording",  last_screen_recording,  status.screen_recording.granted);
+                                emit_granted_if_flipped(&app_clone, "microphone",        last_microphone,        status.microphone.granted);
+                                emit_granted_if_flipped(&app_clone, "input_monitoring",  last_input_monitoring,  status.input_monitoring.granted);
+                            }
+
+                            last_accessibility    = status.accessibility.granted;
+                            last_screen_recording = status.screen_recording.granted;
+                            last_microphone       = status.microphone.granted;
+                            last_input_monitoring = status.input_monitoring.granted;
+                            initialized = true;
                         }
                         Err(e) => {
                             warn!("Error checking permissions during monitoring: {}", e);
@@ -448,8 +540,21 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
     });
 
     *task_guard = Some((handle, cancellation_token));
-    info!("Permissions monitoring started successfully");
+    info!("Permissions monitoring started successfully (1s interval)");
     Ok(())
+}
+
+/// Emit `permission-granted` when a permission flips from denied → granted.
+fn emit_granted_if_flipped(app: &AppHandle, permission_type: &str, was_granted: bool, now_granted: bool) {
+    if !was_granted && now_granted {
+        info!("Permission flipped to granted: {}", permission_type);
+        if let Err(e) = app.emit(
+            events::permissions::GRANTED,
+            serde_json::json!({ "permission_type": permission_type }),
+        ) {
+            warn!("Failed to emit permission-granted for {}: {}", permission_type, e);
+        }
+    }
 }
 
 /// Stop background permission monitoring
