@@ -127,12 +127,14 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
                     ns_window.setHasShadow_(NO);
                     ns_window.setBackgroundColor_(msg_send![class!(NSColor), clearColor]);
 
-                    // Visible across all spaces and full-screen apps; excluded from Cmd+` cycle
+                    // Visible across all spaces and full-screen apps; excluded from Cmd+` cycle.
+                    // NSWindowCollectionBehaviorTransient is intentionally omitted: it conflicts
+                    // with Stationary and would cause macOS to hide the panel on app deactivation,
+                    // negating the setHidesOnDeactivate_(NO) call below.
                     ns_window.setCollectionBehavior_(
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorTransient |
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
                     );
 
