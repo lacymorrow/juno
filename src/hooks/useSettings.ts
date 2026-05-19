@@ -165,6 +165,7 @@ export function useSettings() {
 		dictation_input: "",
 		stop_current_task: "",
 		open_settings: "",
+		voice_activation: "",
 	});
 	const [shortcutsLoading, setShortcutsLoading] = useState<boolean>(false);
 	const [editingShortcut, setEditingShortcut] = useState<string | null>(null);

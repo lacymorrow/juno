@@ -362,6 +362,7 @@ pub async fn trigger_shortcut_test_event(
     let event_name = match shortcut_name.as_str() {
         "agent_mode" => events::shortcuts::AGENT_MODE,
         "dictation_input" => events::shortcuts::DICTATION_INPUT,
+        "voice_activation" => events::shortcuts::VOICE_ACTIVATION,
         _ => return Err("Unknown shortcut name".to_string()),
     };
 

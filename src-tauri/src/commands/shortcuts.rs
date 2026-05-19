@@ -554,18 +554,18 @@ pub async fn get_shortcut_suggestions(
             if is_macos {
                 suggestions.extend([
                     "Option+Shift+V".to_string(),
-                    "Option+Shift+Space".to_string(),
-                    "Ctrl+Option+Space".to_string(),
-                    "Option+F5".to_string(),
                     "Option+Shift+M".to_string(),
+                    "Option+F5".to_string(),
+                    "Ctrl+Option+V".to_string(),
+                    "Option+Shift+R".to_string(),
                 ]);
             } else {
                 suggestions.extend([
                     "Alt+Shift+V".to_string(),
-                    "Alt+Shift+Space".to_string(),
-                    "Ctrl+Alt+Space".to_string(),
-                    "Alt+F5".to_string(),
                     "Alt+Shift+M".to_string(),
+                    "Alt+F5".to_string(),
+                    "Ctrl+Alt+V".to_string(),
+                    "Alt+Shift+R".to_string(),
                 ]);
             }
         },
