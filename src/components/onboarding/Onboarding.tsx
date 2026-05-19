@@ -847,13 +847,11 @@ export default function OnboardingFlow({
 
   // Determine if continue button should be disabled
   const isContinueDisabled =
-    (step.id === "role" && !selectedRole) ||
-    (step.id === "role" && selectedRole === "other" && !customRole.trim()) ||
+    (step.id === "role" && (!selectedRole || (selectedRole === "other" && !customRole.trim()))) ||
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
-    (step.id === "api-key" && !detectedProvider) ||
-    (step.id === "api-key" && apiKeySaving);
+    (step.id === "api-key" && (!detectedProvider || apiKeySaving));
 
   // Determine if skip should be hidden (permissions step with required perms not granted)
   const isSkipHidden =
