@@ -156,6 +156,7 @@ export const EVENTS = {
   SHORTCUTS_AGENT_MODE: 'shortcut-agent-mode',
   SHORTCUTS_DICTATION_INPUT: 'shortcut-dictation-input',
   SHORTCUTS_ESCAPE_KEY: 'shortcut-escape-key',
+  SHORTCUTS_VOICE_ACTIVATION: 'shortcut-voice-activation',
   TOOL_CHOICE_CONFIG_CHANGED: 'tool-choice-config-changed',
   TOOL_CHOICE_CONFIG_RESET: 'tool-choice-config-reset',
   TOOL_CHOICE_ENABLED_CHANGED: 'tool-choice-enabled-changed',
@@ -830,6 +831,7 @@ export const KEYBOARD_SHORTCUTS = {
   DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
   STOP_CURRENT_TASK: 'Escape',
   OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
+  VOICE_ACTIVATION: isMac ? 'Option+Shift+V' : 'Alt+Shift+V',
 } as const;
 
 export const SETTINGS = {
@@ -849,6 +851,7 @@ export const SETTINGS = {
   KEYBOARD_KEYS_DICTATION_INPUT: 'dictation_input',
   KEYBOARD_KEYS_STOP_CURRENT_TASK: 'stop_current_task',
   KEYBOARD_KEYS_OPEN_SETTINGS: 'open_settings',
+  KEYBOARD_KEYS_VOICE_ACTIVATION: 'voice_activation',
   ONBOARDING_KEYS_COMPLETED: 'completed',
   ONBOARDING_KEYS_COMPLETED_AT: 'completed_at',
   ONBOARDING_KEYS_SKIPPED: 'skipped',

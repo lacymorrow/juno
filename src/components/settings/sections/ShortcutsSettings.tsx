@@ -21,6 +21,7 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
       dictation_input: "Start Dictation",
       stop_current_task: "Stop Current Task",
       open_settings: "Open Settings",
+      voice_activation: "Voice Activation",
     };
     return names[shortcutName] || shortcutName;
   };
@@ -31,6 +32,7 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
       dictation_input: "Activate voice input for dictation",
       stop_current_task: "Stop the current AI task or operation",
       open_settings: "Open the settings window",
+      voice_activation: "Toggle voice recording from anywhere — no Juno window required",
     };
     return descriptions[shortcutName] || "";
   };
