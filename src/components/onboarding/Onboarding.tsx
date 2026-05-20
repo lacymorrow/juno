@@ -829,7 +829,7 @@ export default function OnboardingFlow({
     (async () => {
       try {
         const lastPhase = await invoke<string | null>("get_last_onboarding_phase");
-        if (!lastPhase) return;
+        if (!lastPhase || !mountedRef.current) return;
         const idx = onboardingSteps.findIndex((s) => s.id === lastPhase);
         // Don't resume to the welcome step (always start there if no progress)
         // or to the complete step (avoid skipping the user past final guidance).
