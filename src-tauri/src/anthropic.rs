@@ -294,6 +294,11 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // Phase D analytics: fire `onboarding_first_query` exactly once per process
+    // once the user has reached OnboardingPhase::Complete. The helper is a
+    // no-op if onboarding is incomplete or the event is already recorded.
+    crate::commands::onboarding_analytics::maybe_record_first_query(&app_handle).await;
+
     // TODO: Event-driven logging disabled - event system not yet implemented
     // let user_message_event = JunoAgentEvent::UserMessage {
     //     content: trimmed_query.to_string(),

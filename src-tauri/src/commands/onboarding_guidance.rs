@@ -220,13 +220,30 @@ fn find_juno_control_bounds() -> Option<(f64, f64, f64, f64)> {
 
 /// Animate the onboarding cursor from `from` to `to`, then show a pulsing ring and
 /// speech bubble. Reuses the existing onboarding cursor pipeline from Phase A/B.
+///
+/// `skip_flight=true` (Phase D edge case) suppresses the Bezier flight when
+/// System Settings is already open at flow start — we still position the
+/// cursor sprite at the target and show the ring + bubble so the user gets
+/// the in-app prompt without a misleading "I'm flying to a thing that just
+/// appeared" animation.
 async fn fly_and_announce(
     app: &AppHandle,
     from: (f64, f64),
     to: (f64, f64),
     bubble: &str,
     ring_radius: f64,
+    skip_flight: bool,
 ) -> Result<(), String> {
+    if skip_flight {
+        // Snap the cursor to the target without animation (single frame emit).
+        // Using animate_cursor_to with a tiny source delta still emits frames,
+        // so we instead use the highlight + bubble at the target and rely on
+        // the overlay being positionable through subsequent events.
+        crate::commands::onboarding::show_cursor_highlight(app.clone(), to.0, to.1, Some(ring_radius)).await?;
+        crate::commands::onboarding::show_cursor_bubble(app.clone(), to.0, to.1, bubble.to_string()).await?;
+        return Ok(());
+    }
+
     // 1. Animate the cursor (returns immediately, animation runs in spawned task)
     crate::commands::onboarding::animate_cursor_to(
         app.clone(),
@@ -247,6 +264,17 @@ async fn fly_and_announce(
     // 3. Wait for the cursor to arrive before lighting the ring + bubble
     sleep(Duration::from_millis(duration_ms.saturating_add(40))).await;
 
+    // Phase D edge case: if the user closed System Settings while we were
+    // flying, dismiss the overlay rather than landing on a stale coordinate.
+    // Cheap re-check — we already know window_bounds existed pre-flight, so
+    // a `None` here means the window genuinely went away.
+    let still_open = wait_for_settings_window(0).await.is_some();
+    if !still_open {
+        info!("[onboarding-guidance] Settings window closed mid-flight — dismissing overlay");
+        let _ = crate::commands::onboarding::dismiss_cursor_overlay(app.clone()).await;
+        return Ok(());
+    }
+
     // 4. Pulsing highlight ring at target
     crate::commands::onboarding::show_cursor_highlight(app.clone(), to.0, to.1, Some(ring_radius)).await?;
 
@@ -254,6 +282,28 @@ async fn fly_and_announce(
     crate::commands::onboarding::show_cursor_bubble(app.clone(), to.0, to.1, bubble.to_string()).await?;
 
     Ok(())
+}
+
+/// Detect whether System Settings is the foreground (frontmost) macOS app.
+/// Used to skip the cursor flight when the window was already open at the
+/// start of the guidance flow.
+#[cfg(target_os = "macos")]
+fn settings_is_foreground() -> bool {
+    use computer_use_ai_sdk::Desktop;
+    let Ok(desktop) = Desktop::new(true, false) else {
+        return false;
+    };
+    // Treat "Settings is findable AND has at least one usable window" as
+    // foreground-ish. This is intentionally lenient — being wrong errs on the
+    // side of skipping the animation, which is the safer default.
+    ["System Settings", "System Preferences"]
+        .into_iter()
+        .any(|n| desktop.application(n).is_ok())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn settings_is_foreground() -> bool {
+    false
 }
 
 /// Default "from" position for cursor flights — picks a point near the chat
@@ -296,7 +346,17 @@ pub async fn guide_to_system_settings(
 
     info!("[onboarding-guidance] Starting guide for {:?}", perm);
 
-    // Step 1: Wait up to 3s for System Settings to be findable
+    // Phase D edge case: if Settings was already foreground when we started,
+    // skip the cursor flight — flying to a window the user is already looking
+    // at feels gratuitous. The bubble + ring still render at the located
+    // target so the in-app prompt remains useful.
+    let already_open = tokio::task::spawn_blocking(settings_is_foreground)
+        .await
+        .unwrap_or(false);
+
+    // Step 1: Wait up to 3s for System Settings to be findable.
+    // If already_open, the bounds query usually returns immediately on the
+    // first poll, so the timeout is effectively cosmetic in that case.
     let window_bounds = wait_for_settings_window(3000).await;
 
     let origin = default_chat_origin();
@@ -310,7 +370,7 @@ pub async fn guide_to_system_settings(
             let cx = x + w / 2.0;
             let cy = y + h / 2.0;
             info!("[onboarding-guidance] Tier 2 success: AX-located Juno at ({}, {})", cx, cy);
-            fly_and_announce(&app, origin, (cx, cy), perm.bubble_text(), 28.0).await?;
+            fly_and_announce(&app, origin, (cx, cy), perm.bubble_text(), 28.0, already_open).await?;
             return Ok(GuidanceResult {
                 tier: 2,
                 target_x: cx,
@@ -333,7 +393,7 @@ pub async fn guide_to_system_settings(
         let target_x = right_pane_x + right_pane_w - 60.0; // toggle column near right edge
         let target_y = wy + (wh * 0.45).clamp(140.0, 380.0);
         info!("[onboarding-guidance] Tier 1: window-bounds estimate ({}, {})", target_x, target_y);
-        fly_and_announce(&app, origin, (target_x, target_y), perm.bubble_text(), 36.0).await?;
+        fly_and_announce(&app, origin, (target_x, target_y), perm.bubble_text(), 36.0, already_open).await?;
         return Ok(GuidanceResult {
             tier: 1,
             target_x,
@@ -355,6 +415,7 @@ pub async fn guide_to_system_settings(
         (cx, cy),
         &format!("Open {} and toggle Juno on", perm.settings_pane_label()),
         64.0,
+        already_open,
     )
     .await?;
     Ok(GuidanceResult {
