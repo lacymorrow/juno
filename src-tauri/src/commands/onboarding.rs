@@ -1,6 +1,89 @@
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
-use tauri::{AppHandle, Manager};
+use serde::{Deserialize, Serialize};
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
+use uuid::Uuid;
+use crate::constants::events;
+
+// ── Onboarding state machine ──────────────────────────────────────────────────
+
+/// The sequential phases of the guided onboarding flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnboardingPhase {
+    Greeting,
+    ScreenRecording,
+    Accessibility,
+    OptionalPermissions,
+    Provider,
+    Ready,
+    Complete,
+}
+
+impl OnboardingPhase {
+    fn advance(&self) -> Option<Self> {
+        match self {
+            Self::Greeting => Some(Self::ScreenRecording),
+            Self::ScreenRecording => Some(Self::Accessibility),
+            Self::Accessibility => Some(Self::OptionalPermissions),
+            Self::OptionalPermissions => Some(Self::Provider),
+            Self::Provider => Some(Self::Ready),
+            Self::Ready => Some(Self::Complete),
+            Self::Complete => None,
+        }
+    }
+
+    fn intro_message(&self) -> &'static str {
+        match self {
+            Self::Greeting => {
+                "Welcome to Juno! I'm your AI desktop assistant. I'll guide you through a quick setup to make sure everything works perfectly."
+            }
+            Self::ScreenRecording => {
+                "First, let's set up **Screen Recording** permission. This lets me see your screen so I can help you with visual tasks.\n\nClick the button below to grant access."
+            }
+            Self::Accessibility => {
+                "Next, I need **Accessibility** permission. This lets me interact with your Mac — clicking buttons, typing text, and navigating apps on your behalf.\n\nGrant Accessibility access to continue."
+            }
+            Self::OptionalPermissions => {
+                "Almost there! A couple of **optional** permissions improve your experience:\n\n- **Microphone** — enables voice commands so you can talk to me\n- **Input Monitoring** — lets me detect your keyboard shortcuts globally\n\nGrant these now or skip if you prefer."
+            }
+            Self::Provider => {
+                "Choose how you'd like to connect to the AI:\n\n- **Claude CLI** — use your existing Claude subscription (recommended)\n- **API Key** — enter an Anthropic API key directly\n\nSelect your preferred option below."
+            }
+            Self::Ready => {
+                "You're all set! Here's what you can do:\n\n- Press **⌥D** to summon me\n- Press **⌥Space** to dictate\n- Press **Escape** to stop me\n\nLet's get started!"
+            }
+            Self::Complete => "Setup complete. Welcome to Juno!",
+        }
+    }
+
+    /// Whether this phase can be skipped without completing its primary action.
+    fn is_skippable(&self) -> bool {
+        matches!(self, Self::OptionalPermissions | Self::Provider)
+    }
+}
+
+/// State snapshot returned to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnboardingStateInfo {
+    pub phase: OnboardingPhase,
+    pub can_advance: bool,
+    pub can_skip: bool,
+}
+
+static ONBOARDING_PHASE: LazyLock<TokioMutex<OnboardingPhase>> =
+    LazyLock::new(|| TokioMutex::new(OnboardingPhase::Greeting));
+
+// ── Cursor animation cancellation ────────────────────────────────────────────
+
+/// Monotonically increasing generation counter. Each `animate_cursor_to` call
+/// increments this and records its own generation. A running animation task
+/// self-aborts when it detects a newer generation has started, making
+/// cancellation race-free without any sleep-based synchronization.
+static ANIMATION_GENERATION: LazyLock<Arc<AtomicU64>> =
+    LazyLock::new(|| Arc::new(AtomicU64::new(0)));
 
 /// Check if we're running in development mode
 fn is_development_mode() -> bool {
@@ -342,6 +425,221 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
     Ok(())
 }
 
+// ── State machine commands ────────────────────────────────────────────────────
+
+/// Return the current onboarding phase without advancing.
+#[tauri::command]
+pub async fn get_onboarding_state() -> Result<OnboardingStateInfo, String> {
+    let phase = ONBOARDING_PHASE.lock().await;
+    Ok(OnboardingStateInfo {
+        can_advance: *phase != OnboardingPhase::Complete,
+        can_skip: phase.is_skippable(),
+        phase: phase.clone(),
+    })
+}
+
+/// Advance or reset the onboarding state machine.
+///
+/// `action` values:
+/// - `"next"` — advance to the next phase (idempotent on `Complete`)
+/// - `"skip"` — same as next; only meaningful on skippable phases
+/// - `"reset"` — return to `Greeting` (used by restart_onboarding)
+#[tauri::command]
+pub async fn onboarding_action(app: AppHandle, action: String) -> Result<OnboardingStateInfo, String> {
+    let new_phase = {
+        let mut phase = ONBOARDING_PHASE.lock().await;
+        match action.as_str() {
+            "reset" => {
+                *phase = OnboardingPhase::Greeting;
+            }
+            "next" | "skip" => {
+                if let Some(next) = phase.advance() {
+                    *phase = next;
+                }
+            }
+            other => {
+                return Err(format!("Unknown onboarding action: {}", other));
+            }
+        }
+        phase.clone()
+    }; // lock released before any .await
+
+    let info = OnboardingStateInfo {
+        can_advance: new_phase != OnboardingPhase::Complete,
+        can_skip: new_phase.is_skippable(),
+        phase: new_phase.clone(),
+    };
+
+    if let Err(e) = app.emit(events::onboarding::STATE_CHANGED, &info) {
+        warn!("Failed to emit onboarding state change: {}", e);
+    }
+
+    emit_onboarding_message(&app, new_phase.intro_message());
+
+    Ok(info)
+}
+
+/// Stream an onboarding message through the standard agent-text-stream pipeline
+/// so it renders naturally in the chat UI.
+fn emit_onboarding_message(app: &AppHandle, message: &str) {
+    let message_id = Uuid::new_v4().to_string();
+
+    if let Err(e) = app.emit(
+        events::streaming::STREAM_START,
+        serde_json::json!({ "message_id": message_id }),
+    ) {
+        warn!("Failed to emit stream start: {}", e);
+    }
+
+    if let Err(e) = app.emit(
+        events::streaming::TEXT_STREAM,
+        serde_json::json!({
+            "chunk": message,
+            "message_id": message_id,
+            "tts_content": null,
+            "metadata": { "has_spoken_content": false, "spoken_text": null }
+        }),
+    ) {
+        warn!("Failed to emit text stream: {}", e);
+    }
+
+    if let Err(e) = app.emit(
+        events::streaming::STREAM_END,
+        serde_json::json!({
+            "message_id": message_id,
+            "complete_text": message,
+            "is_jsx": false
+        }),
+    ) {
+        warn!("Failed to emit stream end: {}", e);
+    }
+}
+
+// ── Cursor animation commands ─────────────────────────────────────────────────
+
+/// Animate the Juno cursor sprite along a quadratic Bezier arc from
+/// `(from_x, from_y)` to `(to_x, to_y)`, emitting `cursor-animation-frame`
+/// events at ~60fps.
+///
+/// Duration scales linearly with distance: clamp(0.4 + 0.8 * dist/2000, 0.4, 1.2) seconds.
+/// Each frame applies smoothstep easing: t² × (3 - 2t).
+/// The control point arcs upward by 25% of the chord length to create a natural arc.
+#[tauri::command]
+pub async fn animate_cursor_to(
+    app: AppHandle,
+    from_x: f64,
+    from_y: f64,
+    to_x: f64,
+    to_y: f64,
+    style: Option<String>,
+) -> Result<(), String> {
+    // Claim a new generation — any older task will self-abort when it next checks.
+    let my_gen = ANIMATION_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let gen_ref = ANIMATION_GENERATION.clone();
+    let style_str = style.unwrap_or_else(|| "arc".to_string());
+
+    tauri::async_runtime::spawn(async move {
+        let dx = to_x - from_x;
+        let dy = to_y - from_y;
+        let distance = (dx * dx + dy * dy).sqrt();
+
+        if distance < 1.0 {
+            return; // Already at target
+        }
+
+        // Duration proportional to distance, clamped to [0.4, 1.2] seconds
+        let duration_secs = (0.4_f64 + 0.8 * (distance / 2000.0)).clamp(0.4, 1.2);
+        let total_frames = (duration_secs * 60.0).ceil() as u64;
+        let frame_ms = (duration_secs * 1000.0 / total_frames as f64).max(1.0) as u64;
+
+        // Control point: midpoint offset perpendicular to the chord (arcs upward/left)
+        let arc_height = distance * 0.25;
+        let perp_x = -dy / distance * arc_height;
+        let perp_y =  dx / distance * arc_height;
+        let cx = (from_x + to_x) / 2.0 + perp_x;
+        let cy = (from_y + to_y) / 2.0 + perp_y;
+
+        for frame in 0..=total_frames {
+            // Self-abort if a newer animation has been requested
+            if gen_ref.load(Ordering::Acquire) != my_gen {
+                break;
+            }
+
+            // Linear t in [0, 1]
+            let t_linear = frame as f64 / total_frames as f64;
+            // Smoothstep easing: t² × (3 - 2t)
+            let t = t_linear * t_linear * (3.0 - 2.0 * t_linear);
+
+            // Quadratic Bezier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+            let inv_t = 1.0 - t;
+            let x = inv_t * inv_t * from_x + 2.0 * inv_t * t * cx + t * t * to_x;
+            let y = inv_t * inv_t * from_y + 2.0 * inv_t * t * cy + t * t * to_y;
+
+            if let Err(e) = app.emit(
+                events::cursor::ANIMATION_FRAME,
+                serde_json::json!({ "x": x, "y": y, "t": t_linear, "style": style_str }),
+            ) {
+                warn!("Failed to emit cursor animation frame: {}", e);
+                break;
+            }
+
+            if frame < total_frames {
+                tokio::time::sleep(tokio::time::Duration::from_millis(frame_ms)).await;
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Show a pulsing highlight ring at `(x, y)` on the cursor overlay.
+#[tauri::command]
+pub async fn show_cursor_highlight(
+    app: AppHandle,
+    x: f64,
+    y: f64,
+    radius: Option<f64>,
+) -> Result<(), String> {
+    app.emit(
+        events::cursor::HIGHLIGHT,
+        serde_json::json!({
+            "x": x,
+            "y": y,
+            "radius": radius.unwrap_or(30.0)
+        }),
+    )
+    .map_err(|e| format!("Failed to emit cursor highlight: {}", e))
+}
+
+/// Show a speech bubble at `(x, y)` on the cursor overlay.
+#[tauri::command]
+pub async fn show_cursor_bubble(
+    app: AppHandle,
+    x: f64,
+    y: f64,
+    text: String,
+) -> Result<(), String> {
+    app.emit(
+        events::cursor::BUBBLE,
+        serde_json::json!({
+            "x": x,
+            "y": y,
+            "text": text
+        }),
+    )
+    .map_err(|e| format!("Failed to emit cursor bubble: {}", e))
+}
+
+/// Cancel any running animation and dismiss the cursor overlay with a fade-out.
+#[tauri::command]
+pub async fn dismiss_cursor_overlay(app: AppHandle) -> Result<(), String> {
+    // Bump generation so any in-flight animation task self-aborts
+    ANIMATION_GENERATION.fetch_add(1, Ordering::AcqRel);
+
+    app.emit(events::cursor::DISMISS_OVERLAY, serde_json::json!({ "animate": true }))
+        .map_err(|e| format!("Failed to emit cursor dismiss: {}", e))
+}
+
 /// Save the user's selected role during onboarding.
 /// Persists to OnboardingSettings so it survives restarts.
 #[tauri::command]
@@ -369,4 +667,3 @@ pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> 
         .await
         .map_err(|e| e.to_string())
 }
-
