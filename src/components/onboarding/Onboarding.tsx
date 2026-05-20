@@ -614,12 +614,31 @@ export default function OnboardingFlow({
   // permission is revoked while the user is on a later onboarding step.
   // Without this listener, `permissionsState` would only refresh on window
   // focus or the post-request poll — both of which can miss mid-flow revokes.
+  //
+  // Dedup: the backend emits a fresh object every tick, so we compare the
+  // four grant booleans before committing the new state — otherwise a 1Hz
+  // setState would re-render the whole onboarding tree (and the audio
+  // visualizer) every second even when nothing has actually changed.
   useEventListener<PermissionsState>(
     EVENTS.PERMISSIONS_CHANGED,
     (payload) => {
       if (!mountedRef.current) return;
-      setPermissionsState(payload);
-      setActualPermissionsGranted(payload.all_granted);
+      setPermissionsState((prev) => {
+        if (
+          prev &&
+          prev.all_granted === payload.all_granted &&
+          prev.accessibility.granted === payload.accessibility.granted &&
+          prev.screen_recording.granted === payload.screen_recording.granted &&
+          prev.microphone.granted === payload.microphone.granted &&
+          prev.input_monitoring.granted === payload.input_monitoring.granted
+        ) {
+          return prev;
+        }
+        return payload;
+      });
+      setActualPermissionsGranted((prev) =>
+        prev === payload.all_granted ? prev : payload.all_granted
+      );
     }
   );
 
