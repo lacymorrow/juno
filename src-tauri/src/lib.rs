@@ -672,6 +672,9 @@ pub fn run() {
             commands::show_cursor_bubble,
             commands::dismiss_cursor_overlay,
             commands::save_user_role,
+            // Phase C: guided cursor flight to System Settings + permission demos
+            commands::guide_to_system_settings,
+            commands::run_permission_demo,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
