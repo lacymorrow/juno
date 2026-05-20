@@ -18,6 +18,12 @@ const HOT_SPOT = 5;
 const CURSOR_FADE_DELAY_MS = 1500;
 const CLICK_ANIM_DURATION_MS = 700;
 
+// Cached MediaQueryList — avoids creating a new object on every 60fps animation frame.
+const REDUCED_MOTION_MQL =
+  typeof window !== "undefined"
+    ? window.matchMedia?.("(prefers-reduced-motion: reduce)")
+    : null;
+
 // ─── POINT flying cursor ───────────────────────────────────────────────────────
 const FLIGHT_DURATION = 380; // ms — bezier arc from last landed to target
 const LINGER_DURATION = 1600; // ms — display time after landing before hiding
@@ -606,9 +612,7 @@ export const DesktopCursorOverlay = () => {
   useEventListener<{ x: number; y: number; t: number; style: string }>(
     EVENTS.CURSOR_ANIMATION_FRAME,
     ({ x, y, t }) => {
-      const reducedMotion =
-        typeof window !== "undefined" &&
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      const reducedMotion = REDUCED_MOTION_MQL?.matches ?? false;
 
       // Under reduced motion, only the final frame (t=1) lands the cursor.
       // Skipping intermediate frames also drops the per-event DOM writes.
