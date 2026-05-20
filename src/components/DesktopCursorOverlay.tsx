@@ -3,6 +3,7 @@ import {
   getCurrentWindow,
   LogicalSize,
   PhysicalPosition,
+  availableMonitors,
 } from "@tauri-apps/api/window";
 import { useEventListener } from "@/hooks/useEventListener";
 import { EVENTS } from "@/lib/constants.generated";
@@ -420,14 +421,59 @@ export const DesktopCursorOverlay = () => {
   }, []);
 
   // ── Window setup ──────────────────────────────────────────────────────────
+  // Phase D / LAC-1882: span the union of all connected monitors so the
+  // onboarding cursor can fly to a System Settings window on a non-primary
+  // display. Single-monitor users get the same coverage as before.
   useEffect(() => {
     let mounted = true;
     const setupWindow = async () => {
       try {
         const win = getCurrentWindow();
+        // Compute the bounding rectangle that contains every monitor. Each
+        // monitor has physical { position: {x,y}, size: {width,height} }.
+        // We fall back to window.screen if the API errors (e.g. headless test).
+        let originX = 0;
+        let originY = 0;
+        let spanWidth = window.screen.width;
+        let spanHeight = window.screen.height;
+        try {
+          const monitors = await availableMonitors();
+          if (monitors.length > 0) {
+            let minX = Number.POSITIVE_INFINITY;
+            let minY = Number.POSITIVE_INFINITY;
+            let maxX = Number.NEGATIVE_INFINITY;
+            let maxY = Number.NEGATIVE_INFINITY;
+            for (const m of monitors) {
+              // Tauri monitor coords are physical pixels; for setSize we use
+              // logical pixels (assume scale factor 1 for span; the overlay
+              // is transparent + pointer-events:none so an oversize window
+              // is harmless).
+              const scale = m.scaleFactor || 1;
+              const lx = m.position.x / scale;
+              const ly = m.position.y / scale;
+              const lw = m.size.width / scale;
+              const lh = m.size.height / scale;
+              if (lx < minX) minX = lx;
+              if (ly < minY) minY = ly;
+              if (lx + lw > maxX) maxX = lx + lw;
+              if (ly + lh > maxY) maxY = ly + lh;
+            }
+            if (Number.isFinite(minX) && Number.isFinite(maxX)) {
+              originX = minX;
+              originY = minY;
+              spanWidth = maxX - minX;
+              spanHeight = maxY - minY;
+            }
+          }
+        } catch (err) {
+          console.debug("[JunoCursor] availableMonitors failed; using primary display:", err);
+        }
+
         await Promise.all([
-          win.setSize(new LogicalSize(window.screen.width, window.screen.height)),
-          win.setPosition(new PhysicalPosition(0, 0)),
+          win.setSize(new LogicalSize(spanWidth, spanHeight)),
+          // PhysicalPosition is in raw pixels; multiplying by primary scale is
+          // approximate, but Tauri normalizes by primary monitor's scale.
+          win.setPosition(new PhysicalPosition(Math.round(originX), Math.round(originY))),
           win.setIgnoreCursorEvents(true),
         ]);
         if (mounted) await win.show();
@@ -552,9 +598,24 @@ export const DesktopCursorOverlay = () => {
   // ── Onboarding cursor — cursor-animation-frame at 60fps ───────────────────
   // Backend emits {x, y, t, style} via animate_cursor_to. We move the onboarding
   // cursor sprite imperatively so React never re-renders at 60fps.
+  //
+  // Phase D / LAC-1882: under `prefers-reduced-motion: reduce` we honor the
+  // backend's animation by only applying the final frame (`t === 1`). The
+  // cursor effectively teleports to the destination — no Bezier sweep, no
+  // intermediate motion. Backend still emits all frames; we just discard them.
   useEventListener<{ x: number; y: number; t: number; style: string }>(
     EVENTS.CURSOR_ANIMATION_FRAME,
-    ({ x, y }) => {
+    ({ x, y, t }) => {
+      const reducedMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+      // Under reduced motion, only the final frame (t=1) lands the cursor.
+      // Skipping intermediate frames also drops the per-event DOM writes.
+      if (reducedMotion && t < 1) {
+        return;
+      }
+
       onbPosRef.current = { x, y };
 
       // Cursor sprite
