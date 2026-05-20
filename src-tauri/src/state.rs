@@ -43,10 +43,18 @@ fn format_error(template: &'static str, context: &str, error: impl std::fmt::Dis
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode: String, // Default: Alt+D (Option+D on macOS)
+    pub agent_mode: String,        // Default: Alt+D (Option+D on macOS)
     pub dictation_input: String,   // Default: Alt+Space (Option+Space on macOS)
     pub stop_current_task: String, // Default: Escape
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
+    #[serde(default = "KeyboardShortcuts::default_voice_activation")]
+    pub voice_activation: String,  // Default: Option+Shift+V — always-on global voice shortcut
+}
+
+impl KeyboardShortcuts {
+    fn default_voice_activation() -> String {
+        defaults::VOICE_ACTIVATION.to_string()
+    }
 }
 
 /// Agent trigger mode configuration
@@ -72,6 +80,7 @@ impl Default for KeyboardShortcuts {
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
+            voice_activation: defaults::VOICE_ACTIVATION.to_string(),
         }
     }
 }
@@ -107,6 +116,29 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Per-agent cursor position for the desktop overlay (Phase 4 multi-agent cursors).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCursorState {
+    pub agent_id: String,
+    pub x: f64,
+    pub y: f64,
+    /// "idle" | "moving" | "clicking" | "thinking"
+    pub state: String,
+    /// CSS color string for this agent's cursor sprite
+    pub color: String,
+}
+
+/// Risk level for tool approval requests
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    #[default]
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 /// Tool approval request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolApprovalRequest {
@@ -116,6 +148,9 @@ pub struct ToolApprovalRequest {
     pub description: String,
     pub timestamp: u64,
     pub approved: Option<bool>, // None = pending, Some(true) = approved, Some(false) = denied
+    pub risk_level: RiskLevel,
+    pub target_app: Option<String>,
+    pub timeout_seconds: u64,
 }
 
 impl ToolApprovalRequest {
@@ -127,10 +162,28 @@ impl ToolApprovalRequest {
             description,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
             approved: None,
+            risk_level: RiskLevel::default(),
+            target_app: None,
+            timeout_seconds: 60,
         }
+    }
+
+    pub fn with_risk(mut self, risk_level: RiskLevel) -> Self {
+        self.risk_level = risk_level;
+        self
+    }
+
+    pub fn with_target_app(mut self, app: String) -> Self {
+        self.target_app = Some(app);
+        self
+    }
+
+    pub fn with_timeout(mut self, seconds: u64) -> Self {
+        self.timeout_seconds = seconds;
+        self
     }
 }
 
@@ -140,6 +193,10 @@ impl ToolApprovalRequest {
 #[derive(Clone, Debug)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    pub kokoro_voice: String,
+    pub chatterbox_reference_audio_url: Option<String>,
+    pub chatterbox_exaggeration: f32,
+    pub chatterbox_use_hd: bool,
     pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
@@ -163,6 +220,10 @@ impl Default for AudioSettings {
                     "elevenlabs".to_string()
                 }
             },
+            kokoro_voice: "af_bella".to_string(),
+            chatterbox_reference_audio_url: None,
+            chatterbox_exaggeration: 0.5,
+            chatterbox_use_hd: false,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
@@ -275,6 +336,9 @@ pub struct AppState {
     // Rate limiting for command safety
     pub rate_limiters: Arc<GlobalRateLimiters>,
 
+    // Per-agent cursor positions for multi-agent overlay (Phase 4)
+    pub agent_cursors: Arc<StdMutex<HashMap<String, AgentCursorState>>>,
+
     // Dynamic storage for other state components
     state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
@@ -350,6 +414,9 @@ impl AppState {
             // Use the rate limiters created above
             rate_limiters,
 
+            // Initialize per-agent cursor tracking
+            agent_cursors: Arc::new(StdMutex::new(HashMap::new())),
+
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
@@ -403,6 +470,63 @@ impl AppState {
             .map(|mut settings| settings.tts_provider = provider)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "TTS provider", e))
     }
+
+    pub fn get_kokoro_voice(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.kokoro_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Kokoro voice", e))
+    }
+
+    pub fn set_kokoro_voice(&self, voice: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.kokoro_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Kokoro voice", e))
+    }
+
+    pub fn get_chatterbox_reference_audio_url(&self) -> Result<Option<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_reference_audio_url.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn set_chatterbox_reference_audio_url(&self, url: Option<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_reference_audio_url = url)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn get_chatterbox_exaggeration(&self) -> Result<f32, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox exaggeration", e))
+    }
+
+    pub fn set_chatterbox_exaggeration(&self, exaggeration: f32) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_exaggeration = exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox exaggeration", e))
+    }
+
+    pub fn get_chatterbox_use_hd(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox HD mode", e))
+    }
+
+    pub fn set_chatterbox_use_hd(&self, use_hd: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_use_hd = use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox HD mode", e))
+    }
+
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
         self.audio_settings
@@ -1679,6 +1803,32 @@ impl AppState {
                 tokio::task::yield_now().await;
             }
         }
+    }
+
+    // ── Multi-agent cursor tracking (Phase 4) ────────────────────────────────
+
+    /// Update or insert the cursor state for a given agent.
+    pub fn update_agent_cursor(&self, cursor: AgentCursorState) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.insert(cursor.agent_id.clone(), cursor); }
+            Err(e) => warn!("Failed to update agent cursor: {}", e),
+        }
+    }
+
+    /// Remove an agent's cursor (call when the agent finishes or is cancelled).
+    pub fn remove_agent_cursor(&self, agent_id: &str) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.remove(agent_id); }
+            Err(e) => warn!("Failed to remove agent cursor: {}", e),
+        }
+    }
+
+    /// Snapshot of all active agent cursors (cloned for safe cross-thread use).
+    pub fn get_agent_cursors(&self) -> Vec<AgentCursorState> {
+        self.agent_cursors
+            .lock()
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     // TTS content is now handled via XML tags during streaming, no separate methods needed

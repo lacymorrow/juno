@@ -95,6 +95,7 @@ macro_rules! generate_invoke_handler {
             set_big_cursor_scale,
             test_cursor_scale,
             test_cursor_restore,
+            get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
 
@@ -312,6 +313,7 @@ pub mod categories {
         "set_big_cursor_scale",
         "test_cursor_scale",
         "test_cursor_restore",
+        "get_system_cursor_size",
         "get_companion_mode",
         "set_companion_mode",
     ];

@@ -7,15 +7,10 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::state;
 use crate::constants::{events, errors::templates};
-
-// Helper function for error formatting - properly handles template substitution
-fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
-}
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -24,7 +19,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 /// Handle global shortcut events
 pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
-    println!(
+    debug!(
         "[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}",
         shortcut,
         event.state()
@@ -36,7 +31,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{}", format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!("{}", crate::format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -50,14 +45,17 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.open_settings);
+    let voice_activation_shortcut: Option<Shortcut> =
+        parse_shortcut_string(&current_shortcuts.voice_activation);
 
-    // Debug logging
-    println!("[DEBUG] Current shortcuts from state:");
-    println!("  Stop: {} -> {:?}", current_shortcuts.stop_current_task, stop_shortcut);
-    println!("  Agent: {} -> {:?}", current_shortcuts.agent_mode, agent_shortcut);
-    println!("  Dictation: {} -> {:?}", current_shortcuts.dictation_input, dictation_shortcut);
-    println!("  Settings: {} -> {:?}", current_shortcuts.open_settings, settings_shortcut);
-    println!("[DEBUG] Incoming shortcut: {:?}", shortcut);
+    debug!("Current shortcuts — stop:{} agent:{} dictation:{} settings:{} voice:{} | incoming:{:?}",
+        current_shortcuts.stop_current_task,
+        current_shortcuts.agent_mode,
+        current_shortcuts.dictation_input,
+        current_shortcuts.open_settings,
+        current_shortcuts.voice_activation,
+        shortcut
+    );
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if let Some(stop_shortcut_obj) = stop_shortcut {
@@ -81,14 +79,16 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 
     // Check dictation shortcut separately (not as else-if to avoid exclusion)
     if let Some(dictation_shortcut_obj) = dictation_shortcut {
-        println!("[DEBUG] Checking dictation shortcut: incoming {:?} == expected {:?} -> {}", 
-                 shortcut, dictation_shortcut_obj, *shortcut == dictation_shortcut_obj);
         if *shortcut == dictation_shortcut_obj {
-            println!("[DEBUG] Dictation shortcut matched! Calling handler...");
             handle_dictation_input_shortcut(app, event);
         }
-    } else {
-        println!("[DEBUG] No dictation shortcut configured or failed to parse");
+    }
+
+    // Check voice activation shortcut
+    if let Some(voice_activation_obj) = voice_activation_shortcut {
+        if *shortcut == voice_activation_obj {
+            handle_voice_activation_shortcut(app, event);
+        }
     }
 }
 
@@ -322,6 +322,36 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     }
 }
 
+/// Always-on tap-to-toggle voice recording from anywhere on macOS (Option+Shift+V default).
+fn handle_voice_activation_shortcut(app: &AppHandle, event: &ShortcutEvent) {
+    // Only fire on key press — this is a stateless toggle, no hold semantics
+    if event.state() != ShortcutState::Pressed {
+        return;
+    }
+
+    // Emit visual feedback event (for onboarding UI and status indicators)
+    if let Err(e) = app.emit(
+        events::shortcuts::VOICE_ACTIVATION,
+        serde_json::json!({
+            "state": "pressed",
+            "shortcut": "voice_activation"
+        }),
+    ) {
+        error!("[Voice Activation] Failed to emit shortcut event: {}", e);
+    }
+
+    // During onboarding, only provide visual feedback
+    let app_state = app.state::<state::AppState>();
+    if app_state.is_onboarding_active() {
+        info!("[Voice Activation] Pressed during onboarding - visual feedback only");
+        return;
+    }
+
+    // Delegate to the dictation tap handler — same behaviour: toggle recording on each press
+    info!("[Voice Activation] Triggering voice activation (tap-mode dictation toggle)");
+    handle_dictation_tap_mode(app);
+}
+
 /// Add a new command to trigger shortcut testing events during onboarding
 #[tauri::command]
 pub async fn trigger_shortcut_test_event(
@@ -332,6 +362,7 @@ pub async fn trigger_shortcut_test_event(
     let event_name = match shortcut_name.as_str() {
         "agent_mode" => events::shortcuts::AGENT_MODE,
         "dictation_input" => events::shortcuts::DICTATION_INPUT,
+        "voice_activation" => events::shortcuts::VOICE_ACTIVATION,
         _ => return Err("Unknown shortcut name".to_string()),
     };
 
@@ -343,7 +374,7 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(format_error(templates::FAILED_TO_EMIT, "test event", e));
+        return Err(crate::format_error(templates::FAILED_TO_EMIT, "test event", e));
     }
 
     Ok(())

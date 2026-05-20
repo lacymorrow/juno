@@ -25,6 +25,7 @@ use crate::utils::coordinate_validation::{
     CoordinateValidationError
 };
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::state::AgentCursorState;
 
 /// Minimum milliseconds between consecutive UI-modifying actions (click, type, key).
 /// Prevents "clicked too fast" failures when the UI is still loading/animating.
@@ -32,6 +33,63 @@ const ACTION_COOLDOWN_MS: u64 = 300;
 
 /// Timestamp (ms since epoch) of the last UI-modifying action.
 static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Monotonic counter for assigning unique cursor IDs to concurrent agent instances.
+static NEXT_AGENT_CURSOR_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Agent cursor color palette — each slot is used round-robin for up to 8 concurrent agents.
+const AGENT_CURSOR_COLORS: &[&str] = &[
+    "#8B5CF6", // violet  (matches default Juno cursor)
+    "#10B981", // emerald
+    "#F59E0B", // amber
+    "#EF4444", // red
+    "#3B82F6", // blue
+    "#EC4899", // pink
+    "#14B8A6", // teal
+    "#F97316", // orange
+];
+
+/// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
+fn emit_agent_cursor_update(
+    app_handle: &tauri::AppHandle,
+    agent_id: &str,
+    x: f64,
+    y: f64,
+    cursor_state: &str,
+    color: &str,
+) {
+    let state_manager = app_handle.state::<AppState>();
+    let cursor = AgentCursorState {
+        agent_id: agent_id.to_string(),
+        x,
+        y,
+        state: cursor_state.to_string(),
+        color: color.to_string(),
+    };
+    state_manager.update_agent_cursor(cursor.clone());
+    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
+        tracing::debug!("agent cursor update emit failed: {}", e);
+    }
+}
+
+/// Emit cursor removal for a named agent (call on agent completion or cancellation).
+fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
+    let state_manager = app_handle.state::<AppState>();
+    state_manager.remove_agent_cursor(agent_id);
+    let payload = serde_json::json!({ "agent_id": agent_id });
+    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
+        tracing::debug!("agent cursor remove emit failed: {}", e);
+    }
+}
+
+/// Extract [x, y] from a computer tool input's "coordinate" field.
+/// Returns None if the field is absent or malformed.
+fn extract_coordinate(input: &Value) -> Option<(f64, f64)> {
+    let arr = input["coordinate"].as_array()?;
+    let x = arr.first()?.as_f64()?;
+    let y = arr.get(1)?.as_f64()?;
+    Some((x, y))
+}
 
 /// Returns true if the action modifies the UI (click, type, key, scroll, drag).
 /// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
@@ -294,13 +352,18 @@ fn is_interactive_ax_role(role: &str) -> bool {
             | "combobox"
             | "tab"
             | "menuitem"
-            | "menubuttom"
+            | "menubutton"       // fixed typo from "menubuttom"
             | "image"
             | "cell"
             | "searchfield"
             | "statictext"
             | "row"
             | "list"
+            | "slider"           // kAXIncrementAction / kAXDecrementAction
+            | "incrementor"      // steppers (NSStepper)
+            | "colorwell"        // color pickers
+            | "disclosuretriangle" // disclosure triangles
+            | "switch"           // toggle switches
     )
 }
 
@@ -348,11 +411,14 @@ fn try_ax_grounded_click(
         };
     }
 
-    // Attempt AX-native click. The UIElement API has click()/double_click()/right_click().
+    // Attempt AX-native action. Left/Double use semantic click; Right uses kAXShowMenuAction
+    // (the true macOS action for context menus — no cursor position required).
     let result = match kind {
         AxClickKind::Left => element.click().map(|_| ()),
         AxClickKind::Double => element.double_click().map(|_| ()),
-        AxClickKind::Right => element.right_click(),
+        // AXShowMenu is the semantic AX action for context menus. Falls back to coordinate
+        // right-click (via the outer caller) if the element doesn't support it.
+        AxClickKind::Right => element.perform_action("AXShowMenu"),
     };
 
     match result {
@@ -372,15 +438,54 @@ fn try_ax_grounded_click(
             }
         }
         Err(e) => {
-            tracing::debug!(
-                "AX grounding: AXPress failed for {} at ({:.0}, {:.0}): {} — falling back to coordinate",
-                role, screen_x, screen_y, e
+            // Warn-level so we can track AX fallback coverage over time and improve it.
+            tracing::warn!(
+                "⚠️ AX action failed, falling back to coordinate: {} '{}' at ({:.0}, {:.0}): {}",
+                role,
+                label.as_deref().unwrap_or("<unlabeled>"),
+                screen_x, screen_y, e
             );
             AxGroundingResult {
                 used_ax_click: false,
                 role: Some(role),
                 label,
             }
+        }
+    }
+}
+
+/// Try to type text directly into the currently focused AX element.
+///
+/// Fetches the system-wide focused element and calls `type_text()` on it, which
+/// first tries `kAXValueAttribute` (no cursor, no clipboard) and falls back to
+/// clipboard paste if that fails. Returns true if AX typing succeeded.
+///
+/// On any failure (no permissions, no focused element, element rejects AXValue),
+/// returns false so the caller can fall back to global keyboard simulation.
+fn try_ax_type_focused(app_handle: &tauri::AppHandle, text: &str) -> bool {
+    let state = app_handle.state::<AppState>();
+    match state.desktop.focused_element() {
+        Ok(element) => {
+            match element.type_text(text) {
+                Ok(()) => {
+                    info!(
+                        "✨ AX type: {} chars typed into focused element via AXValue",
+                        text.chars().count()
+                    );
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "AX type failed on focused element: {} — falling back to global keyboard",
+                        e
+                    );
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            tracing::debug!("Could not get focused element for AX type: {}", e);
+            false
         }
     }
 }
@@ -883,8 +988,27 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Left click failed: {}", e)));
+                        // Tier 2-4: process-targeted injection (SkyLight → CGEventPostToPid → HID-restore)
+                        // Bypasses AX; works on canvas, games, Chromium web content, and non-AX apps.
+                        let click_method = state_manager.desktop.left_click_no_warp(
+                            screen_x,
+                            screen_y,
+                            modifier.as_deref(),
+                        );
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                // left_click_no_warp always has HID-restore as last resort;
+                                // reaching here means desktop is unavailable.
+                                handle_anthropic_result!(left_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Left click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
@@ -908,8 +1032,20 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Right click failed: {}", e)));
+                        // Tier 2-4: process-targeted injection, no cursor warp
+                        let click_method = state_manager.desktop.right_click_no_warp(screen_x, screen_y);
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp right-click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                handle_anthropic_result!(right_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Right click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
@@ -949,8 +1085,24 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
-                        handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
-                            .map_err(|e| format!("Double click failed: {}", e)));
+                        // Tier 2-4: process-targeted double-click, no cursor warp
+                        let click_method = state_manager.desktop.double_click_no_warp(
+                            screen_x,
+                            screen_y,
+                            modifier.as_deref(),
+                        );
+                        match click_method {
+                            Ok(method) => {
+                                tracing::info!(
+                                    "✨ No-warp double-click at ({:.0}, {:.0}) via {}",
+                                    screen_x, screen_y, method
+                                );
+                            }
+                            Err(_) => {
+                                handle_anthropic_result!(double_click(app_handle.clone(), state_manager, screen_x, screen_y, modifier.clone()).await
+                                    .map_err(|e| format!("Double click failed: {}", e)));
+                            }
+                        }
                     }
 
                     let mut response = json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
@@ -1135,14 +1287,21 @@ pub async fn execute_computer_tool(
                         None => return Ok(create_anthropic_error_response("Missing 'text' parameter".to_string())),
                     };
 
-                    handle_anthropic_result!(crate::commands::keyboard::type_text(
-                        text.to_string(),
-                        app_handle.clone(),
-                        state_manager,
-                    ).await.map_err(|e| format!("Type text failed: {}", e)));
+                    // Try AX-based typing first: finds the focused element and sets AXValue
+                    // directly (no cursor movement, no clipboard). Falls back to global
+                    // keyboard simulation (clipboard paste) when AX isn't supported.
+                    let typed_via_ax = try_ax_type_focused(app_handle, text);
+                    if !typed_via_ax {
+                        handle_anthropic_result!(crate::commands::keyboard::type_text(
+                            text.to_string(),
+                            app_handle.clone(),
+                            state_manager,
+                        ).await.map_err(|e| format!("Type text failed: {}", e)));
+                    }
 
                     Ok(json!({
-                        "success": true
+                        "success": true,
+                        "ax_grounded": typed_via_ax
                     }))
                 }
                 _ => unreachable!("Keyboard action already matched in outer pattern")
@@ -1750,6 +1909,14 @@ pub async fn register_anthropic_computer_use_tools_with_version(
 
     info!("Registering official Anthropic Computer Use tools (API version: {})...", version_info);
 
+    // Assign a unique cursor ID and color to this agent instance at registration time.
+    // The ID is captured by the closure so every tool call from this agent shares it.
+    let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
+    let agent_cursor_id = format!("agent-{}", cursor_slot);
+    let agent_cursor_color = AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()].to_string();
+
+    info!("🖱️ Agent cursor ID: {} (color: {})", agent_cursor_id, agent_cursor_color);
+
     // Create versioned tools
     let versioned_tools = create_versioned_tools(version_config);
     let tool_count = versioned_tools.len();
@@ -1759,10 +1926,33 @@ pub async fn register_anthropic_computer_use_tools_with_version(
             "computer" => {
                 provider.register_async_tool(tool, {
                     let handle = app_handle.clone();
+                    let cursor_id = agent_cursor_id.clone();
+                    let cursor_color = agent_cursor_color.clone();
                     move |input: Value| {
                         let handle = handle.clone();
+                        let cursor_id = cursor_id.clone();
+                        let cursor_color = cursor_color.clone();
                         async move {
-                            execute_computer_tool(&handle, input).await
+                            let result = execute_computer_tool(&handle, input.clone()).await;
+                            // Emit cursor position for the agent overlay (non-blocking)
+                            if result.is_ok() {
+                                let action = input["action"].as_str().unwrap_or("");
+                                if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
+                                    use crate::utils::coordinates;
+                                    let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
+                                    let cursor_state = match action {
+                                        "left_click" | "right_click" | "middle_click"
+                                        | "double_click" | "triple_click" => "clicking",
+                                        "mouse_move" => "moving",
+                                        _ => "idle",
+                                    };
+                                    emit_agent_cursor_update(&handle, &cursor_id, sx, sy, cursor_state, &cursor_color);
+                                } else if action == "screenshot" {
+                                    // Keep cursor visible in "thinking" state during screenshot analysis
+                                    // (no coordinate available — don't move the cursor)
+                                }
+                            }
+                            result
                         }
                     }
                 }).await;

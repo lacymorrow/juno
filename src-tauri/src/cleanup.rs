@@ -45,7 +45,10 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
 /// Perform full application cleanup
 pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
     info!("Starting application cleanup...");
-    
+
+    // Restore cursor scale before anything else — this must happen even on crash paths
+    crate::cursor_scale::force_restore_cursor_scale();
+
     // Get AppState
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         // Cancel any ongoing agent execution
