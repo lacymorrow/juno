@@ -557,12 +557,27 @@ export default function OnboardingFlow({
     analyticsStartMsRef.current = Date.now();
     phaseEnteredAtMsRef.current = analyticsStartMsRef.current;
     recordEvent("onboarding_started");
+
+    // Start 1Hz native permission polling so `permissions-changed` events
+    // flow while onboarding is on screen. Idempotent — the backend cancels
+    // any prior task before starting a new one. Best-effort; failure here
+    // only degrades revocation responsiveness, not core onboarding.
+    invoke("start_permissions_monitoring").catch((err) => {
+      console.debug("[Onboarding] start_permissions_monitoring failed:", err);
+    });
+
     return () => {
       mountedRef.current = false;
       for (const timer of onboardingTimers.current) {
         clearTimeout(timer);
       }
       onboardingTimers.current = [];
+      // Stop monitoring when onboarding closes so we're not paying for a
+      // 1s tick across the rest of the app's lifetime. PermissionsManager /
+      // PermissionsFlow re-start it on demand when they mount.
+      invoke("stop_permissions_monitoring").catch((err) => {
+        console.debug("[Onboarding] stop_permissions_monitoring failed:", err);
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -589,6 +604,22 @@ export default function OnboardingFlow({
         console.log("[Onboarding] Escape key detected via backend event");
         setEscapePressed(true);
       }
+    }
+  );
+
+  // ── Live permission state via backend monitoring (Phase D edge case #12) ──
+  // The backend polls native APIs every 1s and emits `permissions-changed`
+  // with the full state. Subscribing here lets the revocation-detection effect
+  // (further down) react immediately if a previously-granted required
+  // permission is revoked while the user is on a later onboarding step.
+  // Without this listener, `permissionsState` would only refresh on window
+  // focus or the post-request poll — both of which can miss mid-flow revokes.
+  useEventListener<PermissionsState>(
+    EVENTS.PERMISSIONS_CHANGED,
+    (payload) => {
+      if (!mountedRef.current) return;
+      setPermissionsState(payload);
+      setActualPermissionsGranted(payload.all_granted);
     }
   );
 
