@@ -167,6 +167,9 @@ export function PermissionStatusCard({
   const [granted, setGranted] = useState<boolean | null>(null);
   const [requesting, setRequesting] = useState(false);
   const meta = PERMISSION_META[permission];
+  // Track whether we have already fired the live demo for this card so we never
+  // play it twice on the same render (permissions-changed can fire repeatedly).
+  const [demoFired, setDemoFired] = useState(false);
 
   // Fetch initial state
   useEffect(() => {
@@ -178,11 +181,20 @@ export function PermissionStatusCard({
       .catch(() => {});
   }, [permission]);
 
-  // Live updates from the backend poller
+  // Live updates from the backend poller.
+  // When we see a false→true transition, run the matching live capability demo.
   useEventListener<PermissionsChangedPayload>(EVENTS.PERMISSIONS_CHANGED, (payload) => {
     const perm = payload[permission as keyof PermissionsChangedPayload];
     if (perm && typeof (perm as PermissionStatus).granted === "boolean") {
-      setGranted((perm as PermissionStatus).granted);
+      const wasGranted = granted;
+      const nowGranted = (perm as PermissionStatus).granted;
+      setGranted(nowGranted);
+      if (nowGranted && wasGranted === false && !demoFired) {
+        setDemoFired(true);
+        invoke("run_permission_demo", { permissionType: permission }).catch((err) =>
+          console.warn("[PermissionStatusCard] Demo failed:", err)
+        );
+      }
     }
   });
 
@@ -190,13 +202,22 @@ export function PermissionStatusCard({
     if (!meta) return;
     setRequesting(true);
     try {
+      // Open the right System Settings pane via the existing request command.
       await invoke(meta.command);
+      // Phase C: animate the onboarding cursor to the Juno toggle in System Settings.
+      // Fire-and-forget — fly_and_announce internally waits ~3s for the window to appear.
+      // If the user has already granted (request returned true), Settings won't open and
+      // the guidance will gracefully fall back to a Tier-3 center highlight, which we
+      // then dismiss almost immediately. Net cost is harmless.
+      invoke("guide_to_system_settings", { permissionType: permission }).catch((err) =>
+        console.warn("[PermissionStatusCard] Cursor guidance failed:", err)
+      );
     } catch (err) {
       console.error("[PermissionStatusCard] Grant failed:", err);
     } finally {
       setRequesting(false);
     }
-  }, [meta]);
+  }, [meta, permission]);
 
   if (!meta) return null;
 

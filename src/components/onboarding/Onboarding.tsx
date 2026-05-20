@@ -777,7 +777,7 @@ export default function OnboardingFlow({
       const roleToSave = selectedRole === "other" ? customRole.trim() : selectedRole;
       if (roleToSave) {
         try {
-          await invoke(COMMANDS.ONBOARDING_SAVE_USER_ROLE, { role: roleToSave });
+          await invoke("save_user_role", { role: roleToSave });
         } catch (error) {
           console.warn("Failed to save user role:", error);
         }
