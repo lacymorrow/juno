@@ -773,3 +773,28 @@
 .jsx-segment-enter:nth-child(4) { animation-delay: 0.24s; }
 .jsx-segment-enter:nth-child(5) { animation-delay: 0.32s; }
 
+/*
+ * Reduced-motion global override (Phase D / LAC-1882).
+ *
+ * Honors macOS "Reduce motion" + the corresponding browser-level media
+ * query. We collapse all CSS-driven animations and transitions to a single
+ * frame so motion-sensitive users don't get flashes/parallax. JS-driven
+ * animations (framer-motion, onboarding cursor flight, juno-breathe in the
+ * cursor overlay) read the same query at runtime and degrade gracefully.
+ *
+ * Intentionally NOT using `animation: none` — that would skip end-states
+ * (e.g. a fade-in element would stay invisible). The 0.01ms values run the
+ * animation effectively instantly while landing on the final keyframe.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
