@@ -528,6 +528,12 @@ pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>
 /// Captures a screenshot of the specified display using ScreenCaptureKit (macOS 14.0+).
 /// Returns raw RGBA pixel data as an ImageBuffer, which is faster and more efficient
 /// than the legacy CGDisplay::screenshot() path.
+///
+/// # Self-exclusion
+/// All windows belonging to the current process are excluded from the capture so the AI
+/// agent never sees the companion UI in screenshots. This prevents the agent from being
+/// confused by its own interface elements (main window, floating panel, floating bar,
+/// desktop cursor overlay, onboarding, and settings windows).
 #[cfg(feature = "screencapturekit-backend")]
 fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
@@ -551,10 +557,38 @@ fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result
     debug!("ScreenCaptureKit: capturing display {} ({}x{})",
         target_display.display_id(), target_display.width(), target_display.height());
 
-    // Create content filter for this display (capture everything, exclude nothing)
+    // Self-exclusion: collect all windows owned by this process so the AI agent never
+    // sees the companion UI in screenshots. Uses PID (not bundle ID) so this works for
+    // both dev and production builds. Covers: main window, floating panel, floating bar,
+    // desktop cursor overlay, onboarding window, and settings window.
+    let raw_pid = std::process::id();
+    let current_pid = match i32::try_from(raw_pid) {
+        Ok(p) => p,
+        Err(_) => {
+            warn!("PID {raw_pid} does not fit in i32; skipping self-exclusion from screenshot");
+            -1 // matches no window — falls back to capturing everything
+        }
+    };
+    let all_windows = content.windows();
+    let own_windows: Vec<_> = all_windows
+        .iter()
+        .filter(|w| {
+            w.owning_application()
+                .map(|app| app.process_id() == current_pid)
+                .unwrap_or(false)
+        })
+        .collect();
+
+    debug!(
+        "ScreenCaptureKit: excluding {} own-process window(s) from screenshot (PID {})",
+        own_windows.len(),
+        current_pid
+    );
+
+    // Create content filter for this display, excluding all windows owned by this process
     let filter = SCContentFilter::create()
         .with_display(target_display)
-        .with_excluding_windows(&[])
+        .with_excluding_windows(&own_windows)
         .build();
 
     // Use default configuration — captures at native resolution
@@ -780,5 +814,52 @@ mod tests {
         assert_eq!(macos_role_to_generic_role("AXGroup"), expected);
         assert_eq!(macos_role_to_generic_role("AXGenericElement"), expected);
         assert_eq!(macos_role_to_generic_role("AXWebArea"), expected);
+    }
+
+    /// Verifies that the current-process PID is a valid positive integer.
+    /// The screenshot self-exclusion path uses `std::process::id() as i32`; this
+    /// confirms the cast is safe at test-runner time.
+    #[test]
+    fn test_screenshot_exclusion_pid_is_valid() {
+        let pid = std::process::id() as i32;
+        assert!(pid > 0, "current PID should be positive, got {pid}");
+    }
+
+    /// Smoke-test the SCK self-exclusion path: enumerate all windows, filter by PID,
+    /// and confirm the result is a valid (possibly-empty) list without panicking.
+    ///
+    /// Ignored by default because it requires screen-recording permission and an
+    /// active display. Run with: `cargo test -- --ignored test_screenshot_self_exclusion`
+    #[cfg(feature = "screencapturekit-backend")]
+    #[test]
+    #[ignore = "requires screen-recording permission and active display"]
+    fn test_screenshot_self_exclusion() {
+        use screencapturekit::shareable_content::SCShareableContent;
+
+        let current_pid = match i32::try_from(std::process::id()) {
+            Ok(p) => p,
+            Err(_) => return, // extremely unlikely; skip rather than panic
+        };
+
+        let content = match SCShareableContent::get() {
+            Ok(c) => c,
+            Err(_) => return, // no screen-recording permission in this environment
+        };
+
+        let all_windows = content.windows();
+        let own_count = all_windows
+            .iter()
+            .filter(|w| {
+                w.owning_application()
+                    .map(|app| app.process_id() == current_pid)
+                    .unwrap_or(false)
+            })
+            .count();
+
+        println!("PID {current_pid}: {own_count} own-process window(s) found in SCK enumeration");
+
+        // The full capture pipeline must succeed without panicking
+        let result = capture_and_encode_screenshot();
+        assert!(result.is_ok(), "capture_and_encode_screenshot failed: {:?}", result.err());
     }
 }

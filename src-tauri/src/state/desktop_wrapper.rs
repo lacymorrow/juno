@@ -113,6 +113,30 @@ impl DesktopWrapper {
         }
     }
 
+    /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    pub fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, String> {
+        match &self.desktop {
+            Some(desktop) => desktop.left_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
+            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+        }
+    }
+
+    /// Right-click without warping the cursor.
+    pub fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, String> {
+        match &self.desktop {
+            Some(desktop) => desktop.right_click_no_warp(x, y).map_err(|e| e.to_string()),
+            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+        }
+    }
+
+    /// Double-click without warping the cursor.
+    pub fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, String> {
+        match &self.desktop {
+            Some(desktop) => desktop.double_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
+            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+        }
+    }
+
     pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), String> {
         match &self.desktop {
             Some(desktop) => desktop.right_click(x, y, modifiers).map_err(|e| e.to_string()),

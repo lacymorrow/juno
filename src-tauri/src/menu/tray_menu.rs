@@ -12,7 +12,7 @@
 //! - Error: Red-tinted icon when there's an error
 //! - Processing: Animated or pulsing icon during processing
 
-use crate::constants::{events, menus::tray_menu_ids, errors::{templates, prefixes}, settings::defaults};
+use crate::constants::{events, menus::tray_menu_ids, errors::{templates, prefixes}};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -188,12 +188,7 @@ pub fn create_state_aware_tray_menu(
         Err(e) => {
             error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
             // Use defaults if we can't get from state
-            crate::state::KeyboardShortcuts {
-                agent_mode: defaults::AGENT_MODE.to_string(),
-                dictation_input: defaults::DICTATION_INPUT.to_string(),
-                stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
-                open_settings: defaults::OPEN_SETTINGS.to_string(),
-            }
+            crate::state::KeyboardShortcuts::default()
         }
     };
 
