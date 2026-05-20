@@ -40,6 +40,7 @@ pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
+pub mod onboarding_guidance;
 pub mod orchestrator;
 pub mod permissions;
 pub mod providers;
@@ -102,6 +103,7 @@ pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
+pub use self::onboarding_guidance::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
 // pub use self::self_improvement::*; // TODO: Fix module not found
