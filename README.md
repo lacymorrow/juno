@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/lacymorrow/juno/main/public/juno5.png" alt="Juno" width="128" height="128" />
+  <img src="https://raw.githubusercontent.com/lacymorrow/juno/HEAD/public/juno5.png" alt="Juno" width="128" height="128" />
 </p>
 
 <h1 align="center">Juno</h1>
