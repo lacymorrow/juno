@@ -33,6 +33,7 @@ interface ChatInputProps {
   onQueryChange: (value: string) => void;
   onSubmit: (text: string) => void;
   onStop: () => void;
+  placeholder?: string;
 }
 
 export const ChatInput = React.memo(function ChatInput({
@@ -42,6 +43,7 @@ export const ChatInput = React.memo(function ChatInput({
   onQueryChange,
   onSubmit,
   onStop,
+  placeholder,
 }: ChatInputProps) {
   const settings = useSettingsContext();
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
@@ -138,7 +140,7 @@ export const ChatInput = React.memo(function ChatInput({
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         placeholder={
-          isProcessing ? "Processing..." : "Ask anything..."
+          placeholder ?? (isProcessing ? "Processing..." : "Ask anything...")
         }
         disabled={isProcessing || !canSubmit}
       />

@@ -22,6 +22,7 @@ import KeyPressOverlay from "@/components/KeyPressOverlay";
 // Custom hooks
 import { useAppState } from "@/hooks/useAppState";
 import { useConversation } from "@/hooks/useConversation";
+import { useOnboardingState } from "@/hooks/useOnboardingState";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
@@ -34,6 +35,7 @@ function App() {
   // Initialize custom hooks
   const appState = useAppState();
   const conversation = useConversation();
+  const { isOnboardingActive } = useOnboardingState();
   const audioPlayback = useAudioPlayback();
   const { playError } = useSound();
 
@@ -454,10 +456,11 @@ function App() {
                       <ChatInput
                         query={conversation.query}
                         isProcessing={appState.isProcessing}
-                        canSubmit={appState.canSubmit}
+                        canSubmit={appState.canSubmit && !isOnboardingActive}
                         onQueryChange={conversation.setQuery}
                         onSubmit={handleSubmit}
                         onStop={handleStop}
+                        placeholder={isOnboardingActive ? "Use the buttons above to proceed through setup…" : undefined}
                       />
                     </div>
                   </div>
