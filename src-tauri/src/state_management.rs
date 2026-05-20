@@ -344,14 +344,13 @@ async fn initialize_floating_bar_state(_app_handle: AppHandle) -> Result<(), Str
 
 /// Initialize UI Manager for consolidated floating UI elements
 async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing UI Manager for consolidated floating elements...");
+    debug!("[State] Initializing UI Manager for consolidated floating elements...");
 
     // Initialize the global UI manager for all floating UI elements
     if let Err(e) = crate::commands::ui_commands::initialize_ui_manager(app_handle.clone()).await {
         warn!("Failed to initialize UI manager: {}", e);
         return Err(format!("UI Manager initialization failed: {}", e));
     }
-    info!("✅ UI Manager initialized successfully");
 
     Ok(())
 }
