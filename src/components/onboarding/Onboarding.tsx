@@ -22,7 +22,10 @@ import {
   Settings,
   AlertCircle,
   Info,
+  Loader2,
   Mic,
+  Terminal,
+  ExternalLink,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -491,6 +494,12 @@ export default function OnboardingFlow({
   const [selectedRole, setSelectedRole] = useState("");
   const [customRole, setCustomRole] = useState("");
 
+  // Claude CLI state
+  const [cliAvailable, setCliAvailable] = useState(false);
+  const [cliAuthenticated, setCliAuthenticated] = useState(false);
+  const [cliChecking, setCliChecking] = useState(true);
+  const [cliSelected, setCliSelected] = useState(false);
+
   // API key state
   const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -765,6 +774,26 @@ export default function OnboardingFlow({
     }
   }, [detectedProvider, apiKey]);
 
+  const selectClaudeCli = useCallback(async () => {
+    try {
+      setApiKeySaving(true);
+      setApiKeyError(null);
+      await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, {
+        providerId: "claude_cli",
+      });
+      setCliSelected(true);
+    } catch (error) {
+      console.error("Failed to set Claude CLI as active provider:", error);
+      setApiKeyError(error as string);
+    } finally {
+      setApiKeySaving(false);
+    }
+  }, []);
+
+  const deselectClaudeCli = useCallback(() => {
+    setCliSelected(false);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -788,6 +817,22 @@ export default function OnboardingFlow({
           }
         } catch (error) {
           console.warn("Failed to check API keys availability:", error);
+        }
+        if (!mounted) return;
+
+        // Check Claude CLI availability and auth status
+        try {
+          setCliChecking(true);
+          const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+          if (mounted) {
+            setCliAvailable(cliStatus.available);
+            setCliAuthenticated(cliStatus.authenticated);
+            console.log("OnboardingFlow: Claude CLI status:", cliStatus);
+          }
+        } catch (error) {
+          console.warn("Failed to check Claude CLI availability:", error);
+        } finally {
+          if (mounted) setCliChecking(false);
         }
         if (!mounted) return;
 
@@ -827,9 +872,17 @@ export default function OnboardingFlow({
     const handleWindowFocus = async () => {
       if (!mounted) return;
       console.log(
-        "OnboardingFlow: Window gained focus, re-checking permissions"
+        "OnboardingFlow: Window gained focus, re-checking permissions and CLI status"
       );
       await checkPermissionsStatus();
+      try {
+        const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+        if (!mounted) return;
+        setCliAvailable(cliStatus.available);
+        setCliAuthenticated(cliStatus.authenticated);
+      } catch (error) {
+        console.warn("Failed to refresh Claude CLI status on focus:", error);
+      }
     };
 
     window.addEventListener("focus", handleWindowFocus);
@@ -964,8 +1017,8 @@ export default function OnboardingFlow({
       }
     }
 
-    // Save API key before advancing from api-key step
-    if (currentStepData?.id === "api-key" && detectedProvider && !apiKeySaved) {
+    // Save API key before advancing from api-key step (unless CLI was chosen)
+    if (currentStepData?.id === "api-key" && !cliSelected && detectedProvider && !apiKeySaved) {
       await saveApiKey();
     }
 
@@ -1076,7 +1129,8 @@ export default function OnboardingFlow({
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
-    (step.id === "api-key" && (!detectedProvider || apiKeySaving));
+    (step.id === "api-key" && !detectedProvider && !cliSelected) ||
+    (step.id === "api-key" && apiKeySaving);
 
   // Determine if skip should be hidden (permissions step with required perms not granted)
   const isSkipHidden =
@@ -1259,9 +1313,81 @@ export default function OnboardingFlow({
                   </div>
                 )}
 
-                {/* API key input interface */}
+                {/* Connect step: Claude CLI + API key dual path */}
                 {step.id === "api-key" && (
-                  <div className="space-y-4 mt-8 text-left">
+                  <div className="space-y-4 mt-6 text-left">
+                    {/* Claude CLI card */}
+                    <div
+                      className={`rounded-xl border-2 p-4 transition-colors ${
+                        cliSelected
+                          ? "border-green-500 bg-green-50/50 dark:bg-green-950/30 hover:border-green-400 cursor-pointer"
+                          : cliAvailable && cliAuthenticated
+                            ? "border-primary/50 bg-card hover:border-primary cursor-pointer"
+                            : "border-border bg-card"
+                      }`}
+                      onClick={cliAvailable && cliAuthenticated ? (cliSelected ? deselectClaudeCli : selectClaudeCli) : undefined}
+                      role={cliAvailable && cliAuthenticated ? "button" : undefined}
+                      tabIndex={cliAvailable && cliAuthenticated ? 0 : undefined}
+                      onKeyDown={cliAvailable && cliAuthenticated ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          cliSelected ? deselectClaudeCli() : selectClaudeCli();
+                        }
+                      } : undefined}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">
+                          <Terminal className="w-5 h-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">
+                              Use your Claude subscription
+                            </span>
+                            {cliSelected && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-xs font-medium text-green-700 dark:text-green-300">
+                                <CheckCircle className="w-3 h-3" /> Connected
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            No API key needed — uses Claude Code CLI authentication.
+                          </p>
+                          <div className="mt-2">
+                            {cliChecking ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Checking...
+                              </span>
+                            ) : cliAvailable && cliAuthenticated ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                                <CheckCircle className="w-3 h-3" /> Claude CLI detected and authenticated
+                              </span>
+                            ) : cliAvailable ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-400">
+                                <AlertCircle className="w-3 h-3" /> Installed but not logged in — run{" "}
+                                <code className="px-1 py-0.5 rounded bg-muted font-mono">claude login</code>
+                              </span>
+                            ) : (
+                              <a
+                                href="https://claude.ai/code"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <ExternalLink className="w-3 h-3" /> Not installed — get Claude Code
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="flex items-center gap-3 px-2">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-xs text-muted-foreground uppercase tracking-wider">or</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+
                     {/* API key input with show/hide toggle */}
                     <div className="relative">
                       <input
@@ -1270,10 +1396,10 @@ export default function OnboardingFlow({
                         onChange={(e) => handleApiKeyChange(e.target.value)}
                         placeholder="Paste your API key here..."
                         className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background focus:border-primary transition-colors font-mono text-sm"
-                        autoFocus
                         spellCheck={false}
                         autoComplete="off"
                         aria-label="API key"
+                        disabled={cliSelected}
                       />
                       <button
                         type="button"

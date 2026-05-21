@@ -1,3 +1,4 @@
+use crate::agent::providers::claude_cli;
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use serde::{Deserialize, Serialize};
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock};
@@ -374,6 +375,38 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
 
     info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct ClaudeCliStatus {
+    pub available: bool,
+    pub authenticated: bool,
+}
+
+/// Check if Claude CLI is installed and optionally authenticated.
+#[tauri::command]
+pub async fn check_claude_cli_available() -> Result<ClaudeCliStatus, String> {
+    let available = claude_cli::is_claude_cli_available();
+
+    if !available {
+        return Ok(ClaudeCliStatus {
+            available: false,
+            authenticated: false,
+        });
+    }
+
+    let authenticated = match claude_cli::check_cli_auth_status().await {
+        Ok(()) => true,
+        Err(e) => {
+            info!("Claude CLI found but not authenticated: {}", e);
+            false
+        }
+    };
+
+    Ok(ClaudeCliStatus {
+        available,
+        authenticated,
+    })
 }
 
 /// Initialize the onboarding system and check if onboarding should be shown
