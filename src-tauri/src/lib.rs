@@ -882,6 +882,11 @@ pub fn run() {
                 tracing::info!("Geolocation pre-loaded successfully");
             });
 
+            // --- Pre-warm TLS session to api.anthropic.com (saves 200-500ms on first API call) ---
+            tauri::async_runtime::spawn(async {
+                crate::utils::warmup_tls_session().await;
+            });
+
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
