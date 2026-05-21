@@ -629,6 +629,10 @@ export default function OnboardingFlow({
     }
   }, []);
 
+  const deselectClaudeCli = useCallback(() => {
+    setCliSelected(false);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -703,13 +707,23 @@ export default function OnboardingFlow({
       }
     };
 
-    // Add window focus listener to re-check permissions when window gains focus
+    // Add window focus listener to re-check permissions and CLI status when window gains focus
     const handleWindowFocus = async () => {
       if (!mounted) return;
       console.log(
-        "OnboardingFlow: Window gained focus, re-checking permissions"
+        "OnboardingFlow: Window gained focus, re-checking permissions and CLI status"
       );
       await checkPermissionsStatus();
+      try {
+        const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+        if (!mounted) return;
+        if (cliStatus.available !== cliAvailable || cliStatus.authenticated !== cliAuthenticated) {
+          setCliAvailable(cliStatus.available);
+          setCliAuthenticated(cliStatus.authenticated);
+        }
+      } catch (error) {
+        console.warn("Failed to refresh Claude CLI status on focus:", error);
+      }
     };
 
     window.addEventListener("focus", handleWindowFocus);
@@ -811,7 +825,7 @@ export default function OnboardingFlow({
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
     (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
-    (step.id === "api-key" && !detectedProvider) ||
+    (step.id === "api-key" && !detectedProvider && !cliSelected) ||
     (step.id === "api-key" && apiKeySaving);
 
   // Determine if skip should be hidden (permissions step with required perms not granted)
@@ -949,16 +963,18 @@ export default function OnboardingFlow({
                     <div
                       className={`rounded-xl border-2 p-4 transition-colors ${
                         cliSelected
-                          ? "border-green-500 bg-green-50/50 dark:bg-green-950/30"
+                          ? "border-green-500 bg-green-50/50 dark:bg-green-950/30 hover:border-green-400 cursor-pointer"
                           : cliAvailable && cliAuthenticated
                             ? "border-primary/50 bg-card hover:border-primary cursor-pointer"
                             : "border-border bg-card"
                       }`}
-                      onClick={cliAvailable && cliAuthenticated && !cliSelected ? selectClaudeCli : undefined}
-                      role={cliAvailable && cliAuthenticated && !cliSelected ? "button" : undefined}
-                      tabIndex={cliAvailable && cliAuthenticated && !cliSelected ? 0 : undefined}
-                      onKeyDown={cliAvailable && cliAuthenticated && !cliSelected ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") selectClaudeCli();
+                      onClick={cliAvailable && cliAuthenticated ? (cliSelected ? deselectClaudeCli : selectClaudeCli) : undefined}
+                      role={cliAvailable && cliAuthenticated ? "button" : undefined}
+                      tabIndex={cliAvailable && cliAuthenticated ? 0 : undefined}
+                      onKeyDown={cliAvailable && cliAuthenticated ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          cliSelected ? deselectClaudeCli() : selectClaudeCli();
+                        }
                       } : undefined}
                     >
                       <div className="flex items-start gap-3">
