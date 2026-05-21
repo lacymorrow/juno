@@ -6,8 +6,10 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  ExternalLink,
   Key,
   Keyboard,
+  Loader2,
   Monitor,
   Shield,
   Sparkles,
@@ -16,6 +18,7 @@ import {
   AlertCircle,
   Info,
   Mic,
+  Terminal,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -113,10 +116,10 @@ const getOnboardingSteps = (
     : [
         {
           id: "api-key",
-          title: "Connect Your AI Provider",
-          subtitle: "Paste your API key to get started",
+          title: "Connect Your AI",
+          subtitle: "Choose how to power Juno",
           description:
-            "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
+            "Use your existing Claude subscription or paste an API key from any supported provider.",
           icon: <Key className="w-12 h-12 text-primary" />,
           action: "Continue",
         },
@@ -434,6 +437,12 @@ export default function OnboardingFlow({
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
+  // Claude CLI state
+  const [cliAvailable, setCliAvailable] = useState(false);
+  const [cliAuthenticated, setCliAuthenticated] = useState(false);
+  const [cliChecking, setCliChecking] = useState(true);
+  const [cliSelected, setCliSelected] = useState(false);
+
   // New state for granular permissions
   const [permissionsState, setPermissionsState] =
     useState<PermissionsState | null>(null);
@@ -604,6 +613,22 @@ export default function OnboardingFlow({
     }
   }, [detectedProvider, apiKey]);
 
+  const selectClaudeCli = useCallback(async () => {
+    try {
+      setApiKeySaving(true);
+      setApiKeyError(null);
+      await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, {
+        providerId: "claude_cli",
+      });
+      setCliSelected(true);
+    } catch (error) {
+      console.error("Failed to set Claude CLI as active provider:", error);
+      setApiKeyError(error as string);
+    } finally {
+      setApiKeySaving(false);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -627,6 +652,22 @@ export default function OnboardingFlow({
           }
         } catch (error) {
           console.warn("Failed to check API keys availability:", error);
+        }
+        if (!mounted) return;
+
+        // Check Claude CLI availability and auth status
+        try {
+          setCliChecking(true);
+          const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+          if (mounted) {
+            setCliAvailable(cliStatus.available);
+            setCliAuthenticated(cliStatus.authenticated);
+            console.log("OnboardingFlow: Claude CLI status:", cliStatus);
+          }
+        } catch (error) {
+          console.warn("Failed to check Claude CLI availability:", error);
+        } finally {
+          if (mounted) setCliChecking(false);
         }
         if (!mounted) return;
 
@@ -704,8 +745,8 @@ export default function OnboardingFlow({
     if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
       return;
     }
-    // Save API key before advancing from api-key step
-    if (currentStepData?.id === "api-key" && detectedProvider && !apiKeySaved) {
+    // Save API key before advancing from api-key step (unless CLI was chosen)
+    if (currentStepData?.id === "api-key" && !cliSelected && detectedProvider && !apiKeySaved) {
       await saveApiKey();
     }
 
@@ -901,101 +942,170 @@ export default function OnboardingFlow({
                   </div>
                 )}
 
-                {/* API key input interface */}
+                {/* Connect step: Claude CLI + API key dual path */}
                 {step.id === "api-key" && (
-                  <div className="space-y-4 mt-8 text-left">
-                    {/* API key input with show/hide toggle */}
-                    <div className="relative">
-                      <input
-                        type={showApiKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={(e) => handleApiKeyChange(e.target.value)}
-                        placeholder="Paste your API key here..."
-                        className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
-                        autoFocus
-                        spellCheck={false}
-                        autoComplete="off"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                      >
-                        {showApiKey ? (
-                          <EyeOff className="w-5 h-5" />
-                        ) : (
-                          <Eye className="w-5 h-5" />
-                        )}
-                      </button>
+                  <div className="space-y-4 mt-6 text-left">
+                    {/* Claude CLI card */}
+                    <div
+                      className={`rounded-xl border-2 p-4 transition-colors ${
+                        cliSelected
+                          ? "border-green-500 bg-green-50/50 dark:bg-green-950/30"
+                          : cliAvailable && cliAuthenticated
+                            ? "border-primary/50 bg-card hover:border-primary cursor-pointer"
+                            : "border-border bg-card"
+                      }`}
+                      onClick={cliAvailable && cliAuthenticated && !cliSelected ? selectClaudeCli : undefined}
+                      role={cliAvailable && cliAuthenticated && !cliSelected ? "button" : undefined}
+                      tabIndex={cliAvailable && cliAuthenticated && !cliSelected ? 0 : undefined}
+                      onKeyDown={cliAvailable && cliAuthenticated && !cliSelected ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") selectClaudeCli();
+                      } : undefined}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">
+                          <Terminal className="w-5 h-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">
+                              Use your Claude subscription
+                            </span>
+                            {cliSelected && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-xs font-medium text-green-700 dark:text-green-300">
+                                <CheckCircle className="w-3 h-3" /> Connected
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            No API key needed — uses Claude Code CLI authentication.
+                          </p>
+                          <div className="mt-2">
+                            {cliChecking ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Checking...
+                              </span>
+                            ) : cliAvailable && cliAuthenticated ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                                <CheckCircle className="w-3 h-3" /> Claude CLI detected and authenticated
+                              </span>
+                            ) : cliAvailable ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-400">
+                                <AlertCircle className="w-3 h-3" /> Installed but not logged in — run{" "}
+                                <code className="px-1 py-0.5 rounded bg-muted font-mono">claude login</code>
+                              </span>
+                            ) : (
+                              <a
+                                href="https://claude.ai/code"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <ExternalLink className="w-3 h-3" /> Not installed — get Claude Code
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Provider detection badge */}
-                    {detectedProvider && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
-                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                    {/* Divider */}
+                    <div className="flex items-center gap-3 px-2">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-xs text-muted-foreground uppercase tracking-wider">or</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+
+                    {/* API key input */}
+                    <div className={`rounded-xl border-2 p-4 transition-colors ${
+                      apiKeySaved
+                        ? "border-green-500 bg-green-50/50 dark:bg-green-950/30"
+                        : "border-border bg-card"
+                    }`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Key className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm font-medium text-foreground">Paste an API key</span>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showApiKey ? "text" : "password"}
+                          value={apiKey}
+                          onChange={(e) => handleApiKeyChange(e.target.value)}
+                          placeholder="sk-ant-... or sk-proj-... or AIza..."
+                          className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+                          spellCheck={false}
+                          autoComplete="off"
+                          disabled={cliSelected}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                        >
+                          {showApiKey ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Provider detection badge */}
+                      {detectedProvider && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center gap-2 mt-2"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                          <span className="text-xs font-medium text-green-700 dark:text-green-300">
                             {detectedProvider.name} detected
                           </span>
-                        </div>
-                      </motion.div>
-                    )}
+                        </motion.div>
+                      )}
 
-                    {/* Unknown key warning */}
-                    {apiKey.trim().length > 0 && !detectedProvider && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-50 border border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800">
-                          <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
-                          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
+                      {/* Unknown key warning */}
+                      {apiKey.trim().length > 0 && !detectedProvider && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center gap-2 mt-2"
+                        >
+                          <AlertCircle className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
+                          <span className="text-xs font-medium text-yellow-700 dark:text-yellow-300">
                             Unrecognized key format
                           </span>
-                        </div>
-                      </motion.div>
-                    )}
+                        </motion.div>
+                      )}
 
-                    {/* Save confirmation */}
-                    {apiKeySaved && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-center gap-2"
-                      >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
-                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
-                            API key saved! {detectedProvider?.name} set as active provider.
+                      {/* Save confirmation */}
+                      {apiKeySaved && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center gap-2 mt-2"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                          <span className="text-xs font-medium text-green-700 dark:text-green-300">
+                            API key saved! {detectedProvider?.name} set as active.
                           </span>
-                        </div>
-                      </motion.div>
-                    )}
+                        </motion.div>
+                      )}
+                    </div>
 
                     {/* Error message */}
                     {apiKeyError && (
-                      <div className="p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
+                      <div className="p-2 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950 dark:border-red-800">
                         <p className="text-sm text-red-700 dark:text-red-300">
                           Failed to save: {apiKeyError}
                         </p>
                       </div>
                     )}
 
-                    {/* Supported providers info */}
-                    <div className="text-center pt-2">
-                      <p className="text-xs text-muted-foreground">
-                        Supported: Anthropic (sk-ant-...) · OpenAI (sk-proj-...) · Google Gemini (AIza...)
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        You can skip this step and add your key later in Settings.
-                      </p>
-                    </div>
+                    {/* Footer hint */}
+                    <p className="text-xs text-muted-foreground text-center">
+                      You can skip this step and configure later in Settings.
+                    </p>
                   </div>
                 )}
 
