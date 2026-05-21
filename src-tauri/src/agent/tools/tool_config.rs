@@ -795,8 +795,5 @@ pub async fn save_tool_config_to_centralized_settings(
     state: &crate::state::AppState
 ) -> Result<(), String> {
     let config_guard = state.tool_config_manager.lock().await;
-    config_guard.save_to_centralized_settings(settings_manager).await?;
-
-    info!("Saved tool configuration to centralized settings");
-    Ok(())
+    config_guard.save_to_centralized_settings(settings_manager).await
 }

@@ -91,7 +91,16 @@ pub mod ui {
     pub const UI_CURSOR_HIGHLIGHT_START: &str = "ui-cursor-highlight-start";
     pub const UI_CURSOR_HIGHLIGHT_MOVE: &str = "ui-cursor-highlight-move";
     pub const UI_CURSOR_HIGHLIGHT_STOP: &str = "ui-cursor-highlight-stop";
-    
+    /// Emitted when the agent uses [POINT:x,y:label:screenN] to guide attention.
+    /// Payload fields: x, y (f64), label (Option<String>), screen (Option<u32>)
+    pub const CURSOR_POINT: &str = "ui-cursor-point";
+
+    // Multi-agent cursor events (Phase 4)
+    /// Payload: { agent_id, x, y, state, color }
+    pub const AGENT_CURSOR_UPDATE: &str = "agent-cursor-update";
+    /// Payload: { agent_id }
+    pub const AGENT_CURSOR_REMOVE: &str = "agent-cursor-remove";
+
     // Element management events
     pub const ELEMENT_CREATED: &str = "ui-element-created";
     pub const ELEMENT_UPDATED: &str = "ui-element-updated";
@@ -177,6 +186,8 @@ pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
     pub const RESTART_REQUIRED: &str = "permissions-restart-required";
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
+    /// Emitted when a specific permission flips from denied → granted during polling
+    pub const GRANTED: &str = "permission-granted";
 }
 
 /// Development tool events
@@ -224,6 +235,19 @@ pub mod system {
 pub mod onboarding {
     pub const COMPLETE: &str = "onboarding-complete";
     pub const SKIPPED: &str = "onboarding-skipped";
+    pub const STATE_CHANGED: &str = "onboarding-state-changed";
+}
+
+/// Cursor overlay animation events (used by onboarding cursor guidance)
+pub mod cursor {
+    /// Per-frame position event for animated cursor movement (60fps)
+    pub const ANIMATION_FRAME: &str = "cursor-animation-frame";
+    /// Show a pulsing highlight ring at a target position
+    pub const HIGHLIGHT: &str = "cursor-highlight";
+    /// Show a speech bubble at a position
+    pub const BUBBLE: &str = "cursor-bubble";
+    /// Dismiss the cursor overlay with a fade-out
+    pub const DISMISS_OVERLAY: &str = "cursor-dismiss-overlay";
 }
 
 /// Notification events
@@ -271,6 +295,7 @@ pub mod shortcuts {
     pub const AGENT_MODE: &str = "shortcut-agent-mode";
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
     pub const ESCAPE_KEY: &str = "shortcut-escape-key";
+    pub const VOICE_ACTIVATION: &str = "shortcut-voice-activation";
 }
 
 /// Tool choice events

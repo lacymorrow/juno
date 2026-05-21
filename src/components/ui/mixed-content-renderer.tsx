@@ -44,6 +44,12 @@ const JSX_COMPONENT_NAMES = [
   "QueryButton",
   "OpenButton",
   "CopyButton",
+  // Onboarding inline components
+  "OnboardingActionButton",
+  "OnboardingActions",
+  "PermissionStatusCard",
+  "PermissionStatusGrid",
+  "ProviderSelector",
   // Animated components
   "AnimatedCard",
   "AnimatedList",

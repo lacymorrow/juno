@@ -35,10 +35,13 @@ pub mod filesystem;
 pub mod keyboard;
 pub mod mcp;
 pub mod memory;
+pub mod persistent_memory;
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
+pub mod onboarding_analytics;
+pub mod onboarding_guidance;
 pub mod orchestrator;
 pub mod permissions;
 pub mod providers;
@@ -57,6 +60,7 @@ pub mod tools;
 pub mod tray_commands;
 pub mod ui_commands; // Consolidated UI API for all floating elements
 pub mod ui_token_selection;
+pub mod whisper_model;
 pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
@@ -100,6 +104,8 @@ pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
+pub use self::onboarding_analytics::*;
+pub use self::onboarding_guidance::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
 // pub use self::self_improvement::*; // TODO: Fix module not found
@@ -111,6 +117,10 @@ pub use self::sound::*;
 pub use self::stop_operations::*;
 pub use self::tool_choice::*;
 pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
+pub use self::whisper_model::{
+    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
+    get_whisper_models, set_whisper_model,
+};
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

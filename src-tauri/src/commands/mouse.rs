@@ -914,7 +914,7 @@ pub(crate) async fn set_big_cursor_scale(
     settings_manager.set_agent_settings(&agent_settings).await?;
 
     if crate::cursor_scale::is_cursor_scaled() {
-        crate::cursor_scale::set_cursor_scale(scale as f64);
+        crate::cursor_scale::update_active_scale(scale as f64);
     }
 
     info!("Big cursor scale set to {:.1}x", scale);
@@ -952,15 +952,20 @@ pub(crate) async fn set_companion_mode(
 #[tauri::command]
 pub(crate) fn test_cursor_scale(scale: f64) -> Result<(), String> {
     info!("[CursorScale] Test: setting cursor scale to {:.1}x", scale);
-    crate::cursor_scale::set_cursor_scale(scale);
+    crate::cursor_scale::write_cursor_size_preview(scale);
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn test_cursor_restore() -> Result<(), String> {
-    info!("[CursorScale] Test: restoring cursor scale");
-    crate::cursor_scale::force_restore_cursor_scale();
+    info!("[CursorScale] User-initiated cursor reset to default");
+    crate::cursor_scale::reset_cursor_to_default();
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn get_system_cursor_size() -> Result<f64, String> {
+    Ok(crate::cursor_scale::get_system_cursor_size())
 }
 
 

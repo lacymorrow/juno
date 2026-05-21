@@ -1,26 +1,35 @@
 import { invoke } from "@tauri-apps/api/core";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
+  BookOpen,
+  BarChart3,
   CheckCircle,
   ChevronRight,
+  Code2,
+  DollarSign,
   Eye,
   EyeOff,
-  ExternalLink,
   Key,
   Keyboard,
-  Loader2,
+  Megaphone,
+  MoreHorizontal,
   Monitor,
+  Palette,
   Shield,
   Sparkles,
   RefreshCw,
   Settings,
   AlertCircle,
   Info,
+  Loader2,
   Mic,
   Terminal,
+  ExternalLink,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useEventListener } from "@/hooks/useEventListener";
 import AudioVisualizer from "../bar/audio-visualizer";
 
@@ -74,6 +83,52 @@ const permissions = [
   },
 ];
 
+interface RoleOption {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+}
+
+const ROLE_OPTIONS: RoleOption[] = [
+  { id: "engineer", label: "Engineer", icon: Code2, description: "Software developer or engineer" },
+  { id: "designer", label: "Designer", icon: Palette, description: "UI/UX or product designer" },
+  { id: "product", label: "Product", icon: BarChart3, description: "Product manager or owner" },
+  { id: "marketing", label: "Marketing", icon: Megaphone, description: "Marketing or content creator" },
+  { id: "finance", label: "Finance", icon: DollarSign, description: "Finance or accounting" },
+  { id: "student", label: "Student", icon: BookOpen, description: "Student or learner" },
+  { id: "team", label: "Team Lead", icon: Users, description: "Team lead or manager" },
+  { id: "other", label: "Other", icon: MoreHorizontal, description: "Something else" },
+];
+
+const RoleCard = ({
+  role,
+  selected,
+  onSelect,
+}: {
+  role: RoleOption;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) => {
+  const Icon = role.icon;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(role.id)}
+      className={`p-3 rounded-xl border-2 text-left transition-all duration-200 flex flex-col items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+        selected
+          ? "border-primary bg-primary/10 text-foreground"
+          : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground"
+      }`}
+      aria-pressed={selected}
+      aria-label={role.label}
+    >
+      <Icon className={`w-5 h-5 ${selected ? "text-primary" : ""}`} />
+      <span className="text-xs font-medium text-center leading-tight">{role.label}</span>
+    </button>
+  );
+}
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false,
@@ -92,6 +147,15 @@ const getOnboardingSteps = (
       <img src="/juno.png" alt="Juno" className="w-50 h-50 object-contain" />
     ),
     action: "Get Started",
+  },
+  {
+    id: "role",
+    title: "What's your role?",
+    subtitle: "Personalize your experience",
+    description:
+      "Juno adapts to how you work. Optionally select your role to get relevant suggestions and defaults — or skip to continue. You can change this anytime in Settings.",
+    icon: null,
+    action: "Continue",
   },
   {
     id: "shortcut",
@@ -116,10 +180,10 @@ const getOnboardingSteps = (
     : [
         {
           id: "api-key",
-          title: "Connect Your AI",
-          subtitle: "Choose how to power Juno",
+          title: "Connect Your AI Provider",
+          subtitle: "Paste your API key to get started",
           description:
-            "Use your existing Claude subscription or paste an API key from any supported provider.",
+            "Juno works with Anthropic, OpenAI, and Google Gemini. Paste your API key below and we'll auto-detect the provider.",
           icon: <Key className="w-12 h-12 text-primary" />,
           action: "Continue",
         },
@@ -361,7 +425,8 @@ function PermissionCard({
               <button
                 onClick={onRequest}
                 disabled={isRequesting}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                aria-label={`Grant ${permission.title} permission`}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                   isRequired
                     ? "bg-primary hover:bg-primary/90 text-primary-foreground"
                     : "bg-muted-foreground hover:bg-muted-foreground/90 text-background"
@@ -425,6 +490,16 @@ export default function OnboardingFlow({
     false
   );
 
+  // Role selection state
+  const [selectedRole, setSelectedRole] = useState("");
+  const [customRole, setCustomRole] = useState("");
+
+  // Claude CLI state
+  const [cliAvailable, setCliAvailable] = useState(false);
+  const [cliAuthenticated, setCliAuthenticated] = useState(false);
+  const [cliChecking, setCliChecking] = useState(true);
+  const [cliSelected, setCliSelected] = useState(false);
+
   // API key state
   const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -437,12 +512,6 @@ export default function OnboardingFlow({
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
-  // Claude CLI state
-  const [cliAvailable, setCliAvailable] = useState(false);
-  const [cliAuthenticated, setCliAuthenticated] = useState(false);
-  const [cliChecking, setCliChecking] = useState(true);
-  const [cliSelected, setCliSelected] = useState(false);
-
   // New state for granular permissions
   const [permissionsState, setPermissionsState] =
     useState<PermissionsState | null>(null);
@@ -454,15 +523,72 @@ export default function OnboardingFlow({
   const mountedRef = useRef(true);
   const onboardingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  // ── Analytics (#14) ────────────────────────────────────────────────────────
+  // All timestamps are relative — we never write user PII or query content.
+  // Backend persists events to a 500-entry FIFO Tauri Store buffer.
+  const analyticsStartMsRef = useRef<number>(Date.now());
+  const phaseEnteredAtMsRef = useRef<number>(Date.now());
+  const recordedStepIdsRef = useRef<Set<string>>(new Set());
+  const completedRecordedRef = useRef<boolean>(false);
+  // Tracks which optional permissions were never granted by the time the user
+  // advanced past the permissions step — emitted as `onboarding_permission_skipped`.
+  const previouslyGrantedRef = useRef<{ accessibility: boolean; screen_recording: boolean; microphone: boolean; input_monitoring: boolean }>(
+    { accessibility: false, screen_recording: false, microphone: false, input_monitoring: false }
+  );
+
+  const recordEvent = useCallback(
+    (eventName: string, payload?: Record<string, unknown>) => {
+      // Fire-and-forget — analytics must never block UI progress.
+      invoke("record_onboarding_event", { eventName, payload: payload ?? null }).catch((err) => {
+        console.debug("[Onboarding] record_onboarding_event failed:", err);
+      });
+    },
+    []
+  );
+
+  // Honor macOS "Reduce motion" — framer-motion's useReducedMotion hook reads
+  // `prefers-reduced-motion: reduce`. When true we collapse all transition
+  // durations to 0 and skip the Bezier cursor flight on the overlay side.
+  const prefersReducedMotion = useReducedMotion();
+  // Animation perf budget (LAC-1882 #11):
+  //   - 0.4s ease-out for major step transitions (well under the 16.7ms/frame
+  //     budget at 60fps — framer-motion emits ~24 frames).
+  //   - 0.18s for inline reveal motion (badge fade-in, role description).
+  // The framer-motion compositor uses CSS transforms only, so frames stay on
+  // the GPU. QA must verify sustained 55+ fps on M1 Air / Intel macOS 13 via
+  // the Tauri devtools FPS counter — see LAC-1883 testing matrix.
+  const motionDuration = prefersReducedMotion ? 0 : 0.4;
+  const motionDurationShort = prefersReducedMotion ? 0 : 0.18;
+
   useEffect(() => {
     mountedRef.current = true;
+    // Fire onboarding_started once on mount.
+    analyticsStartMsRef.current = Date.now();
+    phaseEnteredAtMsRef.current = analyticsStartMsRef.current;
+    recordEvent("onboarding_started");
+
+    // Start 1Hz native permission polling so `permissions-changed` events
+    // flow while onboarding is on screen. Idempotent — the backend cancels
+    // any prior task before starting a new one. Best-effort; failure here
+    // only degrades revocation responsiveness, not core onboarding.
+    invoke("start_permissions_monitoring").catch((err) => {
+      console.debug("[Onboarding] start_permissions_monitoring failed:", err);
+    });
+
     return () => {
       mountedRef.current = false;
       for (const timer of onboardingTimers.current) {
         clearTimeout(timer);
       }
       onboardingTimers.current = [];
+      // Stop monitoring when onboarding closes so we're not paying for a
+      // 1s tick across the rest of the app's lifetime. PermissionsManager /
+      // PermissionsFlow re-start it on demand when they mount.
+      invoke("stop_permissions_monitoring").catch((err) => {
+        console.debug("[Onboarding] stop_permissions_monitoring failed:", err);
+      });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Backend-driven shortcut detection ──
@@ -487,6 +613,41 @@ export default function OnboardingFlow({
         console.log("[Onboarding] Escape key detected via backend event");
         setEscapePressed(true);
       }
+    }
+  );
+
+  // ── Live permission state via backend monitoring (Phase D edge case #12) ──
+  // The backend polls native APIs every 1s and emits `permissions-changed`
+  // with the full state. Subscribing here lets the revocation-detection effect
+  // (further down) react immediately if a previously-granted required
+  // permission is revoked while the user is on a later onboarding step.
+  // Without this listener, `permissionsState` would only refresh on window
+  // focus or the post-request poll — both of which can miss mid-flow revokes.
+  //
+  // Dedup: the backend emits a fresh object every tick, so we compare the
+  // four grant booleans before committing the new state — otherwise a 1Hz
+  // setState would re-render the whole onboarding tree (and the audio
+  // visualizer) every second even when nothing has actually changed.
+  useEventListener<PermissionsState>(
+    EVENTS.PERMISSIONS_CHANGED,
+    (payload) => {
+      if (!mountedRef.current) return;
+      setPermissionsState((prev) => {
+        if (
+          prev &&
+          prev.all_granted === payload.all_granted &&
+          prev.accessibility.granted === payload.accessibility.granted &&
+          prev.screen_recording.granted === payload.screen_recording.granted &&
+          prev.microphone.granted === payload.microphone.granted &&
+          prev.input_monitoring.granted === payload.input_monitoring.granted
+        ) {
+          return prev;
+        }
+        return payload;
+      });
+      setActualPermissionsGranted((prev) =>
+        prev === payload.all_granted ? prev : payload.all_granted
+      );
     }
   );
 
@@ -707,7 +868,7 @@ export default function OnboardingFlow({
       }
     };
 
-    // Add window focus listener to re-check permissions and CLI status when window gains focus
+    // Add window focus listener to re-check permissions when window gains focus
     const handleWindowFocus = async () => {
       if (!mounted) return;
       console.log(
@@ -717,10 +878,8 @@ export default function OnboardingFlow({
       try {
         const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
         if (!mounted) return;
-        if (cliStatus.available !== cliAvailable || cliStatus.authenticated !== cliAuthenticated) {
-          setCliAvailable(cliStatus.available);
-          setCliAuthenticated(cliStatus.authenticated);
-        }
+        setCliAvailable(cliStatus.available);
+        setCliAuthenticated(cliStatus.authenticated);
       } catch (error) {
         console.warn("Failed to refresh Claude CLI status on focus:", error);
       }
@@ -746,6 +905,93 @@ export default function OnboardingFlow({
     onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
   );
 
+  // ── Analytics: onboarding_phase_entered on step change ───────────────────────
+  // Use the step ID (not the index) so phase names are stable when the step
+  // list shrinks/grows based on `permissionsAlreadyGranted` and `apiKeysAvailable`.
+  useEffect(() => {
+    const currentId = onboardingSteps[currentStep]?.id;
+    if (!currentId) return;
+    if (recordedStepIdsRef.current.has(currentId)) return;
+    recordedStepIdsRef.current.add(currentId);
+    phaseEnteredAtMsRef.current = Date.now();
+    recordEvent("onboarding_phase_entered", {
+      phase: currentId,
+      t_ms_since_start: Date.now() - analyticsStartMsRef.current,
+    });
+  }, [currentStep, onboardingSteps, recordEvent]);
+
+  // ── Resume on app restart (Phase D edge case #12) ───────────────────────────
+  // The backend persists the last-entered phase to Tauri Store. On mount, if
+  // we find a phase that maps to a step in the current `onboardingSteps` list,
+  // jump there. The step list can differ between sessions (e.g. permissions
+  // already granted now), so a missing match just means we start at step 0.
+  const resumeAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (resumeAttemptedRef.current) return;
+    resumeAttemptedRef.current = true;
+    (async () => {
+      try {
+        const lastPhase = await invoke<string | null>("get_last_onboarding_phase");
+        if (!lastPhase || !mountedRef.current) return;
+        const idx = onboardingSteps.findIndex((s) => s.id === lastPhase);
+        // Don't resume to the welcome step (always start there if no progress)
+        // or to the complete step (avoid skipping the user past final guidance).
+        if (idx > 0 && idx < onboardingSteps.length - 1 && currentStep === 0) {
+          console.log(`[Onboarding] Resuming from phase '${lastPhase}' (step ${idx})`);
+          setCurrentStep(idx);
+        }
+      } catch (err) {
+        console.debug("[Onboarding] resume read failed:", err);
+      }
+    })();
+    // Only run after steps are known and on initial mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingSteps]);
+
+  // ── Analytics: onboarding_permission_granted on permission flip ─────────────
+  // Also detects revocation of a previously-granted required permission and
+  // returns the user to the permissions step (Phase D edge case #12).
+  useEffect(() => {
+    if (!permissionsState) return;
+
+    const grantedNow = {
+      accessibility: permissionsState.accessibility.granted,
+      screen_recording: permissionsState.screen_recording.granted,
+      microphone: permissionsState.microphone.granted,
+      input_monitoring: permissionsState.input_monitoring.granted,
+    };
+    const prev = previouslyGrantedRef.current;
+
+    (Object.keys(grantedNow) as Array<keyof typeof grantedNow>).forEach((perm) => {
+      if (grantedNow[perm] && !prev[perm]) {
+        // false → true
+        recordEvent("onboarding_permission_granted", {
+          permission: perm,
+          t_ms_since_phase_entered: Date.now() - phaseEnteredAtMsRef.current,
+        });
+      } else if (!grantedNow[perm] && prev[perm]) {
+        // true → false (revocation)
+        const isRequired = perm === "accessibility" || perm === "screen_recording";
+        if (isRequired) {
+          // Jump back to the permissions step if we're past it.
+          const permIdx = onboardingSteps.findIndex((s) => s.id === "permissions");
+          if (permIdx !== -1 && currentStep > permIdx) {
+            console.warn(`[Onboarding] Required permission '${perm}' revoked; returning to permissions step`);
+            recordEvent("onboarding_error_recovery", {
+              phase: onboardingSteps[currentStep]?.id ?? "unknown",
+              error_kind: `${perm}_revoked`,
+            });
+            // Allow the step to re-record by clearing its tracked id.
+            recordedStepIdsRef.current.delete("permissions");
+            setCurrentStep(permIdx);
+          }
+        }
+      }
+    });
+
+    previouslyGrantedRef.current = grantedNow;
+  }, [permissionsState, onboardingSteps, currentStep, recordEvent]);
+
   const handleNext = useCallback(async () => {
     // Block navigation from keyboard shortcut steps if shortcut hasn't been pressed
     const currentStepData = onboardingSteps[currentStep];
@@ -759,21 +1005,64 @@ export default function OnboardingFlow({
     if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
       return;
     }
+    // Save role before advancing from role step
+    if (currentStepData?.id === "role") {
+      const roleToSave = selectedRole === "other" ? customRole.trim() : selectedRole;
+      if (roleToSave) {
+        try {
+          await invoke("save_user_role", { role: roleToSave });
+        } catch (error) {
+          console.warn("Failed to save user role:", error);
+        }
+      }
+    }
+
     // Save API key before advancing from api-key step (unless CLI was chosen)
     if (currentStepData?.id === "api-key" && !cliSelected && detectedProvider && !apiKeySaved) {
       await saveApiKey();
     }
 
+    // Record permission_skipped for any optional permission that was never
+    // granted by the time the user moves past the permissions step.
+    if (currentStepData?.id === "permissions" && permissionsState) {
+      if (!permissionsState.microphone.granted) {
+        recordEvent("onboarding_permission_skipped", { permission: "microphone" });
+      }
+      if (!permissionsState.input_monitoring.granted) {
+        recordEvent("onboarding_permission_skipped", { permission: "input_monitoring" });
+      }
+    }
+
     if (currentStep < onboardingSteps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
+      if (!completedRecordedRef.current) {
+        completedRecordedRef.current = true;
+        recordEvent("onboarding_completed", {
+          total_t_ms: Date.now() - analyticsStartMsRef.current,
+          // Optional permissions ungranted at completion are the "skipped phases" for funnel purposes.
+          skipped_phases: permissionsState
+            ? [
+                !permissionsState.microphone.granted ? "microphone" : null,
+                !permissionsState.input_monitoring.granted ? "input_monitoring" : null,
+              ].filter(Boolean)
+            : [],
+        });
+      }
       setIsComplete(true);
       onComplete();
     }
-  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
+  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, selectedRole, customRole, detectedProvider, apiKeySaved, saveApiKey, onComplete, recordEvent]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
+    if (!completedRecordedRef.current) {
+      completedRecordedRef.current = true;
+      recordEvent("onboarding_completed", {
+        total_t_ms: Date.now() - analyticsStartMsRef.current,
+        skipped_phases: ["__user_skipped_remaining__"],
+      });
+    }
     setIsComplete(true);
     if (onSkip) {
       onSkip();
@@ -784,15 +1073,29 @@ export default function OnboardingFlow({
 
   const handleSkipStep = () => {
     // Skip just the current step and move to the next one
+    const currentStepData = onboardingSteps[currentStep];
+    if (currentStepData) {
+      recordEvent("onboarding_permission_skipped", {
+        // Re-using the permission_skipped event for any explicit step skip
+        // keeps the funnel schema small; phase carries the actual step id.
+        permission: `step:${currentStepData.id}`,
+      });
+    }
     if (currentStep < onboardingSteps.length - 1) {
       // Reset step-specific states when skipping
-      const currentStepData = onboardingSteps[currentStep];
       if (currentStepData?.id === "shortcut") {
         setShortcutPressed(true); // Allow progression if they come back
       }
       setCurrentStep(currentStep + 1);
     } else {
       // If this is the last step, complete onboarding
+      if (!completedRecordedRef.current) {
+        completedRecordedRef.current = true;
+        recordEvent("onboarding_completed", {
+          total_t_ms: Date.now() - analyticsStartMsRef.current,
+          skipped_phases: [`step:${currentStepData?.id ?? "unknown"}`],
+        });
+      }
       setIsComplete(true);
       if (onSkip) {
         onSkip();
@@ -821,6 +1124,7 @@ export default function OnboardingFlow({
   const step = onboardingSteps[currentStep];
 
   // Determine if continue button should be disabled
+  // Role step is intentionally optional — no guard here; handleNext saves only when a role is selected
   const isContinueDisabled =
     (step.id === "shortcut" && !shortcutPressed) ||
     (step.id === "cancel" && !escapePressed) ||
@@ -860,10 +1164,10 @@ export default function OnboardingFlow({
             {(step.id === "shortcut" || step.id === "cancel") && (
               <motion.div
                 key="floating-bar-preview"
-                initial={{ opacity: 0, y: -10 }}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
+                transition={{ duration: motionDuration, ease: "easeOut" }}
                 className="flex justify-center mb-8"
               >
                 <AudioVisualizer
@@ -891,10 +1195,10 @@ export default function OnboardingFlow({
           <AnimatePresence mode="wait">
             <motion.div
               key={step.id}
-              initial={{ opacity: 0, y: 15 }}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
+              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -15 }}
+              transition={{ duration: motionDuration, ease: "easeOut" }}
               className="text-center"
             >
               {/* Icon (null for shortcut/cancel — floating bar is above) */}
@@ -902,7 +1206,13 @@ export default function OnboardingFlow({
 
               {/* Content */}
               <div className="space-y-4 mb-10">
-                <div>
+                {/*
+                  aria-live="polite" + role="status" lets screen readers
+                  announce each onboarding step's title + subtitle when the
+                  user advances. We use polite (not assertive) so it never
+                  interrupts an active narration in progress.
+                */}
+                <div role="status" aria-live="polite" aria-atomic="true">
                   <h2 className="text-3xl font-light text-foreground mb-3">
                     {step.title}
                   </h2>
@@ -953,6 +1263,53 @@ export default function OnboardingFlow({
                           )} to stop Juno`
                         : "Press the key above to stop Juno"}
                     </p>
+                  </div>
+                )}
+
+                {/* Role selection grid */}
+                {step.id === "role" && (
+                  <div className="mt-6">
+                    <div className="grid grid-cols-4 gap-3">
+                      {ROLE_OPTIONS.map((role) => (
+                        <RoleCard
+                          key={role.id}
+                          role={role}
+                          selected={selectedRole === role.id}
+                          onSelect={setSelectedRole}
+                        />
+                      ))}
+                    </div>
+
+                    {selectedRole === "other" && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        transition={{ duration: motionDurationShort }}
+                        className="mt-4"
+                      >
+                        <input
+                          type="text"
+                          value={customRole}
+                          onChange={(e) => setCustomRole(e.target.value)}
+                          placeholder="Tell us your role..."
+                          className="w-full px-4 py-3 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background focus:border-primary transition-colors text-sm"
+                          autoFocus
+                          maxLength={64}
+                          aria-label="Custom role"
+                        />
+                      </motion.div>
+                    )}
+
+                    {selectedRole && selectedRole !== "other" && (
+                      <motion.p
+                        initial={prefersReducedMotion ? false : { opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: motionDurationShort }}
+                        className="mt-4 text-center text-sm text-muted-foreground"
+                      >
+                        {ROLE_OPTIONS.find((r) => r.id === selectedRole)?.description}
+                      </motion.p>
+                    )}
                   </div>
                 )}
 
@@ -1031,97 +1388,102 @@ export default function OnboardingFlow({
                       <div className="flex-1 h-px bg-border" />
                     </div>
 
-                    {/* API key input */}
-                    <div className={`rounded-xl border-2 p-4 transition-colors ${
-                      apiKeySaved
-                        ? "border-green-500 bg-green-50/50 dark:bg-green-950/30"
-                        : "border-border bg-card"
-                    }`}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Key className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm font-medium text-foreground">Paste an API key</span>
-                      </div>
-                      <div className="relative">
-                        <input
-                          type={showApiKey ? "text" : "password"}
-                          value={apiKey}
-                          onChange={(e) => handleApiKeyChange(e.target.value)}
-                          placeholder="sk-ant-... or sk-proj-... or AIza..."
-                          className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
-                          spellCheck={false}
-                          autoComplete="off"
-                          disabled={cliSelected}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                        >
-                          {showApiKey ? (
-                            <EyeOff className="w-4 h-4" />
-                          ) : (
-                            <Eye className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
+                    {/* API key input with show/hide toggle */}
+                    <div className="relative">
+                      <input
+                        type={showApiKey ? "text" : "password"}
+                        value={apiKey}
+                        onChange={(e) => handleApiKeyChange(e.target.value)}
+                        placeholder="Paste your API key here..."
+                        className="w-full px-4 py-3 pr-12 rounded-xl border-2 border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background focus:border-primary transition-colors font-mono text-sm"
+                        spellCheck={false}
+                        autoComplete="off"
+                        aria-label="API key"
+                        disabled={cliSelected}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                      >
+                        {showApiKey ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
 
-                      {/* Provider detection badge */}
-                      {detectedProvider && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex items-center gap-2 mt-2"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
-                          <span className="text-xs font-medium text-green-700 dark:text-green-300">
+                    {/* Provider detection badge */}
+                    {detectedProvider && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: motionDurationShort }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
+                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
                             {detectedProvider.name} detected
                           </span>
-                        </motion.div>
-                      )}
+                        </div>
+                      </motion.div>
+                    )}
 
-                      {/* Unknown key warning */}
-                      {apiKey.trim().length > 0 && !detectedProvider && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex items-center gap-2 mt-2"
-                        >
-                          <AlertCircle className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
-                          <span className="text-xs font-medium text-yellow-700 dark:text-yellow-300">
+                    {/* Unknown key warning */}
+                    {apiKey.trim().length > 0 && !detectedProvider && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: motionDurationShort }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-50 border border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800">
+                          <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+                          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
                             Unrecognized key format
                           </span>
-                        </motion.div>
-                      )}
+                        </div>
+                      </motion.div>
+                    )}
 
-                      {/* Save confirmation */}
-                      {apiKeySaved && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex items-center gap-2 mt-2"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
-                          <span className="text-xs font-medium text-green-700 dark:text-green-300">
-                            API key saved! {detectedProvider?.name} set as active.
+                    {/* Save confirmation */}
+                    {apiKeySaved && (
+                      <motion.div
+                        initial={prefersReducedMotion ? false : { opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: motionDurationShort }}
+                        className="flex items-center justify-center gap-2"
+                      >
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800">
+                          <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+                            API key saved! {detectedProvider?.name} set as active provider.
                           </span>
-                        </motion.div>
-                      )}
-                    </div>
+                        </div>
+                      </motion.div>
+                    )}
 
                     {/* Error message */}
                     {apiKeyError && (
-                      <div className="p-2 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950 dark:border-red-800">
+                      <div className="p-2 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:border-red-800">
                         <p className="text-sm text-red-700 dark:text-red-300">
                           Failed to save: {apiKeyError}
                         </p>
                       </div>
                     )}
 
-                    {/* Footer hint */}
-                    <p className="text-xs text-muted-foreground text-center">
-                      You can skip this step and configure later in Settings.
-                    </p>
+                    {/* Supported providers info */}
+                    <div className="text-center pt-2">
+                      <p className="text-xs text-muted-foreground">
+                        Supported: Anthropic (sk-ant-...) · OpenAI (sk-proj-...) · Google Gemini (AIza...)
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        You can skip this step and add your key later in Settings.
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -1198,7 +1560,7 @@ export default function OnboardingFlow({
                           </div>
                           <button
                             onClick={checkPermissionsStatus}
-                            className="text-sm text-primary hover:text-primary/80 flex items-center gap-1"
+                            className="text-sm text-primary hover:text-primary/80 flex items-center gap-1 rounded px-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                             aria-label="Refresh permission status"
                           >
                             <RefreshCw className="w-4 h-4" />
@@ -1217,7 +1579,7 @@ export default function OnboardingFlow({
                 {isSkipHidden ? null : currentStep === 0 ? (
                   <button
                     onClick={handleSkip}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     aria-label="Skip onboarding"
                   >
                     Skip
@@ -1225,7 +1587,7 @@ export default function OnboardingFlow({
                 ) : (
                   <button
                     onClick={handleSkipStep}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     aria-label="Skip this step"
                   >
                     Skip
@@ -1236,7 +1598,7 @@ export default function OnboardingFlow({
                 <button
                   onClick={handleNext}
                   disabled={isContinueDisabled}
-                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                     isContinueDisabled
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
                       : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl"

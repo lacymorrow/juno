@@ -40,7 +40,8 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": false,
-        "center": false
+        "center": false,
+        "focus": false
       },
       {
         "label": "floating-bar",
@@ -53,7 +54,8 @@
         "resizable": false,
         "skipTaskbar": true,
         "visible": false,
-        "shadow": false
+        "shadow": false,
+        "focus": false
       },
       {
         "label": "onboarding",
@@ -86,7 +88,8 @@
         "visible": false,
         "shadow": false,
         "center": false,
-        "fullscreen": false
+        "fullscreen": false,
+        "focus": false
       },
       {
         "label": "settings",
