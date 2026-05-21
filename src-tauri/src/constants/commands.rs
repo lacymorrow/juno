@@ -7,6 +7,13 @@
 //! commands in lib.rs to prevent duplication and inconsistency issues.
 
 /// Settings command names (centralized - use ONLY these to prevent duplication!)
+pub mod onboarding {
+    pub const RECORD_ONBOARDING_EVENT: &str = "record_onboarding_event";
+    pub const IS_SYSTEM_SETTINGS_OPEN: &str = "is_system_settings_open";
+    pub const SET_ONBOARDING_STEP_PROGRESS: &str = "set_onboarding_step_progress";
+    pub const GET_ONBOARDING_STEP_PROGRESS: &str = "get_onboarding_step_progress";
+}
+
 pub mod settings {
     pub const GET_ALL_SETTINGS: &str = "get_all_settings";
     pub const SAVE_ALL_SETTINGS: &str = "save_all_settings";

@@ -431,6 +431,10 @@ export const AUDIO = {
 } as const;
 
 export const COMMANDS = {
+  ONBOARDING_RECORD_ONBOARDING_EVENT: 'record_onboarding_event',
+  ONBOARDING_IS_SYSTEM_SETTINGS_OPEN: 'is_system_settings_open',
+  ONBOARDING_SET_ONBOARDING_STEP_PROGRESS: 'set_onboarding_step_progress',
+  ONBOARDING_GET_ONBOARDING_STEP_PROGRESS: 'get_onboarding_step_progress',
   SETTINGS_GET_ALL_SETTINGS: 'get_all_settings',
   SETTINGS_SAVE_ALL_SETTINGS: 'save_all_settings',
   SETTINGS_RESET_SETTINGS: 'reset_centralized_settings',

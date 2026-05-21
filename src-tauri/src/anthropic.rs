@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Arc};
 use tracing::{error, info, warn};
 use uuid;
 
@@ -26,6 +26,10 @@ use crate::persistent_memory::PersistentMemoryStore;
 // TARS Integration: Import event types
 // TODO: Implement event system - currently disabled due to incomplete implementation
 // use crate::agent::events::JunoAgentEvent;
+
+/// Set to `true` after the first query fires post-onboarding so we fire
+/// `onboarding_first_query` only once per app session.
+static FIRST_QUERY_RECORDED: AtomicBool = AtomicBool::new(false);
 
 /// Agent execution queue system to prevent concurrent execution
 struct AgentExecutionQueue {
@@ -285,6 +289,30 @@ pub async fn submit_query(
     if let Err(e) = state.rate_limiters.ai_operations.check("default_user").await {
         warn!("Rate limit exceeded for AI operations");
         return Err(e.to_user_message());
+    }
+
+    // --- onboarding_first_query analytics ---
+    // Fire once when the user submits their first real query after onboarding is complete.
+    // Uses a session-scoped AtomicBool so it fires at most once per app run.
+    if !FIRST_QUERY_RECORDED.load(AtomicOrdering::Relaxed) {
+        let ah = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            // Check if onboarding is complete before marking first query
+            use crate::settings::manager::SettingsManager;
+            if let Ok(sm) = SettingsManager::new(ah.clone()) {
+                if let Ok(s) = sm.get_onboarding_settings().await {
+                    if s.completed && FIRST_QUERY_RECORDED.compare_exchange(
+                        false, true, AtomicOrdering::SeqCst, AtomicOrdering::Relaxed
+                    ).is_ok() {
+                        let _ = crate::commands::record_onboarding_event(
+                            ah,
+                            "onboarding_first_query".to_string(),
+                            serde_json::json!({ "t_ms_since_completed": 0 }),
+                        ).await;
+                    }
+                }
+            }
+        });
     }
 
     // --- Validate query text ---

@@ -675,6 +675,11 @@ pub fn run() {
             // Phase C: guided cursor flight to System Settings + permission demos
             commands::guide_to_system_settings,
             commands::run_permission_demo,
+            // Phase D: analytics buffer + System Settings detection + restart-resume
+            commands::record_onboarding_event,
+            commands::is_system_settings_open,
+            commands::set_onboarding_step_progress,
+            commands::get_onboarding_step_progress,
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,

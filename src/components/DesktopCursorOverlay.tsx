@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useReducedMotion } from "framer-motion";
 import {
   getCurrentWindow,
   LogicalSize,
@@ -140,6 +141,20 @@ const CURSOR_CSS = `
     0%   { transform: translate(0, 0) scale(1); opacity: 1; }
     100% { opacity: 0; }
   }
+
+  /* Reduced motion: disable all cursor animations. Position is JS-driven so the
+     cursor still tracks properly; only decorative CSS animations are suppressed. */
+  @media (prefers-reduced-motion: reduce) {
+    .juno-cursor--idle svg,
+    .juno-cursor--thinking svg,
+    .juno-cursor--clicking svg { animation: none !important; }
+    .juno-ripple-active        { animation: none !important; }
+    .onb-ring-active           { animation: none !important; }
+    .onb-bubble-visible        { animation: none !important; }
+    .onb-celebrate-spin        { animation: none !important; }
+    .onb-glow-burst-active     { animation: none !important; }
+    .juno-cursor               { transition: none !important; }
+  }
 `;
 
 // ─── Cursor SVG ───────────────────────────────────────────────────────────────
@@ -242,6 +257,13 @@ interface AgentCursorRemove {
 }
 
 export const DesktopCursorOverlay = () => {
+  const shouldReduceMotion = useReducedMotion();
+  // Under reduced motion, snap the POINT cursor instantly rather than animating.
+  const flightDurationRef = useRef(shouldReduceMotion ? 0 : FLIGHT_DURATION);
+  useEffect(() => {
+    flightDurationRef.current = shouldReduceMotion ? 0 : FLIGHT_DURATION;
+  }, [shouldReduceMotion]);
+
   // Slot assignment: agentId → 0..MAX_AGENT_SLOTS-1
   const [slotMap, dispatch] = useReducer(slotReducer, new Map<string, number>());
 
@@ -391,7 +413,7 @@ export const DesktopCursorOverlay = () => {
     const startTime = Date.now();
     const tick = () => {
       const elapsed = Date.now() - startTime;
-      const tRaw = Math.min(elapsed / FLIGHT_DURATION, 1);
+      const tRaw = flightDurationRef.current > 0 ? Math.min(elapsed / flightDurationRef.current, 1) : 1;
       // Ease-in-out cubic
       const t = tRaw < 0.5 ? 4 * tRaw * tRaw * tRaw : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
       const curX = bezier(t, startX, ctrlX, targetX);

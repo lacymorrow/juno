@@ -1,7 +1,9 @@
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -666,4 +668,126 @@ pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> 
         .set_onboarding_settings(&onboarding_settings)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ── Restart-resume persistence ────────────────────────────────────────────────
+
+/// Persist the last completed step ID so the flow can resume after a restart.
+/// Called from the frontend after each successful step transition.
+#[tauri::command]
+pub async fn set_onboarding_step_progress(app: AppHandle, step_id: String) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
+    let mut settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+    settings.last_step_id = Some(step_id.clone());
+    settings_manager
+        .set_onboarding_settings(&settings)
+        .await
+        .map_err(|e| e.to_string())?;
+    info!("[onboarding] Step progress saved: {}", step_id);
+    Ok(())
+}
+
+/// Return the last persisted step ID, or `null` if onboarding was never started.
+/// The frontend uses this on mount to skip to the last visited step.
+#[tauri::command]
+pub async fn get_onboarding_step_progress(app: AppHandle) -> Result<Option<String>, String> {
+    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
+    let settings = settings_manager
+        .get_onboarding_settings()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(settings.last_step_id)
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+const ANALYTICS_STORE: &str = "onboarding_analytics.json";
+const ANALYTICS_KEY: &str = "events";
+/// Maximum number of events buffered locally before oldest entries are dropped.
+const MAX_ANALYTICS_EVENTS: usize = 500;
+
+/// Append an onboarding analytics event to the local Tauri Store buffer.
+/// No events leave the device — this buffer is for future in-app analysis only.
+///
+/// `event_name` must be one of the documented event names from [LAC-1882].
+/// `payload` is an arbitrary JSON object with event-specific fields.
+#[tauri::command]
+pub async fn record_onboarding_event(
+    app: AppHandle,
+    event_name: String,
+    payload: JsonValue,
+) -> Result<(), String> {
+    let store = app
+        .store(ANALYTICS_STORE)
+        .map_err(|e| format!("Failed to open analytics store: {}", e))?;
+
+    let mut events: Vec<JsonValue> = store
+        .get(ANALYTICS_KEY)
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
+    let entry = serde_json::json!({
+        "event": event_name,
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "payload": payload,
+    });
+    events.push(entry);
+
+    // Cap the buffer to avoid unbounded growth
+    if events.len() > MAX_ANALYTICS_EVENTS {
+        let drop = events.len() - MAX_ANALYTICS_EVENTS;
+        events.drain(0..drop);
+    }
+
+    store.set(ANALYTICS_KEY, serde_json::to_value(events).unwrap_or_default());
+    store.save().map_err(|e| format!("Failed to persist analytics: {}", e))?;
+
+    info!("[onboarding-analytics] recorded: {}", event_name);
+    Ok(())
+}
+
+// ── System Settings detection ─────────────────────────────────────────────────
+
+/// Returns `true` if System Settings (or System Preferences on older macOS) is
+/// currently running and has a visible window. Used by the frontend to skip the
+/// cursor-flight animation when the user already has Settings open.
+#[tauri::command]
+pub async fn is_system_settings_open() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let open = tokio::task::spawn_blocking(|| {
+            use computer_use_ai_sdk::Desktop;
+            let desktop = match Desktop::new(true, false) {
+                Ok(d) => d,
+                Err(_) => return false,
+            };
+            for name in ["System Settings", "System Preferences"] {
+                if let Ok(app) = desktop.application(name) {
+                    if let Ok(children) = app.children() {
+                        for child in &children {
+                            if let Ok(b) = child.bounds() {
+                                if b.2 > 100.0 && b.3 > 100.0 {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(b) = app.bounds() {
+                        if b.2 > 100.0 && b.3 > 100.0 {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        return Ok(open);
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(false)
 }
