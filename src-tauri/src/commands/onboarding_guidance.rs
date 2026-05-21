@@ -11,7 +11,7 @@
 use crate::constants::events;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -216,6 +216,67 @@ fn find_juno_control_bounds() -> Option<(f64, f64, f64, f64)> {
     None
 }
 
+// ── Multi-monitor overlay positioning ────────────────────────────────────────
+
+/// Move the desktop-cursor-overlay window so it covers the screen that contains
+/// the point `(px, py)` in global AX coordinates (top-left origin, Y down).
+/// Falls back silently on non-macOS or when no matching screen is found.
+#[cfg(target_os = "macos")]
+fn reposition_overlay_to_screen_containing(app: &AppHandle, px: f64, py: f64) {
+    use computer_use_ai_sdk::platforms::macos::display::get_active_displays;
+
+    let displays = match get_active_displays() {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("[onboarding-guidance] Could not enumerate displays: {}", e);
+            return;
+        }
+    };
+
+    // AX and CoreGraphics share the same top-left origin coordinate space.
+    // Find the display whose bounds contain the target point.
+    let target = displays.iter().find(|d| {
+        let x = d.bounds.origin.x;
+        let y = d.bounds.origin.y;
+        let w = d.bounds.size.width;
+        let h = d.bounds.size.height;
+        px >= x && px < x + w && py >= y && py < y + h
+    });
+
+    let display = match target {
+        Some(d) => d,
+        None => {
+            // Point may be outside all screen frames (e.g. between monitors in an offset layout).
+            // Fall back to the display whose center is closest to the point.
+            match displays.iter().min_by_key(|d| {
+                let cx = d.bounds.origin.x + d.bounds.size.width / 2.0;
+                let cy = d.bounds.origin.y + d.bounds.size.height / 2.0;
+                ((cx - px).powi(2) + (cy - py).powi(2)) as i64
+            }) {
+                Some(d) => d,
+                None => return,
+            }
+        }
+    };
+
+    let x = display.bounds.origin.x;
+    let y = display.bounds.origin.y;
+    let w = display.bounds.size.width;
+    let h = display.bounds.size.height;
+
+    if let Some(overlay) = app.get_webview_window("desktop-cursor-overlay") {
+        // Tauri's set_position / set_size use the same top-left coordinate space.
+        let _ = overlay.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+        let _ = overlay.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+        info!(
+            "[onboarding-guidance] Cursor overlay repositioned to screen at ({x},{y}) size {w}×{h}"
+        );
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reposition_overlay_to_screen_containing(_app: &AppHandle, _px: f64, _py: f64) {}
+
 // ── Cursor flight orchestration ───────────────────────────────────────────────
 
 /// Animate the onboarding cursor from `from` to `to`, then show a pulsing ring and
@@ -310,6 +371,8 @@ pub async fn guide_to_system_settings(
             let cx = x + w / 2.0;
             let cy = y + h / 2.0;
             info!("[onboarding-guidance] Tier 2 success: AX-located Juno at ({}, {})", cx, cy);
+            // Multi-monitor: ensure the overlay covers the screen containing System Settings
+            reposition_overlay_to_screen_containing(&app, cx, cy);
             fly_and_announce(&app, origin, (cx, cy), perm.bubble_text(), 28.0).await?;
             return Ok(GuidanceResult {
                 tier: 2,
@@ -333,6 +396,8 @@ pub async fn guide_to_system_settings(
         let target_x = right_pane_x + right_pane_w - 60.0; // toggle column near right edge
         let target_y = wy + (wh * 0.45).clamp(140.0, 380.0);
         info!("[onboarding-guidance] Tier 1: window-bounds estimate ({}, {})", target_x, target_y);
+        // Multi-monitor: ensure the overlay covers the screen containing System Settings
+        reposition_overlay_to_screen_containing(&app, target_x, target_y);
         fly_and_announce(&app, origin, (target_x, target_y), perm.bubble_text(), 36.0).await?;
         return Ok(GuidanceResult {
             tier: 1,

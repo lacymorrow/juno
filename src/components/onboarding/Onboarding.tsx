@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import {
   BookOpen,
@@ -112,7 +112,7 @@ const RoleCard = ({
     <button
       type="button"
       onClick={() => onSelect(role.id)}
-      className={`p-3 rounded-xl border-2 text-left transition-all duration-200 flex flex-col items-center gap-2 ${
+      className={`p-3 rounded-xl border-2 text-left transition-all duration-200 flex flex-col items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
         selected
           ? "border-primary bg-primary/10 text-foreground"
           : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground"
@@ -422,7 +422,7 @@ function PermissionCard({
               <button
                 onClick={onRequest}
                 disabled={isRequesting}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
                   isRequired
                     ? "bg-primary hover:bg-primary/90 text-primary-foreground"
                     : "bg-muted-foreground hover:bg-muted-foreground/90 text-background"
@@ -512,9 +512,42 @@ export default function OnboardingFlow({
 
   const mountedRef = useRef(true);
   const onboardingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const onboardingStartMs = useRef<number>(Date.now());
+  const phaseEnteredMs = useRef<number>(Date.now());
+
+  // Reduced motion — respects macOS "Reduce Motion" setting
+  const shouldReduceMotion = useReducedMotion();
+
+  // Fire-and-forget analytics helper. Events stored locally in Tauri Store buffer only.
+  const recordEvent = useCallback((eventName: string, payload?: Record<string, unknown>) => {
+    invoke(COMMANDS.ONBOARDING_RECORD_ONBOARDING_EVENT, { eventName, payload: payload ?? {} }).catch(() => {
+      // Analytics failures are silent — never block the onboarding flow
+    });
+  }, []);
+
+  // Restart-resume: restore last visited step from Tauri Store on mount.
+  // This runs once before loadInitialData so we have the step set before permissions load.
+  useEffect(() => {
+    invoke<string | null>(COMMANDS.ONBOARDING_GET_ONBOARDING_STEP_PROGRESS)
+      .then((lastStepId) => {
+        if (!lastStepId || !mountedRef.current) return;
+        // Find the index of the persisted step in the (currently empty) step list.
+        // We use the raw step IDs which are stable across restarts.
+        const knownStepIds = ["welcome", "role", "shortcut", "cancel", "api-key", "permissions", "complete"];
+        const idx = knownStepIds.indexOf(lastStepId);
+        if (idx > 0) {
+          // Clamp to a valid step — actual list is computed after permissions load
+          setCurrentStep(Math.min(idx, knownStepIds.length - 2));
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     mountedRef.current = true;
+    onboardingStartMs.current = Date.now();
+    phaseEnteredMs.current = Date.now();
+    recordEvent("onboarding_started");
     return () => {
       mountedRef.current = false;
       for (const timer of onboardingTimers.current) {
@@ -522,7 +555,7 @@ export default function OnboardingFlow({
       }
       onboardingTimers.current = [];
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Backend-driven shortcut detection ──
   // Global shortcuts (Option+D, Escape) are captured at the OS level by
@@ -548,6 +581,20 @@ export default function OnboardingFlow({
       }
     }
   );
+
+  // Edge case: Permission revocation mid-flow.
+  // If a previously-granted required permission is revoked while onboarding is active,
+  // re-check permissions and emit an analytics error recovery event.
+  useEventListener(EVENTS.PERMISSIONS_CHANGED, () => {
+    checkPermissionsStatus().then((allGranted) => {
+      if (!allGranted && mountedRef.current) {
+        recordEvent("onboarding_error_recovery", {
+          phase: onboardingSteps[currentStep]?.id ?? "unknown",
+          error_kind: "permission_revoked",
+        });
+      }
+    }).catch(() => {});
+  });
 
   // Function to check current permissions status
   const checkPermissionsStatus = async () => {
@@ -604,12 +651,23 @@ export default function OnboardingFlow({
 
       if (granted) {
         // Permission was already granted
+        recordEvent("onboarding_permission_granted", {
+          permission: permissionType,
+          t_ms_since_phase_entered: Date.now() - phaseEnteredMs.current,
+        });
         await checkPermissionsStatus();
       } else {
         // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         onboardingTimers.current.push(setTimeout(async () => {
-          if (mountedRef.current) await checkPermissionsStatus();
+          if (!mountedRef.current) return;
+          const newState = await checkPermissionsStatus();
+          if (newState) {
+            recordEvent("onboarding_permission_granted", {
+              permission: permissionType,
+              t_ms_since_phase_entered: Date.now() - phaseEnteredMs.current,
+            });
+          }
         }, 2000));
       }
     } catch (error) {
@@ -790,12 +848,26 @@ export default function OnboardingFlow({
     }
 
     if (currentStep < onboardingSteps.length - 1) {
+      const nextStep = onboardingSteps[currentStep + 1];
+      recordEvent("onboarding_phase_entered", {
+        phase: nextStep?.id ?? "unknown",
+        t_ms_since_start: Date.now() - onboardingStartMs.current,
+      });
+      phaseEnteredMs.current = Date.now();
+      // Persist step for restart-resume
+      if (nextStep?.id) {
+        invoke(COMMANDS.ONBOARDING_SET_ONBOARDING_STEP_PROGRESS, { stepId: nextStep.id }).catch(() => {});
+      }
       setCurrentStep(currentStep + 1);
     } else {
+      recordEvent("onboarding_completed", {
+        total_t_ms: Date.now() - onboardingStartMs.current,
+        skipped_phases: [],
+      });
       setIsComplete(true);
       onComplete();
     }
-  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, selectedRole, customRole, detectedProvider, apiKeySaved, saveApiKey, onComplete]);
+  }, [currentStep, onboardingSteps, shortcutPressed, escapePressed, permissionsState, selectedRole, customRole, detectedProvider, apiKeySaved, saveApiKey, onComplete, recordEvent]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
@@ -815,6 +887,13 @@ export default function OnboardingFlow({
       if (currentStepData?.id === "shortcut") {
         setShortcutPressed(true); // Allow progression if they come back
       }
+      recordEvent("onboarding_permission_skipped", { permission: currentStepData?.id ?? "unknown" });
+      const nextStep = onboardingSteps[currentStep + 1];
+      recordEvent("onboarding_phase_entered", {
+        phase: nextStep?.id ?? "unknown",
+        t_ms_since_start: Date.now() - onboardingStartMs.current,
+      });
+      phaseEnteredMs.current = Date.now();
       setCurrentStep(currentStep + 1);
     } else {
       // If this is the last step, complete onboarding
@@ -858,8 +937,24 @@ export default function OnboardingFlow({
     currentStep === onboardingSteps.length - 1 ||
     (step.id === "permissions" && !areRequiredPermissionsGranted());
 
+  // Transition config — instant when reduced motion is preferred.
+  // Framer-motion's Easing type accepts "easeOut" as a string literal.
+  const stepTransition = shouldReduceMotion
+    ? { duration: 0 }
+    : ({ duration: 0.4, ease: "easeOut" } as const);
+
   return (
     <>
+      {/* Screen-reader live region: announces step title on every transition */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {step.title} — step {currentStep + 1} of {onboardingSteps.length}
+      </div>
+
       <div className="fixed inset-0 flex items-center justify-center z-50">
         <div className="bg-background/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto p-10">
           {/* Progress indicator */}
@@ -885,10 +980,10 @@ export default function OnboardingFlow({
             {(step.id === "shortcut" || step.id === "cancel") && (
               <motion.div
                 key="floating-bar-preview"
-                initial={{ opacity: 0, y: -10 }}
+                initial={shouldReduceMotion ? false : { opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
+                exit={shouldReduceMotion ? undefined : { opacity: 0, y: -10 }}
+                transition={stepTransition}
                 className="flex justify-center mb-8"
               >
                 <AudioVisualizer
@@ -916,10 +1011,10 @@ export default function OnboardingFlow({
           <AnimatePresence mode="wait">
             <motion.div
               key={step.id}
-              initial={{ opacity: 0, y: 15 }}
+              initial={shouldReduceMotion ? false : { opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
+              exit={shouldReduceMotion ? undefined : { opacity: 0, y: -15 }}
+              transition={stepTransition}
               className="text-center"
             >
               {/* Icon (null for shortcut/cancel — floating bar is above) */}
@@ -1215,7 +1310,7 @@ export default function OnboardingFlow({
                 {isSkipHidden ? null : currentStep === 0 ? (
                   <button
                     onClick={handleSkip}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     aria-label="Skip onboarding"
                   >
                     Skip
@@ -1223,7 +1318,7 @@ export default function OnboardingFlow({
                 ) : (
                   <button
                     onClick={handleSkipStep}
-                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors"
+                    className="flex-1 py-3 text-muted-foreground hover:text-foreground font-medium transition-colors rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     aria-label="Skip this step"
                   >
                     Skip
@@ -1234,7 +1329,7 @@ export default function OnboardingFlow({
                 <button
                   onClick={handleNext}
                   disabled={isContinueDisabled}
-                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-3 px-6 font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
                     isContinueDisabled
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
                       : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl"

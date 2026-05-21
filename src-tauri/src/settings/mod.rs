@@ -238,6 +238,9 @@ pub struct OnboardingSettings {
     /// Role selected during onboarding (e.g. "engineer", "designer", "product", etc.)
     #[serde(default)]
     pub user_role: Option<String>,
+    /// Last step ID reached (for restart-resume). Maps to the frontend step.id strings.
+    #[serde(default)]
+    pub last_step_id: Option<String>,
 }
 
 /// CLI configuration settings
