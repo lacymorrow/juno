@@ -8,7 +8,7 @@
   "homepage": "https://junebug.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lacymorrow/juno"
+    "url": "git+https://github.com/lacymorrow/juno.git"
   },
   "keywords": [
     "ai",
