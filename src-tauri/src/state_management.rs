@@ -14,7 +14,7 @@ use crate::constants::events;
 
 /// Initialize all application state components and background tasks
 pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), String> {
-    info!("🚀 Initializing comprehensive application state management...");
+    debug!("🚀 Initializing comprehensive application state management...");
 
     // Initialize core state components in parallel
     let (
@@ -25,7 +25,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         onboarding_result,
         orchestrator_result,
         cloud_result,
-        floating_bar_result,
         ui_manager_result,
         monitoring_result,
     ) = tokio::join!(
@@ -36,7 +35,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         initialize_onboarding_state(app_handle.clone()),
         initialize_orchestrator_state(app_handle.clone()),
         initialize_cloud_state(app_handle.clone()),
-        initialize_floating_bar_state(app_handle.clone()),
         initialize_ui_manager_state(app_handle.clone()),
         initialize_monitoring_state(app_handle.clone()),
     );
@@ -65,9 +63,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     if let Err(e) = cloud_result {
         errors.push(format!("Cloud: {}", e));
     }
-    if let Err(e) = floating_bar_result {
-        errors.push(format!("Floating Bar: {}", e));
-    }
     if let Err(e) = ui_manager_result {
         errors.push(format!("UI Manager: {}", e));
     }
@@ -92,7 +87,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
 
 /// Initialize environment-related state (environment variables, configuration)
 async fn initialize_environment_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing environment state...");
+    debug!("[State] Initializing environment state...");
 
     // In dev, `startup::init_environment()` already loads from local `.env`.
     // The bundled `.env` resource is primarily for packaged builds.
@@ -111,7 +106,7 @@ async fn initialize_environment_state(app_handle: AppHandle) -> Result<(), Strin
 
 /// Initialize keyboard shortcuts state and global shortcut registration
 async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing shortcuts state...");
+    debug!("[State] Initializing shortcuts state...");
 
     let app_state = app_handle.state::<AppState>();
 
@@ -188,7 +183,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
 
 /// Initialize audio and voice settings state
 async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing audio settings state...");
+    debug!("[State] Initializing audio settings state...");
 
     let app_state = app_handle.state::<AppState>();
 
@@ -222,7 +217,7 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
 
 /// Initialize voice transcription plugin configuration
 async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result<(), String> {
-    info!("[State] Initializing voice transcription configuration...");
+    debug!("[State] Initializing voice transcription configuration...");
 
     // Get current audio settings from centralized system
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
@@ -278,7 +273,7 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
 
 /// Initialize onboarding system state
 async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing onboarding state...");
+    debug!("[State] Initializing onboarding state...");
 
     if let Err(e) =
         crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await
@@ -293,7 +288,7 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
 
 /// Initialize multi-agent orchestrator state
 async fn initialize_orchestrator_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing orchestrator state...");
+    debug!("[State] Initializing orchestrator state...");
 
     if let Err(e) =
         crate::commands::orchestrator::init_orchestrator_with_app_handle(app_handle.clone()).await
@@ -308,7 +303,7 @@ async fn initialize_orchestrator_state(app_handle: AppHandle) -> Result<(), Stri
 
 /// Initialize cloud connectivity state
 async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing cloud state...");
+    debug!("[State] Initializing cloud state...");
 
     let app_state = app_handle.state::<AppState>();
 
@@ -334,14 +329,6 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Initialize floating bar manager state
-async fn initialize_floating_bar_state(_app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing floating bar state...");
-    // UI Manager initialization moved to initialize_ui_manager_state to avoid duplicate initialization
-    info!("Floating bar state initialization completed");
-    Ok(())
-}
-
 /// Initialize UI Manager for consolidated floating UI elements
 async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String> {
     debug!("[State] Initializing UI Manager for consolidated floating elements...");
@@ -357,7 +344,7 @@ async fn initialize_ui_manager_state(app_handle: AppHandle) -> Result<(), String
 
 /// Initialize monitoring and background state tasks
 async fn initialize_monitoring_state(app_handle: AppHandle) -> Result<(), String> {
-    info!("[State] Initializing monitoring state...");
+    debug!("[State] Initializing monitoring state...");
 
     // Initialize autostart configuration
     if let Err(e) = crate::commands::autostart::init_autostart(&app_handle) {
@@ -371,7 +358,7 @@ async fn initialize_monitoring_state(app_handle: AppHandle) -> Result<(), String
 
 /// Start background tasks for state management and monitoring
 async fn start_background_state_tasks(app_handle: AppHandle) {
-    info!("[State] Starting background state management tasks...");
+    debug!("[State] Starting background state management tasks...");
 
     // Start MCP error recovery background task
     start_mcp_retry_task(app_handle.clone()).await;
