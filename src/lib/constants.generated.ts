@@ -46,6 +46,7 @@ export const EVENTS = {
   VOICE_TRANSCRIPTION_ERROR: 'voice-transcription:error',
   VOICE_TRANSCRIPTION_DICTATION_STARTED: 'voice-transcription:dictation-started',
   VOICE_TRANSCRIPTION_PARTIAL_RESULT: 'voice-transcription:partial-result',
+  VOICE_TRANSCRIPTION_AUDIO_LEVEL: 'voice-transcription:audio-level',
   TIMER_EXPIRED: 'timer-expired',
   TIMER_QUEUED: 'timer-queued',
   TIMER_PROCESSED: 'timer-processed',
