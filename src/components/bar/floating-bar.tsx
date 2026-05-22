@@ -221,7 +221,7 @@ const FloatingBarContent = () => {
 
   const [localInputValue, setLocalInputValue] = useState("");
 
-  // Real-time audio level driven by voice-audio-level events from the plugin
+  // Real-time audio level driven by voice-transcription:audio-level events from the plugin
   const [audioLevel, setAudioLevel] = useState(0);
 
   useEventListener<{ level: number }>(
@@ -233,12 +233,12 @@ const FloatingBarContent = () => {
 
   // Reset to baseline when leaving a recording state
   useEffect(() => {
-    const recordingStates = [
+    const recordingStates: readonly string[] = [
       UI.BAR_STATES_LISTENING,
       UI.BAR_STATES_TRANSCRIBING,
       UI.BAR_STATES_ALWAYS_LISTENING,
     ];
-    if (!recordingStates.includes(barState.barState as any)) {
+    if (!recordingStates.includes(barState.barState)) {
       setAudioLevel(0);
     }
   }, [barState.barState]);
