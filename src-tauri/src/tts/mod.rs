@@ -1,6 +1,7 @@
 pub mod elevenlabs;
 pub mod kokoro;
 pub mod replicate;
+pub mod supertonic;
 pub mod system;
 
 use tauri::{State, AppHandle};
@@ -461,7 +462,7 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro", "chatterbox"];
+    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro", "chatterbox", "supertonic"];
     if !valid_providers.contains(&provider.as_str()) {
         return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
     }
@@ -805,6 +806,7 @@ async fn execute_tts_with_fallback(
         "replicate" => vec!["replicate", "kokoro", "system"],
         "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
         "chatterbox" => vec!["chatterbox", "kokoro", "system"],
+        "supertonic" => vec!["supertonic", "kokoro", "system"],
         "kokoro" => vec!["kokoro", "system"],
         "system" => vec!["system"],
         "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
@@ -902,6 +904,17 @@ pub async fn invoke_tts_for_provider(
                 .unwrap_or((None, 0.5, false));
             replicate::invoke_chatterbox_tts(text, ref_url, exaggeration, use_hd).await
         }
+        "supertonic" => {
+            let (server_url, voice, speed) = _state
+                .as_ref()
+                .map(|s| (
+                    s.get_supertonic_server_url().unwrap_or_else(|_| "http://localhost:8000".to_string()),
+                    s.get_supertonic_voice().unwrap_or_else(|_| "M1".to_string()),
+                    s.get_supertonic_speed().unwrap_or(1.05),
+                ))
+                .unwrap_or(("http://localhost:8000".to_string(), "M1".to_string(), 1.05));
+            supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
+        }
         "system" => system::invoke_system_tts(text).await,
         "off" => {
              warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
@@ -912,6 +925,59 @@ pub async fn invoke_tts_for_provider(
             Err(format!("Unknown TTS provider: {}", provider))
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_supertonic_settings_command(
+    app_handle: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    Ok(serde_json::json!({
+        "server_url": audio_settings.supertonic_server_url,
+        "voice": audio_settings.supertonic_voice,
+        "speed": audio_settings.supertonic_speed,
+    }))
+}
+
+#[tauri::command]
+pub async fn set_supertonic_settings_command(
+    server_url: String,
+    voice: String,
+    speed: f64,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting Supertonic settings: server_url={}, voice={}, speed={:.2}", server_url, voice, speed);
+
+    if !(0.5..=2.0).contains(&speed) {
+        return Err(format!("Supertonic speed must be between 0.5 and 2.0, got {}", speed));
+    }
+
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    audio_settings.supertonic_server_url = server_url.clone();
+    audio_settings.supertonic_voice = voice.clone();
+    audio_settings.supertonic_speed = speed;
+
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save Supertonic settings: {}", e))?;
+
+    state.set_supertonic_server_url(server_url)
+        .map_err(|e| format!("Failed to set Supertonic server URL in state: {}", e))?;
+    state.set_supertonic_voice(voice)
+        .map_err(|e| format!("Failed to set Supertonic voice in state: {}", e))?;
+    state.set_supertonic_speed(speed)
+        .map_err(|e| format!("Failed to set Supertonic speed in state: {}", e))?;
+
+    info!("Supertonic settings saved");
+    Ok(())
 }
 
 #[cfg(test)]
