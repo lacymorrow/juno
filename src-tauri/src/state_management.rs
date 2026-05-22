@@ -25,7 +25,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         onboarding_result,
         orchestrator_result,
         cloud_result,
-        floating_bar_result,
         ui_manager_result,
         monitoring_result,
     ) = tokio::join!(
@@ -36,7 +35,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         initialize_onboarding_state(app_handle.clone()),
         initialize_orchestrator_state(app_handle.clone()),
         initialize_cloud_state(app_handle.clone()),
-        initialize_floating_bar_state(app_handle.clone()),
         initialize_ui_manager_state(app_handle.clone()),
         initialize_monitoring_state(app_handle.clone()),
     );
@@ -64,9 +62,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     if let Err(e) = cloud_result {
         errors.push(format!("Cloud: {}", e));
-    }
-    if let Err(e) = floating_bar_result {
-        errors.push(format!("Floating Bar: {}", e));
     }
     if let Err(e) = ui_manager_result {
         errors.push(format!("UI Manager: {}", e));
@@ -331,14 +326,6 @@ async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {
         info!("Cloud connectivity is disabled in configuration");
     }
 
-    Ok(())
-}
-
-/// Initialize floating bar manager state
-async fn initialize_floating_bar_state(_app_handle: AppHandle) -> Result<(), String> {
-    debug!("[State] Initializing floating bar state...");
-    // UI Manager initialization moved to initialize_ui_manager_state to avoid duplicate initialization
-    info!("Floating bar state initialization completed");
     Ok(())
 }
 
