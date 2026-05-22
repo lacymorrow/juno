@@ -67,6 +67,8 @@ pub mod voice_transcription {
     // Plugin-specific events
     pub const DICTATION_STARTED: &str = "voice-transcription:dictation-started";
     pub const PARTIAL_RESULT: &str = "voice-transcription:partial-result";
+    // Real-time audio level during active recording (0.0–1.0, emitted every ~70ms)
+    pub const AUDIO_LEVEL: &str = "voice-transcription:audio-level";
 }
 
 /// Timer events
