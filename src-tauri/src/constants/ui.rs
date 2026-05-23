@@ -150,14 +150,19 @@ pub mod standard_resolutions {
     /// Max Anthropic resolution — 2,576px long edge, 16:10 aspect
     pub const ULTRA_HD: (u32, u32) = (2576, 1610);
 
+    /// Ultra-wide 21:9 — 2560x1080, just under the 2576px long-edge cap.
+    /// Aspect ratio 2.370 matches 21:9 monitors (2.333) far better than
+    /// any 16:9 or 16:10 candidate (which have diff ≈ 0.55).
+    pub const UW_1080: (u32, u32) = (2560, 1080);
+
     /// Legacy resolutions for older models (pre-Opus 4.5)
     pub const LEGACY_RESOLUTIONS: [(u32, u32); 3] = [XGA, WXGA, FWXGA];
 
     /// High-resolution options for Opus 4.5+ models
-    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 3] = [HD_WXGA, HD_1080, ULTRA_HD];
+    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] = [HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
 
     /// All supported standard resolutions (legacy + high-res)
-    pub const ALL_RESOLUTIONS: [(u32, u32); 6] = [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD];
+    pub const ALL_RESOLUTIONS: [(u32, u32); 7] = [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
 
     /// Whether a model supports high-resolution screenshots (2,576px).
     /// Returns true for Opus 4.5+ models that use computer_20251124.
@@ -218,7 +223,7 @@ pub mod standard_resolutions {
         // Fall back to full candidate list if none fit (very small display)
         let pool = if fitting.is_empty() { candidates } else { &fitting };
 
-        pool
+        let selected = pool
             .iter()
             .copied()
             .min_by(|a, b| {
@@ -230,6 +235,114 @@ pub mod standard_resolutions {
                     // Tie-break: prefer larger resolution
                     .then_with(|| (b.0 * b.1).cmp(&(a.0 * a.1)))
             })
-            .unwrap_or(XGA)
+            .unwrap_or(XGA);
+
+        let selected_aspect = selected.0 as f64 / selected.1 as f64;
+        let aspect_diff = (display_aspect - selected_aspect).abs();
+        tracing::debug!(
+            "Resolution selection: display {}x{} (aspect {:.3}) → {}x{} (aspect {:.3}, diff {:.3})",
+            display_width, display_height, display_aspect,
+            selected.0, selected.1, selected_aspect, aspect_diff
+        );
+        if aspect_diff > 0.2 {
+            tracing::warn!(
+                "Aspect ratio mismatch: display {:.3} vs standard {:.3} (diff {:.3}) — \
+                 coordinates may be slightly imprecise for display {}x{}",
+                display_aspect, selected_aspect, aspect_diff, display_width, display_height
+            );
+        }
+
+        selected
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_4_3_display_selects_xga() {
+            // 1024×768 is 4:3 — XGA should win
+            let res = select_best_resolution(1024, 768);
+            assert_eq!(res, XGA, "4:3 display should select XGA");
+        }
+
+        #[test]
+        fn test_16_10_display_selects_wxga() {
+            // 1440×900 is 16:10 — WXGA should win over XGA and FWXGA
+            let res = select_best_resolution(1440, 900);
+            assert_eq!(res, WXGA, "16:10 display should select WXGA");
+        }
+
+        #[test]
+        fn test_macbook_pro_16_10_selects_wxga() {
+            // MacBook Pro 16" logical resolution (1728×1080) is close to 16:10
+            let res = select_best_resolution(1728, 1080);
+            assert_eq!(res, WXGA, "MacBook Pro 16\" (1728×1080) should select WXGA");
+        }
+
+        #[test]
+        fn test_16_9_display_selects_fwxga() {
+            // 1920×1080 is 16:9 — FWXGA should win
+            let res = select_best_resolution(1920, 1080);
+            assert_eq!(res, FWXGA, "16:9 display should select FWXGA");
+        }
+
+        #[test]
+        fn test_high_res_16_10_selects_hd_wxga_for_opus() {
+            // Opus 4.5+ on 16:10 should get HD_WXGA (1680×1050) over legacy WXGA
+            let res = select_best_resolution_for_model(1728, 1080, "opus");
+            assert_eq!(res, HD_WXGA, "Opus on 16:10 should select HD_WXGA (1680×1050)");
+        }
+
+        #[test]
+        fn test_high_res_16_9_selects_hd_1080_for_opus() {
+            // Opus 4.5+ on a 16:9 4K display should get HD_1080 (1920×1080)
+            let res = select_best_resolution_for_model(3840, 2160, "opus");
+            assert_eq!(res, HD_1080, "Opus on 16:9 4K should select HD_1080 (1920×1080)");
+        }
+
+        #[test]
+        fn test_ultra_wide_21_9_selects_uw_1080_for_opus() {
+            // Ultra-wide 3440×1440 (21:9) should pick UW_1080 (2560×1080)
+            let res = select_best_resolution_for_model(3440, 1440, "opus");
+            assert_eq!(res, UW_1080, "Ultra-wide 21:9 (3440×1440) should select UW_1080 (2560×1080)");
+        }
+
+        #[test]
+        fn test_ultra_wide_2560x1080_selects_uw_1080_for_opus() {
+            // 2560×1080 native ultra-wide
+            let res = select_best_resolution_for_model(2560, 1080, "opus");
+            assert_eq!(res, UW_1080, "Native 2560×1080 ultra-wide should select UW_1080");
+        }
+
+        #[test]
+        fn test_zero_dimensions_returns_xga_fallback() {
+            let res = select_best_resolution(0, 0);
+            assert_eq!(res, XGA, "Zero dimensions should fall back to XGA");
+        }
+
+        #[test]
+        fn test_very_small_display_falls_back_to_candidates() {
+            // Smaller than any standard resolution — should still return something
+            let res = select_best_resolution(640, 480);
+            assert_eq!(res, XGA, "640×480 (4:3) should fall back to XGA (closest aspect)");
+        }
+
+        #[test]
+        fn test_legacy_model_ignores_high_res_candidates() {
+            // A legacy model on a large 16:10 display should still get legacy WXGA
+            let res = select_best_resolution_for_model(2560, 1600, "claude-2");
+            assert_eq!(res, WXGA, "Legacy model should pick from LEGACY_RESOLUTIONS only");
+        }
+
+        #[test]
+        fn test_uw_1080_aspect_beats_hd_1080_for_ultra_wide() {
+            // Verify UW_1080 aspect (2.370) is closer to 21:9 (2.333) than HD_1080 (1.778)
+            let uw_diff = (2560.0 / 1080.0 - 3440.0 / 1440.0_f64).abs();
+            let hd_diff = (1920.0 / 1080.0 - 3440.0 / 1440.0_f64).abs();
+            assert!(uw_diff < hd_diff,
+                "UW_1080 should have a smaller aspect diff ({:.3}) than HD_1080 ({:.3}) for 3440×1440",
+                uw_diff, hd_diff);
+        }
     }
 }
