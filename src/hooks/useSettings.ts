@@ -124,6 +124,11 @@ export function useSettings() {
 	const [chatterboxExaggeration, setChatterboxExaggeration] = useState<number>(0.5);
 	const [chatterboxUseHd, setChatterboxUseHd] = useState<boolean>(false);
 
+	// Supertonic TTS Settings
+	const [supertonicServerUrl, setSupertonicServerUrl] = useState<string>("http://localhost:8000");
+	const [supertonicVoice, setSupertonicVoice] = useState<string>("M1");
+	const [supertonicSpeed, setSupertonicSpeed] = useState<number>(1.05);
+
 	// AI Provider Settings
 	const [providers, setProviders] = useState<ProviderInfo[]>([]);
 	const [activeProvider, setActiveProvider] = useState<string>("");
@@ -437,6 +442,20 @@ export function useSettings() {
 				console.warn("Failed to load Chatterbox settings:", error);
 			}
 
+			// Load Supertonic-specific settings
+			try {
+				const stSettings = await invokeCommand<{
+					server_url: string;
+					voice: string;
+					speed: number;
+				}>("get_supertonic_settings_command");
+				setSupertonicServerUrl(stSettings.server_url);
+				setSupertonicVoice(stSettings.voice);
+				setSupertonicSpeed(stSettings.speed);
+			} catch (error) {
+				console.warn("Failed to load Supertonic settings:", error);
+			}
+
 			if (currentActiveProvider) {
 				const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
 					providerId: currentActiveProvider,
@@ -625,6 +644,25 @@ export function useSettings() {
 		setChatterboxReferenceAudioUrl(referenceAudioUrl);
 		setChatterboxExaggeration(exaggeration);
 		setChatterboxUseHd(useHd);
+	}, [invokeCommand]);
+
+	const handleSupertonicSettingsChange = useCallback(async (
+		serverUrl: string,
+		voice: string,
+		speed: number,
+	) => {
+		await invokeCommand(
+			"set_supertonic_settings_command",
+			{ serverUrl, voice, speed },
+			{
+				showSuccessToast: true,
+				successMessage: "Supertonic settings saved",
+				errorMessage: "Failed to save Supertonic settings",
+			}
+		);
+		setSupertonicServerUrl(serverUrl);
+		setSupertonicVoice(voice);
+		setSupertonicSpeed(speed);
 	}, [invokeCommand]);
 
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
@@ -910,6 +948,9 @@ export function useSettings() {
 		chatterboxReferenceAudioUrl,
 		chatterboxExaggeration,
 		chatterboxUseHd,
+		supertonicServerUrl,
+		supertonicVoice,
+		supertonicSpeed,
 		providers,
 		activeProvider,
 		providerSettings,
@@ -952,6 +993,7 @@ export function useSettings() {
 		loadAllSettings,
 		handleTtsProviderChange,
 		handleChatterboxSettingsChange,
+		handleSupertonicSettingsChange,
 		handleActiveProviderChange,
 		handleSaveProviderSettings,
 		handleSoundEnabledChange,
