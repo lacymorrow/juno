@@ -33,6 +33,10 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     chatterboxExaggeration,
     chatterboxUseHd,
     handleChatterboxSettingsChange,
+    supertonicServerUrl,
+    supertonicVoice,
+    supertonicSpeed,
+    handleSupertonicSettingsChange,
   } = settings;
 
   const selectedModel = whisperModels.find((m) => m.id === currentWhisperModel);
@@ -45,6 +49,15 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
   const saveChatterboxSettings = () => {
     handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, chatterboxHd);
+  };
+
+  // Local draft state for Supertonic settings
+  const [stServerUrl, setStServerUrl] = useState<string>(supertonicServerUrl ?? "http://localhost:8000");
+  const [stVoice, setStVoice] = useState<string>(supertonicVoice ?? "M1");
+  const [stSpeed, setStSpeed] = useState<number>(supertonicSpeed ?? 1.05);
+
+  const saveSupertonicSettings = () => {
+    handleSupertonicSettingsChange(stServerUrl, stVoice, stSpeed);
   };
 
 
@@ -72,6 +85,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
                 <SelectItem value="replicate">Replicate</SelectItem>
                 <SelectItem value="chatterbox">Chatterbox (Cloud)</SelectItem>
+                <SelectItem value="supertonic">Supertonic (Local)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -141,6 +155,74 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                     handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, checked);
                   }}
                 />
+              </div>
+            </div>
+          )}
+
+          {settings.ttsProvider === "supertonic" && (
+            <div className="mt-4 space-y-4 rounded-md border p-4">
+              <p className="text-xs text-muted-foreground">
+                Supertonic is an MIT-licensed on-device TTS engine. 31 languages, 167x real-time on Apple Silicon.
+                Requires: pip install supertonic &amp;&amp; supertonic serve
+              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="supertonic-server-url">Server URL</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="supertonic-server-url"
+                    value={stServerUrl}
+                    onChange={(e) => setStServerUrl(e.target.value)}
+                    placeholder="http://localhost:8000"
+                    className="flex-1"
+                  />
+                  <Button size="sm" onClick={saveSupertonicSettings} variant="outline">
+                    <Save className="h-3 w-3" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  URL of the local Supertonic server (supertonic serve).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="supertonic-voice">Voice</Label>
+                <Select
+                  value={stVoice}
+                  onValueChange={(v) => {
+                    setStVoice(v);
+                    handleSupertonicSettingsChange(stServerUrl, v, stSpeed);
+                  }}
+                >
+                  <SelectTrigger id="supertonic-voice">
+                    <SelectValue placeholder="Select voice" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="M1">M1 (Male)</SelectItem>
+                    <SelectItem value="F1">F1 (Female)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="supertonic-speed">
+                  Speed: {stSpeed.toFixed(2)}x
+                </Label>
+                <input
+                  type="range"
+                  id="supertonic-speed"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={stSpeed}
+                  onChange={(e) => setStSpeed(parseFloat(e.target.value))}
+                  onMouseUp={saveSupertonicSettings}
+                  onTouchEnd={saveSupertonicSettings}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <p className="text-xs text-muted-foreground">
+                  0.5 = slow, 1.05 = default, 2.0 = fast
+                </p>
               </div>
             </div>
           )}

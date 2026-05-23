@@ -133,6 +133,12 @@ pub struct AudioSettings {
     pub chatterbox_exaggeration: f32,
     #[serde(default)]
     pub chatterbox_use_hd: bool,
+    #[serde(default = "AudioSettings::default_supertonic_server_url")]
+    pub supertonic_server_url: String,
+    #[serde(default = "AudioSettings::default_supertonic_voice")]
+    pub supertonic_voice: String,
+    #[serde(default = "AudioSettings::default_supertonic_speed")]
+    pub supertonic_speed: f64,
     pub sound_enabled: bool,
     pub dictation_clipboard_enabled: bool,
     pub dictation_trigger_mode: String, // "tap" or "hold"
@@ -149,6 +155,18 @@ impl AudioSettings {
 
     fn default_chatterbox_exaggeration() -> f32 {
         0.5
+    }
+
+    fn default_supertonic_server_url() -> String {
+        crate::tts::supertonic::DEFAULT_SERVER_URL.to_string()
+    }
+
+    fn default_supertonic_voice() -> String {
+        crate::tts::supertonic::DEFAULT_VOICE.to_string()
+    }
+
+    fn default_supertonic_speed() -> f64 {
+        crate::tts::supertonic::DEFAULT_SPEED
     }
 }
 
@@ -368,6 +386,9 @@ impl Default for AudioSettings {
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
             chatterbox_use_hd: false,
+            supertonic_server_url: Self::default_supertonic_server_url(),
+            supertonic_voice: Self::default_supertonic_voice(),
+            supertonic_speed: Self::default_supertonic_speed(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_trigger_mode: "hold".to_string(),

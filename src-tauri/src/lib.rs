@@ -357,6 +357,8 @@ pub fn run() {
             tts::get_kokoro_voice_command, // Kokoro voice selection via settings
             tts::get_chatterbox_settings_command, // Chatterbox TTS settings
             tts::set_chatterbox_settings_command, // Chatterbox TTS settings
+            tts::get_supertonic_settings_command, // Supertonic TTS settings
+            tts::set_supertonic_settings_command, // Supertonic TTS settings
             tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,

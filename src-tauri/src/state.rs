@@ -197,6 +197,9 @@ pub struct AudioSettings {
     pub chatterbox_reference_audio_url: Option<String>,
     pub chatterbox_exaggeration: f32,
     pub chatterbox_use_hd: bool,
+    pub supertonic_server_url: String,
+    pub supertonic_voice: String,
+    pub supertonic_speed: f64,
     pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
@@ -224,6 +227,9 @@ impl Default for AudioSettings {
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: 0.5,
             chatterbox_use_hd: false,
+            supertonic_server_url: crate::tts::supertonic::DEFAULT_SERVER_URL.to_string(),
+            supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
+            supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
@@ -527,6 +533,47 @@ impl AppState {
             .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox HD mode", e))
     }
 
+    pub fn get_supertonic_server_url(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_server_url.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic server URL", e))
+    }
+
+    pub fn set_supertonic_server_url(&self, url: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_server_url = url)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic server URL", e))
+    }
+
+    pub fn get_supertonic_voice(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic voice", e))
+    }
+
+    pub fn set_supertonic_voice(&self, voice: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic voice", e))
+    }
+
+    pub fn get_supertonic_speed(&self) -> Result<f64, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_speed)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic speed", e))
+    }
+
+    pub fn set_supertonic_speed(&self, speed: f64) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_speed = speed)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic speed", e))
+    }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
         self.audio_settings
