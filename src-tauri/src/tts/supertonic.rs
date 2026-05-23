@@ -1,11 +1,26 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use reqwest::Client;
 use serde::Serialize;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-const DEFAULT_SERVER_URL: &str = "http://localhost:8000";
+pub const DEFAULT_SERVER_URL: &str = "http://localhost:8000";
+pub const DEFAULT_VOICE: &str = "M1";
+pub const DEFAULT_SPEED: f64 = 1.05;
+
 const REQUEST_TIMEOUT_SECS: u64 = 60;
+
+static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn get_http_client() -> &'static Client {
+    HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .build()
+            .unwrap_or_else(|_| Client::new())
+    })
+}
 
 #[derive(Serialize)]
 struct SupertonicRequest {
@@ -39,17 +54,14 @@ pub async fn invoke_supertonic_tts(
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
-    let base_url = if server_url.is_empty() {
+    let base_url = if server_url.trim().is_empty() {
         DEFAULT_SERVER_URL.to_string()
     } else {
         server_url
     };
     let url = format!("{}/v1/audio/speech", base_url.trim_end_matches('/'));
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("[Supertonic] Failed to create HTTP client: {}", e))?;
+    let client = get_http_client();
 
     let payload = SupertonicRequest {
         model: "supertonic".to_string(),

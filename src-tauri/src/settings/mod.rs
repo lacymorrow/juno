@@ -158,15 +158,15 @@ impl AudioSettings {
     }
 
     fn default_supertonic_server_url() -> String {
-        "http://localhost:8000".to_string()
+        crate::tts::supertonic::DEFAULT_SERVER_URL.to_string()
     }
 
     fn default_supertonic_voice() -> String {
-        "M1".to_string()
+        crate::tts::supertonic::DEFAULT_VOICE.to_string()
     }
 
     fn default_supertonic_speed() -> f64 {
-        1.05
+        crate::tts::supertonic::DEFAULT_SPEED
     }
 }
 

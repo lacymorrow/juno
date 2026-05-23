@@ -908,11 +908,11 @@ pub async fn invoke_tts_for_provider(
             let (server_url, voice, speed) = _state
                 .as_ref()
                 .map(|s| (
-                    s.get_supertonic_server_url().unwrap_or_else(|_| "http://localhost:8000".to_string()),
-                    s.get_supertonic_voice().unwrap_or_else(|_| "M1".to_string()),
-                    s.get_supertonic_speed().unwrap_or(1.05),
+                    s.get_supertonic_server_url().unwrap_or_else(|_| supertonic::DEFAULT_SERVER_URL.to_string()),
+                    s.get_supertonic_voice().unwrap_or_else(|_| supertonic::DEFAULT_VOICE.to_string()),
+                    s.get_supertonic_speed().unwrap_or(supertonic::DEFAULT_SPEED),
                 ))
-                .unwrap_or(("http://localhost:8000".to_string(), "M1".to_string(), 1.05));
+                .unwrap_or((supertonic::DEFAULT_SERVER_URL.to_string(), supertonic::DEFAULT_VOICE.to_string(), supertonic::DEFAULT_SPEED));
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
         "system" => system::invoke_system_tts(text).await,
