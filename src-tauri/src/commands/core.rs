@@ -73,9 +73,23 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                     // Get display information to calculate proper scaling
                     match get_display_dimensions() {
                         Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
-                            // Select the best standard resolution for this display
-                            let (standard_width, standard_height) =
-                                crate::constants::ui::standard_resolutions::select_best_resolution(display_width, display_height);
+                            // Select the best standard resolution for this display, model-aware.
+                            // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
+                            // so the image Claude receives matches the declared display_width_px/display_height_px.
+                            use crate::constants::ui::standard_resolutions;
+                            let model = coordinates::get_current_model();
+                            let display_aspect = display_width as f64 / display_height as f64;
+                            let (standard_width, standard_height) = if model.is_empty() {
+                                standard_resolutions::select_best_resolution(display_width, display_height)
+                            } else {
+                                standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+                            };
+                            info!(
+                                "Resolution selection: display {}x{} (aspect {:.3}) → standard {}x{} (model: {})",
+                                display_width, display_height, display_aspect,
+                                standard_width, standard_height,
+                                if model.is_empty() { "unknown/legacy" } else { &model }
+                            );
 
                             // Determine if we need to scale the screenshot to match standard resolution
                             let needs_scaling = original_width != standard_width || original_height != standard_height;
