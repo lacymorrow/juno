@@ -98,21 +98,21 @@ fn is_development_mode() -> bool {
     }
 }
 
-/// Check if the user has completed onboarding
-/// In development mode, this will always return false to show onboarding
+/// Check if the user has completed onboarding.
+/// Respects persisted settings in all modes. Development mode no longer
+/// forces onboarding on every launch — use `reset_onboarding` / "Restart
+/// Onboarding" in settings to explicitly re-test the flow.
 #[tauri::command]
 pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
-    // In development mode, always show onboarding
-    if is_development_mode() {
-        info!("Development mode detected - onboarding will always be shown");
-        return Ok(false);
-    }
-
     let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
     let onboarding_settings = settings_manager
         .get_onboarding_settings()
         .await
         .map_err(|e| e.to_string())?;
+
+    if is_development_mode() && !onboarding_settings.completed {
+        info!("Development mode: onboarding not yet completed, will show");
+    }
 
     Ok(onboarding_settings.completed)
 }
