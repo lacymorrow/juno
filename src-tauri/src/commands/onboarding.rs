@@ -98,21 +98,21 @@ fn is_development_mode() -> bool {
     }
 }
 
-/// Check if the user has completed onboarding
-/// In development mode, this will always return false to show onboarding
+/// Check if the user has completed onboarding.
+/// Respects persisted settings in all modes. Development mode no longer
+/// forces onboarding on every launch — use `reset_onboarding` / "Restart
+/// Onboarding" in settings to explicitly re-test the flow.
 #[tauri::command]
 pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
-    // In development mode, always show onboarding
-    if is_development_mode() {
-        info!("Development mode detected - onboarding will always be shown");
-        return Ok(false);
-    }
-
     let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
     let onboarding_settings = settings_manager
         .get_onboarding_settings()
         .await
         .map_err(|e| e.to_string())?;
+
+    if is_development_mode() && !onboarding_settings.completed {
+        info!("Development mode: onboarding not yet completed, will show");
+    }
 
     Ok(onboarding_settings.completed)
 }
@@ -144,6 +144,8 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     info!("Onboarding marked as completed at {}", now);
+
+    update_onboarding_phase(&app, OnboardingPhase::Complete, true).await;
 
     // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
@@ -187,6 +189,8 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         "Onboarding skipped at {} (skip count: {})",
         now, onboarding_settings.skip_count
     );
+
+    update_onboarding_phase(&app, OnboardingPhase::Complete, true).await;
 
     // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
@@ -273,8 +277,17 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
 pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     info!("Restarting onboarding flow...");
 
-    // Reset onboarding status
+    // Reset onboarding status (persisted settings)
     reset_onboarding(app.clone()).await?;
+
+    // Reset the in-memory state machine and notify the UI so the chat input re-blocks
+    update_onboarding_phase(&app, OnboardingPhase::Greeting, false).await;
+
+    // Set onboarding active so shortcut handlers suppress normal behavior and
+    // the escape key monitor starts (mirrors initialize_onboarding_system)
+    if let Err(e) = set_onboarding_active(app.clone(), true).await {
+        error!("[Onboarding] Failed to set onboarding active during restart: {}", e);
+    }
 
     // Open the onboarding window
     if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
@@ -443,6 +456,10 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
     } else {
         info!("Onboarding already completed, showing main window");
 
+        // Sync the in-memory phase to Complete so get_onboarding_state returns the
+        // correct value when the main window mounts.
+        update_onboarding_phase(&app_handle, OnboardingPhase::Complete, false).await;
+
         // Hide the onboarding window (it starts visible from tauri.conf.json)
         if let Err(e) = crate::window_management::close_onboarding_window(app_handle.clone()).await
         {
@@ -459,6 +476,27 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 }
 
 // ── State machine commands ────────────────────────────────────────────────────
+
+/// Update the in-memory phase, emit `onboarding-state-changed`, and optionally
+/// stream the phase's intro message to the chat. Single source of truth for all
+/// state transitions outside the normal `onboarding_action` command path.
+async fn update_onboarding_phase(app: &AppHandle, new_phase: OnboardingPhase, emit_message: bool) {
+    {
+        let mut phase_guard = ONBOARDING_PHASE.lock().await;
+        *phase_guard = new_phase.clone();
+    }
+    let info = OnboardingStateInfo {
+        can_advance: new_phase != OnboardingPhase::Complete,
+        can_skip: new_phase.is_skippable(),
+        phase: new_phase.clone(),
+    };
+    if let Err(e) = app.emit(events::onboarding::STATE_CHANGED, &info) {
+        warn!("Failed to emit onboarding state change: {}", e);
+    }
+    if emit_message {
+        emit_onboarding_message(app, new_phase.intro_message());
+    }
+}
 
 /// Return the current onboarding phase without advancing.
 #[tauri::command]
