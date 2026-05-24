@@ -283,6 +283,12 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     // Reset the in-memory state machine and notify the UI so the chat input re-blocks
     update_onboarding_phase(&app, OnboardingPhase::Greeting, false).await;
 
+    // Set onboarding active so shortcut handlers suppress normal behavior and
+    // the escape key monitor starts (mirrors initialize_onboarding_system)
+    if let Err(e) = set_onboarding_active(app.clone(), true).await {
+        error!("[Onboarding] Failed to set onboarding active during restart: {}", e);
+    }
+
     // Open the onboarding window
     if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
         warn!("Failed to open onboarding window: {}", e);

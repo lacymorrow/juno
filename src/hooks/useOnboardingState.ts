@@ -30,9 +30,11 @@ export function useOnboardingState() {
 
   // Fetch current state on mount
   useEffect(() => {
+    let mounted = true;
     invoke<OnboardingStateInfo>("get_onboarding_state")
-      .then(setState)
-      .catch(() => {});
+      .then((info) => { if (mounted) setState(info); })
+      .catch((e) => console.warn("[useOnboardingState] Failed to fetch initial state:", e));
+    return () => { mounted = false; };
   }, []);
 
   // Live updates from the backend state machine — single source of truth.
