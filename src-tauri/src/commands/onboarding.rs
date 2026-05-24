@@ -145,6 +145,10 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 
     info!("Onboarding marked as completed at {}", now);
 
+    // Advance the in-memory state machine to Complete so the main window's
+    // useOnboardingState hook sees the correct phase and unblocks the chat input.
+    set_phase_complete(&app).await;
+
     // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
         warn!("Failed to clear onboarding active state on completion: {}", e);
@@ -187,6 +191,10 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         "Onboarding skipped at {} (skip count: {})",
         now, onboarding_settings.skip_count
     );
+
+    // Advance the in-memory state machine to Complete so the main window's
+    // useOnboardingState hook sees the correct phase and unblocks the chat input.
+    set_phase_complete(&app).await;
 
     // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
@@ -273,8 +281,14 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
 pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     info!("Restarting onboarding flow...");
 
-    // Reset onboarding status
+    // Reset onboarding status (persisted settings)
     reset_onboarding(app.clone()).await?;
+
+    // Reset the in-memory state machine back to Greeting
+    {
+        let mut phase = ONBOARDING_PHASE.lock().await;
+        *phase = OnboardingPhase::Greeting;
+    }
 
     // Open the onboarding window
     if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
@@ -443,6 +457,13 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
     } else {
         info!("Onboarding already completed, showing main window");
 
+        // Sync the in-memory phase to Complete so get_onboarding_state returns the
+        // correct value when the main window mounts.
+        {
+            let mut phase = ONBOARDING_PHASE.lock().await;
+            *phase = OnboardingPhase::Complete;
+        }
+
         // Hide the onboarding window (it starts visible from tauri.conf.json)
         if let Err(e) = crate::window_management::close_onboarding_window(app_handle.clone()).await
         {
@@ -459,6 +480,24 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
 }
 
 // ── State machine commands ────────────────────────────────────────────────────
+
+/// Advance the in-memory state machine to `Complete` and emit the
+/// `onboarding-state-changed` event so the main window unblocks the chat input.
+/// Called by `complete_onboarding` and `skip_onboarding`.
+async fn set_phase_complete(app: &AppHandle) {
+    {
+        let mut phase = ONBOARDING_PHASE.lock().await;
+        *phase = OnboardingPhase::Complete;
+    }
+    let info = OnboardingStateInfo {
+        phase: OnboardingPhase::Complete,
+        can_advance: false,
+        can_skip: false,
+    };
+    if let Err(e) = app.emit(events::onboarding::STATE_CHANGED, &info) {
+        warn!("Failed to emit onboarding state change to Complete: {}", e);
+    }
+}
 
 /// Return the current onboarding phase without advancing.
 #[tauri::command]

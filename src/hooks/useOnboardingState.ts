@@ -25,6 +25,12 @@ export interface OnboardingStateInfo {
   can_skip: boolean;
 }
 
+const COMPLETE_STATE: OnboardingStateInfo = {
+  phase: "complete",
+  can_advance: false,
+  can_skip: false,
+};
+
 export function useOnboardingState() {
   const [state, setState] = useState<OnboardingStateInfo | null>(null);
 
@@ -38,6 +44,15 @@ export function useOnboardingState() {
   // Live updates from the backend state machine
   useEventListener<OnboardingStateInfo>(EVENTS.ONBOARDING_STATE_CHANGED, (payload) => {
     setState(payload);
+  });
+
+  // Also listen for completion/skip events from the onboarding window
+  useEventListener(EVENTS.ONBOARDING_COMPLETE, () => {
+    setState(COMPLETE_STATE);
+  });
+
+  useEventListener(EVENTS.ONBOARDING_SKIPPED, () => {
+    setState(COMPLETE_STATE);
   });
 
   const isOnboardingActive =
