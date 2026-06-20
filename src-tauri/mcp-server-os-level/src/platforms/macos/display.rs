@@ -320,7 +320,7 @@ pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError>
                 Some(l) => l,
                 None => continue,
             };
-            if layer >= 20 || layer < -1 {
+            if !(-1..20).contains(&layer) {
                 continue;
             }
 
@@ -425,7 +425,7 @@ pub(crate) fn get_pid_at_screen_point(x: f64, y: f64) -> Option<i32> {
                 Some(l) => l,
                 None => continue,
             };
-            if layer >= 20 || layer < -1 {
+            if !(-1..20).contains(&layer) {
                 continue;
             }
 

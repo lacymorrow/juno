@@ -1187,11 +1187,11 @@ fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
         // Allocate lookup keys once — reused across every window in the list
         let pid_key: *mut objc::runtime::Object = msg_send![
             class!(NSString),
-            stringWithUTF8String: b"kCGWindowOwnerPID\0".as_ptr()
+            stringWithUTF8String: c"kCGWindowOwnerPID".as_ptr()
         ];
         let name_key: *mut objc::runtime::Object = msg_send![
             class!(NSString),
-            stringWithUTF8String: b"kCGWindowName\0".as_ptr()
+            stringWithUTF8String: c"kCGWindowName".as_ptr()
         ];
 
         for i in 0..count {

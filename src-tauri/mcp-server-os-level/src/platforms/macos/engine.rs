@@ -2322,7 +2322,7 @@ impl AccessibilityEngine for MacOSEngine {
 
     fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
         let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.map_or(true, |f| f.is_empty()) { None } else { flags };
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
         interaction::left_click_no_warp(x, y, flags_opt)
     }
 
@@ -2332,7 +2332,7 @@ impl AccessibilityEngine for MacOSEngine {
 
     fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
         let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.map_or(true, |f| f.is_empty()) { None } else { flags };
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
         interaction::double_click_no_warp(x, y, flags_opt)
     }
 
