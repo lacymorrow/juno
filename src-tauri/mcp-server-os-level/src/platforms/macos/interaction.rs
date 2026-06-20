@@ -1562,11 +1562,16 @@ static SKYLIGHT_FN: OnceLock<Option<SLEventPostToPidFn>> = OnceLock::new();
 // remote observation capability to Chromium/Electron so they do not suspend their
 // AX tree when windows are backgrounded or occluded.
 
+// Phase 4 infrastructure — staged for the focus-without-raise feature.
+// Loaded but not yet wired into callers; suppress dead_code until integration lands.
+#[allow(dead_code)]
 type SLPSPostEventRecordToFn =
     unsafe extern "C" fn(*mut ffi::ProcessSerialNumber, *mut c_void) -> i32;
 
+#[allow(dead_code)]
 static SLPS_POST_EVENT_FN: OnceLock<Option<SLPSPostEventRecordToFn>> = OnceLock::new();
 
+#[allow(dead_code)]
 fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
     *SLPS_POST_EVENT_FN.get_or_init(|| {
         let path = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
@@ -1592,6 +1597,7 @@ fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
 
 // _AXObserverAddNotificationAndCheckRemote:
 // (AXObserverRef, AXUIElementRef, CFStringRef, void* refcon, Boolean* isRemote) -> AXError
+#[allow(dead_code)]
 type AXObserverCheckRemoteFn = unsafe extern "C" fn(
     *mut c_void,   // AXObserverRef
     *const c_void, // AXUIElementRef
@@ -1600,11 +1606,13 @@ type AXObserverCheckRemoteFn = unsafe extern "C" fn(
     *mut bool,     // is_remote (out)
 ) -> i32;
 
+#[allow(dead_code)]
 static AX_REMOTE_OBSERVER_FN: OnceLock<Option<AXObserverCheckRemoteFn>> = OnceLock::new();
 
 /// Attempt to load `_AXObserverAddNotificationAndCheckRemote` from HIServices.
 /// Returns the function pointer if available. Used to signal remote observation
 /// capability so Chromium/Electron do not suspend AX for backgrounded windows.
+#[allow(dead_code)]
 pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> {
     *AX_REMOTE_OBSERVER_FN.get_or_init(|| {
         let path = b"/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices\0";
@@ -1640,6 +1648,7 @@ pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> 
 /// Returns `true` if focus was successfully redirected, `false` on graceful fallback.
 /// In the fallback case `CGEventPostToPid` (Phase 3) still delivers mouse events;
 /// only keyboard routing to background apps is degraded.
+#[allow(dead_code)]
 pub(crate) fn activate_without_raise(pid: i32) -> bool {
     if let Some(slps_fn) = get_slps_post_event_record_to() {
         let mut psn = ffi::ProcessSerialNumber::default();
@@ -1811,6 +1820,7 @@ pub(crate) fn double_click_no_warp(
     left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2, pid)
 }
 
+#[allow(clippy::too_many_arguments)] // PID is passed pre-resolved to avoid double-syscall in double_click_no_warp
 fn left_click_no_warp_inner(
     x: f64,
     y: f64,

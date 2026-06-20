@@ -73,6 +73,7 @@ fn emit_agent_cursor_update(
 }
 
 /// Emit cursor removal for a named agent (call on agent completion or cancellation).
+#[allow(dead_code)] // Symmetric counterpart to emit_agent_cursor_update — staged for completion/cancel paths
 fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
     let state_manager = app_handle.state::<AppState>();
     state_manager.remove_agent_cursor(agent_id);

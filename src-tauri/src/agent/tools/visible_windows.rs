@@ -81,7 +81,7 @@ pub async fn window_titles_for_app(app_name: &str) -> Result<Vec<String>, String
     #[cfg(target_os = "macos")]
     {
         let target = app_name.to_lowercase();
-        let windows = tokio::task::spawn_blocking(move || list_visible_windows())
+        let windows = tokio::task::spawn_blocking(list_visible_windows)
             .await
             .map_err(|e| format!("get_app_windows task panicked: {}", e))?
             .map_err(|e| {
@@ -128,7 +128,7 @@ async fn get_app_windows_impl(input: Value) -> Result<Value, String> {
 async fn list_visible_windows_impl() -> Result<Value, String> {
     #[cfg(target_os = "macos")]
     {
-        tokio::task::spawn_blocking(|| list_visible_windows())
+        tokio::task::spawn_blocking(list_visible_windows)
             .await
             .map_err(|e| format!("list_visible_windows task panicked: {}", e))?
             .map(|windows| {

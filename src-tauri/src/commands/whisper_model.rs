@@ -51,15 +51,14 @@ pub struct WhisperDownloadProgress {
     pub percent: f32,
 }
 
+#[derive(Default)]
 pub struct WhisperDownloadState {
     pub active_model_id: Option<String>,
 }
 
 impl WhisperDownloadState {
     pub fn new() -> Self {
-        Self {
-            active_model_id: None,
-        }
+        Self::default()
     }
 }
 
