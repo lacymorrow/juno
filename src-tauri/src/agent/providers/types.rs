@@ -4,6 +4,8 @@
 // Model ID Constants - Single source of truth
 pub mod model_ids {
     // Anthropic Claude Models — Current Generation
+    pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
+    pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
     pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
     pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
     pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
@@ -20,6 +22,8 @@ pub mod model_ids {
     /// new computer type (computer_20251124) + new editor (text_editor_20250728).
     /// These also support high-resolution screenshots up to 2,576px.
     pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[
+        CLAUDE_FABLE_5,
+        CLAUDE_OPUS_4_8,
         CLAUDE_OPUS_4_5,
         CLAUDE_OPUS_4_6,
         CLAUDE_OPUS_4_7,
@@ -186,11 +190,25 @@ impl Provider {
                 &[
                     // Current generation
                     ModelDefinition {
+                        id: model_ids::CLAUDE_FABLE_5,
+                        name: "Claude Fable 5",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_4_8,
+                        name: "Claude Opus 4.8",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: true,
+                    },
+                    ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_7,
                         name: "Claude Opus 4.7",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_4_6,
@@ -493,6 +511,40 @@ mod tests {
             model_ids::CLAUDE_HAIKU_4_5,
         );
         assert_eq!(editor, "text_editor_20250728", "Haiku 4.5 should use new editor type");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_opus_4_8_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_OPUS_4_8,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_OPUS_4_8,
+        );
+        assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_fable_5_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_FABLE_5,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_FABLE_5,
+        );
+        assert_eq!(editor, "text_editor_20250728");
     }
 
     #[test]
