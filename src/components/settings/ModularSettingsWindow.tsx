@@ -130,7 +130,7 @@ export default function ModularSettingsWindow() {
   return (
     <div className="flex w-full min-w-0 h-screen bg-gray-50">
       {/* Sidebar with categories - macOS style */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
@@ -179,7 +179,7 @@ export default function ModularSettingsWindow() {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Title bar area */}
         <div className="h-12 flex items-center justify-between px-6 bg-transparent">
           <div className="flex items-center gap-3">
