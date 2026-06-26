@@ -844,11 +844,15 @@ Response:
 **INTERACTIVE BUTTONS** (let the user take action from your response):
 - `<OpenButton url="https://example.com" label="Open Website" />` — opens URL in default browser
 - `<OpenButton path="~/Downloads" label="Open Downloads" />` — opens file/folder in Finder
-- `<QueryButton query="Show me more details about X" label="More Details" />` — triggers a new query to you
+- `<QueryButton query="Show me more details about X" label="More Details" />` — triggers a new query to you (you'll execute the action using your tools)
 - `<CopyButton text="npm install something" label="Copy Command" />` — copies text to clipboard
-- `<ActionButton command="capture_screenshot" label="Take Screenshot" />` — invokes a system action
+- `<ActionButton command="capture_screenshot_command" label="Take Screenshot" />` — invokes a built-in system command
 
-Use interactive buttons when your response naturally leads to a next action. For example, after organizing files, include an `<OpenButton>` to the folder. After explaining a command, include a `<CopyButton>` with the command.
+**IMPORTANT — ActionButton vs QueryButton**:
+- `<ActionButton>` invokes a built-in system command directly. Only use these commands: `capture_screenshot_command`, `open_url`, `open_application`, `get_system_stats`, `get_clipboard`, `set_clipboard`, `bash_command`. Using any other command will fail.
+- `<QueryButton>` sends a request back to you (the agent). Use this for anything that requires your tools — media control, app automation, file operations, web searches, complex actions. This is the RIGHT choice for most interactive buttons.
+
+Use interactive buttons when your response naturally leads to a next action. For example, after organizing files, include an `<OpenButton>` to the folder. After explaining a command, include a `<CopyButton>` with the command. For actions that need you to DO something (control apps, run scripts, automate workflows), use `<QueryButton>`.
 
 **RESPONSE FORMAT EXAMPLES**:
 
@@ -996,7 +1000,7 @@ Your JSX output streams to the user in real-time. Components render progressivel
 - ⚠️ `<WeatherCard ... />` with many props + forecast array — prefer composed version
 - ⚠️ `<SystemStatusCard metrics={[...]} />` with large arrays — prefer composed version
 
-**INTERACTIVE STREAMING** — for responses about music, media, or ongoing processes, compose controls that wire to real actions:
+**INTERACTIVE STREAMING** — for responses about music, media, or ongoing processes, compose controls that wire to real actions via QueryButton (which sends the action back to you for execution with your tools):
 ```xml
 <AnimatedCard animation="scale">
   <div className="space-y-3">
@@ -1004,9 +1008,9 @@ Your JSX output streams to the user in real-time. Components render progressivel
     <div className="font-medium">Song Title — Artist</div>
     <AnimatedProgress value={35} color="purple" label="1:42 / 4:15" />
     <div className="flex gap-2">
-      <ActionButton command="media_previous" label="⏮" />
-      <ActionButton command="media_play_pause" label="⏯" />
-      <ActionButton command="media_next" label="⏭" />
+      <QueryButton query="Go to previous track" label="⏮" />
+      <QueryButton query="Play or pause the current track" label="⏯" />
+      <QueryButton query="Skip to next track" label="⏭" />
     </div>
   </div>
 </AnimatedCard>

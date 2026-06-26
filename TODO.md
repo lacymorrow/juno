@@ -2,12 +2,10 @@
 
 ## JSX/MDX Renderer
 
-### Re-enable ActionButton command whitelist
+### ~~Re-enable ActionButton command whitelist~~ ✅ DONE (LAC-2461)
 - **File**: `src/components/ui/agent-actions.tsx`
-- **Status**: Disabled — `isCommandAllowed()` currently returns `true` for all commands
-- **Why disabled**: During development, all Tauri commands are allowed so the agent can invoke any command via `<ActionButton command="..." />`. This removes friction while building out the component system.
-- **Before production**: Restore the `ALLOWED_COMMANDS` whitelist to restrict which Tauri commands agent-rendered JSX can invoke. The previous whitelist was: `open_url`, `open_application`, `get_system_info`, `capture_screenshot`, `submit_query`, `ui_handle_interaction`.
-- **Risk if left disabled**: Agent-rendered JSX could invoke destructive commands (e.g., file deletion, shell execution) if the LLM is prompted to emit malicious JSX.
+- **Status**: Whitelist re-enabled. Non-whitelisted commands fall back to `submit_query` (agent-mediated execution).
+- **Allowed commands**: `open_url`, `open_application`, `capture_screenshot_command`, `submit_query`, `get_system_stats`, `get_clipboard`, `set_clipboard`, `bash_command`.
 
 ### Add floating pane for JSX/MDX display
 - **Current**: JSX/MDX renders inline in the chat window via `MixedContentRenderer` / `JsxMessageRenderer`
