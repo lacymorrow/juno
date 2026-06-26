@@ -10,10 +10,10 @@ import { cn } from "@/lib/utils";
 import { isDevelopment } from "@/lib";
 import {
   ArrowLeft,
+  MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  SquarePen,
 } from "lucide-react";
 
 // Type for view state
@@ -92,7 +92,7 @@ export function AppHeader({
             className="h-7 w-7 p-0"
             disabled={isProcessing}
           >
-            <SquarePen size={14} />
+            <MessageSquarePlus size={14} />
           </Button>
         )}
         {/* Back Button - show for devtools, permissions views */}
