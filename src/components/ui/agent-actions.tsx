@@ -37,7 +37,6 @@ const ALLOWED_COMMANDS = new Set([
   "get_system_stats",
   "get_clipboard",
   "set_clipboard",
-  "bash_command",
 ]);
 
 function isCommandAllowed(command: string): boolean {

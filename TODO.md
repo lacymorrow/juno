@@ -5,7 +5,7 @@
 ### ~~Re-enable ActionButton command whitelist~~ ✅ DONE (LAC-2461)
 - **File**: `src/components/ui/agent-actions.tsx`
 - **Status**: Whitelist re-enabled. Non-whitelisted commands fall back to `submit_query` (agent-mediated execution).
-- **Allowed commands**: `open_url`, `open_application`, `capture_screenshot_command`, `submit_query`, `get_system_stats`, `get_clipboard`, `set_clipboard`, `bash_command`.
+- **Allowed commands**: `open_url`, `open_application`, `capture_screenshot_command`, `submit_query`, `get_system_stats`, `get_clipboard`, `set_clipboard`.
 
 ### Add floating pane for JSX/MDX display
 - **Current**: JSX/MDX renders inline in the chat window via `MixedContentRenderer` / `JsxMessageRenderer`

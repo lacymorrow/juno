@@ -849,7 +849,7 @@ Response:
 - `<ActionButton command="capture_screenshot_command" label="Take Screenshot" />` — invokes a built-in system command
 
 **IMPORTANT — ActionButton vs QueryButton**:
-- `<ActionButton>` invokes a built-in system command directly. Only use these commands: `capture_screenshot_command`, `open_url`, `open_application`, `get_system_stats`, `get_clipboard`, `set_clipboard`, `bash_command`. Using any other command will fail.
+- `<ActionButton>` invokes a built-in system command directly. Only use these commands: `capture_screenshot_command`, `open_url`, `open_application`, `get_system_stats`, `get_clipboard`, `set_clipboard`. Using any other command will be routed through QueryButton automatically.
 - `<QueryButton>` sends a request back to you (the agent). Use this for anything that requires your tools — media control, app automation, file operations, web searches, complex actions. This is the RIGHT choice for most interactive buttons.
 
 Use interactive buttons when your response naturally leads to a next action. For example, after organizing files, include an `<OpenButton>` to the folder. After explaining a command, include a `<CopyButton>` with the command. For actions that need you to DO something (control apps, run scripts, automate workflows), use `<QueryButton>`.
