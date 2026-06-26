@@ -94,7 +94,7 @@ export function ActionButton({
       if (isCommandAllowed(command)) {
         await invoke(command, args || {});
       } else {
-        const query = args
+        const query = args && Object.keys(args).length > 0
           ? `${command} ${JSON.stringify(args)}`
           : command.replace(/_/g, " ");
         await invoke("submit_query", { query });
