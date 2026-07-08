@@ -7,6 +7,7 @@ pub mod model_ids {
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
     pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
+    pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
     pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
     pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
@@ -27,6 +28,7 @@ pub mod model_ids {
         CLAUDE_OPUS_4_5,
         CLAUDE_OPUS_4_6,
         CLAUDE_OPUS_4_7,
+        CLAUDE_SONNET_5,
         CLAUDE_SONNET_4_6,
     ];
 
@@ -206,6 +208,13 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_7,
                         name: "Claude Opus 4.7",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: false,
+                    },
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_SONNET_5,
+                        name: "Claude Sonnet 5",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: false,
@@ -526,6 +535,23 @@ mod tests {
             "str_replace_based_edit_tool",
             "text_editor_20250429",
             model_ids::CLAUDE_OPUS_4_8,
+        );
+        assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_sonnet_5_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_SONNET_5,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_SONNET_5,
         );
         assert_eq!(editor, "text_editor_20250728");
     }
