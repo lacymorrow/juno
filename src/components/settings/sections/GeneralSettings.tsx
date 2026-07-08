@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { Slider } from "@/components/ui/slider";
-import { Eye, RotateCcw, Sparkles } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
@@ -37,8 +37,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
   const [bigCursorScale, setBigCursorScale] = useState(3.0);
   const [bigCursorLoading, setBigCursorLoading] = useState(false);
-  const [companionMode, setCompanionMode] = useState(false);
-  const [companionModeLoading, setCompanionModeLoading] = useState(false);
   const [systemCursorSize, setSystemCursorSize] = useState(1.0);
 
   // Load auto-launch status and onboarding info on component mount
@@ -67,9 +65,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         const cursorScale = await invoke<number>("get_big_cursor_scale");
         setBigCursorScale(cursorScale);
 
-        // Load companion mode
-        const companionEnabled = await invoke<boolean>("get_companion_mode");
-        setCompanionMode(companionEnabled);
         const sysSize = await invoke<number>("get_system_cursor_size");
         setSystemCursorSize(sysSize);
       } catch (error) {
@@ -187,20 +182,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleCompanionModeChange = async (enabled: boolean) => {
-    if (companionModeLoading) return;
-    setCompanionModeLoading(true);
-    try {
-      await invoke("set_companion_mode", { enabled });
-      setCompanionMode(enabled);
-    } catch (error) {
-      console.error("Failed to update companion mode:", error);
-      toast.error("Failed to update companion mode");
-    } finally {
-      setCompanionModeLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <Card>
@@ -232,10 +213,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-blue-500" />
-            Onboarding
-          </CardTitle>
+          <CardTitle>Onboarding</CardTitle>
           <CardDescription>
             Restart the onboarding flow to learn about Juno's features
           </CardDescription>
@@ -412,42 +390,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               <strong>Hold to Activate:</strong> Hold key to activate agent,
               release to stop (like dictation mode).
             </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Eye className="w-5 h-5 text-purple-500" />
-            Companion Mode
-          </CardTitle>
-          <CardDescription>
-            Observe-only mode: Juno watches your screen and advises without
-            clicking, typing, or taking any actions
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label
-                htmlFor="companion-mode"
-                className="text-sm font-medium"
-              >
-                Enable Companion Mode
-              </Label>
-              <p className="text-xs text-gray-500">
-                Ask questions like "What does this error mean?" or "Walk me
-                through this UI" — Juno describes and advises but never
-                acts
-              </p>
-            </div>
-            <Switch
-              id="companion-mode"
-              checked={companionMode}
-              onCheckedChange={handleCompanionModeChange}
-              disabled={companionModeLoading}
-            />
           </div>
         </CardContent>
       </Card>
