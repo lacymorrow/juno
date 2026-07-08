@@ -257,17 +257,6 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  // const handleGetCloudStatus = async () => {
-  //   try {
-  //     const status = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
-  //     setCloudTestStatus(JSON.stringify(status, null, 2));
-  //     toast.success("Cloud status retrieved");
-  //   } catch (error) {
-  //     console.error("Failed to get cloud status:", error);
-  //     toast.error("Failed to get cloud status");
-  //   }
-  // };
-
   const handleStartCloudConnector = async () => {
     try {
       setIsCloudTesting(true);
@@ -645,42 +634,11 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             </div>
           )}
 
-          <div className="pt-4 border-t text-sm text-muted-foreground">
-            <div className="space-y-2">
-              <p className="font-medium">How to use cloud control:</p>
-              <div className="space-y-2 text-xs">
-                <div className="bg-blue-50 p-3 rounded border-l-4 border-blue-400">
-                  <p className="font-medium text-blue-800">
-                    Step 1: Set API Key
-                  </p>
-                  <p className="text-blue-700">
-                    Enter any password/API key above and click "Set Password"
-                  </p>
-                </div>
-                <div className="bg-green-50 p-3 rounded border-l-4 border-green-400">
-                  <p className="font-medium text-green-800">
-                    Step 2: Start Connector
-                  </p>
-                  <p className="text-green-700">
-                    Click "Start Connector" to connect your Juno app to the
-                    cloud backend
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-3 rounded border-l-4 border-purple-400">
-                  <p className="font-medium text-purple-800">
-                    Step 3: Send Commands
-                  </p>
-                  <p className="text-purple-700">
-                    Use the WebSocket scripts in <code>/websocket-test/</code>{" "}
-                    to send agent commands
-                  </p>
-                </div>
-              </div>
-              <p className="text-xs text-amber-600 font-medium">
-                💡 Once connected, your Juno agent can be controlled remotely
-                via cloud commands!
-              </p>
-            </div>
+          <div className="pt-4 border-t">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Set an API key, start the connector to link Juno to the cloud backend,
+              then send commands via the WebSocket scripts in <code className="text-xs">/websocket-test/</code>.
+            </p>
           </div>
         </CardContent>
       </Card>
