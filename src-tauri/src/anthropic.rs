@@ -362,6 +362,38 @@ async fn execute_agent_internal(
         }
     };
 
+    // Register this run in the parallel-agent registry so the switcher UI
+    // sees it and per-session cancel/focus commands have a live target.
+    // If the parallel cap is hit we log and continue — the queue guarantees
+    // at most one run at a time today, so the cap should never actually bite
+    // until LAC-1432 lifts the queue serialization.
+    let _session_handle = {
+        let registry = state.agent_sessions();
+        let color = crate::agents::next_session_color();
+        match registry
+            .create("orchestrator".to_string(), color.clone())
+            .await
+        {
+            Ok(session) => {
+                session.set_status(crate::agents::AgentSessionStatus::Running).await;
+                let handle = crate::agents::SessionHandle::new(
+                    registry.clone(),
+                    session,
+                    app_handle.clone(),
+                );
+                crate::agents::broadcast_sessions_updated(&app_handle, &registry).await;
+                Some(handle)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to register agent session in parallel registry: {} — proceeding without session tracking",
+                    e
+                );
+                None
+            }
+        }
+    };
+
     // TODO: TARS Integration disabled - event system not yet implemented
     // let agent_run_start_event = JunoAgentEvent::AgentRunStart {
     //     session_id: execution_id.clone(),
