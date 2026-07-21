@@ -28,6 +28,22 @@ pub mod agent {
     pub const QUERY_READY: &str = "agent-query-ready";
 }
 
+/// Parallel agent-session lifecycle events (LAC-1432).
+///
+/// The frontend session-switcher and status bar listen to these events
+/// so the UI stays in sync with the backend `AgentSessionRegistry`
+/// without polling. Every registry mutation that changes visible state
+/// (create / focus / status / current action / remove) fires
+/// `AGENT_SESSIONS_UPDATED` with the full snapshot; `AGENT_SESSION_FOCUSED`
+/// fires additionally when the focused session changes so cursor
+/// overlays can key off the focus change without diffing the list.
+pub mod agent_sessions {
+    /// Full snapshot of all live sessions (`Vec<AgentSessionInfo>` payload).
+    pub const UPDATED: &str = "agent-sessions-updated";
+    /// Focus changed. Payload is `{ "session_id": Option<String> }`.
+    pub const FOCUSED: &str = "agent-session-focused";
+}
+
 /// Streaming events
 pub mod streaming {
     pub const TEXT_STREAM: &str = "agent-text-stream";

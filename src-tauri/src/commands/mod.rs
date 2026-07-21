@@ -19,6 +19,7 @@ pub mod dev;
 pub mod dictation;
 // Removed deprecated dictation_reset module
 pub mod agent_continuation;
+pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
 pub mod always_listening;
 pub mod cloud;
 pub mod cloud_test;
@@ -75,6 +76,7 @@ pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
 // Removed deprecated dictation_reset exports
+pub use self::agent_sessions::*;
 pub use self::always_listening::*;
 pub use self::cloud::*;
 pub use self::cloud_test::*;

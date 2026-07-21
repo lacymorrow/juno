@@ -297,6 +297,12 @@ pub fn run() {
             commands::orchestrator::execute_optimized_workflow,
             commands::orchestrator::configure_enhanced_orchestrator,
             commands::orchestrator::benchmark_orchestrator_performance,
+            // Parallel Agent Sessions (LAC-1432) — per-agent cursors, switcher, escape targeting
+            commands::agent_sessions::list_agent_sessions,
+            commands::agent_sessions::get_focused_agent_session,
+            commands::agent_sessions::focus_agent_session,
+            commands::agent_sessions::cancel_focused_agent_session,
+            commands::agent_sessions::cancel_agent_session,
             // Workflow Orchestration Commands
             execute_mcp_task,
             get_workflow_templates,
