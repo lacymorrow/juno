@@ -14,5 +14,6 @@ pub use desktop_agent::DesktopAgent;
 pub use system_agent::SystemAgent;
 pub use orchestrator::{Orchestrator, OrchestratorConfig};
 pub use session::{
-    AgentSession, AgentSessionId, AgentSessionInfo, AgentSessionRegistry, AgentSessionStatus,
+    broadcast_sessions_updated, next_session_color, AgentSession, AgentSessionId, AgentSessionInfo,
+    AgentSessionRegistry, AgentSessionStatus, SessionHandle,
 };

@@ -1,13 +1,42 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::agent::input_arbiter::InputArbiter;
+use crate::constants::events;
+
+/// Distinct display colors for parallel agent sessions.
+///
+/// Assigned round-robin as sessions are created so each session's cursor
+/// overlay and switcher row is visually distinguishable. Kept small and
+/// perceptually distinct — sequential runs of the same color are only a
+/// concern if the user exceeds the parallel cap (typically 12), and even
+/// then the collision is not a correctness issue.
+const SESSION_COLORS: &[&str] = &[
+    "#ff5c8a", // rose
+    "#5cc8ff", // cyan
+    "#ffb45c", // amber
+    "#5cff9d", // mint
+    "#c85cff", // violet
+    "#ffe45c", // yellow
+    "#5c7dff", // indigo
+    "#ff5c5c", // red
+];
+
+static NEXT_COLOR_INDEX: AtomicUsize = AtomicUsize::new(0);
+
+/// Pick the next round-robin session color.
+pub fn next_session_color() -> String {
+    let i = NEXT_COLOR_INDEX.fetch_add(1, Ordering::Relaxed);
+    SESSION_COLORS[i % SESSION_COLORS.len()].to_string()
+}
 
 /// Unique identifier for a parallel agent session.
 ///
@@ -320,6 +349,77 @@ impl AgentSessionRegistry {
 
     pub async fn len(&self) -> usize {
         self.sessions.lock().await.len()
+    }
+}
+
+/// Emit the current session list to the frontend.
+///
+/// Standalone helper so background tasks and RAII cleanup can broadcast
+/// updates without needing a `State<AppState>` handle.
+pub async fn broadcast_sessions_updated(app: &AppHandle, registry: &Arc<AgentSessionRegistry>) {
+    let list = registry.list().await;
+    if let Err(e) = app.emit(events::agent_sessions::UPDATED, &list) {
+        warn!("Failed to emit agent-sessions-updated: {}", e);
+    }
+}
+
+/// RAII guard that removes an agent session from the registry on drop.
+///
+/// `execute_agent_internal` has ~8 explicit `return Err` paths plus a
+/// fall-through success path; threading manual `registry.remove()` calls
+/// through every path is brittle. This guard removes the session on any
+/// exit (including panic unwinds) and broadcasts an `agent-sessions-updated`
+/// event so the switcher UI drops the row.
+///
+/// Registry mutation is async, so cleanup is scheduled on the Tauri async
+/// runtime — `Drop` itself stays cheap and synchronous.
+pub struct SessionHandle {
+    registry: Arc<AgentSessionRegistry>,
+    session: Arc<AgentSession>,
+    app_handle: AppHandle,
+    active: bool,
+}
+
+impl SessionHandle {
+    pub fn new(
+        registry: Arc<AgentSessionRegistry>,
+        session: Arc<AgentSession>,
+        app_handle: AppHandle,
+    ) -> Self {
+        Self {
+            registry,
+            session,
+            app_handle,
+            active: true,
+        }
+    }
+
+    pub fn session(&self) -> &Arc<AgentSession> {
+        &self.session
+    }
+
+    /// Mark the session as finished/failed and broadcast the state before
+    /// the RAII cleanup removes the row entirely. Callers that know
+    /// whether the run succeeded or failed should call this to give the
+    /// UI a final status snapshot instead of the row just disappearing.
+    pub async fn mark_terminal(&self, status: AgentSessionStatus) {
+        self.session.set_status(status).await;
+        broadcast_sessions_updated(&self.app_handle, &self.registry).await;
+    }
+}
+
+impl Drop for SessionHandle {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let registry = self.registry.clone();
+        let session_id = self.session.id().clone();
+        let app_handle = self.app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            registry.remove(&session_id).await;
+            broadcast_sessions_updated(&app_handle, &registry).await;
+        });
     }
 }
 
