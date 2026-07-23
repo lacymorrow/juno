@@ -2,7 +2,7 @@
 //!
 //! Safari-specific browser automation tools using AppleScript and JavaScript injection.
 //! Provides fast Safari DOM analysis and interaction capabilities as an alternative to
-//! Playwright-based browser automation for Safari-specific workflows.
+//! JavaScript-injection browser automation for Safari-specific workflows.
 //!
 //! ## Core Capabilities:
 //! - Direct Safari JavaScript injection via AppleScript
@@ -674,7 +674,7 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "safari_extract_dom".to_string(),
-            description: "Extracts structured DOM from the current Safari tab using JavaScript injection. Much faster than Playwright for Safari-specific automation. Caches elements with IDs for subsequent interaction.".to_string(),
+            description: "Extracts structured DOM from the current Safari tab using JavaScript injection. Much faster than driving a full CDP session for Safari-specific automation. Caches elements with IDs for subsequent interaction.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {},

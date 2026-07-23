@@ -165,7 +165,7 @@ pub mod components {
     pub const SELF_IMPROVEMENT_SYSTEM: &str = "self-improvement system";
     pub const ACCESSIBILITY: &str = "desktop accessibility";
     pub const CLIPBOARD: &str = "clipboard";
-    pub const PLAYWRIGHT_DRIVER: &str = "Playwright driver";
+    pub const BROWSER_DRIVER: &str = "browser driver";
     pub const AUTOMATION: &str = "automation";
     pub const APPLICATION_STATE: &str = "application state";
     pub const CLOUD_CLIENT: &str = "cloud client";

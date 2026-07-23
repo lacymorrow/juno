@@ -16,7 +16,6 @@ use crate::constants::settings::defaults;
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
-use playwright::api::playwright::Playwright;
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -316,7 +315,6 @@ pub struct AppState {
     pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,
 
     // Async state that needs TokioMutex
-    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
     pub memory_manager: Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>>,
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
@@ -375,7 +373,6 @@ impl AppState {
             timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())),
 
             // Initialize async state
-            playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new({
             // Use AdvancedMemoryManager but with reduced features to prevent deadlocks
@@ -1033,36 +1030,10 @@ impl AppState {
         info!("Onboarding active state set to: {}", active);
     }
 
-    // Method to get or initialize the Playwright driver
-    async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
-        let mut driver_guard = self.playwright_driver.lock().await;
-        if driver_guard.is_none() {
-            info!("Initializing Playwright driver instance...");
-            match Playwright::initialize().await {
-                Ok(pw_instance) => {
-                    let arc_pw: Arc<Playwright> = Arc::new(pw_instance);
-                    *driver_guard = Some(arc_pw.clone());
-                    info!("Playwright driver initialized and stored in AppState.");
-                    Ok(arc_pw)
-                }
-                Err(e) => {
-                    let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "Playwright driver", e);
-                    error!("{}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        } else {
-            debug!("Reusing existing Playwright driver instance from AppState.");
-            driver_guard
-                .as_ref()
-                .ok_or_else(|| "Playwright driver is None despite check".to_string())
-                .cloned()
-        }
-    }
-
     // Method to get or initialize the browser controller
-    // NOTE: Initializes playwright driver BEFORE acquiring browser_controller lock
-    // to prevent deadlock from nested async lock acquisition.
+    //
+    // NOTE: the browser is constructed OUTSIDE the browser_controller lock to
+    // prevent deadlock from nested async lock acquisition (check-init-recheck).
     pub async fn get_or_init_browser_controller(&self) -> Result<BrowserController, String> {
         // First, check if controller already exists (short lock)
         {
@@ -1074,16 +1045,9 @@ impl AppState {
         }
         // Lock released here
 
-        // Initialize playwright driver OUTSIDE the browser_controller lock
         info!("Initializing persistent browser controller (was None in AppState)");
-        let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
-            format!(
-                "Cannot init BrowserController without Playwright driver: {}",
-                e
-            )
-        })?;
 
-        let new_controller = BrowserController::new(playwright_arc).await.map_err(|e| {
+        let new_controller = BrowserController::new().await.map_err(|e| {
             let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "browser controller", e);
             error!("{}", err_msg);
             err_msg
