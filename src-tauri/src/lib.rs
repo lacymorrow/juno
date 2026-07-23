@@ -996,6 +996,18 @@ pub fn run() {
                         // Restore cursor scale on app exit — prevents stuck big cursor
                         cursor_scale::force_restore_cursor_scale();
                     }
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event:
+                            tauri::WindowEvent::Moved(_)
+                            | tauri::WindowEvent::ScaleFactorChanged { .. },
+                        ..
+                    } if label.as_str() == constants::window_labels::FLOATING_BAR => {
+                        // Display reconfiguration (monitor plug/unplug, scaling
+                        // changes) moves windows; the notch bar must re-anchor
+                        // to the current notch geometry. No-op outside notch mode.
+                        commands::ui_commands::handle_bar_window_moved(app_handle);
+                    }
                     tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                         // Clean up escape key registration when onboarding window is closed
                         // (e.g., user clicks the red X instead of completing/skipping)
