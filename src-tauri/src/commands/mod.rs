@@ -51,6 +51,7 @@ pub mod providers;
 pub mod settings;
 pub mod shell;
 pub mod shortcuts;
+pub mod skills; // Skill discovery for slash-command autocomplete (LAC-3031)
 pub mod sound;
 pub mod stop_coordinator;
 pub mod stop_operations;
