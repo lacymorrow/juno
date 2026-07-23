@@ -12,22 +12,26 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
+    # The secrets context is not allowed in `if:` expressions (workflow parse
+    # error), so evaluate the presence check once here (LAC-3035).
+    env:
+      HAS_CLAUDE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
       # The action fails env validation when CLAUDE_CODE_OAUTH_TOKEN is unset,
       # turning every PR check red. Skip cleanly until the secret exists (LAC-3035).
       - name: Notice when CLAUDE_CODE_OAUTH_TOKEN is missing
-        if: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN == '' }}
+        if: env.HAS_CLAUDE_OAUTH_TOKEN != 'true'
         run: echo "::notice::Skipping Claude review — CLAUDE_CODE_OAUTH_TOKEN repo secret is not set. Run 'claude setup-token' and 'gh secret set CLAUDE_CODE_OAUTH_TOKEN' to enable AI review (LAC-3035)."
 
       - name: Checkout repository
-        if: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
-        if: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           # Long-lived OAuth token from `claude setup-token` (Claude Max subscription).
