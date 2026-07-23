@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Brain,
+  CalendarClock,
   Keyboard,
   Mic,
   Network,
@@ -18,6 +19,7 @@ import {
   AIProviderSettings,
   SecuritySettings,
   AdvancedSettings,
+  AutomationsSettings,
   NetworkSettings,
   ShortcutsSettings,
   ToolsSettings,
@@ -48,6 +50,12 @@ const settingsCategories: SettingsCategory[] = [
     name: "Tools",
     icon: <Wrench className="w-8 h-8" />,
     description: "Enable/disable agent tools and categories",
+  },
+  {
+    id: "automations",
+    name: "Automations",
+    icon: <CalendarClock className="w-8 h-8" />,
+    description: "Scheduled agent tasks that run automatically",
   },
   {
     id: "network",
@@ -114,6 +122,8 @@ export default function ModularSettingsWindow() {
         return <AIProviderSettings settings={settings} />;
       case "tools":
         return <ToolsSettings settings={settings} />;
+      case "automations":
+        return <AutomationsSettings />;
       case "network":
         return <NetworkSettings settings={settings} />;
       case "security":

@@ -41,6 +41,7 @@ pub mod self_awareness_tools; // Self-building and introspection capabilities
 // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
 
 pub mod risk_classifier; // Automatic risk level classification for tool approval gating
+pub mod schedule_tools; // User-facing scheduled automations (cron-based agent tasks)
 pub mod timer_tools; // Add timer tools for agent scheduling
 pub mod tool_config; // Configuration and category management for all tools
 pub mod tool_mapping; // Add tool mapping service
@@ -65,6 +66,7 @@ pub use safari_tools::{get_safari_tool_definitions, get_safari_tools, SafariTool
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
 // pub use self_improvement::*; // Export self-improvement types and functions - TODO: Fix module not found
 
+pub use schedule_tools::register_schedule_tools; // Export scheduled automation tool registration
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service // Export enhanced visual reasoning components

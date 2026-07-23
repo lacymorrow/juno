@@ -47,6 +47,7 @@ pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
 pub mod testing; // Test harness and mock implementations for headless integration tests
 pub mod persistent_memory; // Cross-session persistent user memory
+pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 
 #[cfg(test)]
 pub mod test_fix_verification; // Test verification for recent fixes
@@ -713,6 +714,13 @@ pub fn run() {
             commands::settings::set_onboarding_settings,
             commands::settings::set_autostart_enabled,
             // Notification Commands
+            // Scheduled automation commands (user-facing cron schedules)
+            commands::scheduled_tasks::create_scheduled_task,
+            commands::scheduled_tasks::list_scheduled_tasks,
+            commands::scheduled_tasks::update_scheduled_task,
+            commands::scheduled_tasks::delete_scheduled_task,
+            commands::scheduled_tasks::run_scheduled_task_now,
+            commands::scheduled_tasks::preview_cron_schedule,
             commands::notifications::get_notification_settings,
             commands::notifications::set_notification_type,
             commands::notifications::set_notification_sound_enabled,
@@ -945,6 +953,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async {
                 crate::agent::tools::browser_controller::BrowserController::cleanup_orphaned_temp_profiles().await;
             });
+
+            // Start the scheduled automations service (user-facing cron schedules)
+            scheduler::start_scheduler(app.handle().clone());
 
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module

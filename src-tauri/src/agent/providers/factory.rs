@@ -492,6 +492,10 @@ impl BrainFactory {
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
+        // Register scheduled automation tools for user-facing recurring tasks (per-provider instance)
+        crate::agent::tools::schedule_tools::register_schedule_tools(provider, app_handle.clone())
+            .await;
+
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
