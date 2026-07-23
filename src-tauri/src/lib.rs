@@ -715,6 +715,7 @@ pub fn run() {
             commands::settings::set_autostart_enabled,
             // Notification Commands
             // Scheduled automation commands (user-facing cron schedules)
+            commands::skills::list_available_skills,
             commands::scheduled_tasks::create_scheduled_task,
             commands::scheduled_tasks::list_scheduled_tasks,
             commands::scheduled_tasks::update_scheduled_task,
