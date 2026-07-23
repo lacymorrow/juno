@@ -72,3 +72,5 @@ Add **`notch` as a 7th `bar_appearance` variant** rather than a separate positio
 ## 6. Effort
 
 Medium. Roughly: Rust geometry + window setup ~150–250 lines in `platform/macos.rs` + one command; frontend `NotchBar` variant + BarHost/settings wiring; constrain-rect prototype is the only unknown (time-box: if a plain NSWindow can't sit top-flush, pull in `tauri-nspanel`). Estimate 2–4 engineer-days including QA on notch + notch-less hardware.
+
+<!-- LAC-3035 guard verification: throwaway PR, close without merging -->
