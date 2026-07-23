@@ -269,6 +269,7 @@ impl UIManager {
             ui::bar_appearances::DYNAMIC => "/dynamic-bar",
             ui::bar_appearances::ORB => "/orb-bar",
             ui::bar_appearances::PERSONA => "/persona-bar",
+            ui::bar_appearances::NOTCH => "/notch-bar",
             _ => "/floating-bar",
         };
         
@@ -858,13 +859,22 @@ pub async fn initialize_ui_manager(app_handle: AppHandle) -> Result<(), String> 
     }
 
     let manager = UIManager::new(app_handle.clone()).await?;
+    let saved_appearance = manager.bar_config.bar_appearance.clone();
     let manager_arc = Arc::new(TokioMutex::new(manager));
 
     // Store globally
     UI_MANAGER.set(manager_arc.clone()).map_err(|_| "Failed to set UI manager")?;
 
     // Set up event listeners
-    setup_ui_event_listeners(app_handle, manager_arc).await;
+    setup_ui_event_listeners(app_handle.clone(), manager_arc).await;
+
+    // Apply persisted notch positioning at startup — the notch appearance is
+    // the only one whose window frame is computed instead of user-placed.
+    if saved_appearance == ui::bar_appearances::NOTCH {
+        if let Err(e) = crate::platform::macos::notch::enter_notch_mode_async(app_handle).await {
+            warn!("Failed to apply notch mode at startup: {}", e);
+        }
+    }
 
     info!("UI Manager initialized successfully");
     Ok(())
@@ -991,8 +1001,8 @@ pub async fn ui_handle_interaction(
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
 
-        // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar)
-        if element_id == ui::element_ids::FLOATING_BAR || element_id == ui::element_ids::APP_BAR || element_id == ui::element_ids::VOICE_AI_BAR || element_id == ui::element_ids::DYNAMIC_BAR {
+        // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar, notch-bar)
+        if element_id == ui::element_ids::FLOATING_BAR || element_id == ui::element_ids::APP_BAR || element_id == ui::element_ids::VOICE_AI_BAR || element_id == ui::element_ids::DYNAMIC_BAR || element_id == ui::element_ids::NOTCH_BAR {
             match interaction.interaction_type.as_str() {
                 ui::interaction_types::CLICK => manager.handle_bar_click().await,
                 ui::interaction_types::SUBMIT => {
@@ -1111,29 +1121,93 @@ pub async fn ui_get_bar_config() -> Result<FloatingBarConfig, String> {
 pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> {
     debug!("Setting floating bar configuration: {:?}", config);
 
+    // Serialize appearance transitions: two overlapping calls could otherwise
+    // interleave between the config store and the main-thread window apply,
+    // leaving the window position contradicting the stored appearance.
+    static APPEARANCE_TRANSITION: TokioMutex<()> = TokioMutex::const_new(());
+    let _transition = APPEARANCE_TRANSITION.lock().await;
+
     if let Some(manager) = get_ui_manager().await {
-        let mut manager = manager.lock().await;
-        let appearance_changed = manager.bar_config.bar_appearance != config.bar_appearance;
-        
-        manager.bar_config = config.clone();
-        manager.save_bar_config().await?;
+        // Scope the manager lock: the notch-mode transition below awaits a
+        // main-thread round-trip and must not run while holding the mutex.
+        let (appearance_changed, previous_appearance, app_handle) = {
+            let mut manager = manager.lock().await;
+            let previous_appearance = manager.bar_config.bar_appearance.clone();
+            let appearance_changed = previous_appearance != config.bar_appearance;
 
-        // Navigate to the appropriate route if appearance changed
-        if appearance_changed {
-            if let Err(e) = manager.navigate_bar_window().await {
-                warn!("Failed to navigate bar window: {}", e);
+            manager.bar_config = config.clone();
+            manager.save_bar_config().await?;
+
+            // Navigate to the appropriate route if appearance changed
+            if appearance_changed {
+                if let Err(e) = manager.navigate_bar_window().await {
+                    warn!("Failed to navigate bar window: {}", e);
+                }
             }
-        }
 
-        // Emit event to notify frontend
-        if let Err(e) = manager.app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
-            warn!("Failed to emit config change event: {}", e);
+            // Emit event to notify frontend
+            if let Err(e) = manager.app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
+                warn!("Failed to emit config change event: {}", e);
+            }
+
+            (appearance_changed, previous_appearance, manager.app_handle.clone())
+        };
+
+        // The notch appearance is the only one that repositions the window
+        // itself (top-flush over the menu bar at an elevated level). The config
+        // is already saved at this point, so a failed window apply is reported
+        // to the caller rather than silently leaving the bar mispositioned.
+        if appearance_changed {
+            if config.bar_appearance == ui::bar_appearances::NOTCH {
+                crate::platform::macos::notch::enter_notch_mode_async(app_handle)
+                    .await
+                    .map_err(|e| format!("Failed to enter notch mode: {}", e))?;
+            } else if previous_appearance == ui::bar_appearances::NOTCH {
+                crate::platform::macos::notch::exit_notch_mode_async(app_handle)
+                    .await
+                    .map_err(|e| format!("Failed to exit notch mode: {}", e))?;
+            }
         }
 
         Ok(())
     } else {
         Err("UI Manager not initialized".to_string())
     }
+}
+
+/// Current notch (or fallback pill) geometry for the notch bar appearance.
+/// The frontend uses this to draw a silhouette aligned with the hardware cutout.
+#[tauri::command]
+pub async fn get_notch_geometry(
+    app_handle: AppHandle,
+) -> Result<crate::platform::macos::notch_layout::NotchGeometry, String> {
+    crate::platform::macos::notch::get_notch_geometry_async(app_handle).await
+}
+
+/// Re-anchor the notch bar after the system moves the floating-bar window —
+/// display plug/unplug, resolution or scaling changes all reposition windows,
+/// which would otherwise leave the notch bar stale until the user re-toggles
+/// the appearance. Called from the run-event loop on Moved/ScaleFactorChanged.
+///
+/// Loop-safe: enter_notch_mode skips setFrame when the frame already matches
+/// the computed target, so our own re-apply does not emit further Moved events.
+pub fn handle_bar_window_moved(app_handle: &AppHandle) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let is_notch = match get_ui_manager().await {
+            Some(manager) => {
+                manager.lock().await.bar_config.bar_appearance == ui::bar_appearances::NOTCH
+            }
+            None => false,
+        };
+        if is_notch {
+            if let Err(e) =
+                crate::platform::macos::notch::enter_notch_mode_async(app_handle).await
+            {
+                warn!("Failed to re-apply notch mode after window move: {}", e);
+            }
+        }
+    });
 }
 
 // === PANEL SPECIFIC COMMANDS ===

@@ -556,6 +556,7 @@ pub fn run() {
             ui_handle_interaction,
             ui_get_bar_config,
             ui_set_bar_config,
+            get_notch_geometry,
             ui_set_panel_click_through,
             ui_set_panel_level,
             notify_query_submitted,
@@ -994,6 +995,18 @@ pub fn run() {
                     tauri::RunEvent::ExitRequested { .. } => {
                         // Restore cursor scale on app exit — prevents stuck big cursor
                         cursor_scale::force_restore_cursor_scale();
+                    }
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event:
+                            tauri::WindowEvent::Moved(_)
+                            | tauri::WindowEvent::ScaleFactorChanged { .. },
+                        ..
+                    } if label.as_str() == constants::window_labels::FLOATING_BAR => {
+                        // Display reconfiguration (monitor plug/unplug, scaling
+                        // changes) moves windows; the notch bar must re-anchor
+                        // to the current notch geometry. No-op outside notch mode.
+                        commands::ui_commands::handle_bar_window_moved(app_handle);
                     }
                     tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
                         // Clean up escape key registration when onboarding window is closed

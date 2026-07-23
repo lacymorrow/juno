@@ -7,6 +7,7 @@ import type { FloatingBarConfig } from "@/types/bar-config";
 import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
+import { NotchBar } from "@/components/bar/notch-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
 const OrbBar = lazy(() =>
@@ -76,6 +77,10 @@ export function BarHost() {
         return () => <VoiceAIBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_DYNAMIC:
         return () => <DynamicBar barAppearance={appearance} />;
+      case UI.BAR_APPEARANCES_NOTCH:
+        // Window placement is backend-driven (fixed canvas over the notch);
+        // the component intentionally has no drag or resize hooks.
+        return () => <NotchBar />;
       case UI.BAR_APPEARANCES_ORB:
         return () => (
           <Suspense fallback={null}>

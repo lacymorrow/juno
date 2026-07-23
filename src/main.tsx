@@ -35,6 +35,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <Route path="/floating-bar" element={<BarHost />} />
               <Route path="/voice-bar" element={<BarHost />} />
               <Route path="/dynamic-bar" element={<BarHost />} />
+              <Route path="/notch-bar" element={<BarHost />} />
               <Route path="/orb-bar" element={<BarHost />} />
               <Route path="/persona-bar" element={<BarHost />} />
               <Route path="/floating-panel" element={<FloatingPanel />} />

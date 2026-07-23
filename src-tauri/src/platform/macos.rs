@@ -501,6 +501,419 @@ pub mod mouse_tracking {
     }
 }
 
+/// Pure layout math for the notch bar appearance (LAC-3037).
+///
+/// Shared by the macOS window-positioning code below and unit-testable on any
+/// platform. All values are logical points (AppKit coordinates).
+pub mod notch_layout {
+    use serde::Serialize;
+
+    /// Geometry of the notch (or fallback pill) reported to the frontend so it
+    /// can draw a silhouette that lines up with the hardware cutout.
+    #[derive(Debug, Clone, Copy, Serialize)]
+    pub struct NotchGeometry {
+        pub has_notch: bool,
+        /// Width of the physical notch cutout, or the fallback pill width on
+        /// notch-less displays.
+        pub notch_width: f64,
+        /// Height of the cutout including the bottom cover fudge, or the menu
+        /// bar height on notch-less displays.
+        pub notch_height: f64,
+        pub menu_bar_height: f64,
+        /// Fixed webview canvas size. The window is sized once to the largest
+        /// state plus slack and never resized per state — per-state window
+        /// resizing makes the bar visibly detach from the bezel mid-animation,
+        /// so all state transitions are CSS-only inside this canvas.
+        pub canvas_width: f64,
+        pub canvas_height: f64,
+    }
+
+    /// Idle pill size on notch-less displays — the option degrades gracefully
+    /// instead of being gated on hardware.
+    pub const FALLBACK_PILL_WIDTH: f64 = 200.0;
+    pub const FALLBACK_PILL_HEIGHT: f64 = 30.0;
+
+    /// NSScreen reports the safe area slightly shallower than the real cutout;
+    /// extend the cover to avoid a hairline gap at the bottom edge.
+    pub const NOTCH_BOTTOM_COVER: f64 = 2.0;
+
+    /// Slack around the largest expanded state so every CSS transition fits
+    /// inside the fixed canvas: total horizontal / vertical below the notch.
+    const CANVAS_HORIZONTAL_SLACK: f64 = 280.0;
+    const CANVAS_VERTICAL_SLACK: f64 = 150.0;
+
+    /// NSMainMenuWindowLevel (24) + 3 — above the menu bar.
+    pub const NOTCH_WINDOW_LEVEL: i64 = 27;
+
+    pub fn build_geometry(
+        has_notch: bool,
+        raw_notch_width: f64,
+        safe_area_top: f64,
+        menu_bar_height: f64,
+    ) -> NotchGeometry {
+        let (notch_width, notch_height) = if has_notch {
+            // A zero raw width means the auxiliary-area API was unavailable —
+            // fall back to a typical cutout width rather than a sliver.
+            (
+                raw_notch_width.max(FALLBACK_PILL_WIDTH),
+                safe_area_top + NOTCH_BOTTOM_COVER,
+            )
+        } else {
+            (
+                FALLBACK_PILL_WIDTH,
+                menu_bar_height.max(FALLBACK_PILL_HEIGHT),
+            )
+        };
+        NotchGeometry {
+            has_notch,
+            notch_width,
+            notch_height,
+            menu_bar_height,
+            canvas_width: notch_width + CANVAS_HORIZONTAL_SLACK,
+            canvas_height: notch_height + CANVAS_VERTICAL_SLACK,
+        }
+    }
+
+    /// Top-flush frame centered on the notch, in AppKit screen coordinates
+    /// (origin bottom-left, y-up). Returns (x, y, width, height).
+    pub fn canvas_frame(
+        screen_x: f64,
+        screen_y: f64,
+        screen_width: f64,
+        screen_height: f64,
+        geometry: &NotchGeometry,
+    ) -> (f64, f64, f64, f64) {
+        (
+            screen_x + (screen_width - geometry.canvas_width) / 2.0,
+            screen_y + screen_height - geometry.canvas_height,
+            geometry.canvas_width,
+            geometry.canvas_height,
+        )
+    }
+
+    /// Whether a window frame already matches a target frame, within half a
+    /// point — macOS may snap frames to the pixel grid, so exact comparison
+    /// would report spurious mismatches and cause repeated setFrame calls.
+    pub fn frame_matches(
+        current: (f64, f64, f64, f64),
+        target: (f64, f64, f64, f64),
+    ) -> bool {
+        const TOLERANCE: f64 = 0.5;
+        (current.0 - target.0).abs() < TOLERANCE
+            && (current.1 - target.1).abs() < TOLERANCE
+            && (current.2 - target.2).abs() < TOLERANCE
+            && (current.3 - target.3).abs() < TOLERANCE
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn frame_matches_tolerates_pixel_grid_rounding() {
+            let target = (764.0, 1085.0, 200.0, 32.0);
+            assert!(frame_matches((764.4, 1084.6, 200.0, 32.0), target));
+            assert!(!frame_matches((760.0, 1085.0, 200.0, 32.0), target));
+            assert!(!frame_matches((764.0, 1085.0, 200.0, 33.0), target));
+        }
+
+        #[test]
+        fn notched_screen_uses_reported_cutout_plus_cover() {
+            // MacBook Pro 14" style: notch ~200pt wide, safe area 32pt deep
+            let geo = build_geometry(true, 210.0, 32.0, 32.0);
+            assert!(geo.has_notch);
+            assert_eq!(geo.notch_width, 210.0);
+            assert_eq!(geo.notch_height, 32.0 + NOTCH_BOTTOM_COVER);
+            assert!(geo.canvas_width > geo.notch_width);
+            assert!(geo.canvas_height > geo.notch_height);
+        }
+
+        #[test]
+        fn notch_with_unknown_width_falls_back_to_pill_width() {
+            // safeAreaInsets.top > 0 but auxiliary areas unavailable
+            let geo = build_geometry(true, 0.0, 32.0, 32.0);
+            assert_eq!(geo.notch_width, FALLBACK_PILL_WIDTH);
+        }
+
+        #[test]
+        fn notchless_screen_gets_centered_pill_from_menu_bar_height() {
+            let geo = build_geometry(false, 0.0, 0.0, 30.0);
+            assert!(!geo.has_notch);
+            assert_eq!(geo.notch_width, FALLBACK_PILL_WIDTH);
+            assert_eq!(geo.notch_height, 30.0);
+        }
+
+        #[test]
+        fn notchless_tiny_menu_bar_clamps_to_minimum_pill_height() {
+            let geo = build_geometry(false, 0.0, 0.0, 22.0);
+            assert_eq!(geo.notch_height, FALLBACK_PILL_HEIGHT);
+        }
+
+        #[test]
+        fn canvas_frame_is_top_flush_and_horizontally_centered() {
+            let geo = build_geometry(true, 200.0, 32.0, 32.0);
+            // Primary screen 1728x1117 at origin (0,0)
+            let (x, y, w, h) = canvas_frame(0.0, 0.0, 1728.0, 1117.0, &geo);
+            // Centered: equal margins either side
+            assert!((x - (1728.0 - w) / 2.0).abs() < f64::EPSILON);
+            // Top-flush: frame max-y equals screen max-y (AppKit y-up coords)
+            assert!((y + h - 1117.0).abs() < f64::EPSILON);
+        }
+
+        #[test]
+        fn canvas_frame_respects_secondary_screen_origin() {
+            let geo = build_geometry(false, 0.0, 0.0, 24.0);
+            let (x, y, _w, h) = canvas_frame(-1920.0, 200.0, 1920.0, 1080.0, &geo);
+            assert!(x > -1920.0 && x < 0.0);
+            assert!((y + h - (200.0 + 1080.0)).abs() < f64::EPSILON);
+        }
+    }
+}
+
+/// macOS window operations for the notch bar appearance (LAC-3037).
+///
+/// A prototype confirmed a plain borderless NSWindow at level 27 is NOT pushed
+/// below the menu bar by `constrainFrameRect:toScreen:` when positioned
+/// programmatically, so no NSPanel conversion or dynamic subclass is needed.
+/// Placement is simply re-applied on every mode entry as self-healing.
+#[cfg(target_os = "macos")]
+pub mod notch {
+    use super::*;
+    use super::notch_layout::{self, NotchGeometry};
+    use cocoa::foundation::{NSPoint, NSSize};
+
+    /// NSEdgeInsets is not defined in the cocoa crate; declare it with the
+    /// matching Objective-C type encoding so msg_send! can return it by value.
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default)]
+    struct NSEdgeInsets {
+        top: f64,
+        left: f64,
+        bottom: f64,
+        right: f64,
+    }
+
+    unsafe impl objc::Encode for NSEdgeInsets {
+        fn encode() -> objc::Encoding {
+            unsafe { objc::Encoding::from_str("{NSEdgeInsets=dddd}") }
+        }
+    }
+
+    /// Default floating-bar frame from tauri.conf.json, restored when the user
+    /// switches away from the notch appearance.
+    const DEFAULT_BAR_WIDTH: f64 = 419.0;
+    const DEFAULT_BAR_HEIGHT: f64 = 92.0;
+    /// Distance below the top of the screen for the restored floating bar.
+    const RESTORE_TOP_OFFSET: f64 = 120.0;
+    /// NSFloatingWindowLevel — the floating bar's normal level.
+    const FLOATING_WINDOW_LEVEL: i64 = 5;
+
+    /// Read notch geometry and the frame of the screen it anchors to.
+    /// Prefers the screen with a notch (the built-in display); otherwise the
+    /// primary screen (index 0 — the one that owns the menu bar).
+    ///
+    /// Must be called on the main thread (AppKit requirement).
+    unsafe fn read_geometry() -> (NotchGeometry, NSRect) {
+        let screens: cocoa_id = msg_send![class!(NSScreen), screens];
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            // Headless / display disconnected — report a fallback pill.
+            let geometry = notch_layout::build_geometry(false, 0.0, 0.0, 24.0);
+            let zero = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
+            return (geometry, zero);
+        }
+
+        let mut target: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
+        let mut safe_top = 0.0f64;
+        for i in 0..count {
+            let screen: cocoa_id = msg_send![screens, objectAtIndex: i];
+            // safeAreaInsets requires macOS 12+; older systems take the
+            // fallback pill path below.
+            let responds: BOOL = msg_send![screen, respondsToSelector: sel!(safeAreaInsets)];
+            if responds == YES {
+                let insets: NSEdgeInsets = msg_send![screen, safeAreaInsets];
+                if insets.top > 0.0 {
+                    target = screen;
+                    safe_top = insets.top;
+                    break;
+                }
+            }
+        }
+
+        let frame: NSRect = msg_send![target, frame];
+        let visible: NSRect = msg_send![target, visibleFrame];
+        // visibleFrame excludes the menu bar at the top (and the dock at the
+        // bottom); only the top edges matter here.
+        let menu_bar_height =
+            (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
+
+        let has_notch = safe_top > 0.0;
+        let mut raw_width = 0.0f64;
+        if has_notch {
+            // Notch width = screen width minus the auxiliary areas either side
+            // of the cutout. Zero-sized rects mean the API gave us nothing —
+            // build_geometry falls back to a typical width.
+            let responds: BOOL =
+                msg_send![target, respondsToSelector: sel!(auxiliaryTopLeftArea)];
+            if responds == YES {
+                let left: NSRect = msg_send![target, auxiliaryTopLeftArea];
+                let right: NSRect = msg_send![target, auxiliaryTopRightArea];
+                if left.size.width > 0.0 && right.size.width > 0.0 {
+                    raw_width = frame.size.width - left.size.width - right.size.width;
+                }
+            }
+        }
+
+        (
+            notch_layout::build_geometry(has_notch, raw_width, safe_top, menu_bar_height),
+            frame,
+        )
+    }
+
+    /// macOS silently drops CanJoinAllSpaces when a window is re-ordered, so
+    /// the overlay behavior must be re-asserted on every mode change.
+    unsafe fn reassert_overlay_collection_behavior(ns_window: cocoa_id) {
+        ns_window.setCollectionBehavior_(
+            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
+        );
+    }
+
+    /// Position the floating bar as a notch bar: window level above the menu
+    /// bar, fixed canvas top-flush over the notch (or centered pill fallback).
+    /// Idempotent — safe to re-apply on display reconfiguration. Main thread only.
+    pub fn enter_notch_mode(app_handle: &AppHandle) -> Result<(), String> {
+        let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR)
+        else {
+            return Err("Notch mode: floating-bar window not found".to_string());
+        };
+        let ns_window_ptr = window
+            .ns_window()
+            .map_err(|e| format!("Notch mode: failed to get NSWindow: {}", e))?;
+        unsafe {
+            let ns_window = ns_window_ptr as cocoa_id;
+            let (geometry, screen_frame) = read_geometry();
+            let (x, y, w, h) = notch_layout::canvas_frame(
+                screen_frame.origin.x,
+                screen_frame.origin.y,
+                screen_frame.size.width,
+                screen_frame.size.height,
+                &geometry,
+            );
+            ns_window.setLevel_(notch_layout::NOTCH_WINDOW_LEVEL);
+            reassert_overlay_collection_behavior(ns_window);
+            // Skip setFrame when already in place: re-entry is triggered from
+            // the floating bar's Moved window event, and an unconditional
+            // setFrame would emit another Moved event and loop forever.
+            let current: NSRect = msg_send![ns_window, frame];
+            if !notch_layout::frame_matches(
+                (current.origin.x, current.origin.y, current.size.width, current.size.height),
+                (x, y, w, h),
+            ) {
+                let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+                ns_window.setFrame_display_(rect, YES);
+                info!(
+                    "Notch mode entered: canvas ({:.0},{:.0}) {:.0}x{:.0}, has_notch={}",
+                    x, y, w, h, geometry.has_notch
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore the floating bar's normal level and default frame after leaving
+    /// the notch appearance. Main thread only.
+    pub fn exit_notch_mode(app_handle: &AppHandle) -> Result<(), String> {
+        let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR)
+        else {
+            return Err("Notch mode exit: floating-bar window not found".to_string());
+        };
+        let ns_window_ptr = window
+            .ns_window()
+            .map_err(|e| format!("Notch mode exit: failed to get NSWindow: {}", e))?;
+        unsafe {
+            let ns_window = ns_window_ptr as cocoa_id;
+            let (_, screen_frame) = read_geometry();
+            let x = screen_frame.origin.x
+                + (screen_frame.size.width - DEFAULT_BAR_WIDTH) / 2.0;
+            let y = screen_frame.origin.y + screen_frame.size.height
+                - DEFAULT_BAR_HEIGHT
+                - RESTORE_TOP_OFFSET;
+            ns_window.setLevel_(FLOATING_WINDOW_LEVEL);
+            reassert_overlay_collection_behavior(ns_window);
+            let rect = NSRect::new(
+                NSPoint::new(x, y),
+                NSSize::new(DEFAULT_BAR_WIDTH, DEFAULT_BAR_HEIGHT),
+            );
+            ns_window.setFrame_display_(rect, YES);
+            info!("Notch mode exited: floating bar restored to default frame");
+        }
+        Ok(())
+    }
+
+    async fn run_on_main(
+        app_handle: AppHandle,
+        f: fn(&AppHandle) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let handle = app_handle.clone();
+        app_handle
+            .run_on_main_thread(move || {
+                let _ = tx.send(f(&handle));
+            })
+            .map_err(|e| format!("Failed to schedule on main thread: {}", e))?;
+        rx.await
+            .map_err(|e| format!("Main-thread task dropped: {}", e))?
+    }
+
+    /// Async wrapper for command / event-loop contexts.
+    pub async fn enter_notch_mode_async(app_handle: AppHandle) -> Result<(), String> {
+        run_on_main(app_handle, enter_notch_mode).await
+    }
+
+    /// Async wrapper for command / event-loop contexts.
+    pub async fn exit_notch_mode_async(app_handle: AppHandle) -> Result<(), String> {
+        run_on_main(app_handle, exit_notch_mode).await
+    }
+
+    /// Read the current notch geometry from any async context.
+    pub async fn get_notch_geometry_async(app_handle: AppHandle) -> Result<NotchGeometry, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app_handle
+            .run_on_main_thread(move || {
+                let geometry = unsafe { read_geometry().0 };
+                let _ = tx.send(geometry);
+            })
+            .map_err(|e| format!("Failed to schedule on main thread: {}", e))?;
+        rx.await
+            .map_err(|e| format!("Main-thread task dropped: {}", e))
+    }
+}
+
+/// Non-macOS stubs — the notch appearance is a no-op elsewhere but the option
+/// stays selectable, rendering the fallback pill inside the normal window.
+#[cfg(not(target_os = "macos"))]
+pub mod notch {
+    use super::notch_layout::{self, NotchGeometry};
+    use tauri::AppHandle;
+
+    pub async fn enter_notch_mode_async(_app_handle: AppHandle) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub async fn exit_notch_mode_async(_app_handle: AppHandle) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub async fn get_notch_geometry_async(
+        _app_handle: AppHandle,
+    ) -> Result<NotchGeometry, String> {
+        Ok(notch_layout::build_geometry(false, 0.0, 0.0, 24.0))
+    }
+}
+
 /// Escape key monitor stub for onboarding.
 ///
 /// During onboarding, the global shortcut handler in `shortcuts.rs` already
