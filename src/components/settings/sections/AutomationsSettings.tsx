@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,26 @@ export default function AutomationsSettings() {
       setCronError(String(error));
     }
   }, []);
+
+  // Debounce keystrokes in the cron field so each character doesn't fire an IPC call
+  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schedulePreview = useCallback(
+    (cron: string) => {
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+      }
+      previewDebounceRef.current = setTimeout(() => previewCron(cron), 300);
+    },
+    [previewCron]
+  );
+  useEffect(
+    () => () => {
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+      }
+    },
+    []
+  );
 
   const openCreateDialog = () => {
     setEditingId(null);
@@ -307,7 +327,7 @@ export default function AutomationsSettings() {
                 placeholder="0 9 * * MON (every Monday at 9am)"
                 onChange={(e) => {
                   setForm({ ...form, cron: e.target.value });
-                  previewCron(e.target.value);
+                  schedulePreview(e.target.value);
                 }}
               />
               {cronError ? (

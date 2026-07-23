@@ -15,12 +15,13 @@ use crate::agent::core::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::agent;
 use crate::scheduler::{
-    self, compute_next_run, load_automations, save_automations, ScheduledAutomation,
+    self, compute_next_run, load_automations, with_automations, ScheduledAutomation,
 };
 use serde_json::{json, Value};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
-use tracing::info;
+use tauri_plugin_notification::NotificationExt;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 fn now_secs() -> u64 {
@@ -91,6 +92,7 @@ async fn create_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
     let notify = input.get("notify").and_then(|v| v.as_bool()).unwrap_or(true);
 
     let next_run_at = compute_next_run(cron)?;
+    scheduler::validate_cron_interval(cron)?;
     let automation = ScheduledAutomation {
         id: Uuid::new_v4().to_string(),
         name,
@@ -105,14 +107,35 @@ async fn create_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
         last_result: None,
     };
 
-    let mut automations = load_automations(&app_handle)?;
-    automations.push(automation.clone());
-    save_automations(&app_handle, &automations)?;
+    with_automations(&app_handle, |automations| {
+        automations.push(automation.clone());
+        Ok(((), true))
+    })
+    .await?;
 
     info!(
         "Agent created scheduled automation '{}' ({}) with cron '{}'",
         automation.name, automation.id, automation.cron
     );
+
+    // Surface agent-initiated persistence at creation time: the `notify` flag
+    // only covers firing, and the user may never open Settings → Automations.
+    let notification = app_handle
+        .notification()
+        .builder()
+        .title("Juno: automation created")
+        .body(format!(
+            "The agent scheduled '{}' ({})",
+            automation.name,
+            automation
+                .natural_language
+                .as_deref()
+                .unwrap_or(&automation.cron)
+        ))
+        .show();
+    if let Err(e) = notification {
+        warn!("Failed to show automation-created notification: {}", e);
+    }
     Ok(json!({
         "success": true,
         "automation": automation,
@@ -170,13 +193,15 @@ async fn delete_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
         .and_then(|v| v.as_str())
         .ok_or("Missing required parameter: id")?;
 
-    let mut automations = load_automations(&app_handle)?;
-    let before = automations.len();
-    automations.retain(|a| a.id != id);
-    if automations.len() == before {
-        return Err(format!("No scheduled automation with id '{}'", id));
-    }
-    save_automations(&app_handle, &automations)?;
+    with_automations(&app_handle, |automations| {
+        let before = automations.len();
+        automations.retain(|a| a.id != id);
+        if automations.len() == before {
+            return Err(format!("No scheduled automation with id '{}'", id));
+        }
+        Ok(((), true))
+    })
+    .await?;
 
     info!("Agent deleted scheduled automation {}", id);
     Ok(json!({ "success": true, "deleted_id": id }))

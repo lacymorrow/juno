@@ -21,8 +21,11 @@ use chrono::Local;
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
 use std::str::FromStr;
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_store::StoreExt;
@@ -36,6 +39,44 @@ pub const STORE_FILE: &str = "scheduled_automations.json";
 pub const STORE_KEY: &str = "automations";
 /// How often the scheduler checks for due automations.
 const TICK_INTERVAL_SECS: u64 = 30;
+/// Minimum allowed gap between consecutive runs of an automation. Each firing
+/// is a full unattended agent run, so per-second cron schedules would burn
+/// tokens continuously.
+pub const MIN_INTERVAL_SECS: u64 = 60;
+
+/// Serializes every load→mutate→save cycle on the automations store so
+/// concurrent writers (CRUD commands, agent tools, the tick loop) cannot
+/// clobber each other's changes with stale snapshots (lost updates).
+static STORE_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
+/// Ids of automations currently firing — prevents the tick loop and a manual
+/// "Run now" from double-firing the same automation concurrently.
+static IN_FLIGHT: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
+
+fn in_flight() -> &'static StdMutex<HashSet<String>> {
+    IN_FLIGHT.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
+/// RAII claim on a firing automation; releases the id when dropped, so every
+/// exit path (success, error, panic unwind) frees the claim.
+pub struct InFlightClaim(String);
+
+impl Drop for InFlightClaim {
+    fn drop(&mut self) {
+        let mut set = in_flight().lock().unwrap_or_else(|p| p.into_inner());
+        set.remove(&self.0);
+    }
+}
+
+/// Claims `id` for firing. Returns `None` if that automation is already firing.
+pub fn try_claim_firing(id: &str) -> Option<InFlightClaim> {
+    let mut set = in_flight().lock().unwrap_or_else(|p| p.into_inner());
+    if set.insert(id.to_string()) {
+        Some(InFlightClaim(id.to_string()))
+    } else {
+        None
+    }
+}
 
 /// A user-visible scheduled automation that fires an agent query on a cron schedule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,16 +151,64 @@ pub fn preview_next_runs(expr: &str, count: usize) -> Result<Vec<u64>, String> {
         .collect())
 }
 
+/// Rejects cron expressions whose upcoming runs are closer together than
+/// `MIN_INTERVAL_SECS`. Checked at create/update time by both the user CRUD
+/// commands and the agent tool.
+pub fn validate_cron_interval(expr: &str) -> Result<(), String> {
+    let runs = preview_next_runs(expr, 3)?;
+    for pair in runs.windows(2) {
+        if pair[1].saturating_sub(pair[0]) < MIN_INTERVAL_SECS {
+            return Err(format!(
+                "Schedule fires too frequently — the minimum interval between runs is {} seconds",
+                MIN_INTERVAL_SECS
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Loads all automations from the Tauri Store.
 pub fn load_automations(app: &AppHandle) -> Result<Vec<ScheduledAutomation>, String> {
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("Failed to open automations store: {}", e))?;
     match store.get(STORE_KEY) {
-        Some(value) => serde_json::from_value(value)
-            .map_err(|e| format!("Failed to parse stored automations: {}", e)),
+        Some(value) => {
+            let entries: Vec<serde_json::Value> = serde_json::from_value(value)
+                .map_err(|e| format!("Failed to parse stored automations: {}", e))?;
+            // Parse per-entry so one malformed record (crash mid-write, manual
+            // edit, schema drift) degrades to a logged drop instead of failing
+            // every CRUD call and permanently stalling the tick loop.
+            Ok(entries
+                .into_iter()
+                .filter_map(|entry| match serde_json::from_value(entry) {
+                    Ok(automation) => Some(automation),
+                    Err(e) => {
+                        warn!("Dropping malformed scheduled automation entry: {}", e);
+                        None
+                    }
+                })
+                .collect())
+        }
         None => Ok(Vec::new()),
     }
+}
+
+/// Runs `mutate` against a freshly loaded automation list while holding the
+/// store lock, saving only when the closure reports the list dirty. All
+/// read-modify-write cycles on the store must go through this — a bare
+/// `load_automations`/`save_automations` pair races with concurrent writers.
+pub async fn with_automations<T, F>(app: &AppHandle, mutate: F) -> Result<T, String>
+where
+    F: FnOnce(&mut Vec<ScheduledAutomation>) -> Result<(T, bool), String>,
+{
+    let _guard = STORE_LOCK.get_or_init(|| TokioMutex::new(())).lock().await;
+    let mut automations = load_automations(app)?;
+    let (result, dirty) = mutate(&mut automations)?;
+    if dirty {
+        save_automations(app, &automations)?;
+    }
+    Ok(result)
 }
 
 /// Persists the automation list and notifies the frontend that it changed.
@@ -146,20 +235,21 @@ pub fn save_automations(
 /// the store, so edits the user made while an automation was running (which can
 /// take minutes) are not clobbered by a stale snapshot. Returns `false` if the
 /// automation no longer exists (deleted mid-run) — the update is dropped.
-pub fn update_automation<F: FnOnce(&mut ScheduledAutomation)>(
+pub async fn update_automation<F: FnOnce(&mut ScheduledAutomation)>(
     app: &AppHandle,
     id: &str,
     mutate: F,
 ) -> Result<bool, String> {
-    let mut automations = load_automations(app)?;
-    match automations.iter_mut().find(|a| a.id == id) {
-        Some(automation) => {
-            mutate(automation);
-            save_automations(app, &automations)?;
-            Ok(true)
+    with_automations(app, |automations| {
+        match automations.iter_mut().find(|a| a.id == id) {
+            Some(automation) => {
+                mutate(automation);
+                Ok((true, true))
+            }
+            None => Ok((false, false)),
         }
-        None => Ok(false),
-    }
+    })
+    .await
 }
 
 /// Starts the background scheduler loop. Called once from application setup.
@@ -201,7 +291,8 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
                 // Heal automations persisted without a next run (e.g. older versions)
                 match compute_next_run(&automation.cron) {
                     Ok(t) => {
-                        update_automation(app, &automation.id, |a| a.next_run_at = Some(t))?;
+                        update_automation(app, &automation.id, |a| a.next_run_at = Some(t))
+                            .await?;
                     }
                     Err(e) => {
                         warn!(
@@ -211,11 +302,18 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
                         update_automation(app, &automation.id, |a| {
                             a.enabled = false;
                             a.last_result = Some(format!("error: {}", e));
-                        })?;
+                        })
+                        .await?;
                     }
                 }
             }
             Some(next_run) if next_run <= now => {
+                // Claim the id so a concurrent "Run now" (or a fire still in
+                // flight) cannot double-fire this automation; skip this cycle
+                // if it is already running.
+                let Some(_claim) = try_claim_firing(&automation.id) else {
+                    continue;
+                };
                 let mut fired = automation.clone();
                 fire_automation(app, &mut fired).await;
                 // Missed occurrences (e.g. the app was closed) collapse into the
@@ -226,7 +324,8 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
                     a.last_run_at = fired.last_run_at;
                     a.last_result = fired.last_result;
                     a.next_run_at = next;
-                })?;
+                })
+                .await?;
             }
             Some(_) => {}
         }
@@ -312,5 +411,23 @@ mod tests {
         let runs = preview_next_runs("0 * * * *", 3).expect("valid cron");
         assert_eq!(runs.len(), 3);
         assert!(runs[0] < runs[1] && runs[1] < runs[2]);
+    }
+
+    #[test]
+    fn rejects_subminute_intervals() {
+        assert!(validate_cron_interval("* * * * * *").is_err());
+        assert!(validate_cron_interval("*/10 * * * * *").is_err());
+        // Every minute is exactly MIN_INTERVAL_SECS — allowed
+        assert!(validate_cron_interval("0 * * * * *").is_ok());
+        assert!(validate_cron_interval("0 9 * * MON").is_ok());
+    }
+
+    #[test]
+    fn claim_prevents_concurrent_fire_and_releases_on_drop() {
+        let claim = try_claim_firing("test-claim-id");
+        assert!(claim.is_some());
+        assert!(try_claim_firing("test-claim-id").is_none());
+        drop(claim);
+        assert!(try_claim_firing("test-claim-id").is_some());
     }
 }

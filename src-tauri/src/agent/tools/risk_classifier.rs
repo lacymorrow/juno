@@ -39,6 +39,12 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
             classify_form_fill_risk(tool_input)
         }
 
+        // Agent self-scheduling — creates a persistent automation that
+        // re-executes unattended with full tool access after this session
+        // ends, so creation requires human confirmation
+        "create_scheduled_automation" => RiskLevel::High,
+        "delete_scheduled_automation" => RiskLevel::Medium,
+
         // Everything else is low risk by default
         _ => RiskLevel::Low,
     }
