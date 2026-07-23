@@ -39,6 +39,7 @@ pub mod persistent_memory;
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
+pub mod scheduled_tasks; // User-facing scheduled automations (LAC-1431)
 pub mod onboarding;
 pub mod onboarding_analytics;
 pub mod onboarding_guidance;
