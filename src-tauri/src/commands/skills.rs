@@ -44,12 +44,23 @@ fn collect_skills() -> Vec<SkillInfo> {
         collect_command_files(&claude_dir.join("commands"), "", 0, &mut results);
     }
 
-    // Sort by name; keep "skill" entries ahead of "command" entries with the
-    // same name so dedup_by_key keeps the richer skill metadata.
-    results.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
-    results.dedup_by(|a, b| a.name == b.name);
+    sort_and_dedup(&mut results);
     results.truncate(MAX_SKILLS);
     results
+}
+
+/// Sort by name; rank "skill" entries ahead of same-named "command" entries so
+/// dedup (which keeps the first of each run) keeps the richer skill metadata.
+fn sort_and_dedup(results: &mut Vec<SkillInfo>) {
+    fn source_rank(info: &SkillInfo) -> u8 {
+        if info.source == "skill" {
+            0
+        } else {
+            1
+        }
+    }
+    results.sort_by(|a, b| a.name.cmp(&b.name).then(source_rank(a).cmp(&source_rank(b))));
+    results.dedup_by(|a, b| a.name == b.name);
 }
 
 /// Each subdirectory of `skills/` containing a SKILL.md is one skill.
@@ -236,6 +247,33 @@ mod tests {
     fn first_content_line_skips_frontmatter_and_headings() {
         let content = "---\nallowed-tools: Bash\n---\n\n# Review the PR\nDo the thing.\n";
         assert_eq!(first_content_line(content), "Review the PR");
+    }
+
+    #[test]
+    fn dedup_prefers_skill_over_same_named_command() {
+        let mut results = vec![
+            SkillInfo {
+                name: "paperclip".to_string(),
+                description: "thin command line".to_string(),
+                source: "command".to_string(),
+            },
+            SkillInfo {
+                name: "paperclip".to_string(),
+                description: "curated skill description".to_string(),
+                source: "skill".to_string(),
+            },
+            SkillInfo {
+                name: "review".to_string(),
+                description: "review the PR".to_string(),
+                source: "command".to_string(),
+            },
+        ];
+        sort_and_dedup(&mut results);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "paperclip");
+        assert_eq!(results[0].source, "skill");
+        assert_eq!(results[0].description, "curated skill description");
+        assert_eq!(results[1].name, "review");
     }
 
     #[test]

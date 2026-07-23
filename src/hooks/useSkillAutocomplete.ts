@@ -66,7 +66,7 @@ export const useSkillAutocomplete = ({
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
-  const fetchedRef = useRef(false);
+  const fetchStateRef = useRef<"idle" | "loading" | "loaded">("idle");
 
   const token = useMemo(() => {
     if (!enabled) return null;
@@ -75,20 +75,26 @@ export const useSkillAutocomplete = ({
   }, [value, enabled]);
 
   // Lazy-load the skill list the first time a slash token appears.
+  // Latches only on success so a transient invoke failure retries on the next
+  // keystroke, and survives StrictMode's double effect pass. No mounted-flag:
+  // discarding the result would drop the only fetch under StrictMode, and
+  // setState after unmount is a safe no-op in React 18.
   useEffect(() => {
-    if (token === null || fetchedRef.current) return;
-    fetchedRef.current = true;
-    let mounted = true;
+    if (token === null || fetchStateRef.current !== "idle") return;
+    fetchStateRef.current = "loading";
     invoke<SkillInfo[]>(COMMANDS.SKILLS_LIST_AVAILABLE_SKILLS)
       .then((result) => {
-        if (mounted && Array.isArray(result)) setSkills(result);
+        if (Array.isArray(result)) {
+          fetchStateRef.current = "loaded";
+          setSkills(result);
+        } else {
+          fetchStateRef.current = "idle";
+        }
       })
       .catch((e) => {
         console.error("SkillAutocomplete: failed to load skills:", e);
+        fetchStateRef.current = "idle";
       });
-    return () => {
-      mounted = false;
-    };
   }, [token]);
 
   const suggestions = useMemo(() => {
@@ -129,6 +135,9 @@ export const useSkillAutocomplete = ({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
       if (!open) return;
+      // Never steal keys from an in-progress IME composition — Enter/Tab there
+      // confirms the composed text, not our suggestion.
+      if (e.nativeEvent.isComposing || e.key === "Process") return;
       switch (e.key) {
         case "Tab":
         case "Enter":
