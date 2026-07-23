@@ -19,6 +19,7 @@ pub mod element_ids {
     pub const APP_BAR: &str = "app-bar";
     pub const VOICE_AI_BAR: &str = "voice-ai-bar";
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
+    pub const NOTCH_BAR: &str = "notch-bar";
     pub const FLOATING_PANEL: &str = "floating-panel";
 }
 
@@ -31,6 +32,7 @@ pub mod bar_appearances {
     pub const DYNAMIC: &str = "dynamic";
     pub const ORB: &str = "orb";
     pub const PERSONA: &str = "persona";
+    pub const NOTCH: &str = "notch";
 }
 
 /// UI state constants for bar state management

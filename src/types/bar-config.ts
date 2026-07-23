@@ -12,3 +12,18 @@ export interface FloatingBarConfig {
   opacity: number;
   bar_appearance: BarAppearance;
 }
+
+/**
+ * Notch (or fallback pill) geometry for the notch bar appearance.
+ * This type should match the Rust NotchGeometry struct
+ * (src-tauri/src/platform/macos.rs, notch_layout module).
+ * All values are logical points.
+ */
+export interface NotchGeometry {
+  has_notch: boolean;
+  notch_width: number;
+  notch_height: number;
+  menu_bar_height: number;
+  canvas_width: number;
+  canvas_height: number;
+}
