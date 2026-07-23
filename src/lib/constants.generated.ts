@@ -152,6 +152,7 @@ export const EVENTS = {
   TOOLS_COMMAND_EXECUTION_START: 'command-execution-start',
   TOOLS_COMMAND_EXECUTION_END: 'command-execution-end',
   TOOLS_COMPUTER_USE_AUDIT: 'computer-use-audit',
+  TOOLS_COMPUTER_USE_PREVIEW: 'computer-use-preview',
   TOOLS_AX_GROUNDING_AUDIT: 'ax-grounding-audit',
   CONTINUATION_AGENT_REQUEST: 'agent-continuation-request',
   CONTINUATION_AGENT_RESPONSE: 'agent-continuation-response',
