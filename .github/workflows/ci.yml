@@ -15,8 +15,16 @@ permissions:
   contents: read
 
 jobs:
-  # Cheap, fast TypeScript + bundle check on Linux. Also produces ../dist,
-  # which the Rust job needs (tauri::generate_context! reads frontendDist).
+  # TypeScript typecheck + Vite bundle. Cheap and fast; catches the most common
+  # breakage class in this codebase.
+  #
+  # NOTE: there is deliberately no Rust `cargo check`/`test` job yet. src-tauri
+  # cannot currently build from a clean checkout — the `playwright` crate
+  # (v0.0.20, abandoned) downloads a hardcoded 2021 browser driver from
+  # playwright.azureedge.net, which Microsoft decommissioned (now HTTP 404), so
+  # its build script panics on any machine without a stale cached driver. That
+  # must be fixed at the dependency level before Rust CI is reproducible.
+  # See docs/ci-rust-blocker.md.
   frontend:
     name: Frontend (typecheck + build)
     runs-on: ubuntu-latest
@@ -33,45 +41,3 @@ jobs:
       # `bun run build` is `tsc && vite build` — gates the typecheck and bundle.
       - name: Build frontend
         run: bun run build
-
-      - name: Upload dist for the Rust job
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist
-          retention-days: 1
-
-  # Rust check + tests on macOS — juno is a macOS app and its src-tauri crate
-  # links Apple frameworks (core-graphics etc.), so it cannot compile on Linux.
-  # Runs only if `frontend` passed, so the pricier runner never spins on a diff
-  # that already fails the cheap check.
-  rust:
-    name: Rust (check + test)
-    needs: frontend
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      # tauri::generate_context! requires ../dist to exist at compile time.
-      - name: Download dist from frontend job
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: cargo check
-        working-directory: src-tauri
-        run: cargo check --all-targets
-
-      - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
