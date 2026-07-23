@@ -591,9 +591,31 @@ pub mod notch_layout {
         )
     }
 
+    /// Whether a window frame already matches a target frame, within half a
+    /// point — macOS may snap frames to the pixel grid, so exact comparison
+    /// would report spurious mismatches and cause repeated setFrame calls.
+    pub fn frame_matches(
+        current: (f64, f64, f64, f64),
+        target: (f64, f64, f64, f64),
+    ) -> bool {
+        const TOLERANCE: f64 = 0.5;
+        (current.0 - target.0).abs() < TOLERANCE
+            && (current.1 - target.1).abs() < TOLERANCE
+            && (current.2 - target.2).abs() < TOLERANCE
+            && (current.3 - target.3).abs() < TOLERANCE
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn frame_matches_tolerates_pixel_grid_rounding() {
+            let target = (764.0, 1085.0, 200.0, 32.0);
+            assert!(frame_matches((764.4, 1084.6, 200.0, 32.0), target));
+            assert!(!frame_matches((760.0, 1085.0, 200.0, 32.0), target));
+            assert!(!frame_matches((764.0, 1085.0, 200.0, 33.0), target));
+        }
 
         #[test]
         fn notched_screen_uses_reported_cutout_plus_cover() {
@@ -761,78 +783,89 @@ pub mod notch {
 
     /// Position the floating bar as a notch bar: window level above the menu
     /// bar, fixed canvas top-flush over the notch (or centered pill fallback).
-    /// Main thread only.
-    pub fn enter_notch_mode(app_handle: &AppHandle) {
+    /// Idempotent — safe to re-apply on display reconfiguration. Main thread only.
+    pub fn enter_notch_mode(app_handle: &AppHandle) -> Result<(), String> {
         let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR)
         else {
-            warn!("Notch mode: floating-bar window not found");
-            return;
+            return Err("Notch mode: floating-bar window not found".to_string());
         };
-        match window.ns_window() {
-            Ok(ns_window_ptr) => unsafe {
-                let ns_window = ns_window_ptr as cocoa_id;
-                let (geometry, screen_frame) = read_geometry();
-                let (x, y, w, h) = notch_layout::canvas_frame(
-                    screen_frame.origin.x,
-                    screen_frame.origin.y,
-                    screen_frame.size.width,
-                    screen_frame.size.height,
-                    &geometry,
-                );
-                ns_window.setLevel_(notch_layout::NOTCH_WINDOW_LEVEL);
-                reassert_overlay_collection_behavior(ns_window);
+        let ns_window_ptr = window
+            .ns_window()
+            .map_err(|e| format!("Notch mode: failed to get NSWindow: {}", e))?;
+        unsafe {
+            let ns_window = ns_window_ptr as cocoa_id;
+            let (geometry, screen_frame) = read_geometry();
+            let (x, y, w, h) = notch_layout::canvas_frame(
+                screen_frame.origin.x,
+                screen_frame.origin.y,
+                screen_frame.size.width,
+                screen_frame.size.height,
+                &geometry,
+            );
+            ns_window.setLevel_(notch_layout::NOTCH_WINDOW_LEVEL);
+            reassert_overlay_collection_behavior(ns_window);
+            // Skip setFrame when already in place: re-entry is triggered from
+            // the floating bar's Moved window event, and an unconditional
+            // setFrame would emit another Moved event and loop forever.
+            let current: NSRect = msg_send![ns_window, frame];
+            if !notch_layout::frame_matches(
+                (current.origin.x, current.origin.y, current.size.width, current.size.height),
+                (x, y, w, h),
+            ) {
                 let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
                 ns_window.setFrame_display_(rect, YES);
                 info!(
                     "Notch mode entered: canvas ({:.0},{:.0}) {:.0}x{:.0}, has_notch={}",
                     x, y, w, h, geometry.has_notch
                 );
-            },
-            Err(e) => error!("Notch mode: failed to get NSWindow: {}", e),
+            }
         }
+        Ok(())
     }
 
     /// Restore the floating bar's normal level and default frame after leaving
     /// the notch appearance. Main thread only.
-    pub fn exit_notch_mode(app_handle: &AppHandle) {
+    pub fn exit_notch_mode(app_handle: &AppHandle) -> Result<(), String> {
         let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR)
         else {
-            warn!("Notch mode exit: floating-bar window not found");
-            return;
+            return Err("Notch mode exit: floating-bar window not found".to_string());
         };
-        match window.ns_window() {
-            Ok(ns_window_ptr) => unsafe {
-                let ns_window = ns_window_ptr as cocoa_id;
-                let (_, screen_frame) = read_geometry();
-                let x = screen_frame.origin.x
-                    + (screen_frame.size.width - DEFAULT_BAR_WIDTH) / 2.0;
-                let y = screen_frame.origin.y + screen_frame.size.height
-                    - DEFAULT_BAR_HEIGHT
-                    - RESTORE_TOP_OFFSET;
-                ns_window.setLevel_(FLOATING_WINDOW_LEVEL);
-                reassert_overlay_collection_behavior(ns_window);
-                let rect = NSRect::new(
-                    NSPoint::new(x, y),
-                    NSSize::new(DEFAULT_BAR_WIDTH, DEFAULT_BAR_HEIGHT),
-                );
-                ns_window.setFrame_display_(rect, YES);
-                info!("Notch mode exited: floating bar restored to default frame");
-            },
-            Err(e) => error!("Notch mode exit: failed to get NSWindow: {}", e),
+        let ns_window_ptr = window
+            .ns_window()
+            .map_err(|e| format!("Notch mode exit: failed to get NSWindow: {}", e))?;
+        unsafe {
+            let ns_window = ns_window_ptr as cocoa_id;
+            let (_, screen_frame) = read_geometry();
+            let x = screen_frame.origin.x
+                + (screen_frame.size.width - DEFAULT_BAR_WIDTH) / 2.0;
+            let y = screen_frame.origin.y + screen_frame.size.height
+                - DEFAULT_BAR_HEIGHT
+                - RESTORE_TOP_OFFSET;
+            ns_window.setLevel_(FLOATING_WINDOW_LEVEL);
+            reassert_overlay_collection_behavior(ns_window);
+            let rect = NSRect::new(
+                NSPoint::new(x, y),
+                NSSize::new(DEFAULT_BAR_WIDTH, DEFAULT_BAR_HEIGHT),
+            );
+            ns_window.setFrame_display_(rect, YES);
+            info!("Notch mode exited: floating bar restored to default frame");
         }
+        Ok(())
     }
 
-    async fn run_on_main(app_handle: AppHandle, f: fn(&AppHandle)) -> Result<(), String> {
+    async fn run_on_main(
+        app_handle: AppHandle,
+        f: fn(&AppHandle) -> Result<(), String>,
+    ) -> Result<(), String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = app_handle.clone();
         app_handle
             .run_on_main_thread(move || {
-                f(&handle);
-                let _ = tx.send(());
+                let _ = tx.send(f(&handle));
             })
             .map_err(|e| format!("Failed to schedule on main thread: {}", e))?;
         rx.await
-            .map_err(|e| format!("Main-thread task dropped: {}", e))
+            .map_err(|e| format!("Main-thread task dropped: {}", e))?
     }
 
     /// Async wrapper for command / event-loop contexts.

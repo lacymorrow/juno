@@ -1121,6 +1121,12 @@ pub async fn ui_get_bar_config() -> Result<FloatingBarConfig, String> {
 pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> {
     debug!("Setting floating bar configuration: {:?}", config);
 
+    // Serialize appearance transitions: two overlapping calls could otherwise
+    // interleave between the config store and the main-thread window apply,
+    // leaving the window position contradicting the stored appearance.
+    static APPEARANCE_TRANSITION: TokioMutex<()> = TokioMutex::const_new(());
+    let _transition = APPEARANCE_TRANSITION.lock().await;
+
     if let Some(manager) = get_ui_manager().await {
         // Scope the manager lock: the notch-mode transition below awaits a
         // main-thread round-trip and must not run while holding the mutex.
@@ -1148,16 +1154,18 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
         };
 
         // The notch appearance is the only one that repositions the window
-        // itself (top-flush over the menu bar at an elevated level).
+        // itself (top-flush over the menu bar at an elevated level). The config
+        // is already saved at this point, so a failed window apply is reported
+        // to the caller rather than silently leaving the bar mispositioned.
         if appearance_changed {
             if config.bar_appearance == ui::bar_appearances::NOTCH {
-                if let Err(e) = crate::platform::macos::notch::enter_notch_mode_async(app_handle).await {
-                    warn!("Failed to enter notch mode: {}", e);
-                }
+                crate::platform::macos::notch::enter_notch_mode_async(app_handle)
+                    .await
+                    .map_err(|e| format!("Failed to enter notch mode: {}", e))?;
             } else if previous_appearance == ui::bar_appearances::NOTCH {
-                if let Err(e) = crate::platform::macos::notch::exit_notch_mode_async(app_handle).await {
-                    warn!("Failed to exit notch mode: {}", e);
-                }
+                crate::platform::macos::notch::exit_notch_mode_async(app_handle)
+                    .await
+                    .map_err(|e| format!("Failed to exit notch mode: {}", e))?;
             }
         }
 
@@ -1174,6 +1182,32 @@ pub async fn get_notch_geometry(
     app_handle: AppHandle,
 ) -> Result<crate::platform::macos::notch_layout::NotchGeometry, String> {
     crate::platform::macos::notch::get_notch_geometry_async(app_handle).await
+}
+
+/// Re-anchor the notch bar after the system moves the floating-bar window —
+/// display plug/unplug, resolution or scaling changes all reposition windows,
+/// which would otherwise leave the notch bar stale until the user re-toggles
+/// the appearance. Called from the run-event loop on Moved/ScaleFactorChanged.
+///
+/// Loop-safe: enter_notch_mode skips setFrame when the frame already matches
+/// the computed target, so our own re-apply does not emit further Moved events.
+pub fn handle_bar_window_moved(app_handle: &AppHandle) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let is_notch = match get_ui_manager().await {
+            Some(manager) => {
+                manager.lock().await.bar_config.bar_appearance == ui::bar_appearances::NOTCH
+            }
+            None => false,
+        };
+        if is_notch {
+            if let Err(e) =
+                crate::platform::macos::notch::enter_notch_mode_async(app_handle).await
+            {
+                warn!("Failed to re-apply notch mode after window move: {}", e);
+            }
+        }
+    });
 }
 
 // === PANEL SPECIFIC COMMANDS ===
