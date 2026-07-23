@@ -274,6 +274,10 @@ pub mod tools {
     /// Emitted for every computer use action with target app, sensitivity, and timing.
     /// Frontend can collect these to display a reviewable action audit trail.
     pub const COMPUTER_USE_AUDIT: &str = "computer-use-audit";
+    /// Emitted BEFORE a coordinate-based computer use action executes.
+    /// Payload: { action, coordinate: [screen_x, screen_y], timestamp }.
+    /// Frontend overlay uses this to show a targeting highlight at the click position.
+    pub const COMPUTER_USE_PREVIEW: &str = "computer-use-preview";
     /// Emitted when AX (accessibility) grounding is attempted on a click action.
     /// Includes element role/label and whether AXPress was used vs coordinate fallback.
     pub const AX_GROUNDING_AUDIT: &str = "ax-grounding-audit";

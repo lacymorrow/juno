@@ -18,6 +18,25 @@ const HOT_SPOT = 5;
 const CURSOR_FADE_DELAY_MS = 1500;
 const CLICK_ANIM_DURATION_MS = 700;
 
+// LAC-1920: Pre-action targeting reticle duration. Matches the 500ms cooldown
+// between computer-use actions so the reticle finishes fading just as the
+// action lands. Must match the longest keyframe in the juno-preview-* set.
+const PREVIEW_ANIM_DURATION_MS = 500;
+
+// Human-readable labels shown above the reticle when the agent is about to act.
+const PREVIEW_ACTION_LABELS: Record<string, string> = {
+  left_click: "clicking",
+  right_click: "right-clicking",
+  middle_click: "middle-clicking",
+  double_click: "double-clicking",
+  triple_click: "triple-clicking",
+  left_click_drag: "dragging",
+  mouse_move: "moving to",
+  left_mouse_down: "pressing",
+  left_mouse_up: "releasing",
+  scroll: "scrolling",
+};
+
 // Cached MediaQueryList — avoids creating a new object on every 60fps animation frame.
 const REDUCED_MOTION_MQL =
   typeof window !== "undefined"
@@ -101,6 +120,37 @@ const CURSOR_CSS = `
   .juno-ripple-active {
     animation: juno-ripple 0.7s ease-out forwards;
   }
+
+  /* LAC-1920: Pre-action targeting reticle — shows BEFORE a computer-use
+     action fires. Container positioned via left/top; children use
+     translate(-50%, -50%) so scale animations start centred on the point. */
+  @keyframes juno-preview-expand {
+    0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.8; }
+    60%  { transform: translate(-50%, -50%) scale(1.1); opacity: 0.5; }
+    100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0;   }
+  }
+  @keyframes juno-preview-pulse {
+    0%   { transform: translate(-50%, -50%) scale(0.6);  opacity: 0;   }
+    20%  { transform: translate(-50%, -50%) scale(1.1);  opacity: 1;   }
+    80%  { transform: translate(-50%, -50%) scale(1.0);  opacity: 0.9; }
+    100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0;   }
+  }
+  @keyframes juno-preview-dot {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+    20%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes juno-preview-label {
+    0%   { opacity: 0; transform: translateX(-50%) translateY(4px);  }
+    20%  { opacity: 1; transform: translateX(-50%) translateY(0);    }
+    70%  { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-2px); }
+  }
+  .juno-preview-active .juno-preview-outer { animation: juno-preview-expand 0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-inner { animation: juno-preview-pulse  0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-dot   { animation: juno-preview-dot    0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-label { animation: juno-preview-label  0.5s ease-out forwards; }
 
   /* ── Onboarding cursor animations ─────────────────────────────────────── */
 
@@ -272,6 +322,13 @@ export const DesktopCursorOverlay = () => {
   // Tracks which slots are currently occupied
   const occupiedSlots = useRef<Set<number>>(new Set());
 
+  // ── LAC-1920: Pre-action reticle refs ─────────────────────────────────────
+  // Single global reticle (not per-slot) — backend emits one preview per
+  // computer-use action; agents on different slots share the same reticle.
+  const previewRef = useRef<HTMLDivElement>(null);
+  const previewLabelRef = useRef<HTMLDivElement>(null);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── POINT flying cursor refs ───────────────────────────────────────────────
   const flyDivRef = useRef<HTMLDivElement | null>(null);
   const flyLabelRef = useRef<HTMLDivElement | null>(null);
@@ -362,6 +419,37 @@ export const DesktopCursorOverlay = () => {
     el.classList.remove("juno-ripple-active");
     void el.offsetWidth;
     el.classList.add("juno-ripple-active");
+  };
+
+  // ── LAC-1920: Fire pre-action targeting reticle at (x, y) ────────────────
+  const firePreview = (x: number, y: number, action: string) => {
+    const el = previewRef.current;
+    if (!el) return;
+
+    // Position container so its centre sits at (x, y). Children use
+    // translate(-50%, -50%) to centre on the container.
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+
+    // Update label text (raw action name if we have no friendly label).
+    if (previewLabelRef.current) {
+      previewLabelRef.current.textContent =
+        PREVIEW_ACTION_LABELS[action] ?? action;
+    }
+
+    // Restart animation — same forced-reflow trick as fireSlotRipple.
+    el.classList.remove("juno-preview-active");
+    void el.offsetWidth; // intentional forced reflow — do not remove
+    el.classList.add("juno-preview-active");
+
+    // Clear active class once the animation finishes so the reticle doesn't
+    // linger as a static shape (all animations use `forwards` at opacity 0).
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      if (previewRef.current) {
+        previewRef.current.classList.remove("juno-preview-active");
+      }
+    }, PREVIEW_ANIM_DURATION_MS);
   };
 
   // ── POINT: fly cursor to (targetX, targetY) along a bezier arc ───────────
@@ -498,6 +586,7 @@ export const DesktopCursorOverlay = () => {
       if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
       if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
       if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
+      if (previewTimer.current) clearTimeout(previewTimer.current);
     };
   }, []);
 
@@ -599,6 +688,18 @@ export const DesktopCursorOverlay = () => {
   // screen space. TODO: map screenN to display origin for multi-monitor support.
   useEventListener<CursorPointPayload>(EVENTS.UI_CURSOR_POINT, (payload) => {
     flyTo(payload.x, payload.y, payload.label ?? null);
+  });
+
+  // ── LAC-1920: Pre-action targeting reticle ────────────────────────────────
+  // Fires ~500ms BEFORE a coordinate-based computer-use action so the user
+  // can see WHERE the agent is about to click/scroll/drag before it acts.
+  useEventListener<{
+    action: string;
+    coordinate: [number, number];
+    timestamp: number;
+  }>("computer-use-preview", ({ action, coordinate }) => {
+    const [x, y] = coordinate;
+    firePreview(x, y, action);
   });
 
   // ── Onboarding cursor — cursor-animation-frame at 60fps ───────────────────
@@ -1018,6 +1119,94 @@ export const DesktopCursorOverlay = () => {
             border: "2px solid rgba(99,102,241,0.6)",
             opacity: 0,
             pointerEvents: "none",
+          }}
+        />
+      </div>
+
+      {/* LAC-1920: Pre-action targeting reticle. Repositioned via left/top
+          on each `computer-use-preview` event; children centre on the
+          container via translate(-50%, -50%). Only visible while the
+          `juno-preview-active` class is applied. */}
+      <div
+        ref={previewRef}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: 0,
+          height: 0,
+          pointerEvents: "none",
+        }}
+      >
+        {/* Outer expanding ring */}
+        <div
+          className="juno-preview-outer"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 80,
+            height: 80,
+            borderRadius: "50%",
+            border: "2px solid rgba(99, 179, 237, 0.5)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+          }}
+        />
+        {/* Inner targeting reticle */}
+        <div
+          className="juno-preview-inner"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            border: "2.5px solid rgba(66, 153, 225, 0.9)",
+            backgroundColor: "rgba(66, 153, 225, 0.15)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+            boxShadow:
+              "0 0 12px rgba(66, 153, 225, 0.6), inset 0 0 8px rgba(66, 153, 225, 0.2)",
+          }}
+        />
+        {/* Crosshair center dot */}
+        <div
+          className="juno-preview-dot"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            backgroundColor: "rgba(66, 153, 225, 0.9)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+          }}
+        />
+        {/* Action label — text set imperatively via previewLabelRef */}
+        <div
+          ref={previewLabelRef}
+          className="juno-preview-label"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: -38,
+            transform: "translateX(-50%)",
+            fontSize: 10,
+            fontWeight: 600,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            color: "rgba(226, 232, 240, 0.95)",
+            backgroundColor: "rgba(15, 15, 30, 0.82)",
+            border: "1px solid rgba(99, 179, 237, 0.5)",
+            padding: "3px 8px",
+            borderRadius: 6,
+            whiteSpace: "nowrap",
+            opacity: 0,
+            letterSpacing: "0.02em",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.35)",
           }}
         />
       </div>
