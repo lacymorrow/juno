@@ -307,6 +307,14 @@ pub mod tool_choice {
     pub const ENABLED_CHANGED: &str = "tool-choice-enabled-changed";
 }
 
+/// Scheduled automation events (user-facing cron schedules)
+pub mod scheduler {
+    /// Emitted whenever the automation list changes (create/update/delete/run)
+    pub const AUTOMATIONS_CHANGED: &str = "scheduled-automations-changed";
+    /// Emitted when a scheduled automation fires, with id/name/query/success payload
+    pub const AUTOMATION_FIRED: &str = "scheduled-automation-fired";
+}
+
 /// Plugin events (namespaced with plugin:)
 pub mod plugin {
     pub const VOICE_TRANSCRIPTION_DICTATION_STARTED: &str = "plugin:voice-transcription:dictation-started";
