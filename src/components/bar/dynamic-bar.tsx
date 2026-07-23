@@ -339,9 +339,20 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const [componentPinned, setComponentPinned] = useState(false);
   const streamContentRef = useRef("");
   const rafRef = useRef(0);
+  const responseScrollRef = useRef<HTMLDivElement>(null);
+  // Follow streaming output unless the user scrolls up to read earlier text.
+  const stickToBottomRef = useRef(true);
   const [localInputValue, setLocalInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const pinnedInputRef = useRef<HTMLInputElement>(null);
+
+  const handleResponseScroll = useCallback(() => {
+    const el = responseScrollRef.current;
+    if (!el) return;
+    // Re-engage following once the user returns near the bottom.
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+  }, []);
 
   const dismissComponent = useCallback(() => {
     setAgentResponseContent(null);
@@ -398,6 +409,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
           () => {
             if (!mounted) return;
             streamContentRef.current = "";
+            stickToBottomRef.current = true;
             setAgentResponseContent(null);
             setIsStreamingContent(true);
             setComponentPinned(false);
@@ -491,6 +503,14 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       safeCleanupEventListener(unlisten);
     };
   }, []);
+
+  // Keep the response view pinned to the newest content while streaming,
+  // unless the user has scrolled up (handleResponseScroll re-engages).
+  useEffect(() => {
+    const el = responseScrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [agentResponseContent]);
 
   // Dismiss pinned content when backend leaves agent/status states
   useEffect(() => {
@@ -805,7 +825,11 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                 animation: `bar-content-in 0.25s ease-out ${SHRINK_DELAY_MS}ms both`,
               }}
             >
-              <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
+              <div
+                ref={responseScrollRef}
+                onScroll={handleResponseScroll}
+                className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]"
+              >
                 <MixedContentRenderer
                   content={agentResponseContent}
                   isStreaming={isStreamingContent}
