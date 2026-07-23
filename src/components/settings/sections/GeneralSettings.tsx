@@ -318,6 +318,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
                   Persona (AI Avatar)
                 </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_NOTCH}>
+                  Notch (Menu Bar)
+                </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-gray-500">

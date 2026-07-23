@@ -6,7 +6,8 @@ export type BarAppearance =
   | typeof UI.BAR_APPEARANCES_VOICE_AI
   | typeof UI.BAR_APPEARANCES_DYNAMIC
   | typeof UI.BAR_APPEARANCES_ORB
-  | typeof UI.BAR_APPEARANCES_PERSONA;
+  | typeof UI.BAR_APPEARANCES_PERSONA
+  | typeof UI.BAR_APPEARANCES_NOTCH;
 
 export function getBarLayoutWindowLabel(appearance: BarAppearance): string {
   switch (appearance) {
