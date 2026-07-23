@@ -529,6 +529,7 @@ export const COMMANDS = {
   CLOUD_HANDLE_CLOUD_MESSAGE: 'handle_cloud_message',
   CLOUD_EXECUTE_REMOTE_COMMAND: 'execute_remote_command',
   CLOUD_GET_CLOUD_CONNECTION_DIAGNOSTICS: 'get_cloud_connection_diagnostics',
+  SKILLS_LIST_AVAILABLE_SKILLS: 'list_available_skills',
 } as const;
 
 export const MEMORY = {
