@@ -1,10 +1,15 @@
 use base64;
-use playwright::api::{Browser, BrowserContext, Page};
-use playwright::Playwright;
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::Viewport;
+use chromiumoxide::handler::Handler;
+use chromiumoxide::page::{Page, ScreenshotParams};
+use futures::StreamExt;
 use serde_json::Value;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
+use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
 
 use crate::agent::core::{AgentError, ToolResult};
@@ -16,45 +21,104 @@ type ControllerResult<T> = Result<T, AgentError>;
 // Timeout defaults
 // const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
 
+/// Drive the CDP connection.
+///
+/// chromiumoxide returns a `Handler` alongside the `Browser`; nothing happens on
+/// the connection unless that handler is continuously polled. We must use
+/// `tauri::async_runtime::spawn` here — `tokio::spawn` panics with "no reactor
+/// running" inside the Tauri context.
+fn spawn_cdp_handler(mut handler: Handler) -> JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = handler.next().await {
+            if event.is_err() {
+                log::debug!("CDP handler stream ended");
+                break;
+            }
+        }
+    })
+}
+
 #[derive(Clone)]
 pub struct BrowserController {
-    // Store Playwright components
-    _playwright: Arc<Playwright>, // Keep playwright instance alive
-    browser: Arc<Browser>,
-    context: Arc<BrowserContext>,
+    // Browser needs &mut for close()/kill(), so it lives behind a mutex.
+    // Never hold this lock while acquiring `page` (see CLAUDE.md deadlock rules).
+    browser: Arc<Mutex<Browser>>,
     // Store page in mutex for thread safety
     page: Arc<Mutex<Option<Page>>>,
     // Track connection method for debugging
     connection_method: String,
+    // Keeps the CDP event pump alive; aborted on cleanup.
+    handler_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl BrowserController {
-    pub async fn new(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+    pub async fn new() -> ControllerResult<Self> {
         log::info!("BrowserController::new called - attempting optimized browser connection...");
 
         // Try three connection strategies in order of speed/preference
 
         // Strategy 1: Connect to existing browser instance via CDP (fastest - ~1-2 seconds)
-        if let Ok(controller) = Self::try_connect_to_existing_browser(playwright.clone()).await {
+        if let Ok(controller) = Self::try_connect_to_existing_browser().await {
             log::info!("Successfully connected to existing browser instance via CDP");
             return Ok(controller);
         }
 
         // Strategy 2: Launch with persistent user profile (fast - ~10-15 seconds)
-        if let Ok(controller) = Self::try_launch_with_user_profile(playwright.clone()).await {
+        if let Ok(controller) = Self::try_launch_with_user_profile().await {
             log::info!("Successfully launched browser with user profile");
             return Ok(controller);
         }
 
         // Strategy 3: Fallback to fresh instance (current behavior - 90+ seconds)
         log::info!("Falling back to fresh browser instance...");
-        Self::launch_fresh_instance(playwright).await
+        Self::launch_fresh_instance().await
+    }
+
+    /// Evaluate a JavaScript function expression and return its result as JSON.
+    ///
+    /// Returns `Value::Null` when the script yields nothing, so callers can treat
+    /// "no result" and "null result" identically (matching the previous behavior).
+    async fn eval_json(page: &Page, js: &str) -> ControllerResult<Value> {
+        let result = page.evaluate_function(js).await.map_err(|e| {
+            AgentError::ToolError(format!("JavaScript evaluation failed: {}", e))
+        })?;
+        Ok(result.value().cloned().unwrap_or(Value::Null))
+    }
+
+    /// Build a controller from a freshly connected/launched browser, reusing an
+    /// existing page when one is available.
+    async fn from_browser(
+        browser: Browser,
+        handler: Handler,
+        connection_method: String,
+    ) -> ControllerResult<Self> {
+        let task = spawn_cdp_handler(handler);
+
+        // Prefer an already-open page so we attach to what the user is looking at.
+        let page = match browser.pages().await {
+            Ok(pages) if !pages.is_empty() => {
+                log::info!("Using existing page from browser");
+                Some(pages[0].clone())
+            }
+            _ => match browser.new_page("about:blank").await {
+                Ok(page) => Some(page),
+                Err(e) => {
+                    log::warn!("Failed to create page: {}", e);
+                    None
+                }
+            },
+        };
+
+        Ok(BrowserController {
+            browser: Arc::new(Mutex::new(browser)),
+            page: Arc::new(Mutex::new(page)),
+            connection_method,
+            handler_task: Arc::new(Mutex::new(Some(task))),
+        })
     }
 
     /// Strategy 1: Try to connect to an existing browser instance via CDP
-    async fn try_connect_to_existing_browser(
-        playwright: Arc<Playwright>,
-    ) -> ControllerResult<Self> {
+    async fn try_connect_to_existing_browser() -> ControllerResult<Self> {
         log::info!("Attempting to connect to existing browser via CDP...");
 
         // First check if Chrome is running and if remote debugging is enabled
@@ -77,59 +141,19 @@ impl BrowserController {
             log::info!("Trying CDP endpoint: {}", endpoint);
 
             // Use a reasonable timeout for CDP connection attempts
+            // `Browser::connect` accepts the http debug URL and resolves the
+            // websocket endpoint via /json/version itself.
             match tokio::time::timeout(
                 std::time::Duration::from_secs(
                     crate::constants::timeouts::BROWSER_CONNECTION_TIMEOUT_SECONDS,
                 ), // Increased timeout for more reliable connection
-                playwright
-                    .chromium()
-                    .connect_over_cdp_builder(endpoint)
-                    .connect_over_cdp(),
+                Browser::connect(endpoint.to_string()),
             )
             .await
             {
-                Ok(Ok(browser)) => {
+                Ok(Ok((browser, handler))) => {
                     log::info!("Successfully connected to existing browser at {}", endpoint);
-
-                    // Create a new context since we can't clone existing ones
-                    log::info!("Creating new context in existing browser");
-                    let context = browser
-                        .context_builder()
-                        .accept_downloads(true)
-                        .build()
-                        .await
-                        .map_err(|e| {
-                            AgentError::ToolError(format!(
-                                "Failed to create context in existing browser: {}",
-                                e
-                            ))
-                        })?;
-
-                    // Get existing page or create new one
-                    let page = match context.pages() {
-                        Ok(pages) if !pages.is_empty() => {
-                            log::info!("Using existing page from browser");
-                            Some(pages[0].clone())
-                        }
-                        _ => {
-                            log::info!("Creating new page in existing browser");
-                            match context.new_page().await {
-                                Ok(page) => Some(page),
-                                Err(e) => {
-                                    log::warn!("Failed to create page in existing browser: {}", e);
-                                    None
-                                }
-                            }
-                        }
-                    };
-
-                    return Ok(BrowserController {
-                        _playwright: playwright,
-                        browser: Arc::new(browser),
-                        context: Arc::new(context),
-                        page: Arc::new(Mutex::new(page)),
-                        connection_method: format!("CDP:{}", endpoint),
-                    });
+                    return Self::from_browser(browser, handler, format!("CDP:{}", endpoint)).await;
                 }
                 Ok(Err(e)) => {
                     log::info!("CDP connection failed at {}: {}", endpoint, e);
@@ -195,14 +219,14 @@ impl BrowserController {
     }
 
     /// Strategy 2: Launch browser with persistent user profile
-    async fn try_launch_with_user_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+    async fn try_launch_with_user_profile() -> ControllerResult<Self> {
         log::info!("Attempting to launch browser with user profile...");
 
         // First, check if Chrome is already running - if so, try with temporary profile
         let chrome_running = Self::is_chrome_running().await;
         if chrome_running {
             log::info!("Chrome is already running, will try with temporary profile to avoid SingletonLock conflict");
-            return Self::try_launch_with_temp_profile(playwright).await;
+            return Self::try_launch_with_temp_profile().await;
         }
 
         // Detect user profile directory based on OS and browser
@@ -214,80 +238,35 @@ impl BrowserController {
         if std::path::Path::new(&singleton_lock_path).exists() {
             log::warn!("SingletonLock file exists at: {}", singleton_lock_path);
             log::info!("Profile appears to be in use, switching to temporary profile strategy");
-            return Self::try_launch_with_temp_profile(playwright).await;
+            return Self::try_launch_with_temp_profile().await;
         }
 
         // Detect browser executable
         let browser_info = Self::detect_browser_executable()?;
         log::info!("Using browser: {} at {:?}", browser_info.0, browser_info.1);
 
-        let chromium = playwright.chromium();
+        let config = BrowserConfig::builder()
+            .with_head()
+            .user_data_dir(std::path::Path::new(&user_data_dir))
+            .chrome_executable(&browser_info.1)
+            .launch_timeout(Duration::from_secs(30))
+            .args(vec![
+                "--no-first-run",
+                "--no-default-browser-check",
+                // Prevent update checks slowing startup
+                "--disable-component-update",
+                // Enable remote debugging for future CDP connections
+                "--remote-debugging-port=9222",
+            ])
+            .build()
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to build browser config: {}", e))
+            })?;
 
-        // Use persistent_context_launcher for user profile access
-        let user_data_path = std::path::Path::new(&user_data_dir);
-        let args = vec![
-            "--no-first-run".to_string(),
-            "--no-default-browser-check".to_string(),
-            "--disable-component-update".to_string(), // Prevent update checks slowing startup
-            "--remote-debugging-port=9222".to_string(), // Enable remote debugging for future CDP connections
-        ];
-        let launcher = chromium
-            .persistent_context_launcher(user_data_path)
-            .headless(false)
-            .accept_downloads(true)
-            .executable(&browser_info.1)
-            .timeout(30000.0) // 30 second timeout
-            .args(&args);
-
-        // Note: Skip channel setting for broader browser compatibility
-
-        let context_result = launcher.launch().await;
-
-        match context_result {
-            Ok(context) => {
+        match Browser::launch(config).await {
+            Ok((browser, handler)) => {
                 log::info!("Successfully launched browser with user profile");
-
-                // Get browser from context - may return None for persistent contexts
-                let browser = match context.browser() {
-                    Ok(Some(browser)) => browser,
-                    Ok(None) => {
-                        return Err(AgentError::ToolError(
-                            "No browser available from persistent context".to_string(),
-                        ))
-                    }
-                    Err(e) => {
-                        return Err(AgentError::ToolError(format!(
-                            "Failed to get browser from persistent context: {}",
-                            e
-                        )))
-                    }
-                };
-
-                // Get existing page or create new one
-                let page = match context.pages() {
-                    Ok(pages) if !pages.is_empty() => {
-                        log::info!("Using existing page from persistent context");
-                        Some(pages[0].clone())
-                    }
-                    _ => {
-                        log::info!("Creating new page in persistent context");
-                        match context.new_page().await {
-                            Ok(page) => Some(page),
-                            Err(e) => {
-                                log::warn!("Failed to create page in persistent context: {}", e);
-                                None
-                            }
-                        }
-                    }
-                };
-
-                Ok(BrowserController {
-                    _playwright: playwright,
-                    browser: Arc::new(browser),
-                    context: Arc::new(context),
-                    page: Arc::new(Mutex::new(page)),
-                    connection_method: format!("Persistent:{}", user_data_dir),
-                })
+                Self::from_browser(browser, handler, format!("Persistent:{}", user_data_dir)).await
             }
             Err(e) => {
                 log::warn!("Failed to launch with user profile: {}", e);
@@ -296,7 +275,7 @@ impl BrowserController {
                     || e.to_string().contains("profile directory")
                 {
                     log::info!("Profile conflict detected - trying temporary profile strategy");
-                    return Self::try_launch_with_temp_profile(playwright).await;
+                    return Self::try_launch_with_temp_profile().await;
                 }
                 Err(AgentError::ToolError(format!(
                     "Persistent profile launch failed: {}",
@@ -307,7 +286,7 @@ impl BrowserController {
     }
 
     /// Strategy 2b: Launch browser with temporary profile (when main profile is in use)
-    async fn try_launch_with_temp_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+    async fn try_launch_with_temp_profile() -> ControllerResult<Self> {
         log::info!("Attempting to launch browser with temporary profile...");
 
         // Create a temporary directory for the browser profile
@@ -329,70 +308,32 @@ impl BrowserController {
         let browser_info = Self::detect_browser_executable()?;
         log::info!("Using browser: {} at {:?}", browser_info.0, browser_info.1);
 
-        let chromium = playwright.chromium();
+        let config = BrowserConfig::builder()
+            .with_head()
+            .user_data_dir(&temp_profile)
+            .chrome_executable(&browser_info.1)
+            .launch_timeout(Duration::from_secs(30))
+            .args(vec![
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-component-update",
+                // Use different port to avoid conflicts
+                "--remote-debugging-port=9223",
+            ])
+            .build()
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to build browser config: {}", e))
+            })?;
 
-        // Use persistent_context_launcher with temporary profile
-        let args = vec![
-            "--no-first-run".to_string(),
-            "--no-default-browser-check".to_string(),
-            "--disable-component-update".to_string(),
-            "--remote-debugging-port=9223".to_string(), // Use different port to avoid conflicts
-        ];
-        let launcher = chromium
-            .persistent_context_launcher(&temp_profile)
-            .headless(false)
-            .accept_downloads(true)
-            .executable(&browser_info.1)
-            .timeout(30000.0) // 30 second timeout
-            .args(&args);
-
-        let context_result = launcher.launch().await;
-
-        match context_result {
-            Ok(context) => {
+        match Browser::launch(config).await {
+            Ok((browser, handler)) => {
                 log::info!("Successfully launched browser with temporary profile");
-
-                // Get browser from context - may return None for persistent contexts
-                let browser = match context.browser() {
-                    Ok(Some(browser)) => browser,
-                    Ok(None) => {
-                        return Err(AgentError::ToolError(
-                            "No browser available from temporary context".to_string(),
-                        ))
-                    }
-                    Err(e) => {
-                        return Err(AgentError::ToolError(format!(
-                            "Failed to get browser from temporary context: {}",
-                            e
-                        )))
-                    }
-                };
-
-                // Get existing page or create new one
-                let page = match context.pages() {
-                    Ok(pages) if !pages.is_empty() => {
-                        log::info!("Using existing page from temporary context");
-                        Some(pages[0].clone())
-                    }
-                    _ => {
-                        log::info!("Creating new page in temporary context");
-                        match context.new_page().await {
-                            Ok(page) => Some(page),
-                            Err(e) => {
-                                log::warn!("Failed to create page in temporary context: {}", e);
-                                None
-                            }
-                        }
-                    }
-                };
-
-                Ok(BrowserController {
-                    _playwright: playwright,
-                    browser: Arc::new(browser),
-                    context: Arc::new(context),
-                    page: Arc::new(Mutex::new(page)),
-                    connection_method: format!("TempProfile:{}", temp_profile.display()),
-                })
+                Self::from_browser(
+                    browser,
+                    handler,
+                    format!("TempProfile:{}", temp_profile.display()),
+                )
+                .await
             }
             Err(e) => {
                 log::warn!("Failed to launch with temporary profile: {}", e);
@@ -523,7 +464,7 @@ impl BrowserController {
     }
 
     /// Strategy 3: Launch fresh browser instance (current behavior)
-    async fn launch_fresh_instance(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+    async fn launch_fresh_instance() -> ControllerResult<Self> {
         log::info!("Launching fresh browser instance (fallback method)...");
 
         // --- Find Chromium Executable ---
@@ -559,38 +500,51 @@ impl BrowserController {
             env::var("PATH").unwrap_or_else(|_| "Not available".to_string())
         );
 
-        let chromium = playwright.chromium();
-
         // --- Build Launcher with Optional Path ---
-        let mut launcher = chromium.launcher(); // Create mutable launcher
-
-        if let Some(path) = &executable_path {
-            log::info!("Using browser executable found at: {:?}", path);
-            launcher = launcher.executable(path); // Pass the reference `path` directly
-        } else {
-            // If no path is found, return the specific error
-            log::error!("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH or install Chrome in a standard location.");
-            return Err(AgentError::ToolError("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH env var or ensure Chrome is installed in /Applications.".to_string()));
-        }
+        let exe_path = match &executable_path {
+            Some(path) => {
+                log::info!("Using browser executable found at: {:?}", path);
+                path.clone()
+            }
+            None => {
+                // If no path is found, return the specific error
+                log::error!("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH or install Chrome in a standard location.");
+                return Err(AgentError::ToolError("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH env var or ensure Chrome is installed in /Applications.".to_string()));
+            }
+        };
 
         // Configure the launcher with more resilient options and enable remote debugging
         let args = vec![
-            "--no-first-run".to_string(),
-            "--no-default-browser-check".to_string(),
-            "--no-sandbox".to_string(),
-            "--remote-debugging-port=9222".to_string(), // Enable remote debugging for future connections
-            "--disable-web-security".to_string(), // Reduce security restrictions for automation
-            "--disable-features=VizDisplayCompositor".to_string(), // Improve stability
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--no-sandbox",
+            // Enable remote debugging for future connections
+            "--remote-debugging-port=9222",
+            // Reduce security restrictions for automation
+            "--disable-web-security",
+            // Improve stability
+            "--disable-features=VizDisplayCompositor",
         ];
 
-        launcher = launcher.headless(false).args(&args).timeout(45000.0); // Reduced timeout to 45 seconds for better user experience
+        // Reduced timeout to 45 seconds for better user experience
+        let build_config = |args: Vec<&str>| {
+            BrowserConfig::builder()
+                .with_head()
+                .chrome_executable(&exe_path)
+                .launch_timeout(Duration::from_secs(45))
+                .args(args)
+                .build()
+                .map_err(|e| {
+                    AgentError::ToolError(format!("Failed to build browser config: {}", e))
+                })
+        };
 
         log::info!("Launching browser with 45 second timeout and remote debugging enabled...");
 
-        let browser = match launcher.launch().await {
-            Ok(browser) => {
+        let (browser, handler) = match Browser::launch(build_config(args)?).await {
+            Ok(pair) => {
                 log::info!("Browser launched successfully.");
-                browser
+                pair
             }
             Err(e) => {
                 // Try one more time with even fewer args
@@ -599,74 +553,23 @@ impl BrowserController {
                     e
                 );
 
-                // Reset launcher with minimal configuration
-                let mut launcher = chromium.launcher();
-                if let Some(path) = &executable_path {
-                    launcher = launcher.executable(path);
-                }
-
                 // Try with absolute minimum arguments but keep remote debugging
-                let minimal_args = vec!["--remote-debugging-port=9222".to_string()];
-
-                launcher = launcher
-                    .headless(false)
-                    .args(&minimal_args)
-                    .timeout(45000.0); // Consistent timeout with first attempt
+                let minimal_args = vec!["--remote-debugging-port=9222"];
 
                 log::info!("Retrying browser launch with minimal configuration...");
-                launcher.launch().await.map_err(|e| {
-                    AgentError::ToolError(format!(
-                        "Failed to launch browser (both attempts): {}",
-                        e
-                    ))
-                })?
-            }
-        };
-
-        log::info!(
-            "Browser launched successfully. Browser version: {}",
-            match browser.version() {
-                Ok(version) => version,
-                Err(_) => "unknown".to_string(),
-            }
-        );
-
-        // Get existing contexts or create a new one
-        let context = match browser.contexts() {
-            Ok(contexts) if !contexts.is_empty() => {
-                log::info!(
-                    "Using existing browser context with {} contexts",
-                    contexts.len()
-                );
-                // Create a new context since BrowserContext doesn't implement Clone
-                browser
-                    .context_builder()
-                    .accept_downloads(true)
-                    .build()
+                Browser::launch(build_config(minimal_args)?)
                     .await
                     .map_err(|e| {
                         AgentError::ToolError(format!(
-                            "Failed to create context in existing browser: {}",
-                            e
-                        ))
-                    })?
-            }
-            _ => {
-                log::info!("Creating new context in existing browser");
-                browser
-                    .context_builder()
-                    .accept_downloads(true)
-                    .build()
-                    .await
-                    .map_err(|e| {
-                        AgentError::ToolError(format!(
-                            "Failed to create context in existing browser: {}",
+                            "Failed to launch browser (both attempts): {}",
                             e
                         ))
                     })?
             }
         };
-        log::info!("Browser context created.");
+
+        // The CDP handler must be pumped before any page work can succeed.
+        let handler_task = spawn_cdp_handler(handler);
 
         // Create a test page to verify everything is working - retry multiple times if needed
         log::info!("Creating test page to verify browser setup...");
@@ -682,7 +585,7 @@ impl BrowserController {
                     attempt,
                     max_attempts
                 );
-                match context.new_page().await {
+                match browser.new_page("about:blank").await {
                     Ok(page) => {
                         test_page = Some(page);
                         break;
@@ -702,6 +605,7 @@ impl BrowserController {
 
             match test_page {
                 None => {
+                    handler_task.abort();
                     return Err(AgentError::ToolError(format!(
                         "Failed to create initial page after {} attempts. Last error: {}",
                         max_attempts,
@@ -712,31 +616,15 @@ impl BrowserController {
             }
         };
 
-        // Try to navigate to a simple URL to verify browser works
-        log::info!("Testing browser with navigation to about:blank...");
-        match test_page
-            .goto_builder("about:blank")
-            .timeout(10000.0)
-            .goto()
-            .await
-        {
-            Ok(_) => log::info!("Browser test navigation successful."),
-            Err(e) => {
-                log::warn!("Browser test navigation failed: {}", e);
-                // Continue anyway, but log the warning
-            }
-        }
-
         // Keep the test page open as our initial page
         let page = Arc::new(Mutex::new(Some(test_page)));
         log::info!("Browser successfully initialized with test page.");
 
         Ok(BrowserController {
-            _playwright: playwright.clone(), // Store the Arc<Playwright>
-            browser: Arc::new(browser),
-            context: Arc::new(context),
+            browser: Arc::new(Mutex::new(browser)),
             page,
             connection_method: "Fresh".to_string(),
+            handler_task: Arc::new(Mutex::new(Some(handler_task))),
         })
     }
 
@@ -968,8 +856,6 @@ impl BrowserController {
 
     // Helper to get or create a page, with enhanced error handling and recovery
     async fn ensure_page_exists(&self) -> ControllerResult<()> {
-        let mut retry_context = false;
-
         // First attempt to work with the current page
         {
             let mut page_guard = self.page.lock().await;
@@ -979,7 +865,7 @@ impl BrowserController {
                 // Check if the existing page is still valid
                 if let Some(page) = page_guard.as_ref() {
                     // Try a simple JavaScript evaluation to check if page is still valid
-                    match page.evaluate::<Option<()>, bool>("() => true", None).await {
+                    match page.evaluate_function("() => true").await {
                         Ok(_) => {
                             log::debug!("Existing page is valid.");
                             return Ok(());
@@ -989,12 +875,8 @@ impl BrowserController {
                                 "Existing page appears invalid: {}. Will create a new page.",
                                 e
                             );
-                            // Try to close the old page just in case
-                            if let Err(ce) = page.close(None).await {
-                                log::warn!("Error closing invalid page: {}", ce);
-                            }
-
-                            // Clear the invalid page reference
+                            // Drop the stale handle; `Page::close` consumes self, and a
+                            // dead target cannot be closed anyway.
                             *page_guard = None;
                         }
                     }
@@ -1003,40 +885,18 @@ impl BrowserController {
         } // Release the mutex guard here
 
         // At this point we need to create a new page
-        // Multiple retry attempts with increasing recovery actions
+        // Multiple retry attempts with increasing backoff
         for attempt in 1..=3 {
             log::info!("Attempt {} of 3 to create new page", attempt);
 
-            if retry_context && attempt > 1 {
-                // On later attempts, try to recreate the context first
-                log::warn!("Attempting to recreate browser context as a recovery step");
-                match self.browser.context_builder().build().await {
-                    Ok(new_context) => {
-                        // We successfully created a new context, but we can't replace the Arc-wrapped one
-                        // Just log this situation - we'll still try to use the original context
-                        log::info!(
-                            "Created new context as a test, but continuing with original context"
-                        );
-                        // Close the test context as we can't use it
-                        if let Err(e) = new_context.close().await {
-                            log::warn!("Failed to close test context: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to recreate browser context: {}", e);
-                        // If we can't even create a context, there may be deeper issues
-                        if attempt == 3 {
-                            return Err(AgentError::ToolError(format!(
-                                "Browser appears to be in an unrecoverable state: {}",
-                                e
-                            )));
-                        }
-                    }
-                }
-            }
+            // Take the browser lock only for the call itself, never while holding
+            // the page lock (see CLAUDE.md deadlock rules).
+            let new_page = {
+                let browser = self.browser.lock().await;
+                browser.new_page("about:blank").await
+            };
 
-            // Try to create a new page
-            match self.context.new_page().await {
+            match new_page {
                 Ok(new_page) => {
                     let mut page_guard = self.page.lock().await;
                     *page_guard = Some(new_page);
@@ -1045,9 +905,6 @@ impl BrowserController {
                 }
                 Err(e) => {
                     log::warn!("Failed to create page on attempt {}: {}", attempt, e);
-
-                    // On first failure, set flag to try context recreation on next attempt
-                    retry_context = true;
 
                     // Wait before retry with increasing backoff
                     let delay = 500 * attempt;
@@ -1101,16 +958,26 @@ impl BrowserController {
             )
         })?;
 
-        // Navigate with timeout
-        let goto_options = page.goto_builder(url).timeout(timeout_ms as f64);
-        match goto_options.goto().await {
+        // Navigate with timeout. chromiumoxide has no per-call timeout, so we
+        // impose one here to preserve the previous contract.
+        let navigation = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+            page.goto(url).await?;
+            page.wait_for_navigation().await?;
+            Ok::<(), chromiumoxide::error::CdpError>(())
+        })
+        .await
+        .map_err(|_| {
+            AgentError::ToolError(format!("Navigation timed out after {}ms", timeout_ms))
+        })?;
+
+        match navigation {
             Ok(_) => {
                 log::info!("Navigation successful to: {}", url);
 
                 // Get page title for a more helpful response
-                let title = match page.title().await {
-                    Ok(t) => t,
-                    Err(_) => "Unknown".to_string(),
+                let title = match page.get_title().await {
+                    Ok(Some(t)) => t,
+                    _ => "Unknown".to_string(),
                 };
 
                 let call_id = "nav_call".to_string();
@@ -1136,13 +1003,15 @@ impl BrowserController {
         if let Some(page) = page_guard.as_ref() {
             let url = page
                 .url()
-                .map_err(|e| AgentError::ToolError(format!("Failed to get current URL: {}", e)))?;
+                .await
+                .map_err(|e| AgentError::ToolError(format!("Failed to get current URL: {}", e)))?
+                .unwrap_or_default();
             log::info!("Current URL: {}", url);
 
             // Get page title too
-            let title = match page.title().await {
-                Ok(t) => t,
-                Err(_) => "Unknown".to_string(),
+            let title = match page.get_title().await {
+                Ok(Some(t)) => t,
+                _ => "Unknown".to_string(),
             };
 
             let call_id = "url_call".to_string();
@@ -1185,7 +1054,7 @@ impl BrowserController {
             AgentError::ToolError("Page not available for content extraction".to_string())
         })?;
 
-        // JavaScript approach is more reliable across Playwright versions
+        // JavaScript approach keeps selector semantics consistent across engines
         let js_fn = if multiple {
             // Multiple elements
             if let Some(attr) = attribute {
@@ -1229,7 +1098,7 @@ impl BrowserController {
         };
 
         // Execute JavaScript with type parameters that match expected arg & return types
-        match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+        match Self::eval_json(page, &js_fn).await {
             Ok(result) => {
                 log::info!("Content extraction successful for selector: {}", selector);
                 let call_id = "extract_call".to_string();
@@ -1288,7 +1157,7 @@ impl BrowserController {
                 );
 
                 // Add proper type annotations to evaluate
-                match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+                match Self::eval_json(page, &js_fn).await {
                     Ok(result) => {
                         if result.as_bool().unwrap_or(false) {
                             // Wait a bit for any navigation/changes
@@ -1345,7 +1214,7 @@ impl BrowserController {
                     value.replace(r#"""#, r#"\""#)
                 );
 
-                match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+                match Self::eval_json(page, &js_fn).await {
                     Ok(result) => {
                         if result.as_bool().unwrap_or(false) {
                             let call_id = "type_call".to_string();
@@ -1397,7 +1266,7 @@ impl BrowserController {
                     value.replace(r#"""#, r#"\""#)
                 );
 
-                match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+                match Self::eval_json(page, &js_fn).await {
                     Ok(result) => {
                         if result.as_bool().unwrap_or(false) {
                             let call_id = "select_call".to_string();
@@ -1451,7 +1320,7 @@ impl BrowserController {
                     }
                 };
 
-                match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+                match Self::eval_json(page, &js_fn).await {
                     Ok(_) => {
                         let call_id = "scroll_call".to_string();
                         Ok(ToolResult {
@@ -1495,18 +1364,9 @@ impl BrowserController {
             AgentError::ToolError("Page not available for screenshot".to_string())
         })?;
 
-        // Create a temporary file for the screenshot
-        let temp_dir = tempfile::Builder::new()
-            .prefix("juno_screenshot_")
-            .tempdir()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to create temp directory: {}", e))
-            })?;
-
-        let screenshot_path = temp_dir.path().join("screenshot.png");
-
-        // Configure screenshot options via builder
-        let screenshot_builder = if let Some(sel) = selector {
+        // chromiumoxide returns the encoded image directly, so there is no temp
+        // file to create, read back, or clean up.
+        let screenshot_params = if let Some(sel) = selector {
             // For element screenshot, capture element coordinates via JavaScript
             // then use clipping
             let js_fn = format!(
@@ -1526,7 +1386,7 @@ impl BrowserController {
             );
 
             // Get element position
-            let element_rect = match page.evaluate::<Option<()>, Value>(&js_fn, None).await {
+            let element_rect = match Self::eval_json(page, &js_fn).await {
                 Ok(rect) => {
                     if rect.is_null() {
                         return Err(AgentError::ToolError(format!(
@@ -1544,46 +1404,31 @@ impl BrowserController {
                 }
             };
 
-            // Fix the clip call to use a proper Rectangle struct
-            // Get dimensions from element_rect
+            // Get dimensions from element_rect and clip to them
             let x = element_rect["x"].as_f64().unwrap_or(0.0);
             let y = element_rect["y"].as_f64().unwrap_or(0.0);
             let width = element_rect["width"].as_f64().unwrap_or(100.0);
             let height = element_rect["height"].as_f64().unwrap_or(100.0);
 
-            // Configure builder with clipping using a proper FloatRect
-            let clip_rect = playwright::api::FloatRect {
-                x,
-                y,
-                width,
-                height,
-            };
-
-            page.screenshot_builder()
-                .path(screenshot_path.clone())
-                .clip(clip_rect)
+            ScreenshotParams::builder()
+                .clip(Viewport {
+                    x,
+                    y,
+                    width,
+                    height,
+                    scale: 1.0,
+                })
+                .build()
         } else {
             // For full page or viewport screenshot
-            page.screenshot_builder()
-                .path(screenshot_path.clone())
-                .full_page(full_page)
+            ScreenshotParams::builder().full_page(full_page).build()
         };
 
         // Take the screenshot
-        match screenshot_builder.screenshot().await {
-            Ok(_) => {
-                // Read the file and convert to base64
-                let image_data = std::fs::read(&screenshot_path).map_err(|e| {
-                    AgentError::ToolError(format!("Failed to read screenshot file: {}", e))
-                })?;
-
+        match page.screenshot(screenshot_params).await {
+            Ok(image_data) => {
                 let base64_data =
                     base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
-
-                // Clean up the temp directory (this removes the file too)
-                if let Err(e) = temp_dir.close() {
-                    log::warn!("Failed to clean up temp directory: {}", e);
-                }
 
                 let call_id = "screenshot_call".to_string();
                 Ok(ToolResult {
@@ -1612,8 +1457,8 @@ impl BrowserController {
             // Scope for page_guard
             let mut page_guard = self.page.lock().await; // Lock mutex
             if let Some(page) = page_guard.take() {
-                // Take ownership from Option
-                if let Err(e) = page.close(None).await {
+                // Take ownership from Option — `Page::close` consumes self
+                if let Err(e) = page.close().await {
                     log::error!("Failed to close browser page gracefully: {}", e);
                 } else {
                     log::info!("Browser page closed.");
@@ -1621,18 +1466,23 @@ impl BrowserController {
             }
         } // MutexGuard is dropped here
 
-        // Close the context
-        if let Err(e) = self.context.close().await {
-            log::error!("Failed to close browser context gracefully: {}", e);
-        } else {
-            log::info!("Browser context closed.");
+        // Close the browser
+        {
+            let mut browser = self.browser.lock().await;
+            if let Err(e) = browser.close().await {
+                log::error!("Failed to close browser gracefully: {}", e);
+            } else {
+                log::info!("Browser instance closed.");
+            }
         }
 
-        // Close the browser
-        if let Err(e) = self.browser.close().await {
-            log::error!("Failed to close browser gracefully: {}", e);
-        } else {
-            log::info!("Browser instance closed.");
+        // Stop pumping CDP events now that the connection is gone
+        {
+            let mut task_guard = self.handler_task.lock().await;
+            if let Some(task) = task_guard.take() {
+                task.abort();
+                log::info!("CDP handler task stopped.");
+            }
         }
 
         // Clean up temporary profile if this was a temporary profile launch
@@ -1726,33 +1576,39 @@ impl Drop for BrowserController {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let connection_method = self.connection_method.clone();
             let browser = self.browser.clone();
-            let context = self.context.clone();
             let page = self.page.clone();
-            
+            let handler_task = self.handler_task.clone();
+
             // Schedule async cleanup in a detached task
             handle.spawn(async move {
                 log::info!("BrowserController dropped, scheduling cleanup...");
-            
+
             // Close the page if it exists
             {
                 let mut page_guard = page.lock().await;
                 if let Some(page) = page_guard.take() {
-                    if let Err(e) = page.close(None).await {
+                    if let Err(e) = page.close().await {
                         log::error!("Failed to close browser page in Drop: {}", e);
                     }
                 }
             }
-            
-            // Close the context
-            if let Err(e) = context.close().await {
-                log::error!("Failed to close browser context in Drop: {}", e);
-            }
-            
+
             // Close the browser
-            if let Err(e) = browser.close().await {
-                log::error!("Failed to close browser in Drop: {}", e);
+            {
+                let mut browser = browser.lock().await;
+                if let Err(e) = browser.close().await {
+                    log::error!("Failed to close browser in Drop: {}", e);
+                }
             }
-            
+
+            // Stop the CDP event pump
+            {
+                let mut task_guard = handler_task.lock().await;
+                if let Some(task) = task_guard.take() {
+                    task.abort();
+                }
+            }
+
             // Clean up temporary profile if needed
             if connection_method.starts_with("TempProfile:") {
                 if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {

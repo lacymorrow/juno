@@ -156,7 +156,6 @@ impl BrowserControllerManager {
     pub async fn get_or_create(
         &self,
         id: String,
-        playwright: Arc<playwright::Playwright>,
     ) -> Result<Arc<crate::agent::tools::browser_controller::BrowserController>, String> {
         // Check if we have an active controller
         {
@@ -177,7 +176,7 @@ impl BrowserControllerManager {
 
         // Create new controller
         info!("Creating new browser controller: {}", id);
-        let controller = crate::agent::tools::browser_controller::BrowserController::new(playwright)
+        let controller = crate::agent::tools::browser_controller::BrowserController::new()
             .await
             .map_err(|e| format!("Failed to create browser controller: {}", e))?;
         

@@ -64,7 +64,7 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
             }
         }
         
-        // Note: Playwright driver is private and will be cleaned up when AppState is dropped
+        // Note: the CDP browser connection is cleaned up when AppState is dropped
         // TTS provider is part of AudioSettings and doesn't need explicit cleanup
     }
     
