@@ -432,9 +432,12 @@ impl AppState {
 
             // Initialize parallel-agent session registry. The 500ms cooldown
             // matches the existing UI-action cooldown used by
-            // anthropic_computer_use.rs; the parallel cap mirrors the
+            // anthropic_computer_use.rs; the parallel cap of 12 mirrors the
             // orchestrator's max_parallel_tasks so we don't outrun the
-            // higher-level scheduler.
+            // higher-level scheduler. Note the cap exceeds the 8-slot
+            // SESSION_COLOR_SLOTS identity palette — sessions 9-12 reuse
+            // colors of sessions 1-4, an accepted visual collision per the
+            // LAC-2830 spec (ColorAllocator wraps mod palette size).
             agent_sessions: Arc::new(AgentSessionRegistry::new(
                 12,
                 Arc::new(InputArbiter::new(Duration::from_millis(500))),

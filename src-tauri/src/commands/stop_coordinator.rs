@@ -224,7 +224,17 @@ impl StopCoordinator {
                 }
             }
 
-            app_state.mark_agent_execution_finished();
+            // The global "is executing" flag serves the whole app, not just
+            // the focused session. Only clear it when no OTHER session is
+            // still running — the cancelled session itself may linger in the
+            // registry until its run tears down, hence <= 1 rather than == 0.
+            // (Its own run clears the flag again on exit.) Today the queue
+            // serializes runs so this gate is a no-op, but once LAC-1432
+            // lifts the cap, clearing unconditionally would switch off
+            // execution UI while background agents are still working.
+            if !cancelled_focused || app_state.agent_sessions().len().await <= 1 {
+                app_state.mark_agent_execution_finished();
+            }
             self.unregister_operation(&agent_op_id).await;
         }
 

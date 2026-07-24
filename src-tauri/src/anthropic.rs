@@ -402,6 +402,61 @@ pub async fn submit_query(
     Ok(())
 }
 
+/// Emit a session's discrete terminal lifecycle event and, when the session
+/// ended in the BACKGROUND (not focused), fire a macOS notification so the
+/// user learns the outcome. Must run on EVERY exit path of
+/// `execute_agent_internal` — including early setup failures — otherwise the
+/// roster row silently vanishes with no error animation or notification
+/// (LAC-2830 §6). The RAII `SessionHandle::drop` only broadcasts the row
+/// removal; it never emits the terminal event.
+///
+/// The focused session's outcome is already on screen, so notifying for it
+/// would be noise. Cancellations are always user-initiated and never notify.
+/// Focus is read exactly once (inside `mark_terminal`) so the notification
+/// gate and the emitted snapshot cannot disagree.
+async fn finish_session_terminal_state(
+    session_handle: Option<&crate::agents::SessionHandle>,
+    app_handle: &tauri::AppHandle,
+    state: &tauri::State<'_, AppState>,
+    terminal_status: crate::agents::AgentSessionStatus,
+    outcome_message: &str,
+) {
+    use crate::agents::AgentSessionStatus;
+
+    let Some(handle) = session_handle else {
+        return;
+    };
+    let was_focused = handle.mark_terminal(terminal_status).await;
+
+    if !was_focused
+        && !crate::cli::headless::is_headless_mode()
+        && terminal_status != AgentSessionStatus::Cancelled
+    {
+        let agent_name = handle.session().agent_name().to_string();
+        let (title, level) = if terminal_status == AgentSessionStatus::Finished {
+            (format!("{} — Complete", agent_name), "success")
+        } else {
+            (format!("{} — Failed", agent_name), "error")
+        };
+        let data = crate::commands::notifications::NotificationData {
+            title,
+            message: outcome_message.chars().take(140).collect::<String>(),
+            level: level.to_string(),
+            important: Some(matches!(terminal_status, AgentSessionStatus::Failed)),
+            timeout: None,
+        };
+        if let Err(e) = crate::commands::notifications::send_notification(
+            app_handle.clone(),
+            state.clone(),
+            data,
+        )
+        .await
+        {
+            warn!("Failed to send background-session notification: {}", e);
+        }
+    }
+}
+
 /// Internal agent execution function - handles the actual agent logic
 async fn execute_agent_internal(
     query: String,
@@ -767,6 +822,14 @@ async fn execute_agent_internal(
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
                     state.mark_agent_execution_finished();
+                    finish_session_terminal_state(
+                        session_handle.as_ref(),
+                        &app_handle,
+                        &state,
+                        crate::agents::AgentSessionStatus::Failed,
+                        &err_msg,
+                    )
+                    .await;
                     return Err(err_msg);
                 }
                 info!("✅ Registered full Computer Use tools for single agent mode");
@@ -875,6 +938,14 @@ async fn execute_agent_internal(
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
                     state.mark_agent_execution_finished();
+                    finish_session_terminal_state(
+                        session_handle.as_ref(),
+                        &app_handle,
+                        &state,
+                        crate::agents::AgentSessionStatus::Failed,
+                        &err_msg,
+                    )
+                    .await;
                     return Err(err_msg);
                 }
             };
@@ -954,6 +1025,14 @@ async fn execute_agent_internal(
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
                     state.mark_agent_execution_finished();
+                    finish_session_terminal_state(
+                        session_handle.as_ref(),
+                        &app_handle,
+                        &state,
+                        crate::agents::AgentSessionStatus::Failed,
+                        &err_msg,
+                    )
+                    .await;
                     return Err(err_msg);
                 }
                 info!("✅ Registered full Computer Use tools for specialist mode");
@@ -1143,6 +1222,14 @@ async fn execute_agent_internal(
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
                     state.mark_agent_execution_finished();
+                    finish_session_terminal_state(
+                        session_handle.as_ref(),
+                        &app_handle,
+                        &state,
+                        crate::agents::AgentSessionStatus::Failed,
+                        &err_msg,
+                    )
+                    .await;
                     return Err(err_msg);
                 }
             };
@@ -1201,53 +1288,27 @@ async fn execute_agent_internal(
     // --- Parallel-session terminal state (LAC-1432) ---
     // Give the roster UI a final status snapshot (and lifecycle event) before
     // the RAII SessionHandle removes the row, and notify the user when a
-    // BACKGROUND session ends — the focused session's outcome is already on
-    // screen, so notifying for it would be noise. Cancellations are always
-    // user-initiated, so they never notify.
-    if let Some(handle) = session_handle.as_ref() {
+    // BACKGROUND session ends. Setup-failure early returns above call the
+    // same helper, so every exit path emits a terminal event.
+    {
         use crate::agents::AgentSessionStatus;
         let terminal_status = match &agent_result {
             Ok(_) => AgentSessionStatus::Finished,
             Err(AgentError::Terminated) => AgentSessionStatus::Cancelled,
             Err(_) => AgentSessionStatus::Failed,
         };
-        let was_focused = handle.is_focused();
-        handle.mark_terminal(terminal_status).await;
-
-        if !was_focused
-            && !crate::cli::headless::is_headless_mode()
-            && terminal_status != AgentSessionStatus::Cancelled
-        {
-            let agent_name = handle.session().agent_name().to_string();
-            let (title, message, level) = match &agent_result {
-                Ok(message) => (
-                    format!("{} — Complete", agent_name),
-                    message.chars().take(140).collect::<String>(),
-                    "success".to_string(),
-                ),
-                Err(e) => (
-                    format!("{} — Failed", agent_name),
-                    e.to_string().chars().take(140).collect::<String>(),
-                    "error".to_string(),
-                ),
-            };
-            let data = crate::commands::notifications::NotificationData {
-                title,
-                message,
-                level,
-                important: Some(matches!(terminal_status, AgentSessionStatus::Failed)),
-                timeout: None,
-            };
-            if let Err(e) = crate::commands::notifications::send_notification(
-                app_handle.clone(),
-                state.clone(),
-                data,
-            )
-            .await
-            {
-                warn!("Failed to send background-session notification: {}", e);
-            }
-        }
+        let outcome_message = match &agent_result {
+            Ok(message) => message.clone(),
+            Err(e) => e.to_string(),
+        };
+        finish_session_terminal_state(
+            session_handle.as_ref(),
+            &app_handle,
+            &state,
+            terminal_status,
+            &outcome_message,
+        )
+        .await;
     }
 
     // TODO: TARS Integration disabled - event system not yet implemented
