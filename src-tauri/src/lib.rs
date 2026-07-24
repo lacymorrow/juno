@@ -1028,13 +1028,9 @@ pub fn run() {
                         // (e.g., user clicks the red X instead of completing/skipping)
                         let app_handle = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
-                            if let Err(e) =
-                                commands::set_onboarding_active(app_handle, false).await
+                            if let Err(e) = commands::set_onboarding_active(app_handle, false).await
                             {
-                                warn!(
-                                    "Failed to clean up onboarding state on window close: {}",
-                                    e
-                                );
+                                warn!("Failed to clean up onboarding state on window close: {}", e);
                             }
                         });
                     }
