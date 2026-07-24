@@ -53,6 +53,8 @@ default = []
 download-models = []
 cargo-clippy = []
 
-[[example]]
-name = "example"
-path = "examples/example.rs"
+# NOTE: there is deliberately no `[[example]]` here. One used to declare
+# `examples/example.rs`, which does not exist — `examples/` holds only
+# `basic-app.tsx` and `integration.md`. Any workspace-wide cargo command that
+# resolves targets (`cargo fmt --all`, `cargo package`) failed outright on the
+# missing file. Re-add the entry only alongside a real .rs file.
