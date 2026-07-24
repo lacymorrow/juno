@@ -16,6 +16,14 @@ use tracing::{debug, trace};
 /// AX-grounded actions (`AXPress` via the accessibility API) do NOT go
 /// through this arbiter. They do not move the physical pointer, so multiple
 /// agents can invoke them concurrently — that is Juno's parallelism moat.
+/// Default cooldown between coordinate-based input actions.
+///
+/// 500 ms gives macOS time to process one event before the next lands.
+/// Callers that need tighter pacing can construct an [`InputArbiter`] with
+/// a custom [`Duration`], but this constant should be preferred for
+/// production agent sessions.
+pub const DEFAULT_COOLDOWN: Duration = Duration::from_millis(500);
+
 pub struct InputArbiter {
     inner: Arc<TokioMutex<InputArbiterInner>>,
     cooldown: Duration,
