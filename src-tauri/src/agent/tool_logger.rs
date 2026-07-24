@@ -1,3 +1,4 @@
+use crate::constants::events;
 use chrono::{DateTime, Local};
 use futures::FutureExt;
 use serde::Serialize;
@@ -5,7 +6,6 @@ use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
-use crate::constants::events;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -164,10 +164,17 @@ where
         match &result {
             Ok(output) => {
                 // Anthropic error format
-                if let Some(error_msg) = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(output) {
+                if let Some(error_msg) =
+                    crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(
+                        output,
+                    )
+                {
                     warn!("❌ Tool '{}' failed: {}", tool_name, error_msg);
                 } else {
-                    warn!("❌ Tool '{}' failed with unknown Anthropic error format", tool_name);
+                    warn!(
+                        "❌ Tool '{}' failed with unknown Anthropic error format",
+                        tool_name
+                    );
                 }
             }
             Err(e) => {
@@ -179,25 +186,26 @@ where
 
     // If this is a screenshot tool, we want to include the screenshot in the event
     // But only if the operation was successful
-    let screenshot_base64 = if success && (tool_name == "capture_screenshot" || tool_name == "screenshot") {
-        match &result {
-            Ok(output) => {
-                if let Some(base64) = output.as_str() {
-                    info!("📸 Screenshot captured successfully. Including in event.");
-                    Some(base64.to_string())
-                } else {
-                    warn!("Screenshot tool returned non-string result");
+    let screenshot_base64 =
+        if success && (tool_name == "capture_screenshot" || tool_name == "screenshot") {
+            match &result {
+                Ok(output) => {
+                    if let Some(base64) = output.as_str() {
+                        info!("📸 Screenshot captured successfully. Including in event.");
+                        Some(base64.to_string())
+                    } else {
+                        warn!("Screenshot tool returned non-string result");
+                        None
+                    }
+                }
+                Err(e) => {
+                    warn!("Screenshot capture failed: {}", e);
                     None
                 }
             }
-            Err(e) => {
-                warn!("Screenshot capture failed: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     // Get timestamp tracking state from AppState
     let (last_timestamp_shown, events_since_last) =
@@ -284,17 +292,19 @@ where
     let (success, final_result, screenshot_base64) = match result {
         Ok(Ok(output)) => {
             // Check if this is an Anthropic error response (computer tools)
-            let is_anthropic_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&output);
+            let is_anthropic_error =
+                crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&output);
             let is_success = !is_anthropic_error;
 
             let mut final_screenshot_base64: Option<String> = None;
 
             // Extract screenshot only if operation was successful
-            if is_success && (tool_name == "capture_screenshot"
-                || tool_name == "capture_element_screenshot"
-                || tool_name == "browser_screenshot"
-                || tool_name == "computer"
-            ) {
+            if is_success
+                && (tool_name == "capture_screenshot"
+                    || tool_name == "capture_element_screenshot"
+                    || tool_name == "browser_screenshot"
+                    || tool_name == "computer")
+            {
                 if let Some(s_val) = output.as_str() {
                     final_screenshot_base64 = Some(s_val.to_string());
                     info!("📸 Screenshot captured successfully. Including in event.");
@@ -318,7 +328,10 @@ where
                 info!("✅ Tool '{}' completed successfully", tool_name);
                 (true, Ok(output.clone()), final_screenshot_base64)
             } else {
-                let error_msg = crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(&output)
+                let error_msg =
+                    crate::agent::tools::anthropic_computer_use::extract_anthropic_error_message(
+                        &output,
+                    )
                     .unwrap_or_else(|| "Unknown Anthropic error".to_string());
                 warn!("❌ Tool '{}' failed: {}", tool_name, error_msg);
                 (false, Err(error_msg), None)
@@ -610,7 +623,10 @@ pub fn emit_thinking_start(app_handle: &AppHandle, message_id: String) {
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_START, event_data) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::THINKING_START,
+        event_data,
+    ) {
         warn!("Failed to emit thinking-start event: {}", e);
     }
 }
@@ -622,7 +638,10 @@ pub fn emit_thinking_chunk(app_handle: &AppHandle, chunk: String, message_id: Op
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_STREAM, event_data) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::THINKING_STREAM,
+        event_data,
+    ) {
         warn!("Failed to emit thinking-stream event: {}", e);
     }
 }
@@ -634,7 +653,10 @@ pub fn emit_thinking_end(app_handle: &AppHandle, message_id: String, complete_te
         "complete_text": complete_text
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::streaming::THINKING_END, event_data) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::THINKING_END,
+        event_data,
+    ) {
         warn!("Failed to emit thinking-end event: {}", e);
     }
 }
@@ -797,7 +819,10 @@ struct ToolMetadata {
 impl ToolMetadata {
     fn normalized_category_from_action(action_verb: &str) -> &'static str {
         let lower_action = action_verb.to_ascii_lowercase();
-        if lower_action.contains("typing") || lower_action.contains("pressing key") || lower_action.contains("pressing keys") {
+        if lower_action.contains("typing")
+            || lower_action.contains("pressing key")
+            || lower_action.contains("pressing keys")
+        {
             "Keyboard"
         } else if lower_action.contains("running command") {
             "Command"
@@ -809,7 +834,13 @@ impl ToolMetadata {
             "Timer"
         } else if lower_action.contains("desktop") {
             "Desktop"
-        } else if lower_action.contains("screen") || lower_action.contains("screenshot") || lower_action.contains("click") || lower_action.contains("scroll") || lower_action.contains("drag") || lower_action.contains("cursor") {
+        } else if lower_action.contains("screen")
+            || lower_action.contains("screenshot")
+            || lower_action.contains("click")
+            || lower_action.contains("scroll")
+            || lower_action.contains("drag")
+            || lower_action.contains("cursor")
+        {
             "Computer Use"
         } else {
             "General"
@@ -921,13 +952,9 @@ impl ToolMetadata {
                 "standard",
                 Some("instant"),
             ),
-            name if name.starts_with("computer/click(") => (
-                "👆",
-                "Clicking",
-                "Computer Use",
-                "minimal",
-                Some("instant"),
-            ),
+            name if name.starts_with("computer/click(") => {
+                ("👆", "Clicking", "Computer Use", "minimal", Some("instant"))
+            }
             name if name.starts_with("computer/right_click(") => (
                 "🖱️",
                 "Right-clicking",
@@ -956,13 +983,9 @@ impl ToolMetadata {
                 "minimal",
                 Some("instant"),
             ),
-            name if name.starts_with("computer/drag(") => (
-                "🖱️",
-                "Dragging",
-                "Computer Use",
-                "minimal",
-                Some("short"),
-            ),
+            name if name.starts_with("computer/drag(") => {
+                ("🖱️", "Dragging", "Computer Use", "minimal", Some("short"))
+            }
             name if name.starts_with("computer/move_to(") => (
                 "↗️",
                 "Moving cursor",
@@ -977,13 +1000,9 @@ impl ToolMetadata {
                 "silent",
                 Some("instant"),
             ),
-            name if name.starts_with("computer/mouse_up(") => (
-                "🖱️",
-                "Mouse up",
-                "Computer Use",
-                "silent",
-                Some("instant"),
-            ),
+            name if name.starts_with("computer/mouse_up(") => {
+                ("🖱️", "Mouse up", "Computer Use", "silent", Some("instant"))
+            }
             name if name.starts_with("computer/scroll_") => (
                 "📜",
                 "Scrolling",
@@ -991,13 +1010,9 @@ impl ToolMetadata {
                 "minimal",
                 Some("instant"),
             ),
-            name if name.starts_with("computer/type(") => (
-                "⌨️",
-                "Typing",
-                "Computer Use",
-                "standard",
-                Some("short"),
-            ),
+            name if name.starts_with("computer/type(") => {
+                ("⌨️", "Typing", "Computer Use", "standard", Some("short"))
+            }
             name if name.starts_with("computer/press_key(") => (
                 "🔤",
                 "Pressing key",
@@ -1012,13 +1027,9 @@ impl ToolMetadata {
                 "standard",
                 Some("short"),
             ),
-            name if name.starts_with("computer/wait(") => (
-                "⏳",
-                "Waiting",
-                "Computer Use",
-                "minimal",
-                Some("medium"),
-            ),
+            name if name.starts_with("computer/wait(") => {
+                ("⏳", "Waiting", "Computer Use", "minimal", Some("medium"))
+            }
             name if name.starts_with("computer/get_cursor_position") => (
                 "📍",
                 "Getting cursor position",
@@ -1220,7 +1231,11 @@ impl ToolMetadata {
                 if let Some(key_details) = self.extract_key_details() {
                     message = format!("{} {}", message, key_details);
                 }
-                if self.action_verb.to_ascii_lowercase().contains("running command") {
+                if self
+                    .action_verb
+                    .to_ascii_lowercase()
+                    .contains("running command")
+                {
                     if let Some(command_details) = self.extract_command_details() {
                         message = format!("{}: {}", message, command_details);
                     }
@@ -1235,7 +1250,11 @@ impl ToolMetadata {
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
                 // Add comprehensive details for detailed level
-                if self.action_verb.to_ascii_lowercase().contains("running command") {
+                if self
+                    .action_verb
+                    .to_ascii_lowercase()
+                    .contains("running command")
+                {
                     if let Some(command_details) = self.extract_command_details() {
                         message = format!("{}: {}", message, command_details);
                     }
@@ -1305,7 +1324,11 @@ impl ToolMetadata {
                 let mut message = format!("{} {}", self.icon, self.action_verb);
 
                 // Add comprehensive details
-                if self.action_verb.to_ascii_lowercase().contains("running command") {
+                if self
+                    .action_verb
+                    .to_ascii_lowercase()
+                    .contains("running command")
+                {
                     if let Some(command_details) = self.extract_command_details() {
                         message = format!("{}: {}", message, command_details);
                     }
@@ -1411,7 +1434,12 @@ fn parse_point_inner(inner: &str) -> Option<PointTag> {
         .and_then(|s| s.trim().strip_prefix("screen"))
         .and_then(|n| n.parse::<u32>().ok());
 
-    Some(PointTag { x, y, label, screen })
+    Some(PointTag {
+        x,
+        y,
+        label,
+        screen,
+    })
 }
 
 /// Emit a `cursor-point` Tauri event for a single parsed [POINT] tag.
@@ -1530,8 +1558,6 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     // invoke_tts now properly handles escape key management and audio completion
     info!("TTS processing started in background with enhanced completion tracking...");
 }
-
-
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
     // Strip any [POINT] tags from the final accumulated text (tags were already emitted per-chunk)

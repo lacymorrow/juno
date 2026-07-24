@@ -6,15 +6,11 @@
 //! - Command result processing
 //! - State management
 
-use tauri::{AppHandle, Emitter};
 use crate::constants::events;
+use tauri::{AppHandle, Emitter};
 
 /// Sends a notification to the frontend dev tools
-pub fn send_dev_notification(
-    app: &AppHandle,
-    action: &str,
-    message: &str,
-) -> Result<(), String> {
+pub fn send_dev_notification(app: &AppHandle, action: &str, message: &str) -> Result<(), String> {
     let payload = serde_json::json!({
         "action": action,
         "message": message
@@ -69,8 +65,6 @@ macro_rules! dev_command {
         }
     };
 }
-
-
 
 /// Macro for creating simple state accessor commands
 #[macro_export]

@@ -13,10 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     info!("looking for arc browser...");
-    
+
     // Create accessibility engine
     let engine = MacOSEngine::new(true, false)?;
-    
+
     // Get Arc browser application
     let arc_app = match engine.get_application_by_name("Arc") {
         Ok(app) => {
@@ -34,12 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get text directly using our improved method
     let text = arc_app.text(10)?;
-    
+
     let duration = start.elapsed();
-    
+
     info!("extracted text from arc browser in {:?}", duration);
     info!("text length: {} characters", text.len());
     info!("text content:\n{}", text);
-    
+
     Ok(())
 }

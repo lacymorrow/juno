@@ -1,7 +1,7 @@
+use crate::agent::core::{AgentError, ToolCall};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::agent::core::{AgentError, ToolCall};
 
 /// Enum defining the different types of specialized agents
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -80,7 +80,7 @@ pub fn format_task_output(value: &serde_json::Value) -> String {
                     // For single-key objects, try to extract meaningful content
                     match val {
                         serde_json::Value::String(s) => s.clone(),
-                        _ => format!("{}: {}", key, format_task_output(val))
+                        _ => format!("{}: {}", key, format_task_output(val)),
                     }
                 } else {
                     "Result available".to_string()
@@ -88,7 +88,7 @@ pub fn format_task_output(value: &serde_json::Value) -> String {
             } else {
                 format!("Result with {} fields", obj.len())
             }
-        },
+        }
 
         // For arrays, provide a summary rather than raw JSON
         serde_json::Value::Array(arr) => {
@@ -110,7 +110,7 @@ pub struct AgentCapability {
     pub name: String,
     pub description: String,
     pub tool_patterns: Vec<String>, // Tool name patterns this capability handles
-    pub confidence: f32, // 0.0 to 1.0, how confident this agent is with this capability
+    pub confidence: f32,            // 0.0 to 1.0, how confident this agent is with this capability
 }
 
 /// Status information about an agent

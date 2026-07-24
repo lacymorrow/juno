@@ -89,7 +89,10 @@ async fn create_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
         .get("natural_language")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let notify = input.get("notify").and_then(|v| v.as_bool()).unwrap_or(true);
+    let notify = input
+        .get("notify")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     let next_run_at = compute_next_run(cron)?;
     scheduler::validate_cron_interval(cron)?;

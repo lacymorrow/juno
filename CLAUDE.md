@@ -235,10 +235,10 @@ Register escape key ONLY during agent execution (`submit_query`/`submit_orchestr
 ### Rust: Deadlock Prevention
 Never hold an async mutex while calling a function that acquires another (or the same) mutex. Use check-init-recheck for lazy initialization:
 ```rust
-// WRONG — deadlock if get_or_init_playwright also locks browser_controller
+// WRONG — deadlock if the init path also locks browser_controller
 let guard = self.browser_controller.lock().await;
 if guard.is_none() {
-    let driver = self.get_or_init_playwright_driver().await?; // deadlocks
+    let controller = BrowserController::new().await?; // deadlocks
 }
 
 // CORRECT — release lock before expensive init, recheck after

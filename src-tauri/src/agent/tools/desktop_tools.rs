@@ -20,20 +20,19 @@
 //! Used by: Anthropic Computer Use agents, desktop automation workflows, UI testing
 //! Registration: Called via `register_desktop_tools()` and `setup_tools()` during agent setup
 
-use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::core::ToolDefinition;
-use crate::state::AppState;
+use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::commands;
+use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
-use tauri::{State, Manager};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use tauri::{Manager, State};
 use tracing::{info, warn};
 // Window commands accessed via state.app_handle // Add window for scroll command
 use std::sync::Arc;
 
-use tokio;
 use std::time::Duration;
-
+use tokio;
 
 // Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
 // use crate::{
@@ -83,7 +82,6 @@ async fn register_additional_computer_use_tools(
     _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     info!("Additional computer use tools: All redundant tools removed for clean API compliance");
-
 
     // REMOVED: 11 redundant mouse tools - Use computer tool with official Anthropic Computer Use API instead
     // The following tools have been consolidated into the computer tool:
@@ -158,7 +156,13 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             // Validate accessibility permission before accessing UI elements
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "get_focused_element_info").await {
+            if let Err(e) = validate_permission(
+                &app,
+                RequiredPermission::Accessibility,
+                "get_focused_element_info",
+            )
+            .await
+            {
                 return Err(e.to_string());
             }
 
@@ -166,14 +170,16 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::element::get_focused_element_info(app.clone(), state_manager)
-                        .await
+                    commands::element::get_focused_element_info(app.clone(), state_manager).await
                 })
-            }).map_err(|e| format!("Error getting focused element: {}", e))?;
+            })
+            .map_err(|e| format!("Error getting focused element: {}", e))?;
             Ok(json!(result))
         }
     };
-    provider.register_async_tool(get_focused_def, get_focused_exec).await;
+    provider
+        .register_async_tool(get_focused_def, get_focused_exec)
+        .await;
     info!("Registered tool: get_focused_element_info");
 
     // Tool for capturing full desktop screenshots.
@@ -194,21 +200,29 @@ pub async fn register_desktop_tools(
     let app_handle_clone = app_handle.clone();
     let capture_screenshot_exec = move |_input: Value| {
         let app_handle = app_handle_clone.clone(); // Clone for this specific async move block
-         async move {
+        async move {
             // Validate screen recording permission before taking screenshot
-            if let Err(e) = validate_permission(&app_handle, RequiredPermission::ScreenRecording, "capture_screenshot").await {
+            if let Err(e) = validate_permission(
+                &app_handle,
+                RequiredPermission::ScreenRecording,
+                "capture_screenshot",
+            )
+            .await
+            {
                 return Err(e.to_string());
             }
 
             // The command now returns a ScreenshotResult struct
-            let block_result: Result<commands::core::ScreenshotResult, String> = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    // Get state from app_handle
-                    let state: State<AppState> = app_handle.state();
-                    commands::core::capture_screenshot_command(app_handle.clone(), state).await // Clone app_handle for the inner async block
-                })
-            });
+            let block_result: Result<commands::core::ScreenshotResult, String> =
+                tokio::task::block_in_place(|| {
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        // Get state from app_handle
+                        let state: State<AppState> = app_handle.state();
+                        commands::core::capture_screenshot_command(app_handle.clone(), state).await
+                        // Clone app_handle for the inner async block
+                    })
+                });
 
             // Handle error from capture_screenshot_command
             let screenshot_result =
@@ -219,9 +233,11 @@ pub async fn register_desktop_tools(
                 .map_err(|e| format!("Failed to serialize screenshot result: {}", e))?;
 
             Ok(result_value)
-         }
+        }
     };
-    provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;
+    provider
+        .register_async_tool(capture_screenshot_def, capture_screenshot_exec)
+        .await;
     info!("Registered tool: capture_screenshot");
 
     // Tool for capturing screenshots of specific UI elements.
@@ -229,7 +245,8 @@ pub async fn register_desktop_tools(
     // capture_element_screenshot
     let capture_element_screenshot_def = ToolDefinition {
         name: "capture_element_screenshot".to_string(),
-        description: "Captures a screenshot of the currently focused UI element on the desktop.".to_string(),
+        description: "Captures a screenshot of the currently focused UI element on the desktop."
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -244,7 +261,13 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             // Validate accessibility permission before capturing element screenshot
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "capture_element_screenshot").await {
+            if let Err(e) = validate_permission(
+                &app,
+                RequiredPermission::Accessibility,
+                "capture_element_screenshot",
+            )
+            .await
+            {
                 return Err(e.to_string());
             }
 
@@ -252,14 +275,23 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::element::capture_element_screenshot_command(app.clone(), state_manager)
-                        .await
+                    commands::element::capture_element_screenshot_command(
+                        app.clone(),
+                        state_manager,
+                    )
+                    .await
                 })
-            }).map_err(|e| format!("Error capturing element screenshot: {}", e))?;
+            })
+            .map_err(|e| format!("Error capturing element screenshot: {}", e))?;
             Ok(json!(result))
         }
     };
-    provider.register_async_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
+    provider
+        .register_async_tool(
+            capture_element_screenshot_def,
+            capture_element_screenshot_exec,
+        )
+        .await;
     info!("Registered tool: capture_element_screenshot");
 
     // REMOVED: type_text tool - Use computer tool with action: "type" instead
@@ -289,12 +321,14 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             match commands::core::get_clipboard(app.clone(), state_manager).await {
                 Ok(content) => Ok(json!({ "content": content })),
-                Err(e) => Err(format!("Error getting clipboard content: {}", e))
+                Err(e) => Err(format!("Error getting clipboard content: {}", e)),
             }
         }
     };
 
-    provider.register_async_tool(get_clipboard_def, get_clipboard_exec).await;
+    provider
+        .register_async_tool(get_clipboard_def, get_clipboard_exec)
+        .await;
     info!("Registered tool: get_clipboard");
 
     // Tool for setting clipboard text content.
@@ -302,7 +336,8 @@ pub async fn register_desktop_tools(
     // Set Clipboard Tool
     let set_clipboard_def = ToolDefinition {
         name: "set_clipboard".to_string(),
-        description: "Set the contents of the operating system clipboard to the specified text.".to_string(),
+        description: "Set the contents of the operating system clipboard to the specified text."
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -318,7 +353,9 @@ pub async fn register_desktop_tools(
     };
 
     #[derive(serde::Deserialize)]
-    struct SetClipboardContentInput { content: String }
+    struct SetClipboardContentInput {
+        content: String,
+    }
 
     let app_handle_clone = app_handle.clone();
     let set_clipboard_exec = move |input: Value| {
@@ -331,15 +368,16 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::core::set_clipboard(args.content, app.clone(), state_manager)
-                        .await
+                    commands::core::set_clipboard(args.content, app.clone(), state_manager).await
                 })
             });
             inner_result.map_err(|e| format!("Error setting clipboard content: {}", e))?;
             Ok(json!({"success": true}))
         }
     };
-    provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
+    provider
+        .register_async_tool(set_clipboard_def, set_clipboard_exec)
+        .await;
     info!("Registered tool: set_clipboard");
 
     // Tool for performing mouse clicks at specified desktop coordinates.
@@ -367,7 +405,7 @@ pub async fn register_desktop_tools(
         // Depending on requirements, might want to panic or return an error here
     }
 
-// MousePositionInput and DragInput removed as they were unused and causing warnings.
+    // MousePositionInput and DragInput removed as they were unused and causing warnings.
 
     // Note: scroll tool is already registered in register_additional_computer_use_tools
 
@@ -406,7 +444,10 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             // Validate accessibility permission before getting cursor position
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "cursor_position").await {
+            if let Err(e) =
+                validate_permission(&app, RequiredPermission::Accessibility, "cursor_position")
+                    .await
+            {
                 return Err(e.to_string());
             }
 
@@ -425,7 +466,9 @@ pub async fn register_desktop_tools(
             Ok(json!({ "x": x, "y": y }))
         }
     };
-    provider.register_async_tool(cursor_position_def, cursor_position_exec).await;
+    provider
+        .register_async_tool(cursor_position_def, cursor_position_exec)
+        .await;
     info!("Registered tool: cursor_position");
 
     // Tool for listing all open windows in the system.
@@ -453,14 +496,16 @@ pub async fn register_desktop_tools(
                     // Try to parse the JSON to ensure it's valid, then return it
                     match serde_json::from_str::<Value>(&window_list_json) {
                         Ok(parsed) => Ok(parsed),
-                        Err(e) => Err(format!("Failed to parse window list JSON: {}", e))
+                        Err(e) => Err(format!("Failed to parse window list JSON: {}", e)),
                     }
-                },
-                Err(e) => Err(format!("Failed to get window list: {}", e))
+                }
+                Err(e) => Err(format!("Failed to get window list: {}", e)),
             }
         }
     };
-    provider.register_async_tool(window_list_def, window_list_exec).await;
+    provider
+        .register_async_tool(window_list_def, window_list_exec)
+        .await;
     info!("Registered tool: list_windows");
 
     // Tool for getting detailed information about a specific window.
@@ -491,19 +536,27 @@ pub async fn register_desktop_tools(
                 .as_str()
                 .ok_or_else(|| "Missing or invalid 'window_id' parameter".to_string())?;
 
-            match crate::commands::window::get_window_info(window_id.to_string(), app.clone(), state_manager).await {
+            match crate::commands::window::get_window_info(
+                window_id.to_string(),
+                app.clone(),
+                state_manager,
+            )
+            .await
+            {
                 Ok(window_info_json) => {
                     // Try to parse the JSON to ensure it's valid, then return it
                     match serde_json::from_str::<Value>(&window_info_json) {
                         Ok(parsed) => Ok(parsed),
-                        Err(e) => Err(format!("Failed to parse window info JSON: {}", e))
+                        Err(e) => Err(format!("Failed to parse window info JSON: {}", e)),
                     }
-                },
-                Err(e) => Err(format!("Failed to get window info: {}", e))
+                }
+                Err(e) => Err(format!("Failed to get window info: {}", e)),
             }
         }
     };
-    provider.register_async_tool(window_info_def, window_info_exec).await;
+    provider
+        .register_async_tool(window_info_def, window_info_exec)
+        .await;
     info!("Registered tool: get_window_info");
 
     // === COMPOUND TOOLS ===
@@ -511,7 +564,6 @@ pub async fn register_desktop_tools(
 
     // Compound tool for executing shell commands and capturing output.
     // Used by: Development workflows, system administration, automated testing
-
 
     // Compound tool for opening a file and typing content into it.
     // Used by: File editing workflows, content creation, automated document generation
@@ -556,8 +608,17 @@ pub async fn register_desktop_tools(
                 .map_err(|e| format!("Failed to parse open_file_and_type input: {}", e))?;
 
             // Step 0: Validate accessibility permission before any keyboard operations
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "open_file_and_type").await {
-                return Err(format!("Accessibility permission required for open_file_and_type: {}", e));
+            if let Err(e) = validate_permission(
+                &app,
+                RequiredPermission::Accessibility,
+                "open_file_and_type",
+            )
+            .await
+            {
+                return Err(format!(
+                    "Accessibility permission required for open_file_and_type: {}",
+                    e
+                ));
             }
 
             // Step 1: Check if file path is accessible and create directory if needed
@@ -565,7 +626,11 @@ pub async fn register_desktop_tools(
             if let Some(parent_dir) = file_path.parent() {
                 if !parent_dir.exists() {
                     if let Err(e) = std::fs::create_dir_all(parent_dir) {
-                        return Err(format!("Failed to create directory '{}': {}", parent_dir.display(), e));
+                        return Err(format!(
+                            "Failed to create directory '{}': {}",
+                            parent_dir.display(),
+                            e
+                        ));
                     }
                 }
             }
@@ -577,7 +642,10 @@ pub async fn register_desktop_tools(
                         info!("Created empty file: {}", args.file_path);
                     }
                     Err(e) => {
-                        warn!("Failed to create file directly, will try opening with default app: {}", e);
+                        warn!(
+                            "Failed to create file directly, will try opening with default app: {}",
+                            e
+                        );
                     }
                 }
             }
@@ -591,11 +659,15 @@ pub async fn register_desktop_tools(
                 Some(15), // Increased timeout for opening (15 seconds)
                 None,
                 Some(true), // Enable debug mode for agent usage
-            ).await;
+            )
+            .await;
 
             if let Err(e) = open_result {
                 // Fallback: Try to write content directly to file
-                warn!("Failed to open file with default app, attempting direct write: {}", e);
+                warn!(
+                    "Failed to open file with default app, attempting direct write: {}",
+                    e
+                );
 
                 let content_to_write = if args.append.unwrap_or(false) {
                     // Read existing content and append
@@ -609,7 +681,10 @@ pub async fn register_desktop_tools(
 
                 match std::fs::write(&args.file_path, content_to_write) {
                     Ok(_) => {
-                        info!("Successfully wrote content directly to file: {}", args.file_path);
+                        info!(
+                            "Successfully wrote content directly to file: {}",
+                            args.file_path
+                        );
                         return Ok(json!({
                             "success": true,
                             "file_path": args.file_path,
@@ -620,7 +695,10 @@ pub async fn register_desktop_tools(
                         }));
                     }
                     Err(e) => {
-                        return Err(format!("Failed to open file '{}' and direct write also failed: {}", args.file_path, e));
+                        return Err(format!(
+                            "Failed to open file '{}' and direct write also failed: {}",
+                            args.file_path, e
+                        ));
                     }
                 }
             }
@@ -635,12 +713,16 @@ pub async fn register_desktop_tools(
 
             let typing_result = tokio::time::timeout(
                 typing_timeout,
-                commands::keyboard::type_text(args.content.clone(), app.clone(), state_manager)
-            ).await;
+                commands::keyboard::type_text(args.content.clone(), app.clone(), state_manager),
+            )
+            .await;
 
             match typing_result {
                 Ok(Ok(_)) => {
-                    info!("Successfully opened file and typed content: {}", args.file_path);
+                    info!(
+                        "Successfully opened file and typed content: {}",
+                        args.file_path
+                    );
                     Ok(json!({
                         "success": true,
                         "file_path": args.file_path,
@@ -712,14 +794,18 @@ pub async fn register_desktop_tools(
             }
         }
     };
-    provider.register_async_tool(open_file_and_type_def, open_file_and_type_exec).await;
+    provider
+        .register_async_tool(open_file_and_type_def, open_file_and_type_exec)
+        .await;
     info!("Registered compound tool: open_file_and_type");
 
     // Compound tool for saving and closing the current file.
     // Used by: File editing workflows, automated saving, document completion
     let save_and_close_file_def = ToolDefinition {
         name: "save_and_close_file".to_string(),
-        description: "Save the current file and close the editor. Uses keyboard shortcuts Cmd+S and Cmd+W.".to_string(),
+        description:
+            "Save the current file and close the editor. Uses keyboard shortcuts Cmd+S and Cmd+W."
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -734,7 +820,13 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             // Validate accessibility permission before keyboard operations
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "save_and_close_file").await {
+            if let Err(e) = validate_permission(
+                &app,
+                RequiredPermission::Accessibility,
+                "save_and_close_file",
+            )
+            .await
+            {
                 return Err(e.to_string());
             }
 
@@ -746,7 +838,8 @@ pub async fn register_desktop_tools(
                 Some("cmd".to_string()),
                 app.clone(),
                 state_manager,
-            ).await;
+            )
+            .await;
 
             if let Err(e) = save_result {
                 return Err(format!("Failed to save file: {}", e));
@@ -762,7 +855,8 @@ pub async fn register_desktop_tools(
                 Some("cmd".to_string()),
                 app.clone(),
                 state_manager,
-            ).await;
+            )
+            .await;
 
             if let Err(e) = close_result {
                 warn!("Failed to close file: {}", e);
@@ -775,7 +869,9 @@ pub async fn register_desktop_tools(
             }))
         }
     };
-    provider.register_async_tool(save_and_close_file_def, save_and_close_file_exec).await;
+    provider
+        .register_async_tool(save_and_close_file_def, save_and_close_file_exec)
+        .await;
     info!("Registered compound tool: save_and_close_file");
 
     // Compound tool for copying text to clipboard and pasting at cursor.
@@ -788,7 +884,9 @@ pub async fn register_desktop_tools(
 
     let copy_to_clipboard_and_paste_def = ToolDefinition {
         name: "copy_to_clipboard_and_paste".to_string(),
-        description: "Copy text to the clipboard and immediately paste it at the current cursor position.".to_string(),
+        description:
+            "Copy text to the clipboard and immediately paste it at the current cursor position."
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -812,7 +910,13 @@ pub async fn register_desktop_tools(
         let app = app_handle_clone.clone();
         async move {
             // Validate accessibility permission before keyboard operations
-            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "copy_to_clipboard_and_paste").await {
+            if let Err(e) = validate_permission(
+                &app,
+                RequiredPermission::Accessibility,
+                "copy_to_clipboard_and_paste",
+            )
+            .await
+            {
                 return Err(e.to_string());
             }
 
@@ -821,7 +925,8 @@ pub async fn register_desktop_tools(
 
             // Step 1: Set clipboard content
             let state_manager = app.state::<AppState>();
-            let clipboard_result = commands::core::set_clipboard(args.text.clone(), app.clone(), state_manager).await;
+            let clipboard_result =
+                commands::core::set_clipboard(args.text.clone(), app.clone(), state_manager).await;
 
             if let Err(e) = clipboard_result {
                 return Err(format!("Failed to set clipboard: {}", e));
@@ -836,7 +941,8 @@ pub async fn register_desktop_tools(
                     None,
                     app.clone(),
                     state_manager,
-                ).await;
+                )
+                .await;
 
                 // Brief pause
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -849,11 +955,15 @@ pub async fn register_desktop_tools(
                 Some("cmd".to_string()),
                 app.clone(),
                 state_manager,
-            ).await;
+            )
+            .await;
 
             match paste_result {
                 Ok(_) => {
-                    info!("Successfully copied to clipboard and pasted text ({} chars)", args.text.len());
+                    info!(
+                        "Successfully copied to clipboard and pasted text ({} chars)",
+                        args.text.len()
+                    );
                     Ok(json!({
                         "success": true,
                         "text_length": args.text.len(),
@@ -861,13 +971,16 @@ pub async fn register_desktop_tools(
                         "cleared_selection": args.clear_selection.unwrap_or(false)
                     }))
                 }
-                Err(e) => {
-                    Err(format!("Failed to paste from clipboard: {}", e))
-                }
+                Err(e) => Err(format!("Failed to paste from clipboard: {}", e)),
             }
         }
     };
-    provider.register_async_tool(copy_to_clipboard_and_paste_def, copy_to_clipboard_and_paste_exec).await;
+    provider
+        .register_async_tool(
+            copy_to_clipboard_and_paste_def,
+            copy_to_clipboard_and_paste_exec,
+        )
+        .await;
     info!("Registered compound tool: copy_to_clipboard_and_paste");
 
     info!("All compound tools registered successfully.");

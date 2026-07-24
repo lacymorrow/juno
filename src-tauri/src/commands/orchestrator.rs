@@ -168,8 +168,7 @@ pub async fn submit_orchestrated_query(
 
     if !use_orchestrator {
         // Fall back to the existing single-agent system
-        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle)
-            .await?;
+        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle).await?;
         return Ok(format!("Query processed: {}", trimmed_query));
     }
 
@@ -475,7 +474,9 @@ pub async fn execute_mcp_task(
     let mcp_manager = get_mcp_manager()?;
 
     match mcp_manager.execute_tool(&tool_name, input, call_id).await {
-        Ok(result) => Ok(crate::agents::base_agent::format_task_output(&result.output)),
+        Ok(result) => Ok(crate::agents::base_agent::format_task_output(
+            &result.output,
+        )),
         Err(e) => Err(format!("MCP tool execution failed: {}", e)),
     }
 }

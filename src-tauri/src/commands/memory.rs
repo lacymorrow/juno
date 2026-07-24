@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
 use crate::agent::traits::MemoryManager;
 use crate::state::AppState;
-use crate::agent::implementations::memory_manager::{VisualContextConfig, VisualContextSummary};
 
 /// DTOs for memory management commands (simplified version)
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,14 +20,14 @@ pub async fn get_memory_status(state: State<'_, AppState>) -> Result<MemoryStatu
     let memory_guard = memory_manager.lock().await;
 
     // Get enhanced metrics from AdvancedMemoryManager
-    let messages = memory_guard.get_messages().await
+    let messages = memory_guard
+        .get_messages()
+        .await
         .map_err(|e| format!("Failed to get messages: {}", e))?;
 
     let total_messages = messages.len();
     // Enhanced token estimation: ~4 chars per token
-    let estimated_tokens = messages.iter()
-        .map(|msg| msg.content.len() / 4)
-        .sum();
+    let estimated_tokens = messages.iter().map(|msg| msg.content.len() / 4).sum();
 
     // Get efficiency ratio from AdvancedMemoryManager metrics
     let metrics = memory_guard.get_memory_metrics().await;
@@ -46,7 +46,9 @@ pub async fn clear_conversation_memory(state: State<'_, AppState>) -> Result<(),
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
 
-    memory_guard.clear_memory().await
+    memory_guard
+        .clear_memory()
+        .await
         .map_err(|e| format!("Failed to clear memory: {}", e))
 }
 
@@ -56,7 +58,9 @@ pub async fn clean_orphaned_tool_calls(state: State<'_, AppState>) -> Result<Str
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
 
-    memory_guard.clean_orphaned_tool_calls().await
+    memory_guard
+        .clean_orphaned_tool_calls()
+        .await
         .map_err(|e| format!("Failed to clean orphaned tool calls: {}", e))?;
 
     Ok("Orphaned tool calls cleaned successfully".to_string())
@@ -68,29 +72,43 @@ pub async fn clean_orphaned_tool_results(state: State<'_, AppState>) -> Result<S
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
 
-    let cleaned_count = memory_guard.clean_orphaned_tool_results().await
+    let cleaned_count = memory_guard
+        .clean_orphaned_tool_results()
+        .await
         .map_err(|e| format!("Failed to clean orphaned tool results: {}", e))?;
 
-    Ok(format!("Cleaned {} orphaned tool results successfully", cleaned_count))
+    Ok(format!(
+        "Cleaned {} orphaned tool results successfully",
+        cleaned_count
+    ))
 }
 
 /// Get conversation messages (basic implementation)
 #[tauri::command]
-pub async fn get_conversation_messages(state: State<'_, AppState>) -> Result<Vec<crate::agent::core::Message>, String> {
+pub async fn get_conversation_messages(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::agent::core::Message>, String> {
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    memory_guard.get_messages().await
+    memory_guard
+        .get_messages()
+        .await
         .map_err(|e| format!("Failed to get messages: {}", e))
 }
 
 /// Get last N messages
 #[tauri::command]
-pub async fn get_last_n_messages(n: usize, state: State<'_, AppState>) -> Result<Vec<crate::agent::core::Message>, String> {
+pub async fn get_last_n_messages(
+    n: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::agent::core::Message>, String> {
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    memory_guard.get_last_n_messages(n).await
+    memory_guard
+        .get_last_n_messages(n)
+        .await
         .map_err(|e| format!("Failed to get last {} messages: {}", n, e))
 }
 
@@ -116,7 +134,9 @@ pub async fn update_visual_config(
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    memory_guard.update_visual_config(config).await
+    memory_guard
+        .update_visual_config(config)
+        .await
         .map_err(|e| format!("Failed to update visual config: {}", e))
 }
 
@@ -134,14 +154,14 @@ pub async fn get_visual_config(
 
 /// Force compression of all screenshots - supported by AdvancedMemoryManager
 #[tauri::command]
-pub async fn compress_all_screenshots(
-    app_handle: tauri::AppHandle,
-) -> Result<usize, String> {
+pub async fn compress_all_screenshots(app_handle: tauri::AppHandle) -> Result<usize, String> {
     let state = app_handle.state::<AppState>();
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
 
-    memory_guard.compress_all_screenshots().await
+    memory_guard
+        .compress_all_screenshots()
+        .await
         .map_err(|e| format!("Failed to compress screenshots: {}", e))
 }
 
@@ -166,7 +186,9 @@ pub async fn configure_screenshot_compression(
         fallback_to_generic_description: true,
     };
 
-    memory_guard.update_visual_config(new_config).await
+    memory_guard
+        .update_visual_config(new_config)
+        .await
         .map_err(|e| format!("Failed to configure screenshot compression: {}", e))
 }
 
@@ -184,15 +206,18 @@ pub async fn get_memory_compression_stats(
 
     // Calculate visual compression stats
     let total_screenshots_compressed = visual_summaries.len();
-    let total_original_tokens: usize = visual_summaries.iter()
+    let total_original_tokens: usize = visual_summaries
+        .iter()
         .map(|s| s.estimated_original_tokens)
         .sum();
-    let total_compressed_tokens: usize = visual_summaries.iter()
-        .map(|s| s.compressed_tokens)
-        .sum();
+    let total_compressed_tokens: usize = visual_summaries.iter().map(|s| s.compressed_tokens).sum();
     let tokens_saved = total_original_tokens.saturating_sub(total_compressed_tokens);
     let average_compression_ratio = if !visual_summaries.is_empty() {
-        visual_summaries.iter().map(|s| s.compression_ratio).sum::<f64>() / visual_summaries.len() as f64
+        visual_summaries
+            .iter()
+            .map(|s| s.compression_ratio)
+            .sum::<f64>()
+            / visual_summaries.len() as f64
     } else {
         0.0
     };
@@ -220,9 +245,7 @@ pub async fn get_memory_compression_stats(
 
 /// Emergency function to recover from token overflow - enhanced for AdvancedMemoryManager
 #[tauri::command]
-pub async fn emergency_memory_recovery(
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+pub async fn emergency_memory_recovery(app_handle: tauri::AppHandle) -> Result<String, String> {
     let state = app_handle.state::<AppState>();
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
@@ -232,17 +255,24 @@ pub async fn emergency_memory_recovery(
 
     // Check if we need emergency recovery
     if metrics.estimated_tokens > config.max_tokens {
-        log::warn!("Token count high ({}), performing emergency recovery", metrics.estimated_tokens);
+        log::warn!(
+            "Token count high ({}), performing emergency recovery",
+            metrics.estimated_tokens
+        );
 
         // Try pruning first (less destructive)
-        let pruned_count = memory_guard.prune_memory(Some(config.min_messages_to_keep)).await
+        let pruned_count = memory_guard
+            .prune_memory(Some(config.min_messages_to_keep))
+            .await
             .map_err(|e| format!("Failed to prune memory: {}", e))?;
 
         let new_metrics = memory_guard.get_memory_metrics().await;
 
         if new_metrics.estimated_tokens > config.max_tokens {
             // If pruning wasn't enough, clear memory
-            memory_guard.clear_memory().await
+            memory_guard
+                .clear_memory()
+                .await
                 .map_err(|e| format!("Failed to clear memory: {}", e))?;
 
             Ok(format!("Emergency recovery complete: Pruned {} messages, then cleared all memory due to persistent high token count", pruned_count))
@@ -251,8 +281,10 @@ pub async fn emergency_memory_recovery(
                       pruned_count, metrics.estimated_tokens, new_metrics.estimated_tokens))
         }
     } else {
-        Ok(format!("Emergency recovery complete: Token count {} within limits (max: {})",
-                  metrics.estimated_tokens, config.max_tokens))
+        Ok(format!(
+            "Emergency recovery complete: Token count {} within limits (max: {})",
+            metrics.estimated_tokens, config.max_tokens
+        ))
     }
 }
 
@@ -270,14 +302,14 @@ pub async fn get_conversation_summaries(
 
 /// Force memory optimization - enhanced for AdvancedMemoryManager
 #[tauri::command]
-pub async fn optimize_memory(
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+pub async fn optimize_memory(app_handle: tauri::AppHandle) -> Result<String, String> {
     let state = app_handle.state::<AppState>();
     let memory_manager = state.get_memory_manager().await;
     let mut memory_guard = memory_manager.lock().await;
 
-    memory_guard.optimize_memory().await
+    memory_guard
+        .optimize_memory()
+        .await
         .map_err(|e| format!("Failed to optimize memory: {}", e))?;
 
     Ok("Memory optimization completed successfully".to_string())
@@ -305,7 +337,9 @@ pub async fn update_memory_config(
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    memory_guard.update_config(config).await
+    memory_guard
+        .update_config(config)
+        .await
         .map_err(|e| format!("Failed to update memory config: {}", e))
 }
 
@@ -320,7 +354,9 @@ pub async fn get_advanced_memory_metrics(
 
     let metrics = memory_guard.get_memory_metrics().await;
     let config = memory_guard.get_config().await;
-    let messages = memory_guard.get_messages().await
+    let messages = memory_guard
+        .get_messages()
+        .await
         .map_err(|e| format!("Failed to get messages: {}", e))?;
     let visual_summaries = memory_guard.get_visual_summaries().await;
 
@@ -342,7 +378,7 @@ pub async fn get_advanced_memory_metrics(
                 if message.tool_calls.is_some() {
                     tool_calls += 1;
                 }
-            },
+            }
             crate::agent::core::Role::Tool => tool_results += 1,
             _ => {}
         }
@@ -350,7 +386,11 @@ pub async fn get_advanced_memory_metrics(
 
     // Visual compression analytics
     let total_visual_compression_ratio = if !visual_summaries.is_empty() {
-        visual_summaries.iter().map(|s| s.compression_ratio).sum::<f64>() / visual_summaries.len() as f64
+        visual_summaries
+            .iter()
+            .map(|s| s.compression_ratio)
+            .sum::<f64>()
+            / visual_summaries.len() as f64
     } else {
         0.0
     };
@@ -396,7 +436,9 @@ pub async fn force_memory_prune(
 
     let before_metrics = memory_guard.get_memory_metrics().await;
 
-    let pruned_count = memory_guard.prune_memory(target_messages).await
+    let pruned_count = memory_guard
+        .prune_memory(target_messages)
+        .await
         .map_err(|e| format!("Failed to force prune memory: {}", e))?;
 
     let after_metrics = memory_guard.get_memory_metrics().await;
@@ -420,7 +462,9 @@ pub async fn get_tiered_memory_context(
     let memory_manager = state.get_memory_manager().await;
     let memory_guard = memory_manager.lock().await;
 
-    let (immediate_context, background_context) = memory_guard.get_tiered_context(max_immediate_tokens).await
+    let (immediate_context, background_context) = memory_guard
+        .get_tiered_context(max_immediate_tokens)
+        .await
         .map_err(|e| format!("Failed to get tiered context: {}", e))?;
 
     let immediate_tokens: usize = immediate_context.iter()

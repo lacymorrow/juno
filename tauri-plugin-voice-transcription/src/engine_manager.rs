@@ -1,12 +1,12 @@
-use std::sync::Arc;
 use once_cell::sync::Lazy;
-use std::sync::RwLock;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::engine::{SttProvider, TranscriptionEngine};
-use crate::engine_whisper::WhisperEngine;
 use crate::engine_parakeet::ParakeetEngine;
+use crate::engine_whisper::WhisperEngine;
 use crate::shared_whisper::SharedWhisperManager;
 
 static ACTIVE_ENGINE: Lazy<RwLock<Option<Arc<dyn TranscriptionEngine>>>> =
@@ -35,7 +35,10 @@ impl EngineManager {
                 .map_err(|e| format!("EngineManager read lock poisoned: {}", e))?;
             if let Some(engine) = guard.as_ref() {
                 if engine.name() == provider.as_str() {
-                    info!("[EngineManager] Engine '{}' already initialized", engine.name());
+                    info!(
+                        "[EngineManager] Engine '{}' already initialized",
+                        engine.name()
+                    );
                     return Ok(engine.clone());
                 }
             }
@@ -101,7 +104,8 @@ impl EngineManager {
             SttProvider::Parakeet => {
                 let dir = parakeet_model_dir.ok_or_else(|| {
                     "Parakeet model directory not configured. \
-                     Set `parakeet_model_dir` in voice transcription config.".to_string()
+                     Set `parakeet_model_dir` in voice transcription config."
+                        .to_string()
                 })?;
                 if !ParakeetEngine::model_files_present(Path::new(dir)) {
                     warn!(

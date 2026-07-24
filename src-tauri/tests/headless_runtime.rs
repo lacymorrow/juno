@@ -62,8 +62,7 @@ async fn test_agent_status() {
     let harness = TestHarness::with_app().await.expect("harness should build");
 
     let cli = juno_lib::cli::Cli::parse_from(["juno", "agent", "status"]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     let result = runtime
         .execute_command(&cli)
@@ -84,8 +83,7 @@ async fn test_system_info() {
     let harness = TestHarness::with_app().await.expect("harness should build");
 
     let cli = juno_lib::cli::Cli::parse_from(["juno", "system", "info"]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     let result = runtime
         .execute_command(&cli)
@@ -106,8 +104,7 @@ async fn test_config_show() {
     let harness = TestHarness::with_app().await.expect("harness should build");
 
     let cli = juno_lib::cli::Cli::parse_from(["juno", "config", "show"]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     let result = runtime
         .execute_command(&cli)
@@ -121,8 +118,7 @@ async fn test_agent_stop() {
     let harness = TestHarness::with_app().await.expect("harness should build");
 
     let cli = juno_lib::cli::Cli::parse_from(["juno", "agent", "stop"]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     let result = runtime
         .execute_command(&cli)
@@ -140,13 +136,8 @@ async fn test_real_api_query() {
 
     let harness = TestHarness::with_app().await.expect("harness should build");
 
-    let cli = juno_lib::cli::Cli::parse_from([
-        "juno",
-        "query",
-        "Say exactly: HEADLESS_TEST_OK",
-    ]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let cli = juno_lib::cli::Cli::parse_from(["juno", "query", "Say exactly: HEADLESS_TEST_OK"]);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     match runtime.execute_command(&cli).await {
         Ok(result) => {
@@ -157,7 +148,9 @@ async fn test_real_api_query() {
             let err_str = format!("{}", e);
             // Timeouts are expected in the minimal test app (no full agent infrastructure)
             if err_str.contains("timed out") || err_str.contains("timeout") {
-                println!("test test_real_api_query ... skipped (query timed out in test environment)");
+                println!(
+                    "test test_real_api_query ... skipped (query timed out in test environment)"
+                );
             } else {
                 panic!("query failed unexpectedly: {}", e);
             }
@@ -280,8 +273,7 @@ async fn test_mcp_add_server() {
         "--http-url",
         "http://localhost:9999/mcp",
     ]);
-    let runtime =
-        juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
+    let runtime = juno_lib::cli::headless::HeadlessRuntime::new(harness.app_handle().clone(), &cli);
 
     match runtime.execute_command(&cli).await {
         Ok(result) => {

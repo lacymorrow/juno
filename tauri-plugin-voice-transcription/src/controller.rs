@@ -1,16 +1,18 @@
-use std::path::Path;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::SampleFormat;
-use std::sync::mpsc::{channel, Sender, TryRecvError};
-use std::thread;
-use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
-use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
-use hound;
-use tauri::{AppHandle, Emitter, Runtime};
-use tracing::info;
 use crate::constants;
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::SampleFormat;
+use hound;
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
+use std::path::Path;
+use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Runtime};
+use tracing::info;
 
 use crate::error::{Error, Result};
 
@@ -38,7 +40,6 @@ fn sinc_resampling_params() -> SincInterpolationParameters {
     }
 }
 
-
 enum AudioThreadMessage {
     Stop,
 }
@@ -57,8 +58,14 @@ pub struct VoiceController {
 impl VoiceController {
     /// Create a VoiceController backed by an already-initialized STT engine.
     /// Preferred constructor — engine is provided by `EngineManager`.
-    pub fn new_with_engine(model_path_str: &str, engine: Arc<dyn TranscriptionEngine>) -> Result<Self> {
-        info!("[VoiceController] Creating controller with '{}' engine", engine.name());
+    pub fn new_with_engine(
+        model_path_str: &str,
+        engine: Arc<dyn TranscriptionEngine>,
+    ) -> Result<Self> {
+        info!(
+            "[VoiceController] Creating controller with '{}' engine",
+            engine.name()
+        );
         Ok(Self {
             engine: Some(engine),
             model_path: model_path_str.to_string(),
@@ -109,8 +116,15 @@ impl VoiceController {
 
     /// Update the shared Whisper context and model path for this controller
     /// This allows updating the model without recreating the entire controller
-    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<whisper_rs::WhisperContext>) -> Result<()> {
-        info!("[VoiceController] Updating shared Whisper context with new model: {}", model_path);
+    pub fn update_shared_context(
+        &mut self,
+        model_path: &str,
+        shared_context: Arc<whisper_rs::WhisperContext>,
+    ) -> Result<()> {
+        info!(
+            "[VoiceController] Updating shared Whisper context with new model: {}",
+            model_path
+        );
 
         // Stop dictation if it's currently active
         let was_dictating = self.is_dictating;
@@ -156,7 +170,8 @@ impl VoiceController {
     /// Helper method to check initialization before performing operations
     fn ensure_initialized(&self) -> Result<&Arc<dyn TranscriptionEngine>> {
         if !self.is_initialized {
-            let error_msg = self.initialization_error
+            let error_msg = self
+                .initialization_error
                 .as_ref()
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "Voice controller not initialized".to_string());
@@ -165,7 +180,10 @@ impl VoiceController {
         self.engine.as_ref().ok_or(Error::NotInitialized)
     }
 
-    pub fn transcribe_audio_file(&self, audio_path_str: &str) -> std::result::Result<String, String> {
+    pub fn transcribe_audio_file(
+        &self,
+        audio_path_str: &str,
+    ) -> std::result::Result<String, String> {
         let engine = self.ensure_initialized().map_err(|e| e.to_string())?;
 
         let audio_path = Path::new(audio_path_str);
@@ -194,13 +212,12 @@ impl VoiceController {
         }
 
         // i16 → f32 normalization ([-32768, 32767] → [-1.0, 1.0])
-        let audio_f32: Vec<f32> = samples_i16.iter()
-            .map(|&s| s as f32 / 32768.0)
-            .collect();
+        let audio_f32: Vec<f32> = samples_i16.iter().map(|&s| s as f32 / 32768.0).collect();
 
         let mut processed_audio = if channels == 2 {
             // Stereo → mono: average left + right channels
-            audio_f32.chunks_exact(2)
+            audio_f32
+                .chunks_exact(2)
                 .map(|pair| (pair[0] + pair[1]) / 2.0)
                 .collect()
         } else if channels == 1 {
@@ -222,24 +239,31 @@ impl VoiceController {
                 resample_params,
                 processed_audio.len(),
                 1,
-            ).map_err(|e| format!("Failed to create resampler: {:?}", e))?;
+            )
+            .map_err(|e| format!("Failed to create resampler: {:?}", e))?;
 
             let waves_in = vec![processed_audio];
-            let waves_out = resampler.process(&waves_in, None)
+            let waves_out = resampler
+                .process(&waves_in, None)
                 .map_err(|e| format!("Resampling failed: {:?}", e))?;
 
             if waves_out.is_empty() || waves_out[0].is_empty() {
                 return Err("Resampling produced empty audio".to_string());
             }
 
-            processed_audio = waves_out.into_iter().next()
+            processed_audio = waves_out
+                .into_iter()
+                .next()
                 .ok_or_else(|| "Resampling failed to produce audio data".to_string())?;
         }
 
         session.transcribe_final(&processed_audio)
     }
 
-    pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
+    pub fn start_dictation<R: Runtime + 'static>(
+        &mut self,
+        app_handle: &AppHandle<R>,
+    ) -> Result<()> {
         // Check if controller is initialized before starting dictation
         self.ensure_initialized()?;
 
@@ -263,14 +287,17 @@ impl VoiceController {
             }
             crate::mic_permissions::MicrophonePermissionStatus::NotApplicable => {
                 // Non-macOS platform, continue
-                info!("[VoiceController] Microphone permission check not applicable on this platform");
+                info!(
+                    "[VoiceController] Microphone permission check not applicable on this platform"
+                );
             }
         }
 
         info!("[VoiceController] Starting dictation...");
 
         // Emit dictation started event
-        app_handle.emit(constants::voice_transcription::DICTATION_STARTED, ())
+        app_handle
+            .emit(constants::voice_transcription::DICTATION_STARTED, ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
         // Clear the last processed audio buffer
@@ -282,23 +309,36 @@ impl VoiceController {
         let device = host.default_input_device()
             .ok_or_else(|| Error::AudioDevice("No default input device found. This may indicate microphone permission was not granted — check System Settings > Privacy & Security > Microphone.".to_string()))?;
 
-        let supported_configs_iter = device.supported_input_configs()
-            .map_err(|e| Error::AudioDevice(format!("Failed to get input device configs (microphone permission may be denied): {:?}", e)))?;
+        let supported_configs_iter = device.supported_input_configs().map_err(|e| {
+            Error::AudioDevice(format!(
+                "Failed to get input device configs (microphone permission may be denied): {:?}",
+                e
+            ))
+        })?;
 
         let selected_config_range = supported_configs_iter
-            .filter(|c| c.channels() == 1 || c.channels() == 2)  // Support both mono and stereo
+            .filter(|c| c.channels() == 1 || c.channels() == 2) // Support both mono and stereo
             .find(|c| {
-                (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) &&
-                (c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
+                (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000)
+                    && (c.sample_format() == SampleFormat::F32
+                        || c.sample_format() == SampleFormat::I16)
             });
 
         let supported_config = if let Some(conf_range) = selected_config_range {
             conf_range.with_sample_rate(cpal::SampleRate(16000))
         } else {
-            device.supported_input_configs()
-                .map_err(|e| Error::AudioDevice(format!("Failed to get device configs for fallback: {:?}", e)))?
-                .filter(|c| c.channels() == 1 || c.channels() == 2)  // Support both mono and stereo
-                .find(|c| c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
+            device
+                .supported_input_configs()
+                .map_err(|e| {
+                    Error::AudioDevice(format!(
+                        "Failed to get device configs for fallback: {:?}",
+                        e
+                    ))
+                })?
+                .filter(|c| c.channels() == 1 || c.channels() == 2) // Support both mono and stereo
+                .find(|c| {
+                    c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16
+                })
                 .map(|c| {
                     if (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) {
                         c.with_sample_rate(cpal::SampleRate(16000))
@@ -318,7 +358,9 @@ impl VoiceController {
         if let Ok(mut rate_guard) = self.actual_recording_sample_rate.lock() {
             *rate_guard = Some(actual_rate);
         } else {
-            tracing::error!("Failed to acquire lock for actual_recording_sample_rate - lock may be poisoned");
+            tracing::error!(
+                "Failed to acquire lock for actual_recording_sample_rate - lock may be poisoned"
+            );
         }
 
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
@@ -329,7 +371,9 @@ impl VoiceController {
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
 
-        let engine = self.engine.as_ref()
+        let engine = self
+            .engine
+            .as_ref()
             .ok_or_else(|| Error::InitializationError("STT engine not initialized".to_string()))?
             .clone();
 
@@ -396,7 +440,7 @@ impl VoiceController {
                         } else {
                             data.to_vec()
                         };
-                        
+
                         if let Err(e) = tx_clone.send(audio_data) {
                             tracing::error!("Failed to send audio data: {:?}", e);
                         }
@@ -404,7 +448,7 @@ impl VoiceController {
                     move |err| {
                         tracing::error!("An error occurred on the input stream: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -413,7 +457,7 @@ impl VoiceController {
                         return;
                     }
                 }
-            },
+            }
             SampleFormat::I16 => {
                 let tx_clone = audio_data_tx.clone();
                 match device.build_input_stream(
@@ -427,11 +471,10 @@ impl VoiceController {
                         } else {
                             data.to_vec()
                         };
-                        
+
                         // i16 → f32 normalization
-                        let audio_f32: Vec<f32> = mono_data.iter()
-                            .map(|&s| s as f32 / 32768.0)
-                            .collect();
+                        let audio_f32: Vec<f32> =
+                            mono_data.iter().map(|&s| s as f32 / 32768.0).collect();
                         if let Err(e) = tx_clone.send(audio_f32) {
                             tracing::error!("Failed to send converted audio data: {:?}", e);
                         }
@@ -439,7 +482,7 @@ impl VoiceController {
                     move |err| {
                         tracing::error!("An error occurred on the input stream: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -448,7 +491,7 @@ impl VoiceController {
                         return;
                     }
                 }
-            },
+            }
             _ => {
                 tracing::error!("Unsupported sample format {:?}", sample_format);
                 return;
@@ -478,17 +521,20 @@ impl VoiceController {
                 params,
                 1024,
                 1,
-            ).ok();
+            )
+            .ok();
         }
 
         let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new();
         let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
 
-        info!("[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
-              partial_buffer_capacity_samples,
-              partial_buffer_capacity_samples as f32 / actual_rate as f32,
-              actual_rate);
+        info!(
+            "[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
+            partial_buffer_capacity_samples,
+            partial_buffer_capacity_samples as f32 / actual_rate as f32,
+            actual_rate
+        );
 
         // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
         let level_emit_interval = Duration::from_millis(70);
@@ -499,10 +545,15 @@ impl VoiceController {
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
-                    info!("[AudioThread] Final audio buffer size: {} samples", audio_buffer_for_whisper_chunks.len());
-                    info!("[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
-                          raw_full_session_audio.len(),
-                          raw_full_session_audio.len() as f32 / actual_rate as f32);
+                    info!(
+                        "[AudioThread] Final audio buffer size: {} samples",
+                        audio_buffer_for_whisper_chunks.len()
+                    );
+                    info!(
+                        "[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
+                        raw_full_session_audio.len(),
+                        raw_full_session_audio.len() as f32 / actual_rate as f32
+                    );
 
                     // Process final audio
                     Self::process_final_audio(
@@ -590,8 +641,10 @@ impl VoiceController {
 
         match session.transcribe_partial(&audio_to_transcribe) {
             Ok(Some(text)) if !text.is_empty() => {
-                let _ = app_handle.emit(constants::voice_transcription::PARTIAL_RESULT,
-                    serde_json::json!({ "text": text }));
+                let _ = app_handle.emit(
+                    constants::voice_transcription::PARTIAL_RESULT,
+                    serde_json::json!({ "text": text }),
+                );
             }
             Ok(_) => {}
             Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {}", e),
@@ -677,17 +730,25 @@ impl VoiceController {
 
             match session.transcribe_final(&audio_for_transcription) {
                 Ok(transcription_text) => {
-                    info!("[AudioThread] Final transcription result: '{}'", transcription_text);
-                    let _ = app_handle.emit(constants::voice_transcription::FINAL_RESULT,
-                        serde_json::json!({ "text": transcription_text }));
+                    info!(
+                        "[AudioThread] Final transcription result: '{}'",
+                        transcription_text
+                    );
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::FINAL_RESULT,
+                        serde_json::json!({ "text": transcription_text }),
+                    );
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {}", e);
-                    let _ = app_handle.emit(constants::voice_transcription::ERROR, serde_json::json!({
-                        "type": "transcription_failed",
-                        "message": format!("Final transcription failed: {}", e)
-                    }));
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::ERROR,
+                        serde_json::json!({
+                            "type": "transcription_failed",
+                            "message": format!("Final transcription failed: {}", e)
+                        }),
+                    );
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
                 }
             }
@@ -722,7 +783,10 @@ impl VoiceController {
         }
     }
 
-    pub fn toggle_dictation<R: Runtime + 'static>(&mut self, app_handle: AppHandle<R>) -> Result<bool> {
+    pub fn toggle_dictation<R: Runtime + 'static>(
+        &mut self,
+        app_handle: AppHandle<R>,
+    ) -> Result<bool> {
         if self.is_dictating {
             self.stop_dictation()?;
             Ok(false)

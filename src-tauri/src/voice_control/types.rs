@@ -139,7 +139,8 @@ impl AudioThreadHandle {
 
     /// Send a message to the audio thread
     pub fn send_message(&self, message: AudioThreadMessage) -> Result<(), String> {
-        self.sender.send(message)
+        self.sender
+            .send(message)
             .map_err(|e| format!("Failed to send message to audio thread: {}", e))
     }
 

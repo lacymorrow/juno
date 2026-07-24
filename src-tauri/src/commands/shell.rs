@@ -1,15 +1,15 @@
 // Commands related to shell execution - Anthropic Computer Use API Compliant
 
 use crate::state::AppState;
-use tauri::{AppHandle, State};
-use std::process::{Command, Stdio, Child};
-use std::io::Write;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::thread;
-use tracing::error;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use std::io::Write;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, State};
+use tracing::error;
 
 // ============================================================================
 // STRUCTURED RESULT TYPES - NO STRING COMPARISONS
@@ -23,10 +23,7 @@ pub enum BashResult {
     /// Tool was restarted - follows Anthropic Computer Use API specification
     Restarted,
     /// Command execution with both stdout and stderr
-    CommandResult {
-        output: String,
-        success: bool,
-    },
+    CommandResult { output: String, success: bool },
 }
 
 impl BashResult {
@@ -93,8 +90,11 @@ impl ShellSession {
         let history_path = session_dir.join(".bash_history");
 
         // Initialize session state files
-        fs::write(&bashrc_path, "# Juno shell session\nexport PS1=''\nset +H\n")
-            .map_err(|e| format!("Failed to create session bashrc: {}", e))?;
+        fs::write(
+            &bashrc_path,
+            "# Juno shell session\nexport PS1=''\nset +H\n",
+        )
+        .map_err(|e| format!("Failed to create session bashrc: {}", e))?;
         fs::write(&history_path, "")
             .map_err(|e| format!("Failed to create session history: {}", e))?;
 
@@ -108,7 +108,9 @@ impl ShellSession {
 
     /// Start or restart the bash process
     fn ensure_process(&mut self) -> Result<(), String> {
-        let mut process_guard = self.process.lock()
+        let mut process_guard = self
+            .process
+            .lock()
             .map_err(|e| format!("Failed to lock process: {}", e))?;
 
         // Check if we need to start/restart the process
@@ -146,9 +148,11 @@ impl ShellSession {
             // Initialize the shell environment
             if let Some(stdin) = bash_process.stdin.as_mut() {
                 let init_commands = "set +H\nPS1=''\nexport PS1=''\n";
-                stdin.write_all(init_commands.as_bytes())
+                stdin
+                    .write_all(init_commands.as_bytes())
                     .map_err(|e| format!("Failed to initialize shell: {}", e))?;
-                stdin.flush()
+                stdin
+                    .flush()
                     .map_err(|e| format!("Failed to flush initialization: {}", e))?;
             }
 
@@ -164,7 +168,9 @@ impl ShellSession {
 
         // Kill existing process
         {
-            let mut process_guard = self.process.lock()
+            let mut process_guard = self
+                .process
+                .lock()
                 .map_err(|e| format!("Failed to lock process for restart: {}", e))?;
 
             if let Some(mut child) = process_guard.take() {
@@ -174,7 +180,9 @@ impl ShellSession {
         }
 
         // Reset command counter
-        *self.command_counter.lock()
+        *self
+            .command_counter
+            .lock()
             .map_err(|e| format!("Failed to lock command counter: {}", e))? = 0;
 
         // Clear session state files
@@ -183,8 +191,11 @@ impl ShellSession {
 
         fs::write(&history_path, "")
             .map_err(|e| format!("Failed to clear session history: {}", e))?;
-        fs::write(&bashrc_path, "# Juno shell session\nexport PS1=''\nset +H\n")
-            .map_err(|e| format!("Failed to reset session bashrc: {}", e))?;
+        fs::write(
+            &bashrc_path,
+            "# Juno shell session\nexport PS1=''\nset +H\n",
+        )
+        .map_err(|e| format!("Failed to reset session bashrc: {}", e))?;
 
         // Start new process
         self.ensure_process()?;
@@ -195,7 +206,11 @@ impl ShellSession {
     /// Execute command with Anthropic Computer Use API compliance
     /// Fixed: Direct pipe communication with proper escaping and session persistence
     /// Fixed: Returns exit code for proper success/failure reporting
-    fn run_command(&mut self, command: &str, timeout_seconds: Option<u64>) -> Result<(String, String, i32), String> {
+    fn run_command(
+        &mut self,
+        command: &str,
+        timeout_seconds: Option<u64>,
+    ) -> Result<(String, String, i32), String> {
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(DEFAULT_TIMEOUT);
@@ -208,7 +223,9 @@ impl ShellSession {
 
         // Get next command ID for tracking
         let cmd_id = {
-            let mut counter = self.command_counter.lock()
+            let mut counter = self
+                .command_counter
+                .lock()
                 .map_err(|e| format!("Failed to lock command counter: {}", e))?;
             *counter += 1;
             *counter
@@ -227,26 +244,29 @@ impl ShellSession {
 
         // Only check for truly catastrophic patterns
         let catastrophic_patterns = [
-            "rm -rf /",        // Delete entire filesystem
-            "rm -rf /*",       // Delete entire filesystem
-            ":(){ :|:& };:",   // Fork bomb
-            "> /dev/sda",      // Overwrite disk
+            "rm -rf /",                    // Delete entire filesystem
+            "rm -rf /*",                   // Delete entire filesystem
+            ":(){ :|:& };:",               // Fork bomb
+            "> /dev/sda",                  // Overwrite disk
             "dd if=/dev/zero of=/dev/sda", // Wipe disk
-            "mkfs.ext4 /dev/sda",  // Format main disk
+            "mkfs.ext4 /dev/sda",          // Format main disk
         ];
-        
+
         let cmd_lower = command.to_lowercase();
         for pattern in &catastrophic_patterns {
             if cmd_lower.contains(pattern) {
-                return Err(format!("Command contains catastrophic pattern that could destroy the system: {}", pattern));
+                return Err(format!(
+                    "Command contains catastrophic pattern that could destroy the system: {}",
+                    pattern
+                ));
             }
         }
-        
+
         // In development mode, allow almost everything
         if cfg!(debug_assertions) {
             return Ok(());
         }
-        
+
         // In production, be stricter: block sudo/doas and dangerous redirections/absolute destructive paths
         if cmd_lower.contains("sudo") || cmd_lower.contains("doas") {
             return Err("Privilege escalation commands are not allowed in production".to_string());
@@ -255,11 +275,16 @@ impl ShellSession {
         // Block writing to root/system-sensitive absolute paths via redirection
         // Simple heuristic without full shell parsing; covers common cases safely
         let redir_patterns = [
-            ">/etc/",            "> /etc/",
-            ">/bin/",            "> /bin/",
-            ">/usr/bin/",        "> /usr/bin/",
-            ">/usr/local/bin/",  "> /usr/local/bin/",
-            ">/System/",         "> /System/",
+            ">/etc/",
+            "> /etc/",
+            ">/bin/",
+            "> /bin/",
+            ">/usr/bin/",
+            "> /usr/bin/",
+            ">/usr/local/bin/",
+            "> /usr/local/bin/",
+            ">/System/",
+            "> /System/",
         ];
         for pat in &redir_patterns {
             if cmd_lower.contains(pat) {
@@ -271,45 +296,54 @@ impl ShellSession {
         if cmd_lower.contains("> ../") || cmd_lower.contains(">../../") {
             return Err("Path traversal in redirection is not allowed".to_string());
         }
-        
+
         Ok(())
     }
 
     /// Execute command directly via stdin/stdout with proper timeout handling
     /// Fixed: Maintains process lock throughout execution to prevent race conditions
     /// Fixed: Captures exit code for proper success/failure reporting
-    fn execute_command_direct(&mut self, command: &str, cmd_id: u64, timeout: Duration) -> Result<(String, String, i32), String> {
-        let mut process_guard = self.process.lock()
+    fn execute_command_direct(
+        &mut self,
+        command: &str,
+        cmd_id: u64,
+        timeout: Duration,
+    ) -> Result<(String, String, i32), String> {
+        let mut process_guard = self
+            .process
+            .lock()
             .map_err(|e| format!("Failed to lock process: {}", e))?;
 
-        let child = process_guard.as_mut()
+        let child = process_guard
+            .as_mut()
             .ok_or_else(|| "No bash process available".to_string())?;
 
         // Prepare command with exit code capture and completion marker
         // Use printf to avoid issues with echo implementations
         let safe_command = format!(
             "{}\necho \"EXIT_CODE:$?\"\nprintf '\\n{}{}\\n'\n",
-            command,
-            COMMAND_SEPARATOR,
-            cmd_id
+            command, COMMAND_SEPARATOR, cmd_id
         );
 
         // Send command to bash
-        let stdin = child.stdin.as_mut()
+        let stdin = child
+            .stdin
+            .as_mut()
             .ok_or_else(|| "Process stdin not available".to_string())?;
 
-        stdin.write_all(safe_command.as_bytes())
+        stdin
+            .write_all(safe_command.as_bytes())
             .map_err(|e| format!("Failed to write command: {}", e))?;
-        stdin.flush()
+        stdin
+            .flush()
             .map_err(|e| format!("Failed to flush command: {}", e))?;
 
         // Read output with timeout while maintaining the process lock
         let completion_marker = format!("{}{}", COMMAND_SEPARATOR, cmd_id);
         let start_time = Instant::now();
 
-        let (stdout_result, stderr_result) = self.read_output_with_timeout_secure(
-            child, &completion_marker, timeout, start_time
-        )?;
+        let (stdout_result, stderr_result) =
+            self.read_output_with_timeout_secure(child, &completion_marker, timeout, start_time)?;
 
         // Extract exit code from stdout
         let (cleaned_stdout, exit_code) = self.extract_exit_code(&stdout_result);
@@ -328,13 +362,17 @@ impl ShellSession {
         timeout: Duration,
         start_time: Instant,
     ) -> Result<(String, String), String> {
-        use std::io::{Read, ErrorKind};
+        use std::io::{ErrorKind, Read};
         use std::os::unix::io::AsRawFd;
 
         // Get mutable references to stdout and stderr - never take ownership
-        let stdout = child.stdout.as_mut()
+        let stdout = child
+            .stdout
+            .as_mut()
             .ok_or_else(|| "Process stdout not available".to_string())?;
-        let stderr = child.stderr.as_mut()
+        let stderr = child
+            .stderr
+            .as_mut()
             .ok_or_else(|| "Process stderr not available".to_string())?;
 
         let stdout_fd = stdout.as_raw_fd();
@@ -367,7 +405,7 @@ impl ShellSession {
 
             // Read from stdout (non-blocking)
             match stdout.read(&mut stdout_buffer) {
-                Ok(0) => {}, // No data available
+                Ok(0) => {} // No data available
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&stdout_buffer[..n]);
                     stdout_output.push_str(&chunk);
@@ -393,7 +431,7 @@ impl ShellSession {
 
             // Read from stderr (non-blocking)
             match stderr.read(&mut stderr_buffer) {
-                Ok(0) => {}, // No data available
+                Ok(0) => {} // No data available
                 Ok(n) => {
                     let chunk = String::from_utf8_lossy(&stderr_buffer[..n]);
                     stderr_output.push_str(&chunk);
@@ -490,12 +528,11 @@ impl ShellSession {
         // If we can't find/parse exit code, assume error (-1)
         (output.to_string(), -1)
     }
-
 }
 
 impl Drop for ShellSession {
     fn drop(&mut self) {
-        use tracing::{error, warn, debug};
+        use tracing::{debug, error, warn};
 
         debug!("Cleaning up shell session: {}", self._session_id);
 
@@ -523,7 +560,10 @@ impl Drop for ShellSession {
 
                             // Still attempt to wait in case the process exits naturally
                             if let Err(wait_err) = child.wait() {
-                                error!("Also failed to wait for bash process after kill failure: {}", wait_err);
+                                error!(
+                                    "Also failed to wait for bash process after kill failure: {}",
+                                    wait_err
+                                );
                             }
                         }
                     }
@@ -539,7 +579,10 @@ impl Drop for ShellSession {
         // Clean up session directory with proper error handling
         match std::fs::remove_dir_all(&self.session_dir) {
             Ok(_) => {
-                debug!("Successfully cleaned up session directory: {:?}", self.session_dir);
+                debug!(
+                    "Successfully cleaned up session directory: {:?}",
+                    self.session_dir
+                );
             }
             Err(e) => {
                 warn!(
@@ -550,7 +593,10 @@ impl Drop for ShellSession {
                 // Log directory contents for debugging if possible
                 if let Ok(entries) = std::fs::read_dir(&self.session_dir) {
                     let file_count = entries.count();
-                    warn!("Session directory contains {} entries that were not cleaned up", file_count);
+                    warn!(
+                        "Session directory contains {} entries that were not cleaned up",
+                        file_count
+                    );
                 } else {
                     warn!("Could not read session directory contents for cleanup verification");
                 }
@@ -585,11 +631,19 @@ pub async fn bash_command(
     restart: Option<bool>,
     debug_mode: Option<bool>,
 ) -> Result<BashResult, String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
-    use tracing::{info, error};
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
+        DebugOperation,
+    };
+    use tracing::{error, info};
 
     // Rate limiting check - use user identifier or default key
-    if let Err(e) = state.rate_limiters.shell_commands.check("default_user").await {
+    if let Err(e) = state
+        .rate_limiters
+        .shell_commands
+        .check("default_user")
+        .await
+    {
         return Err(e.to_user_message());
     }
 
@@ -622,7 +676,8 @@ pub async fn bash_command(
                 debug_op.complete(Some(&app), false);
                 return Err(err_msg);
             }
-            if timeout > 3600 { // 1 hour max
+            if timeout > 3600 {
+                // 1 hour max
                 let err_msg = "Timeout cannot exceed 3600 seconds (1 hour)".to_string();
                 if debug_config.send_notifications {
                     send_debug_notification(&app, "Bash Command Error", &err_msg)?;
@@ -639,14 +694,13 @@ pub async fn bash_command(
     if debug_config.log_operations {
         info!(
             "[SHELL] Executing bash command: \"{}\" (timeout: {:?}, restart: {})",
-            command,
-            timeout_seconds,
-            effective_restart
+            command, timeout_seconds, effective_restart
         );
     }
 
     // Get shell sessions from state
-    let shell_sessions = state.get::<ShellSessions>()
+    let shell_sessions = state
+        .get::<ShellSessions>()
         .ok_or_else(|| "Shell session state not initialized".to_string())?;
     let sessions_arc = shell_sessions.clone();
     let mut sessions = sessions_arc.lock().unwrap_or_else(|e| {
@@ -743,7 +797,10 @@ pub async fn bash_command(
                 send_debug_notification(
                     &app,
                     &format!("Bash Command {}", status),
-                    &format!("Command: {} - Exit Code: {} - Result: {}", command, exit_code, preview),
+                    &format!(
+                        "Command: {} - Exit Code: {} - Result: {}",
+                        command, exit_code, preview
+                    ),
                 )?;
             }
 
@@ -752,7 +809,7 @@ pub async fn bash_command(
                 output: result,
                 success,
             })
-        },
+        }
         None => {
             let err_msg = "Failed to get bash session".to_string();
             if debug_config.log_operations {

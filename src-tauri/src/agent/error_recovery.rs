@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashMap;
 /// TODO: ELIMINATE STRING MATCHING
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use serde_json::{json, Value};
-use tracing::{warn, info, debug, error};
+use tracing::{debug, error, info, warn};
 // use crate::constants::error_recovery; // Not needed - using local definitions
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
@@ -34,7 +34,7 @@ pub struct RollbackInfo {
 pub struct AgentState {
     pub current_tool: Option<String>,
     pub execution_context: Value,
-    pub ui_state: Option<Value>, // Screenshot, element states, etc.
+    pub ui_state: Option<Value>,      // Screenshot, element states, etc.
     pub browser_state: Option<Value>, // URL, cookies, session state
     pub file_system_state: Option<Value>, // Working directory, open files
     pub variables: HashMap<String, Value>, // Agent-defined variables
@@ -83,7 +83,7 @@ pub enum ErrorPattern {
     ServiceUnavailable,
     MaxStepsReached,
     Cancelled,
-    StateCorruption, // NEW: For rollback scenarios
+    StateCorruption,  // NEW: For rollback scenarios
     CascadingFailure, // NEW: Multiple related failures
     Unknown(String),
 }
@@ -222,7 +222,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::RefreshContext,
                 RecoveryStrategy::AlternativeMethod,
                 RecoveryStrategy::AdjustParameters,
-            ]
+            ],
         );
 
         // Network errors - retry with backoff and checkpointing
@@ -233,7 +233,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::WaitAndRetry(Duration::from_millis(5000)),
                 RecoveryStrategy::Retry,
                 RecoveryStrategy::FallbackTool,
-            ]
+            ],
         );
 
         // Permission denied - escalate or use alternative
@@ -243,7 +243,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::EscalateToUser,
                 RecoveryStrategy::AlternativeMethod,
                 RecoveryStrategy::SkipStep,
-            ]
+            ],
         );
 
         // Timeout errors - adjust parameters and retry with rollback option
@@ -254,7 +254,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::WaitAndRetry(Duration::from_millis(3000)),
                 RecoveryStrategy::RestoreLastKnownGood,
                 RecoveryStrategy::AlternativeMethod,
-            ]
+            ],
         );
 
         // LLM rate limit - wait and retry
@@ -263,7 +263,7 @@ impl ErrorRecoveryManager {
             vec![
                 RecoveryStrategy::WaitAndRetry(Duration::from_millis(60000)),
                 RecoveryStrategy::FallbackTool,
-            ]
+            ],
         );
 
         // Browser not ready - wait and refresh
@@ -273,7 +273,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::WaitAndRetry(Duration::from_secs(3)),
                 RecoveryStrategy::RefreshContext,
                 RecoveryStrategy::AlternativeMethod,
-            ]
+            ],
         );
 
         // Application not running - start app and retry
@@ -283,7 +283,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::AlternativeMethod, // This would start the app
                 RecoveryStrategy::WaitAndRetry(Duration::from_millis(5000)),
                 RecoveryStrategy::EscalateToUser,
-            ]
+            ],
         );
 
         // Service unavailable - wait and fallback
@@ -292,23 +292,19 @@ impl ErrorRecoveryManager {
             vec![
                 RecoveryStrategy::WaitAndRetry(Duration::from_secs(10)),
                 RecoveryStrategy::FallbackTool,
-            ]
+            ],
         );
 
         // Max steps reached - terminate gracefully
         self.strategy_mappings.insert(
             ErrorPattern::MaxStepsReached,
-            vec![
-                RecoveryStrategy::EscalateToUser,
-            ]
+            vec![RecoveryStrategy::EscalateToUser],
         );
 
         // User cancelled - terminate immediately
         self.strategy_mappings.insert(
             ErrorPattern::Cancelled,
-            vec![
-                RecoveryStrategy::EscalateToUser,
-            ]
+            vec![RecoveryStrategy::EscalateToUser],
         );
 
         // NEW: Enhanced error patterns with rollback strategies
@@ -318,7 +314,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::RestoreLastKnownGood,
                 RecoveryStrategy::RollbackToCheckpoint("last_stable".to_string()),
                 RecoveryStrategy::EscalateToUser,
-            ]
+            ],
         );
 
         self.strategy_mappings.insert(
@@ -327,7 +323,7 @@ impl ErrorRecoveryManager {
                 RecoveryStrategy::RestoreLastKnownGood,
                 RecoveryStrategy::RollbackAndRetry("previous_stable".to_string()),
                 RecoveryStrategy::Abort,
-            ]
+            ],
         );
     }
 
@@ -356,7 +352,9 @@ impl ErrorRecoveryManager {
 
         // Limit number of checkpoints
         if self.checkpoints.len() > self.config.max_checkpoints {
-            let oldest_checkpoint = self.checkpoints.iter()
+            let oldest_checkpoint = self
+                .checkpoints
+                .iter()
                 .min_by_key(|(_, cp)| cp.timestamp)
                 .map(|(id, _)| id.clone());
 
@@ -371,12 +369,22 @@ impl ErrorRecoveryManager {
     }
 
     /// Rollback to a specific checkpoint
-    pub async fn rollback_to_checkpoint(&mut self, checkpoint_id: &str) -> Result<RollbackInfo, AgentError> {
-        let checkpoint = self.checkpoints.get(checkpoint_id).cloned()
-            .ok_or_else(|| AgentError::Unknown(format!("Checkpoint '{}' not found", checkpoint_id)))?;
+    pub async fn rollback_to_checkpoint(
+        &mut self,
+        checkpoint_id: &str,
+    ) -> Result<RollbackInfo, AgentError> {
+        let checkpoint = self
+            .checkpoints
+            .get(checkpoint_id)
+            .cloned()
+            .ok_or_else(|| {
+                AgentError::Unknown(format!("Checkpoint '{}' not found", checkpoint_id))
+            })?;
 
         // Determine operations that need to be undone
-        let operations_to_undo = self.execution_history.iter()
+        let operations_to_undo = self
+            .execution_history
+            .iter()
             .filter(|entry| entry.timestamp > checkpoint.timestamp)
             .map(|entry| entry.tool_call.clone())
             .collect();
@@ -394,29 +402,38 @@ impl ErrorRecoveryManager {
         };
 
         // Truncate execution history to checkpoint point
-        self.execution_history.retain(|entry| entry.timestamp <= checkpoint.timestamp);
+        self.execution_history
+            .retain(|entry| entry.timestamp <= checkpoint.timestamp);
 
-        info!("Rolled back to checkpoint '{}' (step {})", checkpoint_id, checkpoint.step_number);
+        info!(
+            "Rolled back to checkpoint '{}' (step {})",
+            checkpoint_id, checkpoint.step_number
+        );
         Ok(rollback_info)
     }
 
     /// Rollback to the last known good state
     pub async fn rollback_to_last_known_good(&mut self) -> Result<RollbackInfo, AgentError> {
         // Find the most recent checkpoint
-        let latest_checkpoint = self.checkpoints.values()
+        let latest_checkpoint = self
+            .checkpoints
+            .values()
             .max_by_key(|cp| cp.timestamp)
             .cloned();
 
         match latest_checkpoint {
-            Some(checkpoint) => {
-                self.rollback_to_checkpoint(&checkpoint.id).await
-            }
+            Some(checkpoint) => self.rollback_to_checkpoint(&checkpoint.id).await,
             None => {
                 // If no checkpoints available, reset to initial state
                 let rollback_info = RollbackInfo {
                     checkpoint_id: "initial_state".to_string(),
-                    operations_to_undo: self.execution_history.iter().map(|e| e.tool_call.clone()).collect(),
-                    rollback_reason: "No checkpoints available, resetting to initial state".to_string(),
+                    operations_to_undo: self
+                        .execution_history
+                        .iter()
+                        .map(|e| e.tool_call.clone())
+                        .collect(),
+                    rollback_reason: "No checkpoints available, resetting to initial state"
+                        .to_string(),
                     recovery_strategy: RecoveryStrategy::RestoreLastKnownGood,
                 };
 
@@ -431,7 +448,12 @@ impl ErrorRecoveryManager {
     }
 
     /// Record a successful tool execution
-    pub fn record_successful_execution(&mut self, tool_call: ToolCall, result: Value, execution_time: Duration) {
+    pub fn record_successful_execution(
+        &mut self,
+        tool_call: ToolCall,
+        result: Value,
+        execution_time: Duration,
+    ) {
         self.step_counter += 1;
         self.cascading_failure_count = 0; // Reset failure count on success
 
@@ -447,16 +469,24 @@ impl ErrorRecoveryManager {
         self.execution_history.push(history_entry);
 
         // Auto-create checkpoint if configured
-        if self.config.enable_checkpoints &&
-           self.step_counter.is_multiple_of(self.config.checkpoint_interval) {
-            if let Ok(checkpoint_id) = self.create_checkpoint(format!("Auto-checkpoint at step {}", self.step_counter)) {
+        if self.config.enable_checkpoints
+            && self
+                .step_counter
+                .is_multiple_of(self.config.checkpoint_interval)
+        {
+            if let Ok(checkpoint_id) =
+                self.create_checkpoint(format!("Auto-checkpoint at step {}", self.step_counter))
+            {
                 if let Some(last_entry) = self.execution_history.last_mut() {
                     last_entry.checkpoint_created = Some(checkpoint_id);
                 }
             }
         }
 
-        debug!("Recorded successful execution of '{}' (step {})", tool_call.name, self.step_counter);
+        debug!(
+            "Recorded successful execution of '{}' (step {})",
+            tool_call.name, self.step_counter
+        );
     }
 
     /// Enhanced tool execution with checkpoint and rollback support
@@ -476,7 +506,8 @@ impl ErrorRecoveryManager {
         // Create a pre-execution checkpoint for complex operations
         let should_checkpoint = self.should_create_checkpoint(&tool_call);
         let pre_execution_checkpoint = if should_checkpoint {
-            match self.create_checkpoint(format!("Pre-execution checkpoint for {}", tool_call.name)) {
+            match self.create_checkpoint(format!("Pre-execution checkpoint for {}", tool_call.name))
+            {
                 Ok(id) => Some(id),
                 Err(e) => {
                     warn!("Failed to create pre-execution checkpoint: {}", e);
@@ -491,7 +522,11 @@ impl ErrorRecoveryManager {
             match executor(tool_call.clone()).await {
                 Ok(result) => {
                     // Record successful execution
-                    self.record_successful_execution(tool_call.clone(), serde_json::to_value(&result).unwrap_or_default(), start_time.elapsed());
+                    self.record_successful_execution(
+                        tool_call.clone(),
+                        serde_json::to_value(&result).unwrap_or_default(),
+                        start_time.elapsed(),
+                    );
                     return Ok(result);
                 }
                 Err(error) => {
@@ -514,26 +549,36 @@ impl ErrorRecoveryManager {
                     let should_rollback = self.should_trigger_rollback(&error_pattern);
 
                     if should_rollback && self.config.enable_automatic_rollback {
-                        info!("Triggering automatic rollback due to error pattern: {:?}", error_pattern);
+                        info!(
+                            "Triggering automatic rollback due to error pattern: {:?}",
+                            error_pattern
+                        );
                         if let Err(rollback_error) = self.rollback_to_last_known_good().await {
                             error!("Rollback failed: {}", rollback_error);
                         }
                     }
 
                     // Apply recovery strategies
-                    let strategies = self.strategy_mappings.get(&error_pattern).cloned().unwrap_or_default();
+                    let strategies = self
+                        .strategy_mappings
+                        .get(&error_pattern)
+                        .cloned()
+                        .unwrap_or_default();
                     if !strategies.is_empty() {
                         let mut recovery_successful = false;
 
                         for strategy in &strategies {
                             let recovery_start = Instant::now();
 
-                            match self.apply_enhanced_recovery_strategy(
-                                strategy.clone(),
-                                &tool_call,
-                                &error,
-                                &pre_execution_checkpoint
-                            ).await {
+                            match self
+                                .apply_enhanced_recovery_strategy(
+                                    strategy.clone(),
+                                    &tool_call,
+                                    &error,
+                                    &pre_execution_checkpoint,
+                                )
+                                .await
+                            {
                                 Ok(Some(modified_call)) => {
                                     tool_call = modified_call;
                                     recovery_successful = true;
@@ -549,7 +594,10 @@ impl ErrorRecoveryManager {
                                     };
                                     self.recovery_history.push(attempt);
 
-                                    debug!("Recovery strategy {:?} succeeded for tool '{}'", strategy, tool_call.name);
+                                    debug!(
+                                        "Recovery strategy {:?} succeeded for tool '{}'",
+                                        strategy, tool_call.name
+                                    );
                                     break;
                                 }
                                 Ok(None) => {
@@ -579,13 +627,20 @@ impl ErrorRecoveryManager {
                                     };
                                     self.recovery_history.push(attempt);
 
-                                    warn!("Recovery strategy {:?} failed for tool '{}': {}", strategy, tool_call.name, recovery_error);
+                                    warn!(
+                                        "Recovery strategy {:?} failed for tool '{}': {}",
+                                        strategy, tool_call.name, recovery_error
+                                    );
                                 }
                             }
                         }
 
                         if !recovery_successful {
-                            error!("All recovery strategies failed for tool '{}' on attempt {}", tool_call.name, retry_count + 1);
+                            error!(
+                                "All recovery strategies failed for tool '{}' on attempt {}",
+                                tool_call.name,
+                                retry_count + 1
+                            );
                             break;
                         }
                     }
@@ -596,11 +651,19 @@ impl ErrorRecoveryManager {
         }
 
         let total_time = start_time.elapsed();
-        error!("Tool call '{}' failed after {} retries in {:?}: {}",
-               tool_call.name, retry_count, total_time,
-               last_error.as_ref().map(|e| e.to_string()).unwrap_or_default());
+        error!(
+            "Tool call '{}' failed after {} retries in {:?}: {}",
+            tool_call.name,
+            retry_count,
+            total_time,
+            last_error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+        );
 
-        Err(last_error.unwrap_or_else(|| AgentError::Unknown("Unknown error during recovery".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AgentError::Unknown("Unknown error during recovery".to_string())))
     }
 
     /// Apply enhanced recovery strategy with checkpoint and rollback support
@@ -614,25 +677,35 @@ impl ErrorRecoveryManager {
         match strategy {
             RecoveryStrategy::SaveStateAndRetry => {
                 // Create checkpoint before retry
-                let checkpoint_id = self.create_checkpoint(format!("Pre-retry checkpoint for {}", tool_call.name))?;
+                let checkpoint_id =
+                    self.create_checkpoint(format!("Pre-retry checkpoint for {}", tool_call.name))?;
                 info!("Created pre-retry checkpoint: {}", checkpoint_id);
                 Ok(None)
             }
 
             RecoveryStrategy::RestoreLastKnownGood => {
-                info!("Restoring to last known good state for tool '{}'", tool_call.name);
+                info!(
+                    "Restoring to last known good state for tool '{}'",
+                    tool_call.name
+                );
                 let _rollback_info = self.rollback_to_last_known_good().await?;
                 Ok(None)
             }
 
             RecoveryStrategy::RollbackToCheckpoint(checkpoint_id) => {
-                info!("Rolling back to checkpoint '{}' for tool '{}'", checkpoint_id, tool_call.name);
+                info!(
+                    "Rolling back to checkpoint '{}' for tool '{}'",
+                    checkpoint_id, tool_call.name
+                );
                 let _rollback_info = self.rollback_to_checkpoint(&checkpoint_id).await?;
                 Ok(None)
             }
 
             RecoveryStrategy::RollbackAndRetry(checkpoint_id) => {
-                info!("Rolling back to checkpoint '{}' and retrying tool '{}'", checkpoint_id, tool_call.name);
+                info!(
+                    "Rolling back to checkpoint '{}' and retrying tool '{}'",
+                    checkpoint_id, tool_call.name
+                );
                 let _rollback_info = self.rollback_to_checkpoint(&checkpoint_id).await?;
 
                 // Modify the tool call slightly for retry
@@ -644,7 +717,10 @@ impl ErrorRecoveryManager {
             }
 
             // Delegate to existing recovery strategies
-            _ => self.apply_recovery_strategy(strategy, tool_call, error).await
+            _ => {
+                self.apply_recovery_strategy(strategy, tool_call, error)
+                    .await
+            }
         }
     }
 
@@ -656,7 +732,9 @@ impl ErrorRecoveryManager {
 
         // Create checkpoints for high-risk operations
         match tool_call.name.as_str() {
-            "browser_navigate" | "left_click" | "right_click" | "type_text" | "key_combination" => true,
+            "browser_navigate" | "left_click" | "right_click" | "type_text" | "key_combination" => {
+                true
+            }
             "file_write" | "file_delete" | "directory_create" | "directory_delete" => true,
             "bash" => true, // Use official bash command for high-risk operations
             _ => false,
@@ -681,13 +759,16 @@ impl ErrorRecoveryManager {
 
     /// Get recent successful operations for checkpoint context
     fn get_recent_successful_operations(&self) -> Vec<ToolCall> {
-        self.execution_history.iter()
+        self.execution_history
+            .iter()
             .rev()
             .filter(|entry: &&ExecutionHistoryEntry| {
                 match &entry.result {
                     Ok(output) => {
                         // Check if this is an Anthropic error response (computer tools)
-                        !crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(output)
+                        !crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(
+                            output,
+                        )
                     }
                     Err(_) => false, // Traditional error format
                 }
@@ -699,21 +780,29 @@ impl ErrorRecoveryManager {
 
     /// Update agent state during execution
     pub fn update_agent_state(&mut self, key: &str, value: Value) {
-        self.current_agent_state.variables.insert(key.to_string(), value);
+        self.current_agent_state
+            .variables
+            .insert(key.to_string(), value);
     }
 
     /// Get current execution statistics
     pub fn get_enhanced_recovery_stats(&self) -> Value {
         let total_attempts = self.recovery_history.len();
         let successful_attempts = self.recovery_history.iter().filter(|a| a.success).count();
-        let rollback_attempts = self.recovery_history.iter().filter(|a| a.rollback_performed).count();
+        let rollback_attempts = self
+            .recovery_history
+            .iter()
+            .filter(|a| a.rollback_performed)
+            .count();
 
-        let strategy_stats = self.recovery_history.iter()
-            .fold(HashMap::new(), |mut acc, attempt| {
-                let strategy_name = format!("{:?}", attempt.strategy);
-                *acc.entry(strategy_name).or_insert(0) += 1;
-                acc
-            });
+        let strategy_stats =
+            self.recovery_history
+                .iter()
+                .fold(HashMap::new(), |mut acc, attempt| {
+                    let strategy_name = format!("{:?}", attempt.strategy);
+                    *acc.entry(strategy_name).or_insert(0) += 1;
+                    acc
+                });
 
         json!({
             "total_recovery_attempts": total_attempts,
@@ -771,7 +860,8 @@ impl ErrorRecoveryManager {
         let error_message = error.to_string().to_lowercase();
 
         // Check for specific patterns in error messages
-        if error_message.contains("element not found") || error_message.contains("no such element") {
+        if error_message.contains("element not found") || error_message.contains("no such element")
+        {
             return ErrorPattern::ElementNotFound;
         }
 
@@ -787,12 +877,13 @@ impl ErrorRecoveryManager {
             return ErrorPattern::FileSystemError;
         }
 
-        if error_message.contains("permission denied") ||
-           error_message.contains("access denied") ||
-           error_message.contains("accessibility permissions") ||
-           error_message.contains("screen recording permission") ||
-           error_message.contains("microphone permission") ||
-           error_message.contains("desktop automation is not available") {
+        if error_message.contains("permission denied")
+            || error_message.contains("access denied")
+            || error_message.contains("accessibility permissions")
+            || error_message.contains("screen recording permission")
+            || error_message.contains("microphone permission")
+            || error_message.contains("desktop automation is not available")
+        {
             return ErrorPattern::PermissionDenied;
         }
 
@@ -804,11 +895,15 @@ impl ErrorRecoveryManager {
             return ErrorPattern::LLMRateLimit;
         }
 
-        if error_message.contains("browser") && (error_message.contains("not ready") || error_message.contains("not initialized")) {
+        if error_message.contains("browser")
+            && (error_message.contains("not ready") || error_message.contains("not initialized"))
+        {
             return ErrorPattern::BrowserNotReady;
         }
 
-        if error_message.contains("application not running") || error_message.contains("app not found") {
+        if error_message.contains("application not running")
+            || error_message.contains("app not found")
+        {
             return ErrorPattern::ApplicationNotRunning;
         }
 
@@ -831,8 +926,14 @@ impl ErrorRecoveryManager {
     }
 
     /// Choose recovery strategies for a given error pattern and retry count
-    pub fn choose_recovery_strategies(&self, pattern: ErrorPattern, retry_count: usize) -> Vec<RecoveryStrategy> {
-        let strategies = self.strategy_mappings.get(&pattern)
+    pub fn choose_recovery_strategies(
+        &self,
+        pattern: ErrorPattern,
+        retry_count: usize,
+    ) -> Vec<RecoveryStrategy> {
+        let strategies = self
+            .strategy_mappings
+            .get(&pattern)
             .cloned()
             .unwrap_or_else(|| vec![RecoveryStrategy::Retry, RecoveryStrategy::Abort]);
 
@@ -857,14 +958,20 @@ impl ErrorRecoveryManager {
         let start_time = Instant::now();
 
         while retry_count <= self.config.max_retries {
-            debug!("Executing tool call attempt {} of {}: {}",
-                   retry_count + 1, self.config.max_retries + 1, current_tool_call.name);
+            debug!(
+                "Executing tool call attempt {} of {}: {}",
+                retry_count + 1,
+                self.config.max_retries + 1,
+                current_tool_call.name
+            );
 
             match executor(current_tool_call.clone()).await {
                 Ok(result) => {
                     if retry_count > 0 {
-                        info!("Tool call '{}' succeeded after {} retries",
-                              current_tool_call.name, retry_count);
+                        info!(
+                            "Tool call '{}' succeeded after {} retries",
+                            current_tool_call.name, retry_count
+                        );
                     }
                     return Ok(result);
                 }
@@ -879,19 +986,23 @@ impl ErrorRecoveryManager {
                     let pattern = self.determine_error_pattern(&error);
                     let strategies = self.choose_recovery_strategies(pattern.clone(), retry_count);
 
-                    info!("Tool call '{}' failed (attempt {}): {}. Trying {} recovery strategies",
-                          current_tool_call.name, retry_count + 1, error, strategies.len());
+                    info!(
+                        "Tool call '{}' failed (attempt {}): {}. Trying {} recovery strategies",
+                        current_tool_call.name,
+                        retry_count + 1,
+                        error,
+                        strategies.len()
+                    );
 
                     // Try each recovery strategy
                     let mut recovery_successful = false;
                     for strategy in strategies {
                         let recovery_start = Instant::now();
 
-                        match self.apply_recovery_strategy(
-                            strategy.clone(),
-                            &current_tool_call,
-                            &error
-                        ).await {
+                        match self
+                            .apply_recovery_strategy(strategy.clone(), &current_tool_call, &error)
+                            .await
+                        {
                             Ok(Some(modified_call)) => {
                                 current_tool_call = modified_call;
                                 recovery_successful = true;
@@ -907,8 +1018,10 @@ impl ErrorRecoveryManager {
                                 };
                                 self.recovery_history.push(attempt);
 
-                                debug!("Recovery strategy {:?} succeeded for tool '{}'",
-                                       strategy, current_tool_call.name);
+                                debug!(
+                                    "Recovery strategy {:?} succeeded for tool '{}'",
+                                    strategy, current_tool_call.name
+                                );
                                 break;
                             }
                             Ok(None) => {
@@ -939,15 +1052,20 @@ impl ErrorRecoveryManager {
                                 };
                                 self.recovery_history.push(attempt);
 
-                                warn!("Recovery strategy {:?} failed for tool '{}': {}",
-                                      strategy, current_tool_call.name, recovery_error);
+                                warn!(
+                                    "Recovery strategy {:?} failed for tool '{}': {}",
+                                    strategy, current_tool_call.name, recovery_error
+                                );
                             }
                         }
                     }
 
                     if !recovery_successful {
-                        error!("All recovery strategies failed for tool '{}' on attempt {}",
-                               current_tool_call.name, retry_count + 1);
+                        error!(
+                            "All recovery strategies failed for tool '{}' on attempt {}",
+                            current_tool_call.name,
+                            retry_count + 1
+                        );
                         break;
                     }
 
@@ -957,10 +1075,13 @@ impl ErrorRecoveryManager {
         }
 
         let total_time = start_time.elapsed();
-        error!("Tool call '{}' failed after {} attempts in {:?}. Final error: {:?}",
-               tool_call.name, retry_count, total_time, last_error);
+        error!(
+            "Tool call '{}' failed after {} attempts in {:?}. Final error: {:?}",
+            tool_call.name, retry_count, total_time, last_error
+        );
 
-        Err(last_error.unwrap_or_else(|| AgentError::Unknown("Unknown error during recovery".to_string())))
+        Err(last_error
+            .unwrap_or_else(|| AgentError::Unknown("Unknown error during recovery".to_string())))
     }
 
     /// Apply a specific recovery strategy
@@ -977,18 +1098,17 @@ impl ErrorRecoveryManager {
             }
 
             RecoveryStrategy::WaitAndRetry(duration) => {
-                info!("Waiting {:?} before retry for tool '{}'", duration, tool_call.name);
+                info!(
+                    "Waiting {:?} before retry for tool '{}'",
+                    duration, tool_call.name
+                );
                 tokio::time::sleep(duration).await;
                 Ok(None)
             }
 
-            RecoveryStrategy::AdjustParameters => {
-                self.adjust_tool_parameters(tool_call, error)
-            }
+            RecoveryStrategy::AdjustParameters => self.adjust_tool_parameters(tool_call, error),
 
-            RecoveryStrategy::AlternativeMethod => {
-                self.find_alternative_method(tool_call, error)
-            }
+            RecoveryStrategy::AlternativeMethod => self.find_alternative_method(tool_call, error),
 
             RecoveryStrategy::RefreshContext => {
                 // For now, just wait a bit - in a full implementation this would
@@ -997,19 +1117,24 @@ impl ErrorRecoveryManager {
                 Ok(None)
             }
 
-            RecoveryStrategy::FallbackTool => {
-                self.find_fallback_tool(tool_call, error)
-            }
+            RecoveryStrategy::FallbackTool => self.find_fallback_tool(tool_call, error),
 
             RecoveryStrategy::SkipStep => {
-                info!("Skipping tool call '{}' due to recovery strategy", tool_call.name);
-                Err(AgentError::Unknown("Step skipped by recovery strategy".to_string()))
+                info!(
+                    "Skipping tool call '{}' due to recovery strategy",
+                    tool_call.name
+                );
+                Err(AgentError::Unknown(
+                    "Step skipped by recovery strategy".to_string(),
+                ))
             }
 
             RecoveryStrategy::EscalateToUser => {
                 if self.config.enable_user_escalation {
                     // In a full implementation, this would prompt the user
-                    Err(AgentError::Unknown("User intervention required".to_string()))
+                    Err(AgentError::Unknown(
+                        "User intervention required".to_string(),
+                    ))
                 } else {
                     Err(AgentError::Unknown("Escalation not enabled".to_string()))
                 }
@@ -1024,28 +1149,36 @@ impl ErrorRecoveryManager {
                 }
             }
 
-            RecoveryStrategy::Abort => {
-                Err(AgentError::Unknown("Recovery strategy chose to abort".to_string()))
-            }
+            RecoveryStrategy::Abort => Err(AgentError::Unknown(
+                "Recovery strategy chose to abort".to_string(),
+            )),
 
             RecoveryStrategy::RollbackToCheckpoint(_checkpoint_id) => {
                 // This should be handled by the enhanced recovery system
-                Err(AgentError::Unknown("Rollback strategies require enhanced recovery manager".to_string()))
+                Err(AgentError::Unknown(
+                    "Rollback strategies require enhanced recovery manager".to_string(),
+                ))
             }
 
             RecoveryStrategy::RollbackAndRetry(_checkpoint_id) => {
                 // This should be handled by the enhanced recovery system
-                Err(AgentError::Unknown("Rollback strategies require enhanced recovery manager".to_string()))
+                Err(AgentError::Unknown(
+                    "Rollback strategies require enhanced recovery manager".to_string(),
+                ))
             }
 
             RecoveryStrategy::SaveStateAndRetry => {
                 // This should be handled by the enhanced recovery system
-                Err(AgentError::Unknown("Checkpoint strategies require enhanced recovery manager".to_string()))
+                Err(AgentError::Unknown(
+                    "Checkpoint strategies require enhanced recovery manager".to_string(),
+                ))
             }
 
             RecoveryStrategy::RestoreLastKnownGood => {
                 // This should be handled by the enhanced recovery system
-                Err(AgentError::Unknown("Rollback strategies require enhanced recovery manager".to_string()))
+                Err(AgentError::Unknown(
+                    "Rollback strategies require enhanced recovery manager".to_string(),
+                ))
             }
         }
     }
@@ -1123,7 +1256,7 @@ impl ErrorRecoveryManager {
         let fallback_tool = match tool_call.name.as_str() {
             "browser_extract_content" => "screenshot", // Fallback to visual
             "get_focused_element_info" => "screenshot", // Fallback to visual
-            "browser_navigate" => "type_text", // Could type URL directly
+            "browser_navigate" => "type_text",         // Could type URL directly
             _ => return Ok(None),
         };
 
@@ -1146,22 +1279,24 @@ impl ErrorRecoveryManager {
     ) -> Result<Option<ToolCall>, AgentError> {
         // Placeholder for LLM-based recovery
         // In a full implementation, this would query the LLM for suggestions
-        Err(AgentError::Unknown("LLM recovery not implemented".to_string()))
+        Err(AgentError::Unknown(
+            "LLM recovery not implemented".to_string(),
+        ))
     }
 
     /// Get recovery statistics
     pub fn get_recovery_stats(&self) -> Value {
         let total_attempts = self.recovery_history.len();
-        let successful_attempts = self.recovery_history.iter()
-            .filter(|a| a.success)
-            .count();
+        let successful_attempts = self.recovery_history.iter().filter(|a| a.success).count();
 
-        let strategy_stats: HashMap<String, usize> = self.recovery_history.iter()
-            .fold(HashMap::new(), |mut acc, attempt| {
-                let strategy_name = format!("{:?}", attempt.strategy);
-                *acc.entry(strategy_name).or_insert(0) += 1;
-                acc
-            });
+        let strategy_stats: HashMap<String, usize> =
+            self.recovery_history
+                .iter()
+                .fold(HashMap::new(), |mut acc, attempt| {
+                    let strategy_name = format!("{:?}", attempt.strategy);
+                    *acc.entry(strategy_name).or_insert(0) += 1;
+                    acc
+                });
 
         json!({
             "total_recovery_attempts": total_attempts,

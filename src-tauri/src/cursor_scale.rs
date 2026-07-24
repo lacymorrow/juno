@@ -99,7 +99,10 @@ mod inner {
         }
 
         write_cursor_size(scale);
-        info!("[CursorScale] Preview: wrote cursor scale {:.1} (refcount unchanged)", scale);
+        info!(
+            "[CursorScale] Preview: wrote cursor scale {:.1} (refcount unchanged)",
+            scale
+        );
     }
 
     /// Update cursor size while it is already scaled by an active guard.
@@ -114,7 +117,11 @@ mod inner {
 
     pub fn restore_cursor_scale() {
         let did_dec = SCALE_REFCOUNT.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-            if n > 0 { Some(n - 1) } else { None }
+            if n > 0 {
+                Some(n - 1)
+            } else {
+                None
+            }
         });
         match did_dec {
             Ok(1) => {
@@ -149,10 +156,7 @@ mod inner {
             .and_then(|mut g| g.take())
             .unwrap_or(1.0);
         write_cursor_size(orig);
-        info!(
-            "[CursorScale] Force-restored cursor to {:.2}",
-            orig
-        );
+        info!("[CursorScale] Force-restored cursor to {:.2}", orig);
     }
 
     pub fn is_cursor_scaled() -> bool {

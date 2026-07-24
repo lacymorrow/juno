@@ -27,8 +27,8 @@
 //! ```
 
 use crate::cli::headless;
-use crate::state::AppState;
 use crate::startup;
+use crate::state::AppState;
 use std::sync::OnceLock;
 use tauri::AppHandle;
 use tracing::info;
@@ -56,7 +56,10 @@ impl TestHarness {
         headless::set_headless_mode(true);
         startup::init_environment();
         let state = startup::init_app_state(None);
-        Ok(Self { state, app_handle: None })
+        Ok(Self {
+            state,
+            app_handle: None,
+        })
     }
 
     /// Build a full harness with a real Tauri app.
@@ -91,7 +94,10 @@ impl TestHarness {
             h
         };
 
-        Ok(Self { state, app_handle: Some(handle) })
+        Ok(Self {
+            state,
+            app_handle: Some(handle),
+        })
     }
 
     /// Get a reference to the `AppState`.
@@ -105,8 +111,8 @@ impl TestHarness {
     ///
     /// Panics if called on a lightweight harness (use `with_app()` instead).
     pub fn app_handle(&self) -> &AppHandle {
-        self.app_handle
-            .as_ref()
-            .unwrap_or_else(|| panic!("app_handle() called on lightweight harness — use TestHarness::with_app()"))
+        self.app_handle.as_ref().unwrap_or_else(|| {
+            panic!("app_handle() called on lightweight harness — use TestHarness::with_app()")
+        })
     }
 }

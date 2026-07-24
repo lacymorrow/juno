@@ -1,14 +1,16 @@
+use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
+use serde_json;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
-use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use tauri::{AppHandle, Emitter, Runtime};
-use tracing::{info, warn, error, debug};
-use serde_json;
-use crate::engine::{TranscriptionEngine, TranscriptionSession};
+use tracing::{debug, error, info, warn};
 
 use crate::error::{Error, Result};
 use crate::utils::filter_transcription_text;
@@ -41,16 +43,25 @@ const DEFAULT_WAKE_WORDS: &[&str] = &["hey juno", "juno", "joono", "computer", "
 
 // Stop words that should end always listening mode
 const STOP_WORDS: &[&str] = &[
-    "stop", "nevermind", "never mind", "cancel", "quit", "exit",
-    "done", "that's all", "thats all", "end", "finish", "enough"
+    "stop",
+    "nevermind",
+    "never mind",
+    "cancel",
+    "quit",
+    "exit",
+    "done",
+    "that's all",
+    "thats all",
+    "end",
+    "finish",
+    "enough",
 ];
-
 
 // Single word noise patterns that should only match complete words
 const NOISE_WORDS: &[&str] = &[
     "um", "uh", "hmm", "ah", "er", "mm", "mhm",
     // Single letter transcriptions are usually noise
-    "a", "i", "o", "e", "u"
+    "a", "i", "o", "e", "u",
 ];
 
 /// Create standard sinc interpolation parameters for audio resampling.
@@ -77,9 +88,9 @@ enum AlwaysListeningMessage {
 
 #[derive(Debug, Clone)]
 pub enum AlwaysListeningState {
-    Monitoring,   // Continuously monitoring for intent
-    Activated,    // Intent detected, actively transcribing
-    Processing,   // Processing detected speech
+    Monitoring,         // Continuously monitoring for intent
+    Activated,          // Intent detected, actively transcribing
+    Processing,         // Processing detected speech
     WaitingForWakeWord, // Waiting for wake word after command completion
 }
 
@@ -96,8 +107,14 @@ pub struct AlwaysListeningController {
 
 impl AlwaysListeningController {
     /// Create an AlwaysListeningController backed by an already-initialized STT engine.
-    pub fn new_with_engine(model_path_str: &str, engine: Arc<dyn TranscriptionEngine>) -> Result<Self> {
-        info!("[AlwaysListeningController] Creating controller with '{}' engine", engine.name());
+    pub fn new_with_engine(
+        model_path_str: &str,
+        engine: Arc<dyn TranscriptionEngine>,
+    ) -> Result<Self> {
+        info!(
+            "[AlwaysListeningController] Creating controller with '{}' engine",
+            engine.name()
+        );
         Ok(Self {
             engine: Some(engine),
             model_path: model_path_str.to_string(),
@@ -135,7 +152,10 @@ impl AlwaysListeningController {
         }
     }
 
-    pub fn start_always_listening<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
+    pub fn start_always_listening<R: Runtime + 'static>(
+        &mut self,
+        app_handle: &AppHandle<R>,
+    ) -> Result<()> {
         if self.is_active {
             return Ok(()); // Already active
         }
@@ -163,12 +183,15 @@ impl AlwaysListeningController {
         info!("[AlwaysListeningController] Starting always listening mode...");
 
         // Validate engine BEFORE setting is_active to prevent stale state
-        let engine = self.engine.as_ref()
+        let engine = self
+            .engine
+            .as_ref()
             .ok_or_else(|| Error::InitializationError("STT engine not initialized".to_string()))?
             .clone();
 
         // Emit always listening started event
-        app_handle.emit("always-listening:started", ())
+        app_handle
+            .emit("always-listening:started", ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
         let (control_tx, control_rx) = channel::<AlwaysListeningMessage>();
@@ -205,7 +228,10 @@ impl AlwaysListeningController {
         mut wake_words: Vec<String>,
         last_activity: Arc<Mutex<Option<Instant>>>,
     ) {
-        info!("[AlwaysListening] Worker thread started. Engine: '{}'", engine.name());
+        info!(
+            "[AlwaysListening] Worker thread started. Engine: '{}'",
+            engine.name()
+        );
 
         let mut session = match engine.create_session() {
             Ok(s) => s,
@@ -256,7 +282,11 @@ impl AlwaysListeningController {
                             // Convert stereo to mono by averaging channels
                             data.chunks(2)
                                 .map(|pair| {
-                                    if pair.len() == 2 { (pair[0] + pair[1]) / 2.0 } else { pair[0] }
+                                    if pair.len() == 2 {
+                                        (pair[0] + pair[1]) / 2.0
+                                    } else {
+                                        pair[0]
+                                    }
                                 })
                                 .collect()
                         } else {
@@ -269,7 +299,7 @@ impl AlwaysListeningController {
                     move |err| {
                         error!("Audio stream error: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -277,7 +307,7 @@ impl AlwaysListeningController {
                         return;
                     }
                 }
-            },
+            }
             SampleFormat::I16 => {
                 let channels_for_cb = channels;
                 match device.build_input_stream(
@@ -297,9 +327,8 @@ impl AlwaysListeningController {
                         } else {
                             data.to_vec()
                         };
-                        let audio_f32: Vec<f32> = mono_data.iter()
-                            .map(|&s| s as f32 / 32768.0)
-                            .collect();
+                        let audio_f32: Vec<f32> =
+                            mono_data.iter().map(|&s| s as f32 / 32768.0).collect();
                         if let Err(e) = audio_data_tx.send(audio_f32) {
                             error!("Failed to send converted audio data: {:?}", e);
                         }
@@ -307,7 +336,7 @@ impl AlwaysListeningController {
                     move |err| {
                         error!("Audio stream error: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -315,7 +344,7 @@ impl AlwaysListeningController {
                         return;
                     }
                 }
-            },
+            }
             _ => {
                 error!("Unsupported sample format {:?}", sample_format);
                 return;
@@ -334,7 +363,8 @@ impl AlwaysListeningController {
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut current_state = AlwaysListeningState::Monitoring;
         let buffer_capacity = (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize;
-        let min_transcription_samples = (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
+        let min_transcription_samples =
+            (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
         let mut audio_activity_start: Option<Instant> = None;
         let mut last_volume_drop: Option<Instant> = None;
 
@@ -354,10 +384,16 @@ impl AlwaysListeningController {
                     debug!("[AlwaysListening] Wake words updated");
                 }
                 Ok(AlwaysListeningMessage::SetTranscriptionDebugging(enabled)) => {
-                    info!("[AlwaysListening] Transcription debugging set to: {}", enabled);
+                    info!(
+                        "[AlwaysListening] Transcription debugging set to: {}",
+                        enabled
+                    );
                 }
                 Ok(AlwaysListeningMessage::SetAudioLevelMonitoring(enabled)) => {
-                    info!("[AlwaysListening] Audio level monitoring set to: {}", enabled);
+                    info!(
+                        "[AlwaysListening] Audio level monitoring set to: {}",
+                        enabled
+                    );
                 }
                 Ok(AlwaysListeningMessage::ForceTranscriptionTest) => {
                     info!("[AlwaysListening] Force transcription test requested");
@@ -381,7 +417,7 @@ impl AlwaysListeningController {
                     // Calculate volume level
                     let volume = Self::calculate_rms_volume(&audio_chunk);
 
-                                        // Log audio chunk reception occasionally for debugging
+                    // Log audio chunk reception occasionally for debugging
                     thread_local! {
                         static LAST_CHUNK_LOG: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
                     }
@@ -389,7 +425,11 @@ impl AlwaysListeningController {
                     LAST_CHUNK_LOG.with(|last_log| {
                         let mut last_log = last_log.borrow_mut();
                         if last_log.is_none_or(|last| last.elapsed().as_secs() > 10) {
-                            info!("[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}", audio_chunk.len(), volume);
+                            info!(
+                                "[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}",
+                                audio_chunk.len(),
+                                volume
+                            );
                             *last_log = Some(Instant::now());
                         }
                     });
@@ -416,18 +456,25 @@ impl AlwaysListeningController {
                                 if let Some(start_time) = audio_activity_start {
                                     let activity_duration = start_time.elapsed().as_millis();
 
-                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128 &&
-                                       audio_buffer.len() >= min_transcription_samples {
-
+                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128
+                                        && audio_buffer.len() >= min_transcription_samples
+                                    {
                                         // Check if the accumulated audio has sufficient volume for speech
-                                        let buffer_volume = Self::calculate_rms_volume(&audio_buffer);
+                                        let buffer_volume =
+                                            Self::calculate_rms_volume(&audio_buffer);
 
                                         if buffer_volume >= MIN_SPEECH_VOLUME {
                                             info!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples, volume: {:.6}",
                                                    activity_duration, audio_buffer.len(), buffer_volume);
 
                                             // Check for wake words or speech
-                                            if Self::detect_intent(session.as_mut(), &audio_buffer, sample_rate, &wake_words, &app_handle) {
+                                            if Self::detect_intent(
+                                                session.as_mut(),
+                                                &audio_buffer,
+                                                sample_rate,
+                                                &wake_words,
+                                                &app_handle,
+                                            ) {
                                                 current_state = AlwaysListeningState::Activated;
                                                 info!("[AlwaysListening] Intent detected - activating transcription");
 
@@ -437,7 +484,9 @@ impl AlwaysListeningController {
                                                 }
 
                                                 // Emit activation event
-                                                if let Err(e) = app_handle.emit("always-listening:activated", ()) {
+                                                if let Err(e) = app_handle
+                                                    .emit("always-listening:activated", ())
+                                                {
                                                     error!("[AlwaysListening] Failed to emit activation event: {}", e);
                                                 }
 
@@ -471,7 +520,9 @@ impl AlwaysListeningController {
                                         last_volume_drop = Some(Instant::now());
                                         debug!("[AlwaysListening] Volume drop detected, starting tolerance timer - volume: {:.6} < {:.6}", volume, end_threshold);
                                     } else if let Some(drop_time) = last_volume_drop {
-                                        if drop_time.elapsed().as_millis() > VOLUME_DROP_TOLERANCE_MS as u128 {
+                                        if drop_time.elapsed().as_millis()
+                                            > VOLUME_DROP_TOLERANCE_MS as u128
+                                        {
                                             info!("[AlwaysListening] Audio activity ended after tolerance period - volume: {:.6} < {:.6}", volume, end_threshold);
                                             audio_activity_start = None;
                                             last_volume_drop = None;
@@ -505,15 +556,20 @@ impl AlwaysListeningController {
                             // Actively transcribing - check for silence to return to monitoring
                             let end_threshold = VOLUME_THRESHOLD_END / sensitivity;
 
-                            if volume < end_threshold { // Lower threshold for ending activity
+                            if volume < end_threshold {
+                                // Lower threshold for ending activity
                                 if let Ok(activity) = last_activity.lock() {
                                     if let Some(last_time) = *activity {
-                                        if last_time.elapsed().as_millis() > SILENCE_TIMEOUT_MS as u128 {
+                                        if last_time.elapsed().as_millis()
+                                            > SILENCE_TIMEOUT_MS as u128
+                                        {
                                             current_state = AlwaysListeningState::Monitoring;
                                             info!("[AlwaysListening] Silence timeout - returning to monitoring (volume: {:.6} < {:.6})", volume, end_threshold);
 
                                             // Emit deactivation event
-                                            if let Err(e) = app_handle.emit("always-listening:deactivated", ()) {
+                                            if let Err(e) =
+                                                app_handle.emit("always-listening:deactivated", ())
+                                            {
                                                 error!("[AlwaysListening] Failed to emit deactivation event: {}", e);
                                             }
 
@@ -533,7 +589,12 @@ impl AlwaysListeningController {
 
                             // Process transcription for activated mode
                             if audio_buffer.len() >= buffer_capacity {
-                                Self::process_active_transcription(session.as_mut(), &audio_buffer, sample_rate, &app_handle);
+                                Self::process_active_transcription(
+                                    session.as_mut(),
+                                    &audio_buffer,
+                                    sample_rate,
+                                    &app_handle,
+                                );
                                 audio_buffer.clear();
                             }
                         }
@@ -545,15 +606,20 @@ impl AlwaysListeningController {
                             // Waiting for wake word after command completion
                             let end_threshold = VOLUME_THRESHOLD_END / sensitivity;
 
-                            if volume < end_threshold { // Lower threshold for ending activity
+                            if volume < end_threshold {
+                                // Lower threshold for ending activity
                                 if let Ok(activity) = last_activity.lock() {
                                     if let Some(last_time) = *activity {
-                                        if last_time.elapsed().as_millis() > COMMAND_COMPLETION_TIMEOUT_MS as u128 {
+                                        if last_time.elapsed().as_millis()
+                                            > COMMAND_COMPLETION_TIMEOUT_MS as u128
+                                        {
                                             current_state = AlwaysListeningState::Monitoring;
                                             info!("[AlwaysListening] Command completion timeout - returning to monitoring (volume: {:.6} < {:.6})", volume, end_threshold);
 
                                             // Emit deactivation event
-                                            if let Err(e) = app_handle.emit("always-listening:deactivated", ()) {
+                                            if let Err(e) =
+                                                app_handle.emit("always-listening:deactivated", ())
+                                            {
                                                 error!("[AlwaysListening] Failed to emit deactivation event: {}", e);
                                             }
 
@@ -573,7 +639,12 @@ impl AlwaysListeningController {
 
                             // Process transcription for waiting mode
                             if audio_buffer.len() >= buffer_capacity {
-                                Self::process_waiting_transcription(session.as_mut(), &audio_buffer, sample_rate, &app_handle);
+                                Self::process_waiting_transcription(
+                                    session.as_mut(),
+                                    &audio_buffer,
+                                    sample_rate,
+                                    &app_handle,
+                                );
                                 audio_buffer.clear();
                             }
                         }
@@ -612,10 +683,12 @@ impl AlwaysListeningController {
         let audio_duration_ms = (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32;
         let min_duration_for_transcription = MIN_TRANSCRIPTION_DURATION_MS as u32;
 
-        info!("[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
-               audio_buffer.len(),
-               audio_duration_ms,
-               wake_words.len());
+        info!(
+            "[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
+            audio_buffer.len(),
+            audio_duration_ms,
+            wake_words.len()
+        );
 
         // Ensure we have sufficient audio duration for meaningful transcription
         if audio_duration_ms < min_duration_for_transcription {
@@ -633,8 +706,12 @@ impl AlwaysListeningController {
         }
 
         // Resample if necessary
-        info!("[AlwaysListening] Sample rate check: {} -> {} (needs resampling: {})",
-              sample_rate, WHISPER_SAMPLE_RATE, sample_rate != WHISPER_SAMPLE_RATE);
+        info!(
+            "[AlwaysListening] Sample rate check: {} -> {} (needs resampling: {})",
+            sample_rate,
+            WHISPER_SAMPLE_RATE,
+            sample_rate != WHISPER_SAMPLE_RATE
+        );
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
             let config = sinc_resampling_params();
@@ -649,21 +726,28 @@ impl AlwaysListeningController {
                 Ok(mut custom_resampler) => {
                     match custom_resampler.process(&[audio_buffer.to_vec()], None) {
                         Ok(mut resampled) if !resampled.is_empty() => {
-                            info!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
+                            info!(
+                                "[AlwaysListening] Audio resampled: {} -> {} samples",
+                                audio_buffer.len(),
+                                resampled[0].len()
+                            );
                             resampled.remove(0)
-                        },
+                        }
                         Ok(_) => {
                             warn!("[AlwaysListening] Resampling produced empty output");
                             return false;
-                        },
+                        }
                         Err(e) => {
                             warn!("[AlwaysListening] Resampling failed: {:?}", e);
                             return false;
                         }
                     }
-                },
+                }
                 Err(e) => {
-                    warn!("[AlwaysListening] Failed to create custom resampler: {:?}", e);
+                    warn!(
+                        "[AlwaysListening] Failed to create custom resampler: {:?}",
+                        e
+                    );
                     return false;
                 }
             }
@@ -672,7 +756,8 @@ impl AlwaysListeningController {
         };
 
         // Ensure resampled audio also meets minimum duration and quality
-        let resampled_duration_ms = (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
+        let resampled_duration_ms =
+            (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
         if resampled_duration_ms < min_duration_for_transcription {
             info!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
                    resampled_duration_ms, min_duration_for_transcription);
@@ -680,7 +765,8 @@ impl AlwaysListeningController {
         }
 
         let resampled_volume = Self::calculate_rms_volume(&audio_to_process);
-        if resampled_volume < MIN_SPEECH_VOLUME * 0.5 { // Allow slightly lower volume after resampling
+        if resampled_volume < MIN_SPEECH_VOLUME * 0.5 {
+            // Allow slightly lower volume after resampling
             info!("[AlwaysListening] detect_intent: Resampled audio volume too low ({:.6} < {:.6}), skipping transcription",
                    resampled_volume, MIN_SPEECH_VOLUME * 0.5);
             return false;
@@ -692,16 +778,26 @@ impl AlwaysListeningController {
         match session.transcribe_partial(&audio_to_process) {
             Ok(Some(transcribed_text)) => {
                 let text_lower = transcribed_text.trim().to_lowercase();
-                info!("[AlwaysListening] Transcription result: '{}' (length: {})", text_lower, text_lower.len());
+                info!(
+                    "[AlwaysListening] Transcription result: '{}' (length: {})",
+                    text_lower,
+                    text_lower.len()
+                );
 
                 // Check for wake words
                 for wake_word in wake_words {
                     let wake_word_lower = wake_word.to_lowercase();
                     if text_lower.contains(&wake_word_lower) {
-                        info!("[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' found in '{}'", wake_word, text_lower);
+                        info!(
+                            "[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' found in '{}'",
+                            wake_word, text_lower
+                        );
                         return true;
                     } else {
-                        debug!("[AlwaysListening] Wake word '{}' not found in '{}'", wake_word_lower, text_lower);
+                        debug!(
+                            "[AlwaysListening] Wake word '{}' not found in '{}'",
+                            wake_word_lower, text_lower
+                        );
                     }
                 }
 
@@ -711,7 +807,10 @@ impl AlwaysListeningController {
                     return true;
                 }
 
-                info!("[AlwaysListening] ❌ No wake words detected in: '{}'", text_lower);
+                info!(
+                    "[AlwaysListening] ❌ No wake words detected in: '{}'",
+                    text_lower
+                );
                 false
             }
             Ok(None) => {
@@ -749,7 +848,7 @@ impl AlwaysListeningController {
                         Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
                         _ => return,
                     }
-                },
+                }
                 Err(_) => return,
             }
         } else {
@@ -760,32 +859,56 @@ impl AlwaysListeningController {
             Ok(Some(transcribed_text)) => {
                 let cleaned_text = filter_transcription_text(transcribed_text.trim());
                 if !cleaned_text.is_empty() {
-                    info!("[AlwaysListening] Active transcription result: '{}'", cleaned_text);
+                    info!(
+                        "[AlwaysListening] Active transcription result: '{}'",
+                        cleaned_text
+                    );
 
                     if Self::should_process_with_agent(&cleaned_text) {
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected: '{}' - stopping always listening", cleaned_text);
-                            if let Err(e) = app_handle.emit("always-listening:stop-requested",
-                                serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
-                                error!("[AlwaysListening] Failed to emit stop-requested event: {}", e);
+                            if let Err(e) = app_handle.emit(
+                                "always-listening:stop-requested",
+                                serde_json::json!({ "reason": "stop_word", "text": cleaned_text }),
+                            ) {
+                                error!(
+                                    "[AlwaysListening] Failed to emit stop-requested event: {}",
+                                    e
+                                );
                             }
                             return;
                         }
 
                         if Self::is_agent_call_allowed() {
                             Self::record_agent_call();
-                            if let Err(e) = app_handle.emit("always-listening:transcription",
-                                serde_json::json!({ "text": cleaned_text })) {
-                                error!("[AlwaysListening] Failed to emit transcription event: {}", e);
+                            if let Err(e) = app_handle.emit(
+                                "always-listening:transcription",
+                                serde_json::json!({ "text": cleaned_text }),
+                            ) {
+                                error!(
+                                    "[AlwaysListening] Failed to emit transcription event: {}",
+                                    e
+                                );
                             }
-                            if let Err(e) = app_handle.emit("always-listening:command-processed", ()) {
-                                error!("[AlwaysListening] Failed to emit command-processed event: {}", e);
+                            if let Err(e) =
+                                app_handle.emit("always-listening:command-processed", ())
+                            {
+                                error!(
+                                    "[AlwaysListening] Failed to emit command-processed event: {}",
+                                    e
+                                );
                             }
                         } else {
-                            warn!("[AlwaysListening] Agent call rate limit exceeded, skipping: '{}'", cleaned_text);
+                            warn!(
+                                "[AlwaysListening] Agent call rate limit exceeded, skipping: '{}'",
+                                cleaned_text
+                            );
                         }
                     } else {
-                        info!("[AlwaysListening] Content filtered out (noise/meaningless): '{}'", cleaned_text);
+                        info!(
+                            "[AlwaysListening] Content filtered out (noise/meaningless): '{}'",
+                            cleaned_text
+                        );
                     }
                 } else {
                     debug!("[AlwaysListening] Empty transcription result, continuing monitoring");
@@ -800,14 +923,18 @@ impl AlwaysListeningController {
         }
     }
 
-        // Intelligent content filtering functions
+    // Intelligent content filtering functions
     fn should_process_with_agent(text: &str) -> bool {
         let text_lower = text.to_lowercase();
         let mut text_trimmed = text_lower.trim().to_string();
 
         // Filter out empty or very short content
         if text_trimmed.len() < MIN_MEANINGFUL_CONTENT_LENGTH {
-            info!("[AlwaysListening] Content too short: '{}' (length: {})", text_trimmed, text_trimmed.len());
+            info!(
+                "[AlwaysListening] Content too short: '{}' (length: {})",
+                text_trimmed,
+                text_trimmed.len()
+            );
             return false;
         }
 
@@ -815,13 +942,20 @@ impl AlwaysListeningController {
         // entire text — this allows "Open Spotify [BLANK_AUDIO]" to become "Open Spotify"
         let filtered = filter_transcription_text(&text_trimmed);
         if filtered != text_trimmed {
-            info!("[AlwaysListening] Removed noise markers from text, remaining: '{}'", filtered);
+            info!(
+                "[AlwaysListening] Removed noise markers from text, remaining: '{}'",
+                filtered
+            );
             text_trimmed = filtered;
         }
 
         // Re-check length after noise pattern removal
         if text_trimmed.len() < MIN_MEANINGFUL_CONTENT_LENGTH {
-            info!("[AlwaysListening] Content too short after noise removal: '{}' (length: {})", text_trimmed, text_trimmed.len());
+            info!(
+                "[AlwaysListening] Content too short after noise removal: '{}' (length: {})",
+                text_trimmed,
+                text_trimmed.len()
+            );
             return false;
         }
 
@@ -829,12 +963,16 @@ impl AlwaysListeningController {
         let words: Vec<&str> = text_trimmed.split_whitespace().collect();
 
         // Filter out if text consists entirely of noise words
-        let noise_word_count = words.iter()
+        let noise_word_count = words
+            .iter()
             .filter(|word| NOISE_WORDS.contains(word))
             .count();
 
         if noise_word_count == words.len() && !words.is_empty() {
-            info!("[AlwaysListening] Text consists entirely of noise words: '{}'", text_trimmed);
+            info!(
+                "[AlwaysListening] Text consists entirely of noise words: '{}'",
+                text_trimmed
+            );
             return false;
         }
 
@@ -842,32 +980,50 @@ impl AlwaysListeningController {
         if words.len() > 2 {
             let unique_words: std::collections::HashSet<&str> = words.iter().cloned().collect();
             if unique_words.len() == 1 && words[0].len() == 1 {
-                info!("[AlwaysListening] Repetitive single character detected: '{}'", text_trimmed);
+                info!(
+                    "[AlwaysListening] Repetitive single character detected: '{}'",
+                    text_trimmed
+                );
                 return false;
             }
         }
 
         // Filter out content that is mostly punctuation or numbers
         let letter_count = text_trimmed.chars().filter(|c| c.is_alphabetic()).count();
-        let total_meaningful_chars = text_trimmed.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).count();
+        let total_meaningful_chars = text_trimmed
+            .chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .count();
 
-        if total_meaningful_chars > 0 && (letter_count as f32 / total_meaningful_chars as f32) < 0.3 {
-            info!("[AlwaysListening] Content mostly non-alphabetic: '{}'", text_trimmed);
+        if total_meaningful_chars > 0 && (letter_count as f32 / total_meaningful_chars as f32) < 0.3
+        {
+            info!(
+                "[AlwaysListening] Content mostly non-alphabetic: '{}'",
+                text_trimmed
+            );
             return false;
         }
 
         // Check for minimum meaningful word count (exclude noise words from meaningful words)
-        let meaningful_words: Vec<&str> = words.iter()
+        let meaningful_words: Vec<&str> = words
+            .iter()
             .filter(|word| word.len() > 2 && !NOISE_WORDS.contains(word))
             .cloned()
             .collect();
 
         if meaningful_words.is_empty() {
-            info!("[AlwaysListening] No meaningful words found: '{}'", text_trimmed);
+            info!(
+                "[AlwaysListening] No meaningful words found: '{}'",
+                text_trimmed
+            );
             return false;
         }
 
-        info!("[AlwaysListening] Content passed filtering: '{}' (meaningful words: {})", text_trimmed, meaningful_words.len());
+        info!(
+            "[AlwaysListening] Content passed filtering: '{}' (meaningful words: {})",
+            text_trimmed,
+            meaningful_words.len()
+        );
         true
     }
 
@@ -952,7 +1108,7 @@ impl AlwaysListeningController {
                         Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
                         _ => return,
                     }
-                },
+                }
                 Err(_) => return,
             }
         } else {
@@ -963,23 +1119,36 @@ impl AlwaysListeningController {
             Ok(Some(transcribed_text)) => {
                 let cleaned_text = filter_transcription_text(transcribed_text.trim());
                 if !cleaned_text.is_empty() {
-                    info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
+                    info!(
+                        "[AlwaysListening] Waiting transcription result: '{}'",
+                        cleaned_text
+                    );
 
                     if Self::should_process_with_agent(&cleaned_text) {
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected in waiting mode: '{}' - stopping", cleaned_text);
-                            if let Err(e) = app_handle.emit("always-listening:stop-requested",
-                                serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
-                                error!("[AlwaysListening] Failed to emit stop-requested event: {}", e);
+                            if let Err(e) = app_handle.emit(
+                                "always-listening:stop-requested",
+                                serde_json::json!({ "reason": "stop_word", "text": cleaned_text }),
+                            ) {
+                                error!(
+                                    "[AlwaysListening] Failed to emit stop-requested event: {}",
+                                    e
+                                );
                             }
                             return;
                         }
 
                         if Self::is_agent_call_allowed() {
                             Self::record_agent_call();
-                            if let Err(e) = app_handle.emit("always-listening:transcription",
-                                serde_json::json!({ "text": cleaned_text })) {
-                                error!("[AlwaysListening] Failed to emit transcription event: {}", e);
+                            if let Err(e) = app_handle.emit(
+                                "always-listening:transcription",
+                                serde_json::json!({ "text": cleaned_text }),
+                            ) {
+                                error!(
+                                    "[AlwaysListening] Failed to emit transcription event: {}",
+                                    e
+                                );
                             }
                         } else {
                             warn!("[AlwaysListening] Agent call rate limit exceeded in waiting mode, skipping: '{}'", cleaned_text);
@@ -1008,13 +1177,19 @@ impl AlwaysListeningController {
         if let Some((thread_handle, control_tx)) = self.audio_thread.take() {
             // Send stop message
             if let Err(e) = control_tx.send(AlwaysListeningMessage::Stop) {
-                warn!("[AlwaysListeningController] Failed to send stop message: {:?}", e);
+                warn!(
+                    "[AlwaysListeningController] Failed to send stop message: {:?}",
+                    e
+                );
             }
 
             // Wait for thread to finish with timeout
             match thread_handle.join() {
                 Ok(_) => info!("[AlwaysListeningController] Audio thread finished cleanly"),
-                Err(e) => error!("[AlwaysListeningController] Audio thread join error: {:?}", e),
+                Err(e) => error!(
+                    "[AlwaysListeningController] Audio thread join error: {:?}",
+                    e
+                ),
             }
         }
 
@@ -1037,8 +1212,11 @@ impl AlwaysListeningController {
         self.sensitivity = sensitivity.clamp(MIN_SENSITIVITY, MAX_SENSITIVITY);
 
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::UpdateSensitivity(self.sensitivity))
-                .map_err(|e| Error::ControlError(format!("Failed to update sensitivity: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::UpdateSensitivity(self.sensitivity))
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to update sensitivity: {:?}", e))
+                })?;
         }
 
         Ok(())
@@ -1052,8 +1230,11 @@ impl AlwaysListeningController {
         self.wake_words = wake_words.clone();
 
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::UpdateWakeWords(wake_words))
-                .map_err(|e| Error::ControlError(format!("Failed to update wake words: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::UpdateWakeWords(wake_words))
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to update wake words: {:?}", e))
+                })?;
         }
 
         Ok(())
@@ -1065,8 +1246,15 @@ impl AlwaysListeningController {
 
     /// Update the shared Whisper context and model path for this controller.
     /// Kept for backward-compat with `set_model_path` command — wraps the context in a `WhisperEngine`.
-    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<whisper_rs::WhisperContext>) -> Result<()> {
-        info!("[AlwaysListeningController] Updating shared Whisper context with new model: {}", model_path);
+    pub fn update_shared_context(
+        &mut self,
+        model_path: &str,
+        shared_context: Arc<whisper_rs::WhisperContext>,
+    ) -> Result<()> {
+        info!(
+            "[AlwaysListeningController] Updating shared Whisper context with new model: {}",
+            model_path
+        );
 
         let was_active = self.is_active;
         if was_active {
@@ -1090,7 +1278,10 @@ impl AlwaysListeningController {
 
     /// Swap the active STT engine without restarting the controller.
     pub fn update_engine(&mut self, engine: Arc<dyn TranscriptionEngine>) -> Result<()> {
-        info!("[AlwaysListeningController] Updating engine to '{}'", engine.name());
+        info!(
+            "[AlwaysListeningController] Updating engine to '{}'",
+            engine.name()
+        );
         let was_active = self.is_active;
         if was_active {
             self.stop_always_listening()?;
@@ -1104,48 +1295,87 @@ impl AlwaysListeningController {
 
     // Enhanced Debugging Methods
 
-    pub fn set_transcription_debugging<R: Runtime>(&mut self, enabled: bool, app_handle: &AppHandle<R>) -> Result<()> {
-        info!("[AlwaysListeningController] Setting transcription debugging to: {}", enabled);
+    pub fn set_transcription_debugging<R: Runtime>(
+        &mut self,
+        enabled: bool,
+        app_handle: &AppHandle<R>,
+    ) -> Result<()> {
+        info!(
+            "[AlwaysListeningController] Setting transcription debugging to: {}",
+            enabled
+        );
 
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::SetTranscriptionDebugging(enabled))
-                .map_err(|e| Error::ControlError(format!("Failed to set transcription debugging: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::SetTranscriptionDebugging(enabled))
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to set transcription debugging: {:?}", e))
+                })?;
         }
 
         if enabled {
             // Emit an event to confirm debugging is enabled
-            app_handle.emit("always-listening-event", serde_json::json!({
-                "type": "transcription_debug",
-                "payload": { "enabled": true }
-            })).map_err(|e| Error::EventError(format!("Failed to emit debugging enabled event: {}", e)))?;
+            app_handle
+                .emit(
+                    "always-listening-event",
+                    serde_json::json!({
+                        "type": "transcription_debug",
+                        "payload": { "enabled": true }
+                    }),
+                )
+                .map_err(|e| {
+                    Error::EventError(format!("Failed to emit debugging enabled event: {}", e))
+                })?;
         }
 
         Ok(())
     }
 
-    pub fn set_audio_level_monitoring<R: Runtime>(&mut self, enabled: bool, app_handle: &AppHandle<R>) -> Result<()> {
-        info!("[AlwaysListeningController] Setting audio level monitoring to: {}", enabled);
+    pub fn set_audio_level_monitoring<R: Runtime>(
+        &mut self,
+        enabled: bool,
+        app_handle: &AppHandle<R>,
+    ) -> Result<()> {
+        info!(
+            "[AlwaysListeningController] Setting audio level monitoring to: {}",
+            enabled
+        );
 
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::SetAudioLevelMonitoring(enabled))
-                .map_err(|e| Error::ControlError(format!("Failed to set audio level monitoring: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::SetAudioLevelMonitoring(enabled))
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to set audio level monitoring: {:?}", e))
+                })?;
         }
 
         if enabled {
             // Emit an event to confirm monitoring is enabled
-            app_handle.emit("always-listening-event", serde_json::json!({
-                "type": "audio_level",
-                "payload": { "enabled": true }
-            })).map_err(|e| Error::EventError(format!("Failed to emit monitoring enabled event: {}", e)))?;
+            app_handle
+                .emit(
+                    "always-listening-event",
+                    serde_json::json!({
+                        "type": "audio_level",
+                        "payload": { "enabled": true }
+                    }),
+                )
+                .map_err(|e| {
+                    Error::EventError(format!("Failed to emit monitoring enabled event: {}", e))
+                })?;
         }
 
         Ok(())
     }
 
     pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
-        info!("[AlwaysListening] Testing STT engine at path: {}", self.model_path);
+        info!(
+            "[AlwaysListening] Testing STT engine at path: {}",
+            self.model_path
+        );
 
-        let engine = self.engine.as_ref()
+        let engine = self
+            .engine
+            .as_ref()
             .ok_or_else(|| Error::Whisper("STT engine not available".to_string()))?;
 
         let sample_rate = WHISPER_SAMPLE_RATE;
@@ -1185,16 +1415,25 @@ impl AlwaysListeningController {
             "status": "Model test completed"
         });
 
-        info!("[AlwaysListening] Model test result: {}", serde_json::to_string_pretty(&test_result).unwrap_or_default());
+        info!(
+            "[AlwaysListening] Model test result: {}",
+            serde_json::to_string_pretty(&test_result).unwrap_or_default()
+        );
         Ok(test_result)
     }
 
-    pub fn force_transcription_test<R: Runtime>(&mut self, _app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
+    pub fn force_transcription_test<R: Runtime>(
+        &mut self,
+        _app_handle: &AppHandle<R>,
+    ) -> Result<serde_json::Value> {
         info!("[AlwaysListeningController] Starting force transcription test...");
 
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::ForceTranscriptionTest)
-                .map_err(|e| Error::ControlError(format!("Failed to send force transcription test: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::ForceTranscriptionTest)
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to send force transcription test: {:?}", e))
+                })?;
 
             // Wait a moment for the test to process
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1213,13 +1452,19 @@ impl AlwaysListeningController {
         }
     }
 
-    pub fn force_threshold_test<R: Runtime>(&mut self, _app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
+    pub fn force_threshold_test<R: Runtime>(
+        &mut self,
+        _app_handle: &AppHandle<R>,
+    ) -> Result<serde_json::Value> {
         info!("[AlwaysListeningController] Starting force threshold test...");
 
         if let Some((_, control_tx)) = &self.audio_thread {
             // Temporarily set very low sensitivity for testing
-            control_tx.send(AlwaysListeningMessage::UpdateSensitivity(0.1))
-                .map_err(|e| Error::ControlError(format!("Failed to set test sensitivity: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::UpdateSensitivity(0.1))
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to set test sensitivity: {:?}", e))
+                })?;
 
             std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -1253,8 +1498,11 @@ impl AlwaysListeningController {
     // New method to return to wake word mode
     pub fn return_to_wake_word_mode(&mut self) -> Result<()> {
         if let Some((_, control_tx)) = &self.audio_thread {
-            control_tx.send(AlwaysListeningMessage::ReturnToWakeWordMode)
-                .map_err(|e| Error::ControlError(format!("Failed to return to wake word mode: {:?}", e)))?;
+            control_tx
+                .send(AlwaysListeningMessage::ReturnToWakeWordMode)
+                .map_err(|e| {
+                    Error::ControlError(format!("Failed to return to wake word mode: {:?}", e))
+                })?;
         }
         Ok(())
     }

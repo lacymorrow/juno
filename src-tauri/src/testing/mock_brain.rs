@@ -14,9 +14,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::agent::core::{
-    AgentAction, AgentError, Message, ToolCall, ToolDefinition,
-};
+use crate::agent::core::{AgentAction, AgentError, Message, ToolCall, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 
 /// Controls the mock brain's behavior.
@@ -55,9 +53,7 @@ impl MockBrain {
 
     /// Create a mock brain that immediately finishes with "Hello from MockBrain".
     pub fn immediate() -> Self {
-        Self::new(MockBrainMode::Immediate(
-            "Hello from MockBrain".to_string(),
-        ))
+        Self::new(MockBrainMode::Immediate("Hello from MockBrain".to_string()))
     }
 
     /// Create a mock brain that calls a tool once, then finishes.
@@ -80,9 +76,7 @@ impl AgentBrain for MockBrain {
         let call_num = self.call_count.fetch_add(1, Ordering::SeqCst);
 
         match &self.mode {
-            MockBrainMode::Immediate(response) => {
-                Ok(AgentAction::Finish(response.clone()))
-            }
+            MockBrainMode::Immediate(response) => Ok(AgentAction::Finish(response.clone())),
             MockBrainMode::ToolThenFinish {
                 tool_name,
                 tool_input,
