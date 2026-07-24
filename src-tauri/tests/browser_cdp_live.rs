@@ -46,10 +46,9 @@ const FIXTURE_HTML: &str = r#"<!doctype html>
   <p class="item">beta</p>
   <p class="item">gamma</p>
   <a id="link" href="https://example.com/target">A link</a>
-  <!-- `#mirror` exists because `extract_content` can only read HTML attributes,
-       never live DOM properties, so there is no way to read an input's current
-       value back directly. Mirroring on `input` also proves the controller
-       dispatches the events that reactive frameworks bind to. -->
+  <!-- `#mirror` proves the controller dispatches the `input` events that
+       reactive frameworks bind to. Reading the typed value itself goes through
+       `extract_content`'s `property` option (LAC-3055). -->
   <input id="text-field" type="text" value=""
          oninput="document.getElementById('mirror').textContent = this.value" />
   <button id="btn" onclick="document.getElementById('sink').textContent='clicked'">Press me</button>
@@ -365,15 +364,46 @@ async fn interact_types_and_clicks() {
         .await
         .expect("type should succeed");
 
-    // Read the mirror, not `getAttribute("value")` — the latter returns the
-    // markup's initial attribute forever, no matter what the property holds.
+    // Regression for LAC-3055: read the live `.value` property straight off the
+    // input — no mirror div needed.
     let typed = controller
+        .extract_content(&json!({ "selector": "#text-field", "property": "value" }))
+        .await
+        .expect("read back the live value property");
+    assert_eq!(
+        typed.output["content"], "juno was here",
+        "the `property` option should see what `type` wrote"
+    );
+
+    // The static markup attribute must be untouched by typing — that asymmetry
+    // is exactly why `property` exists.
+    let attr = controller
+        .extract_content(&json!({ "selector": "#text-field", "attribute": "value" }))
+        .await
+        .expect("read the static value attribute");
+    assert_eq!(
+        attr.output["content"], "",
+        "getAttribute must keep returning the markup's initial value"
+    );
+
+    // Asking for both in one call is a caller bug and must error.
+    let both = controller
+        .extract_content(&json!({
+            "selector": "#text-field",
+            "attribute": "value",
+            "property": "value"
+        }))
+        .await;
+    assert!(both.is_err(), "attribute + property together should error");
+
+    // The mirror still proves the `input` event fired for reactive frameworks.
+    let mirrored = controller
         .extract_content(&json!({ "selector": "#mirror" }))
         .await
         .expect("read back the mirrored value");
     assert_eq!(
-        typed.output["content"], "juno was here",
-        "typing should set the property and fire an `input` event"
+        mirrored.output["content"], "juno was here",
+        "typing should fire an `input` event"
     );
 
     controller
