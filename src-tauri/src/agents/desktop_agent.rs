@@ -55,7 +55,9 @@ impl DesktopAgent {
                     &self.app_handle,
                     tool_call.input.clone(),
                     None,
-                ).await {
+                )
+                .await
+                {
                     Ok(result) => Ok(ToolResult {
                         call_id: tool_call.id.clone(),
                         output: result,
@@ -102,7 +104,8 @@ impl DesktopAgent {
                     state,
                     app_name.to_string(),
                     Some(true),
-                ).await;
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -175,8 +178,11 @@ impl DesktopAgent {
                 }
             }
             "capture_screenshot_command" | "desktop_screenshot" => {
-                let result =
-                    commands::core::capture_screenshot_command(self.app_handle.clone(), state.clone()).await;
+                let result = commands::core::capture_screenshot_command(
+                    self.app_handle.clone(),
+                    state.clone(),
+                )
+                .await;
 
                 match result {
                     Ok(screenshot_result) => {
@@ -213,7 +219,12 @@ impl DesktopAgent {
                         AgentError::InputError("Missing or invalid 'content' parameter".to_string())
                     })?;
 
-                let result = commands::core::set_clipboard(content.to_string(), self.app_handle.clone(), state).await;
+                let result = commands::core::set_clipboard(
+                    content.to_string(),
+                    self.app_handle.clone(),
+                    state,
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -256,8 +267,7 @@ impl DesktopAgent {
                     })?;
 
                 let result =
-                    commands::element::find_element_by_selector(selector.to_string(), state)
-                    .await;
+                    commands::element::find_element_by_selector(selector.to_string(), state).await;
 
                 match result {
                     Ok(element_info) => Ok(ToolResult {
@@ -283,38 +293,26 @@ impl SpecializedAgent for DesktopAgent {
             AgentCapability {
                 name: "Mouse Control".to_string(),
                 description: "Control mouse movements, clicks, and interactions".to_string(),
-                tool_patterns: vec![
-                    "click".to_string(),
-                    "mouse".to_string(),
-                ],
+                tool_patterns: vec!["click".to_string(), "mouse".to_string()],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "Keyboard Control".to_string(),
                 description: "Type text, press keys, handle keyboard interactions".to_string(),
-                tool_patterns: vec![
-                    "type".to_string(),
-                    "key".to_string(),
-                ],
+                tool_patterns: vec!["type".to_string(), "key".to_string()],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "Application Management".to_string(),
                 description: "Open, focus, and manage native applications".to_string(),
-                tool_patterns: vec![
-                    "app".to_string(),
-                    "application".to_string(),
-                ],
+                tool_patterns: vec!["app".to_string(), "application".to_string()],
                 confidence: 0.90,
             },
             AgentCapability {
                 name: "Window Management".to_string(),
                 description: "Focus windows, get window information, manage window state"
                     .to_string(),
-                tool_patterns: vec![
-                    "window".to_string(),
-                    "focus".to_string(),
-                ],
+                tool_patterns: vec!["window".to_string(), "focus".to_string()],
                 confidence: 0.85,
             },
             AgentCapability {

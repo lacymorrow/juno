@@ -1,21 +1,21 @@
 //! Application cleanup module
 //! Handles resource cleanup on application exit
 
-use crate::utils::resource_manager::ResourceManager;
 use crate::state::AppState;
-use tracing::{info, error};
+use crate::utils::resource_manager::ResourceManager;
 use tauri::{Listener, Manager};
+use tracing::{error, info};
 
 /// Initialize cleanup handlers for the application
 pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
     // Register cleanup on app exit
     let app_handle_clone = app_handle.clone();
-    
+
     // Handle window close event
     app_handle.listen("tauri://destroyed", move |_| {
         info!("Application window destroyed, initiating cleanup...");
         let handle = app_handle_clone.clone();
-        
+
         // Spawn cleanup in a blocking task since we're exiting anyway
         std::thread::spawn(move || {
             tauri::async_runtime::block_on(async {
@@ -23,7 +23,7 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
             });
         });
     });
-    
+
     // Setup ctrl+c handler for CLI mode
     let app_handle_ctrl_c = app_handle.clone();
     if let Err(e) = ctrlc::set_handler(move || {
@@ -53,7 +53,7 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         // Cancel any ongoing agent execution
         app_state.signal_cancel();
-        
+
         // Clean up browser controllers
         if let Ok(mut controller_guard) = app_state.browser_controller.try_lock() {
             if let Some(controller) = controller_guard.take() {
@@ -63,18 +63,18 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
                 }
             }
         }
-        
-        // Note: Playwright driver is private and will be cleaned up when AppState is dropped
+
+        // Note: the CDP browser connection is cleaned up when AppState is dropped
         // TTS provider is part of AudioSettings and doesn't need explicit cleanup
     }
-    
+
     // Clean up global resources
     let resource_manager = ResourceManager::global();
     resource_manager.cleanup_all().await;
-    
+
     // Clean up temporary directories
     cleanup_temp_directories();
-    
+
     info!("Application cleanup completed");
 }
 

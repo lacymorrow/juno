@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use tracing::{error, info};
 // Add base64 import for TTS audio playback
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use tempfile::Builder as TempFileBuilder;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::io::Write;
+use tempfile::Builder as TempFileBuilder;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SoundPlayResult {
@@ -49,16 +49,26 @@ impl SoundType {
     /// Get the file path for this sound type (platform-specific extension)
     pub fn get_file_path(&self) -> String {
         // Use CAF on macOS for better native support, OGG on other platforms
-        let extension = if cfg!(target_os = "macos") { "caf" } else { "ogg" };
+        let extension = if cfg!(target_os = "macos") {
+            "caf"
+        } else {
+            "ogg"
+        };
 
         let base_path = match self {
             // Hero sounds
             SoundType::HeroSimpleCelebration01 => "01 Hero Sounds/hero_simple-celebration-01",
             SoundType::HeroSimpleCelebration02 => "01 Hero Sounds/hero_simple-celebration-02",
             SoundType::HeroSimpleCelebration03 => "01 Hero Sounds/hero_simple-celebration-03",
-            SoundType::HeroDecorativeCelebration01 => "01 Hero Sounds/hero_decorative-celebration-01",
-            SoundType::HeroDecorativeCelebration02 => "01 Hero Sounds/hero_decorative-celebration-02",
-            SoundType::HeroDecorativeCelebration03 => "01 Hero Sounds/hero_decorative-celebration-03",
+            SoundType::HeroDecorativeCelebration01 => {
+                "01 Hero Sounds/hero_decorative-celebration-01"
+            }
+            SoundType::HeroDecorativeCelebration02 => {
+                "01 Hero Sounds/hero_decorative-celebration-02"
+            }
+            SoundType::HeroDecorativeCelebration03 => {
+                "01 Hero Sounds/hero_decorative-celebration-03"
+            }
 
             // Alert and notification sounds
             SoundType::AlertSimple => "02 Alerts and Notifications/alert_simple",
@@ -66,9 +76,15 @@ impl SoundType {
             SoundType::NotificationSimple01 => "02 Alerts and Notifications/notification_simple-01",
             SoundType::NotificationSimple02 => "02 Alerts and Notifications/notification_simple-02",
             SoundType::NotificationAmbient => "02 Alerts and Notifications/notification_ambient",
-            SoundType::NotificationDecorative01 => "02 Alerts and Notifications/notification_decorative-01",
-            SoundType::NotificationDecorative02 => "02 Alerts and Notifications/notification_decorative-02",
-            SoundType::NotificationHighIntensity => "02 Alerts and Notifications/notification_high-intensity",
+            SoundType::NotificationDecorative01 => {
+                "02 Alerts and Notifications/notification_decorative-01"
+            }
+            SoundType::NotificationDecorative02 => {
+                "02 Alerts and Notifications/notification_decorative-02"
+            }
+            SoundType::NotificationHighIntensity => {
+                "02 Alerts and Notifications/notification_high-intensity"
+            }
             SoundType::RingtoneMinimal => "02 Alerts and Notifications/ringtone_minimal",
             SoundType::AlarmGentle => "02 Alerts and Notifications/alarm_gentle",
         };
@@ -79,12 +95,12 @@ impl SoundType {
     /// Get the category this sound belongs to
     pub fn get_category(&self) -> SoundCategory {
         match self {
-            SoundType::HeroSimpleCelebration01 |
-            SoundType::HeroSimpleCelebration02 |
-            SoundType::HeroSimpleCelebration03 |
-            SoundType::HeroDecorativeCelebration01 |
-            SoundType::HeroDecorativeCelebration02 |
-            SoundType::HeroDecorativeCelebration03 => SoundCategory::HeroSounds,
+            SoundType::HeroSimpleCelebration01
+            | SoundType::HeroSimpleCelebration02
+            | SoundType::HeroSimpleCelebration03
+            | SoundType::HeroDecorativeCelebration01
+            | SoundType::HeroDecorativeCelebration02
+            | SoundType::HeroDecorativeCelebration03 => SoundCategory::HeroSounds,
 
             _ => SoundCategory::AlertsAndNotifications,
         }
@@ -99,7 +115,8 @@ pub async fn play_sound_by_type(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
     // Check if sound is enabled
-    let sound_enabled = state.get_sound_enabled()
+    let sound_enabled = state
+        .get_sound_enabled()
         .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
 
     if !sound_enabled {
@@ -114,7 +131,11 @@ pub async fn play_sound_by_type(
     let file_path = sound_type.get_file_path();
 
     // Use appropriate directory based on platform
-    let directory = if cfg!(target_os = "macos") { "sounds/caf" } else { "sounds/ogg" };
+    let directory = if cfg!(target_os = "macos") {
+        "sounds/caf"
+    } else {
+        "sounds/ogg"
+    };
     let full_path = format!("{}/{}", directory, file_path);
 
     info!("Playing sound: {:?} from path: {}", sound_type, full_path);
@@ -132,7 +153,8 @@ pub async fn play_sound_file(
     info!("Attempting to play sound file: {}", file_path);
 
     // Check if sound is enabled
-    let sound_enabled = state.get_sound_enabled()
+    let sound_enabled = state
+        .get_sound_enabled()
         .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
 
     if !sound_enabled {
@@ -154,19 +176,19 @@ pub async fn play_sound_file(
         // Try multiple possible paths in the bundled resources
         let possible_paths = [
             // Primary bundled path in production builds (_up_ directory)
-            resource_path.join("_up_").join("public").join(&file_path),    // resources/_up_/public/sounds/caf/...
-            resource_path.join("_up_").join(&file_path),                   // resources/_up_/sounds/caf/...
+            resource_path.join("_up_").join("public").join(&file_path), // resources/_up_/public/sounds/caf/...
+            resource_path.join("_up_").join(&file_path), // resources/_up_/sounds/caf/...
             // Additional paths for development and production compatibility
-            resource_path.join(&file_path),                                // Direct path: resources/sounds/caf/...
-            resource_path.join("sounds").join(&file_path),                 // With sounds prefix: resources/sounds/sounds/caf/...
+            resource_path.join(&file_path), // Direct path: resources/sounds/caf/...
+            resource_path.join("sounds").join(&file_path), // With sounds prefix: resources/sounds/sounds/caf/...
             if let Some(stripped) = file_path.strip_prefix("sounds/") {
-                resource_path.join(stripped)                               // Remove "sounds/" prefix: resources/caf/...
+                resource_path.join(stripped) // Remove "sounds/" prefix: resources/caf/...
             } else {
                 resource_path.join(&file_path)
             },
             // Try with different sound directory structures
-            resource_path.join("public").join(&file_path),                 // resources/public/sounds/caf/...
-            resource_path.join("dist").join(&file_path),                   // resources/dist/sounds/caf/...
+            resource_path.join("public").join(&file_path), // resources/public/sounds/caf/...
+            resource_path.join("dist").join(&file_path),   // resources/dist/sounds/caf/...
         ];
 
         for test_path in possible_paths.iter() {
@@ -187,10 +209,7 @@ pub async fn play_sound_file(
 
         // Try relative to current working directory (development mode)
         if let Ok(cwd) = std::env::current_dir() {
-            let mut dev_paths = vec![
-                cwd.join("public").join(&file_path),
-                cwd.join(&file_path),
-            ];
+            let mut dev_paths = vec![cwd.join("public").join(&file_path), cwd.join(&file_path)];
 
             // Try going up one directory level if we're in src-tauri
             if let Some(parent) = cwd.parent() {
@@ -273,7 +292,8 @@ pub async fn play_success_sound(
     app: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
-    play_sound_by_type(app, SoundType::HeroDecorativeCelebration01, state).await // Use decorative celebration for agent success
+    play_sound_by_type(app, SoundType::HeroDecorativeCelebration01, state).await
+    // Use decorative celebration for agent success
 }
 
 /// Play an error sound (convenience function)
@@ -327,16 +347,21 @@ pub async fn set_sound_enabled(
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     audio_settings.sound_enabled = enabled;
 
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update state for backward compatibility
-    state.set_sound_enabled(enabled)
+    state
+        .set_sound_enabled(enabled)
         .map_err(|e| format!("Failed to set sound_enabled: {}", e))?;
 
     info!("Sound effects set to: {}", enabled);
@@ -352,14 +377,20 @@ pub async fn get_sound_enabled(
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Sync with state for backward compatibility
-    state.set_sound_enabled(audio_settings.sound_enabled)
+    state
+        .set_sound_enabled(audio_settings.sound_enabled)
         .map_err(|e| format!("Failed to set sound_enabled: {}", e))?;
 
-    info!("Current sound enabled setting: {}", audio_settings.sound_enabled);
+    info!(
+        "Current sound enabled setting: {}",
+        audio_settings.sound_enabled
+    );
     Ok(audio_settings.sound_enabled)
 }
 
@@ -368,9 +399,7 @@ pub async fn get_sound_enabled(
 fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::process::Command;
 
-    let output = Command::new("afplay")
-        .arg(path)
-        .output()?;
+    let output = Command::new("afplay").arg(path).output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -388,7 +417,7 @@ fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Sen
     let output = Command::new("powershell")
         .args(&[
             "-c",
-            &format!("(New-Object Media.SoundPlayer '{}').PlaySync()", path_str)
+            &format!("(New-Object Media.SoundPlayer '{}').PlaySync()", path_str),
         ])
         .output()?;
 
@@ -409,9 +438,7 @@ fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Sen
 
     for player in &players {
         if Command::new("which").arg(player).output().is_ok() {
-            let output = Command::new(player)
-                .arg(path)
-                .output()?;
+            let output = Command::new(player).arg(path).output()?;
 
             if output.status.success() {
                 return Ok(());
@@ -557,10 +584,14 @@ pub async fn play_tts_audio_backend(
     base64_audio: String,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
-    info!("Playing TTS audio in backend from base64 data ({} bytes)", base64_audio.len());
+    info!(
+        "Playing TTS audio in backend from base64 data ({} bytes)",
+        base64_audio.len()
+    );
 
     // Check if sound is enabled
-    let sound_enabled = state.get_sound_enabled()
+    let sound_enabled = state
+        .get_sound_enabled()
         .map_err(|e| format!("Failed to get sound_enabled: {}", e))?;
 
     if !sound_enabled {

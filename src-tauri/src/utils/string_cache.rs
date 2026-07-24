@@ -1,7 +1,7 @@
+use crate::constants::errors::templates;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use once_cell::sync::Lazy;
-use crate::constants::errors::templates;
 
 /// String interning cache for reducing format! allocations
 #[allow(clippy::type_complexity)]
@@ -54,7 +54,11 @@ impl StringCache {
 
     /// Get cached error message for common template patterns
     /// This is the main optimization function - replace format!() calls with this
-    pub fn get_template_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
+    pub fn get_template_error(
+        template: &'static str,
+        context: &str,
+        error: impl std::fmt::Display,
+    ) -> String {
         // Create cache key from template + context only (not the variable error)
         let cache_key = format!("{}|{}", template, context);
 
@@ -62,19 +66,24 @@ impl StringCache {
         if let Ok(cache) = STRING_CACHE.read() {
             if let Some(cached_template) = cache.get(&cache_key) {
                 // Use the same replacement logic as cache miss for consistency
-                return Self::replace_placeholders_by_position(cached_template, &[&error.to_string()]);
+                return Self::replace_placeholders_by_position(
+                    cached_template,
+                    &[&error.to_string()],
+                );
             }
         }
 
         // Format the template properly - replace first {} with context, second {} with error
-        let formatted = Self::replace_placeholders_by_position(template, &[context, &error.to_string()]);
+        let formatted =
+            Self::replace_placeholders_by_position(template, &[context, &error.to_string()]);
 
         // Cache the template with context filled in for future use
         if let Ok(mut cache) = STRING_CACHE.write() {
             // Limit cache size to prevent memory leaks
             if cache.len() < 2000 {
                 // Cache the template with context already filled in using consistent logic
-                let template_with_context = Self::replace_placeholders_by_position(template, &[context]);
+                let template_with_context =
+                    Self::replace_placeholders_by_position(template, &[context]);
                 cache.insert(cache_key, template_with_context.into());
             }
         }
@@ -125,18 +134,19 @@ impl StringCache {
             (templates::FAILED_TO_ACCESS, "TTS provider"),
             ("Failed to play", "voice start sound"),
             (templates::FAILED_TO_PARSE, "voice transcription"),
-
             // Agent/Brain patterns
             (templates::FAILED_TO_ACCESS, "agent brain"),
             (templates::FAILED_TO_REGISTER, "Computer Use tools"),
             (templates::FAILED_TO_INITIALIZE, "single agent brain"),
             (templates::FAILED_TO_INITIALIZE, "orchestrator brain"),
             (templates::FAILED_TO_EXECUTE, "tool execution"),
-
             // State management patterns
             (templates::FAILED_TO_RETRIEVE, "dictation active status"),
             (templates::FAILED_TO_SET, "dictation active status"),
-            (templates::FAILED_TO_RETRIEVE, "always listening active status"),
+            (
+                templates::FAILED_TO_RETRIEVE,
+                "always listening active status",
+            ),
             (templates::FAILED_TO_SET, "always listening active status"),
             (templates::FAILED_TO_RETRIEVE, "TTS provider"),
             (templates::FAILED_TO_SET, "TTS provider"),
@@ -144,14 +154,12 @@ impl StringCache {
             (templates::FAILED_TO_SET, "sound enabled status"),
             (templates::FAILED_TO_RETRIEVE, "debug mode status"),
             (templates::FAILED_TO_SET, "debug mode status"),
-
             // MCP/Integration patterns
             (templates::FAILED_TO_START, "MCP servers"),
             (templates::FAILED_TO_CREATE, "cloud client"),
             (templates::FAILED_TO_START, "cloud client"),
             (templates::FAILED_TO_CREATE, "settings manager"),
             (templates::FAILED_TO_EMIT, "event"),
-
             // File/IO patterns
             (templates::FAILED_TO_CREATE, "temporary file"),
             (templates::FAILED_TO_PARSE, "JSON data"),
@@ -163,7 +171,8 @@ impl StringCache {
             for (template, context) in common_patterns {
                 let cache_key = format!("{}|{}", template, context);
                 // Cache the template with context already filled in using consistent logic
-                let template_with_context = Self::replace_placeholders_by_position(template, &[context]);
+                let template_with_context =
+                    Self::replace_placeholders_by_position(template, &[context]);
                 cache.insert(cache_key, template_with_context.into());
             }
         }
@@ -189,7 +198,11 @@ impl StringCache {
 /// Convenience function for formatting error messages using templates
 /// This provides the same interface as the existing format_error functions
 /// but uses the string cache for performance optimization
-pub fn format_error_cached(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
+pub fn format_error_cached(
+    template: &'static str,
+    context: &str,
+    error: impl std::fmt::Display,
+) -> String {
     StringCache::get_template_error(template, context, error)
 }
 
@@ -207,7 +220,11 @@ pub fn initialize_string_cache() {
     log::info!("🚀 Initializing string cache for performance optimization...");
     StringCache::initialize();
     let (count, capacity) = StringCache::get_stats();
-    log::info!("✅ String cache initialized with {} pre-warmed entries (capacity: {})", count, capacity);
+    log::info!(
+        "✅ String cache initialized with {} pre-warmed entries (capacity: {})",
+        count,
+        capacity
+    );
 }
 
 #[cfg(test)]
@@ -258,7 +275,10 @@ mod tests {
         // Cache count should remain the same (template cached, not the full error)
         assert_eq!(count_after_first, count_after_second);
         assert_eq!(result1, "Failed to load configuration file: file not found");
-        assert_eq!(result2, "Failed to load configuration file: permission denied");
+        assert_eq!(
+            result2,
+            "Failed to load configuration file: permission denied"
+        );
 
         // Should have exactly 1 more cache entry than initial (robust to shared state)
         let entries_added_by_first = count_after_first - initial_count;
@@ -276,10 +296,13 @@ mod tests {
         let result = format_error_cached(
             templates::FAILED_TO_RETRIEVE,
             "user settings",
-            "database connection lost"
+            "database connection lost",
         );
 
-        assert_eq!(result, "Failed to retrieve user settings: database connection lost");
+        assert_eq!(
+            result,
+            "Failed to retrieve user settings: database connection lost"
+        );
     }
 
     #[test]
@@ -291,7 +314,10 @@ mod tests {
 
         StringCache::initialize();
         let (count_after, _) = StringCache::get_stats();
-        assert!(count_after > count_before, "Cache should be pre-warmed with common patterns");
+        assert!(
+            count_after > count_before,
+            "Cache should be pre-warmed with common patterns"
+        );
 
         // Count the expected patterns from the initialize() method
         // This is the actual number of patterns defined in the common_patterns vector
@@ -310,7 +336,7 @@ mod tests {
         StringCache::clear();
 
         let template = "Failed to access {}: {}";
-        let context = "file {config.json}";  // Contains braces
+        let context = "file {config.json}"; // Contains braces
         let error = "not found";
 
         let result = StringCache::get_template_error(template, context, error);
@@ -325,10 +351,13 @@ mod tests {
 
         let template = "Failed to parse {}: {}";
         let context = "JSON data";
-        let error = "unexpected character '{' at position 5";  // Contains braces
+        let error = "unexpected character '{' at position 5"; // Contains braces
 
         let result = StringCache::get_template_error(template, context, error);
-        assert_eq!(result, "Failed to parse JSON data: unexpected character '{' at position 5");
+        assert_eq!(
+            result,
+            "Failed to parse JSON data: unexpected character '{' at position 5"
+        );
     }
 
     #[test]
@@ -343,7 +372,10 @@ mod tests {
 
         let result = StringCache::get_template_error(template, context, error);
         // Should only replace first two {} placeholders
-        assert_eq!(result, "Failed to load config file not found: {} occurred at {}");
+        assert_eq!(
+            result,
+            "Failed to load config file not found: {} occurred at {}"
+        );
     }
 
     #[test]
@@ -377,9 +409,11 @@ mod tests {
         let entries_added_by_second = count_after_second - count_after_first;
         let entries_added_by_third = final_count - count_after_second;
 
-        assert_eq!(entries_added_by_first, 1,
+        assert_eq!(
+            entries_added_by_first, 1,
             "First call should add exactly 1 cache entry. Initial: {}, After first: {}, Added: {}",
-            initial_count, count_after_first, entries_added_by_first);
+            initial_count, count_after_first, entries_added_by_first
+        );
         assert_eq!(entries_added_by_second, 1,
             "Second call should add exactly 1 cache entry. After first: {}, After second: {}, Added: {}",
             count_after_first, count_after_second, entries_added_by_second);

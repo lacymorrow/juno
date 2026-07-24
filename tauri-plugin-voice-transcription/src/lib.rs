@@ -1,30 +1,31 @@
-use tauri::{plugin::{Builder, TauriPlugin}, Emitter, Manager, Runtime};
 use std::sync::{Arc, Mutex};
+use tauri::{
+    plugin::{Builder, TauriPlugin},
+    Emitter, Manager, Runtime,
+};
 
-pub mod controller;
-pub mod commands;
-pub mod error;
-pub mod config;
-pub mod utils;
 pub mod always_listening;
-pub mod shared_whisper;
+pub mod commands;
+pub mod config;
 pub mod constants;
-pub mod mic_permissions;
+pub mod controller;
 pub mod engine;
-pub mod engine_whisper;
-pub mod engine_parakeet;
 pub mod engine_manager;
+pub mod engine_parakeet;
+pub mod engine_whisper;
+pub mod error;
+pub mod mic_permissions;
+pub mod shared_whisper;
+pub mod utils;
 
-pub use config::VoiceTranscriptionConfig;
-pub use error::{Error, Result};
-pub use controller::VoiceController;
 pub use always_listening::AlwaysListeningController;
-pub use utils::resolve_model_path;
-pub use shared_whisper::SharedWhisperManager;
+pub use config::VoiceTranscriptionConfig;
+pub use controller::VoiceController;
 pub use engine::{SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
-
-
+pub use error::{Error, Result};
+pub use shared_whisper::SharedWhisperManager;
+pub use utils::resolve_model_path;
 
 /// Initialize the Voice Transcription plugin
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {

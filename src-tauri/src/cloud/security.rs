@@ -13,12 +13,12 @@
 //! Used by: Cloud command processor, WebSocket handlers
 //! Registration: Called via CloudSecurity::new() during cloud initialization
 
+use super::auth::DeviceAuth;
+use super::config::CloudConfig;
+use super::types::{CloudCommand, CloudCommandType, CloudError};
+use crate::utils::current_timestamp_secs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use super::types::{CloudError, CloudCommand, CloudCommandType};
-use super::config::CloudConfig;
-use super::auth::DeviceAuth;
-use crate::utils::current_timestamp_secs;
 
 /// Security levels for different operations - now maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,12 +64,19 @@ impl CloudSecurity {
         blocked_commands.insert(":(){ :|:& };:".to_string());
         blocked_commands.insert(":(){:|:&};:".to_string());
 
-        Self { config, auth, blocked_commands }
+        Self {
+            config,
+            auth,
+            blocked_commands,
+        }
     }
 
     /// Validate incoming command with minimal restrictions
     pub fn validate_command(&self, command: &CloudCommand) -> Result<(), CloudError> {
-        log::info!("🔓 Validating cloud command: {} with minimal restrictions", command.id);
+        log::info!(
+            "🔓 Validating cloud command: {} with minimal restrictions",
+            command.id
+        );
 
         // Basic timestamp validation (allow generous time skew)
         self.validate_timestamp(command.timestamp)?;
@@ -78,7 +85,10 @@ impl CloudSecurity {
         if let Some(signature) = &command.signature {
             let command_data = serde_json::to_string(command)?;
             if !self.auth.verify_signature(&command_data, signature)? {
-                log::warn!("⚠️ Invalid signature for command {}, but allowing execution", command.id);
+                log::warn!(
+                    "⚠️ Invalid signature for command {}, but allowing execution",
+                    command.id
+                );
                 // Don't block on signature failure - just log it
             }
         }
@@ -108,7 +118,10 @@ impl CloudSecurity {
             // Continue processing - don't block in permissive mode
         }
 
-        log::debug!("✅ Command timestamp validated (time diff: {}s) - permissive mode", time_diff);
+        log::debug!(
+            "✅ Command timestamp validated (time diff: {}s) - permissive mode",
+            time_diff
+        );
         Ok(())
     }
 
@@ -138,9 +151,11 @@ impl CloudSecurity {
         }
 
         // Add parameter content if it exists
-        let combined_params = command.payload.parameters.as_ref().map(|params| {
-            params.values().cloned().collect::<Vec<_>>().join(" ")
-        });
+        let combined_params = command
+            .payload
+            .parameters
+            .as_ref()
+            .map(|params| params.values().cloned().collect::<Vec<_>>().join(" "));
         if let Some(ref combined) = combined_params {
             if !combined.is_empty() {
                 content_to_check.push(combined);
@@ -151,7 +166,10 @@ impl CloudSecurity {
             // Check against blocked command patterns
             for blocked_cmd in &self.blocked_commands {
                 if content.to_lowercase().contains(&blocked_cmd.to_lowercase()) {
-                    log::error!("🚫 Command contains blocked destructive pattern: '{}'", blocked_cmd);
+                    log::error!(
+                        "🚫 Command contains blocked destructive pattern: '{}'",
+                        blocked_cmd
+                    );
                     return Err(CloudError::SecurityError(format!(
                         "Command content contains blocked destructive pattern: '{}'. Command rejected for security.",
                         blocked_cmd
@@ -170,34 +188,44 @@ impl CloudSecurity {
             CloudCommandType::VoiceQuery | CloudCommandType::TextQuery => {
                 // Basic validation - require either text or audio
                 if command.payload.query.is_none() && command.payload.audio_base64.is_none() {
-                    return Err(CloudError::ValidationFailed("Query commands require either text or audio".to_string()));
+                    return Err(CloudError::ValidationFailed(
+                        "Query commands require either text or audio".to_string(),
+                    ));
                 }
 
                 // Generous query length limit (increased from 10KB to 1MB)
                 if let Some(query) = &command.payload.query {
                     if query.len() > 1_000_000 {
-                        log::warn!("⚠️ Query text is very long ({} chars), but allowing", query.len());
+                        log::warn!(
+                            "⚠️ Query text is very long ({} chars), but allowing",
+                            query.len()
+                        );
                     }
                 }
 
                 // Generous audio data limit (increased from 7.5MB to 100MB)
                 if let Some(audio) = &command.payload.audio_base64 {
                     if audio.len() > 100_000_000 {
-                        log::warn!("⚠️ Audio data is very large ({} bytes), but allowing", audio.len());
+                        log::warn!(
+                            "⚠️ Audio data is very large ({} bytes), but allowing",
+                            audio.len()
+                        );
                     }
                 }
-            },
+            }
             CloudCommandType::SystemCommand => {
                 // System command validation - security checks are now handled by validate_command_content
                 log::debug!("✅ System command payload validation passed");
-            },
+            }
             CloudCommandType::ConfigUpdate => {
                 // Configuration updates allowed with basic validation
                 if command.payload.config.is_none() {
-                    return Err(CloudError::ValidationFailed("Config update requires config data".to_string()));
+                    return Err(CloudError::ValidationFailed(
+                        "Config update requires config data".to_string(),
+                    ));
                 }
                 log::info!("✅ Config update allowed");
-            },
+            }
             _ => {
                 // All other commands are safe
                 log::info!("✅ Command type allowed by default");
@@ -261,12 +289,18 @@ impl CloudSecurity {
     }
 
     /// Create audit log entry
-    pub fn create_audit_log(&self, command: &CloudCommand, result: &Result<(), CloudError>) -> AuditLogEntry {
+    pub fn create_audit_log(
+        &self,
+        command: &CloudCommand,
+        result: &Result<(), CloudError>,
+    ) -> AuditLogEntry {
         AuditLogEntry {
             timestamp: current_timestamp_secs(),
             command_id: command.id.clone(),
             command_type: self.command_type_to_string(&command.command_type),
-            device_id: self.auth.get_credentials()
+            device_id: self
+                .auth
+                .get_credentials()
                 .map(|c| c.device_id.clone())
                 .unwrap_or_else(|| "unknown".to_string()),
             success: result.is_ok(),
@@ -311,5 +345,3 @@ pub struct RateLimit {
     pub time_window_seconds: u64,
     pub burst_allowance: Option<u32>,
 }
-
-

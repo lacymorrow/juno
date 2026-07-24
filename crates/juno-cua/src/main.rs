@@ -230,7 +230,8 @@ enum Commands {
 }
 
 fn init_desktop() -> Result<Desktop> {
-    Desktop::new(false, true).context("Failed to initialize Desktop engine. Check accessibility permissions.")
+    Desktop::new(false, true)
+        .context("Failed to initialize Desktop engine. Check accessibility permissions.")
 }
 
 fn output(format: &OutputFormat, value: Value) {
@@ -252,7 +253,10 @@ fn output(format: &OutputFormat, value: Value) {
 fn main() {
     if let Err(e) = run() {
         let err = json!({ "error": format!("{:#}", e) });
-        eprintln!("{}", serde_json::to_string(&err).unwrap_or_else(|_| format!("{{\"error\":\"{}\"}}", e)));
+        eprintln!(
+            "{}",
+            serde_json::to_string(&err).unwrap_or_else(|_| format!("{{\"error\":\"{}\"}}", e))
+        );
         std::process::exit(1);
     }
 }
@@ -262,13 +266,9 @@ fn run() -> Result<()> {
 
     // Init tracing
     if cli.verbose {
-        tracing_subscriber::fmt()
-            .with_env_filter("debug")
-            .init();
+        tracing_subscriber::fmt().with_env_filter("debug").init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter("warn")
-            .init();
+        tracing_subscriber::fmt().with_env_filter("warn").init();
     }
 
     // These commands don't need Desktop initialization
@@ -311,7 +311,9 @@ fn run() -> Result<()> {
         }
 
         Commands::CursorPosition => {
-            let (x, y) = desktop.cursor_position().context("Failed to get cursor position")?;
+            let (x, y) = desktop
+                .cursor_position()
+                .context("Failed to get cursor position")?;
             json!({ "x": x, "y": y })
         }
 
@@ -371,9 +373,7 @@ fn run() -> Result<()> {
         }
 
         Commands::OpenUrl { url } => {
-            desktop
-                .open_url(&url, None)
-                .context("Open URL failed")?;
+            desktop.open_url(&url, None).context("Open URL failed")?;
             json!({ "status": "success", "action": "open_url", "url": url })
         }
 
@@ -399,17 +399,13 @@ fn run() -> Result<()> {
             json!({ "status": "success", "action": "set_clipboard" })
         }
 
-        Commands::UiTree { app } => {
-            desktop
-                .call_tool("getUiTree", json!({ "application_name": app }))
-                .context("Failed to get UI tree")?
-        }
+        Commands::UiTree { app } => desktop
+            .call_tool("getUiTree", json!({ "application_name": app }))
+            .context("Failed to get UI tree")?,
 
-        Commands::FindElements { selector } => {
-            desktop
-                .call_tool("findElementsBySelector", json!({ "selector": selector }))
-                .context("Find elements failed")?
-        }
+        Commands::FindElements { selector } => desktop
+            .call_tool("findElementsBySelector", json!({ "selector": selector }))
+            .context("Find elements failed")?,
 
         Commands::Wait { ms } => {
             desktop.wait(ms).context("Wait failed")?;
@@ -491,8 +487,11 @@ async fn mcp_server_loop() -> Result<()> {
         let method = match request.get("method").and_then(|v| v.as_str()) {
             Some(m) => m,
             None => {
-                let err_resp =
-                    jsonrpc_error(id, -32600, "Invalid Request: missing or non-string 'method'");
+                let err_resp = jsonrpc_error(
+                    id,
+                    -32600,
+                    "Invalid Request: missing or non-string 'method'",
+                );
                 write_jsonrpc(&mut stdout, &err_resp).await?;
                 continue;
             }
@@ -632,20 +631,14 @@ fn jsonrpc_error(id: Value, code: i64, message: &str) -> Value {
     })
 }
 
-async fn write_jsonrpc(
-    stdout: &mut tokio::io::Stdout,
-    response: &Value,
-) -> Result<()> {
+async fn write_jsonrpc(stdout: &mut tokio::io::Stdout, response: &Value) -> Result<()> {
     use tokio::io::AsyncWriteExt;
     let line = serde_json::to_string(response).unwrap_or_else(|_| "{}".into());
     stdout
         .write_all(line.as_bytes())
         .await
         .context("stdout write")?;
-    stdout
-        .write_all(b"\n")
-        .await
-        .context("stdout newline")?;
+    stdout.write_all(b"\n").await.context("stdout newline")?;
     stdout.flush().await.context("stdout flush")?;
     Ok(())
 }

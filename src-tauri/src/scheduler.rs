@@ -25,10 +25,10 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_store::StoreExt;
+use tokio::sync::Mutex as TokioMutex;
 use tracing::{info, warn};
 
 use crate::constants::events;
@@ -291,8 +291,7 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
                 // Heal automations persisted without a next run (e.g. older versions)
                 match compute_next_run(&automation.cron) {
                     Ok(t) => {
-                        update_automation(app, &automation.id, |a| a.next_run_at = Some(t))
-                            .await?;
+                        update_automation(app, &automation.id, |a| a.next_run_at = Some(t)).await?;
                     }
                     Err(e) => {
                         warn!(

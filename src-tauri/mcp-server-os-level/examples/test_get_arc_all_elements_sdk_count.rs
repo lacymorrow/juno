@@ -9,16 +9,16 @@ use computer_use_ai_sdk::Selector;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging with DEBUG level to see all logs
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG)  // Changed from INFO to DEBUG
+        .with_max_level(Level::DEBUG) // Changed from INFO to DEBUG
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
     debug!("debug logging enabled");
     info!("looking for arc browser...");
-    
+
     // Create accessibility engine
     let engine = MacOSEngine::new(true, false)?;
-    
+
     // Get Arc browser application
     let arc_app = match engine.get_application_by_name("Arc") {
         Ok(app) => {
@@ -37,10 +37,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use String::from("") for the text selector
     debug!("calling find_elements with empty text selector");
     let elements = engine.find_elements(&Selector::Text(String::from("")), Some(&arc_app))?;
-    
+
     let duration = start.elapsed();
-    
-    info!("found {} elements in arc browser in {:?}", elements.len(), duration);
-        
+
+    info!(
+        "found {} elements in arc browser in {:?}",
+        elements.len(),
+        duration
+    );
+
     Ok(())
 }

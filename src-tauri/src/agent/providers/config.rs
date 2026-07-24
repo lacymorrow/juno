@@ -1,15 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use tracing::{info, warn, debug};
 use crate::agent::core::AgentError;
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 
 use super::types::Provider;
 
 // Add centralized settings support
-use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
+use crate::settings::{
+    ProviderConfig as CentralizedProviderConfig, ProviderSettings as CentralizedProviderSettings,
+};
 
 // Configuration cache to prevent redundant loading
 #[allow(clippy::type_complexity)]
@@ -121,7 +123,9 @@ impl ProviderConfig {
     /// Load configuration from centralized settings manager with caching.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Application startup for configuration initialization.
-    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
+    pub async fn load_from_centralized_settings(
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<Self, AgentError> {
         // Use a static cache key since all SettingsManager instances share the same AppHandle
         // There's only one application instance, so per-instance caching is unnecessary
         let cache_key = "provider_config";
@@ -130,14 +134,21 @@ impl ProviderConfig {
         if let Ok(cache) = CONFIG_CACHE.lock() {
             if let Some((config, timestamp)) = cache.get(cache_key) {
                 if timestamp.elapsed() < CACHE_DURATION {
-                    debug!("Using cached provider configuration (age: {:?})", timestamp.elapsed());
+                    debug!(
+                        "Using cached provider configuration (age: {:?})",
+                        timestamp.elapsed()
+                    );
                     return Ok(config.clone());
                 }
             }
         }
 
-        let provider_settings = settings_manager.get_provider_settings().await
-            .map_err(|e| AgentError::ConfigurationError(format!("Failed to load provider settings: {}", e)))?;
+        let provider_settings = settings_manager
+            .get_provider_settings()
+            .await
+            .map_err(|e| {
+                AgentError::ConfigurationError(format!("Failed to load provider settings: {}", e))
+            })?;
 
         let config = Self::from_centralized_settings(&provider_settings)?;
 
@@ -153,10 +164,17 @@ impl ProviderConfig {
     /// Save configuration to centralized settings manager and invalidate cache.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and provider configuration updates.
-    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+    pub async fn save_to_centralized_settings(
+        &self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), AgentError> {
         let provider_settings = self.to_centralized_settings()?;
-        settings_manager.set_provider_settings(&provider_settings).await
-            .map_err(|e| AgentError::ConfigurationError(format!("Failed to save provider settings: {}", e)))?;
+        settings_manager
+            .set_provider_settings(&provider_settings)
+            .await
+            .map_err(|e| {
+                AgentError::ConfigurationError(format!("Failed to save provider settings: {}", e))
+            })?;
 
         // Invalidate cache after saving
         if let Ok(mut cache) = CONFIG_CACHE.lock() {
@@ -170,7 +188,9 @@ impl ProviderConfig {
 
     /// Convert from centralized ProviderSettings to ProviderConfig.
     /// Handles schema differences between the two formats.
-    pub(crate) fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
+    pub(crate) fn from_centralized_settings(
+        settings: &CentralizedProviderSettings,
+    ) -> Result<Self, AgentError> {
         let providers = settings.providers.clone();
 
         // Ensure all default providers are present for backwards compatibility
@@ -178,7 +198,10 @@ impl ProviderConfig {
         let mut final_providers = providers.clone();
         for default_provider in &default_config.providers {
             if !final_providers.iter().any(|p| p.id == default_provider.id) {
-                info!("Adding missing provider from defaults: {}", default_provider.id);
+                info!(
+                    "Adding missing provider from defaults: {}",
+                    default_provider.id
+                );
                 final_providers.push(default_provider.clone());
             }
         }
@@ -193,7 +216,7 @@ impl ProviderConfig {
         })
     }
 
-        /// Convert from ProviderConfig to centralized ProviderSettings.
+    /// Convert from ProviderConfig to centralized ProviderSettings.
     /// Handles schema differences between the two formats.
     fn to_centralized_settings(&self) -> Result<CentralizedProviderSettings, AgentError> {
         let providers = self.providers.clone();
@@ -204,15 +227,16 @@ impl ProviderConfig {
         })
     }
 
-
-
     /// Update provider API key
     pub fn update_api_key(&mut self, provider_id: &str, api_key: String) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.api_key = Some(api_key);
             Ok(())
         } else {
-            Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
+            Err(AgentError::ConfigurationError(format!(
+                "Provider '{}' not found",
+                provider_id
+            )))
         }
     }
 
@@ -222,7 +246,10 @@ impl ProviderConfig {
             provider.model = Some(model);
             Ok(())
         } else {
-            Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
+            Err(AgentError::ConfigurationError(format!(
+                "Provider '{}' not found",
+                provider_id
+            )))
         }
     }
 
@@ -230,7 +257,10 @@ impl ProviderConfig {
     pub fn set_active_provider(&mut self, provider_id: String) -> Result<(), AgentError> {
         // Verify the provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
-            return Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)));
+            return Err(AgentError::ConfigurationError(format!(
+                "Provider '{}' not found",
+                provider_id
+            )));
         }
         self.active_provider = provider_id;
         Ok(())
@@ -265,7 +295,11 @@ impl ProviderConfig {
         let mut config = self.providers.iter().find(|p| p.id == provider_id)?.clone();
         // Rig special case: fall back to OpenAI's API key
         if provider == Provider::Rig && config.api_key.is_none() {
-            if let Some(openai) = self.providers.iter().find(|p| p.id == Provider::OpenAI.id()) {
+            if let Some(openai) = self
+                .providers
+                .iter()
+                .find(|p| p.id == Provider::OpenAI.id())
+            {
                 config.api_key = openai.api_key.clone();
             }
         }
@@ -279,34 +313,38 @@ impl ProviderConfig {
 /// that used unsafe env::set_var() as an intermediary.
 pub fn load_provider_config(app_handle: Option<&tauri::AppHandle>) -> ProviderConfig {
     match app_handle {
-        Some(handle) => {
-            match load_config_from_store_internal(handle) {
-                Ok(config) => {
-                    info!("Loaded provider configuration from Tauri Store");
-                    config
-                }
-                Err(e) => {
-                    warn!("Failed to load provider settings from store: {}. Using defaults.", e);
-                    ProviderConfig::default()
-                }
+        Some(handle) => match load_config_from_store_internal(handle) {
+            Ok(config) => {
+                info!("Loaded provider configuration from Tauri Store");
+                config
             }
-        }
+            Err(e) => {
+                warn!(
+                    "Failed to load provider settings from store: {}. Using defaults.",
+                    e
+                );
+                ProviderConfig::default()
+            }
+        },
         None => ProviderConfig::default(),
     }
 }
 
 /// Load ProviderConfig directly from Tauri Store (sync, internal helper).
-fn load_config_from_store_internal(app_handle: &tauri::AppHandle) -> Result<ProviderConfig, AgentError> {
+fn load_config_from_store_internal(
+    app_handle: &tauri::AppHandle,
+) -> Result<ProviderConfig, AgentError> {
+    use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
     use tauri_plugin_store::StoreExt;
-    use crate::constants::settings::{SETTINGS_STORE_FILE, store_keys};
 
-    let store = app_handle.store(SETTINGS_STORE_FILE)
-        .map_err(|e| AgentError::ConfigurationError(format!("Failed to access settings store: {}", e)))?;
+    let store = app_handle.store(SETTINGS_STORE_FILE).map_err(|e| {
+        AgentError::ConfigurationError(format!("Failed to access settings store: {}", e))
+    })?;
 
-    let provider_settings: CentralizedProviderSettings = store.get(store_keys::PROVIDERS)
+    let provider_settings: CentralizedProviderSettings = store
+        .get(store_keys::PROVIDERS)
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
     ProviderConfig::from_centralized_settings(&provider_settings)
 }
-

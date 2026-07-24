@@ -4,10 +4,10 @@
 use serde::Serialize;
 use std::fs;
 
+use chrono;
+use html_escape;
 use tauri::{AppHandle, State};
 use tracing::info;
-use html_escape;
-use chrono;
 
 use crate::commands::send_dev_tool_notification;
 use crate::state::AppState;
@@ -18,8 +18,6 @@ struct FileEntry {
     is_dir: bool,
     // Consider adding other fields like size, modified_date if needed in the future
 }
-
-
 
 #[tauri::command]
 pub async fn save_agent_response(
@@ -53,8 +51,8 @@ pub async fn save_agent_response(
     };
 
     // Get the user's Downloads directory
-    let downloads_dir = dirs::download_dir()
-        .ok_or_else(|| "Could not find Downloads directory".to_string())?;
+    let downloads_dir =
+        dirs::download_dir().ok_or_else(|| "Could not find Downloads directory".to_string())?;
 
     let file_path = downloads_dir.join(format!("{}.{}", default_filename, file_extension));
 
@@ -70,11 +68,7 @@ pub async fn save_agent_response(
         Ok(_) => {
             let success_msg = format!("Saved agent response to: {:?}", file_path);
             info!("[SAVE_RESPONSE] {}", success_msg);
-            send_dev_tool_notification(
-                &app,
-                "Save Agent Response",
-                &success_msg,
-            )?;
+            send_dev_tool_notification(&app, "Save Agent Response", &success_msg)?;
             Ok(file_path.to_string_lossy().to_string())
         }
         Err(e) => {
@@ -199,10 +193,13 @@ pub async fn list_files(
     path_str: String,
     debug_mode: Option<bool>,
 ) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::valid_file_path, send_debug_notification};
-    use std::path::Path;
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
+        DebugOperation,
+    };
     use std::fs;
-    use tracing::{info, error, warn};
+    use std::path::Path;
+    use tracing::{error, info, warn};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
@@ -212,7 +209,7 @@ pub async fn list_files(
 
     let debug_op = DebugOperation::start("list_files", debug_config.clone());
 
-        // Debug validation
+    // Debug validation
     if debug_config.validate_inputs {
         if let Err(e) = valid_file_path(&path_str) {
             let err_msg = format!("Invalid path: {}", e);
@@ -230,7 +227,7 @@ pub async fn list_files(
 
     let path = Path::new(&path_str);
 
-        if !path.exists() {
+    if !path.exists() {
         let err_msg = format!("Path does not exist: {:?}", path);
         if debug_config.log_operations {
             error!("[FILESYSTEM] Error: {}", err_msg);
@@ -275,7 +272,8 @@ pub async fn list_files(
         match entry {
             Ok(entry) => {
                 let path = entry.path();
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("<invalid>")
                     .to_string();
@@ -283,7 +281,7 @@ pub async fn list_files(
                 let is_dir = path.is_dir();
                 file_entries.push(FileEntry { name, is_dir });
             }
-                        Err(e) => {
+            Err(e) => {
                 if debug_config.log_operations {
                     warn!("[FILESYSTEM] Skipping invalid entry: {}", e);
                 }
@@ -292,12 +290,10 @@ pub async fn list_files(
     }
 
     // Sort entries: directories first, then files, both alphabetically
-    file_entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
+    file_entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
 
     let result = match serde_json::to_string(&file_entries) {
@@ -335,10 +331,13 @@ pub async fn get_file_content(
     path_str: String,
     debug_mode: Option<bool>,
 ) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::valid_file_path, send_debug_notification};
-    use std::path::Path;
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
+        DebugOperation,
+    };
     use std::fs;
-    use tracing::{info, error};
+    use std::path::Path;
+    use tracing::{error, info};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
@@ -431,10 +430,13 @@ pub async fn set_file_content(
     content: String,
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::valid_file_path, send_debug_notification};
-    use std::path::Path;
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
+        DebugOperation,
+    };
     use std::fs;
-    use tracing::{info, error};
+    use std::path::Path;
+    use tracing::{error, info};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
@@ -444,7 +446,7 @@ pub async fn set_file_content(
 
     let debug_op = DebugOperation::start("set_file_content", debug_config.clone());
 
-        // Debug validation
+    // Debug validation
     if debug_config.validate_inputs {
         if let Err(e) = valid_file_path(&path_str) {
             let err_msg = format!("Invalid path: {}", e);
@@ -457,7 +459,11 @@ pub async fn set_file_content(
     }
 
     if debug_config.log_operations {
-        info!("[FILESYSTEM] Writing to file: {} ({} chars)", path_str, content.len());
+        info!(
+            "[FILESYSTEM] Writing to file: {} ({} chars)",
+            path_str,
+            content.len()
+        );
     }
 
     let file_path = Path::new(&path_str);
@@ -466,7 +472,10 @@ pub async fn set_file_content(
     if let Some(parent) = file_path.parent() {
         if !parent.exists() {
             if let Err(e) = fs::create_dir_all(parent) {
-                let err_msg = format!("Failed to create parent directories for '{:?}': {}", file_path, e);
+                let err_msg = format!(
+                    "Failed to create parent directories for '{:?}': {}",
+                    file_path, e
+                );
                 if debug_config.log_operations {
                     error!("[FILESYSTEM] Error: {}", err_msg);
                 }
@@ -477,14 +486,20 @@ pub async fn set_file_content(
                 return Err(err_msg);
             }
             if debug_config.log_operations {
-                info!("[FILESYSTEM] Created parent directories for {:?}", file_path);
+                info!(
+                    "[FILESYSTEM] Created parent directories for {:?}",
+                    file_path
+                );
             }
         }
     }
 
     // If it's a directory, we shouldn't write to it as if it's a file
     if file_path.is_dir() {
-        let err_msg = format!("Path is a directory, cannot write file content: {:?}", file_path);
+        let err_msg = format!(
+            "Path is a directory, cannot write file content: {:?}",
+            file_path
+        );
         if debug_config.log_operations {
             error!("[FILESYSTEM] Error: {}", err_msg);
         }

@@ -12,7 +12,6 @@ use tokio_util::io::StreamReader;
 #[cfg(debug_assertions)]
 use chrono;
 
-
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
 use crate::agent::providers::types::Provider;
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
@@ -215,12 +214,17 @@ impl AnthropicBrain {
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::Anthropic.default_model().to_string());
-        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
+        let max_tokens =
+            max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
 
         // Create HTTP client with proper timeout configuration to prevent hanging
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS))
-            .connect_timeout(std::time::Duration::from_secs(crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS))
+            .timeout(std::time::Duration::from_secs(
+                crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS,
+            ))
+            .connect_timeout(std::time::Duration::from_secs(
+                crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS,
+            ))
             .build()
             .map_err(|e| AgentError::LlmError(format!("Failed to create HTTP client: {}", e)))?;
 
@@ -239,12 +243,21 @@ impl AnthropicBrain {
     /// Falls back to the ANTHROPIC_API_KEY env var if the config has no api_key
     /// (e.g., when keys come from a .env file rather than the Tauri Store).
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| env::var("ANTHROPIC_API_KEY").ok())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into()
-            ))?;
-        Self::new(api_key, config.model.clone(), config.max_tokens, config.system_prompt.clone())
+            .ok_or_else(|| {
+                AgentError::ConfigurationError(
+                    "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into(),
+                )
+            })?;
+        Self::new(
+            api_key,
+            config.model.clone(),
+            config.max_tokens,
+            config.system_prompt.clone(),
+        )
     }
 
     fn format_anthropic_http_error_for_user(
@@ -267,7 +280,10 @@ impl AnthropicBrain {
             if let Some(message) = message {
                 let mut formatted = match error_type {
                     Some(error_type) => {
-                        format!("Anthropic API error {} ({}): {}", status, error_type, message)
+                        format!(
+                            "Anthropic API error {} ({}): {}",
+                            status, error_type, message
+                        )
                     }
                     None => format!("Anthropic API error {}: {}", status, message),
                 };
@@ -349,7 +365,9 @@ impl AnthropicBrain {
             if let Some(msg) = api_messages.get_mut(msg_idx) {
                 if let ApiContent::Blocks(blocks) = &mut msg.content {
                     if let Some(block) = blocks.get_mut(block_idx) {
-                        if let Some(ApiToolResultContent::Blocks(result_blocks)) = &mut block.content {
+                        if let Some(ApiToolResultContent::Blocks(result_blocks)) =
+                            &mut block.content
+                        {
                             if let Some(result_block) = result_blocks.get_mut(rb_idx) {
                                 *result_block = ApiToolResultBlock {
                                     block_type: "text".to_string(),
@@ -457,10 +475,7 @@ impl AnthropicBrain {
 
         // Get the response body as a stream
         let stream = response.bytes_stream();
-        let reader =
-            StreamReader::new(stream.map(|result| {
-                result.map_err(std::io::Error::other)
-            }));
+        let reader = StreamReader::new(stream.map(|result| result.map_err(std::io::Error::other)));
 
         let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
         tokio::pin!(lines_stream);
@@ -525,7 +540,11 @@ impl AnthropicBrain {
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("")
                                                 .to_string();
-                                            log::debug!("Stream: started tool call {} ({})", name, id);
+                                            log::debug!(
+                                                "Stream: started tool call {} ({})",
+                                                name,
+                                                id
+                                            );
                                             current_tool_call = Some((id, name, String::new()));
                                         }
                                         "thinking" => {
@@ -534,7 +553,10 @@ impl AnthropicBrain {
                                             current_thinking_content = Some(String::new());
                                         }
                                         _ => {
-                                            log::debug!("Stream: started content block type: {}", block_type);
+                                            log::debug!(
+                                                "Stream: started content block type: {}",
+                                                block_type
+                                            );
                                         }
                                     }
                                 }
@@ -562,8 +584,10 @@ impl AnthropicBrain {
                                                 if let Some(handle) = app_handle {
                                                     // Emit thinking_start if we just entered a thinking block
                                                     if thinking_started {
-                                                        let new_thinking_id = uuid::Uuid::new_v4().to_string();
-                                                        thinking_message_id = Some(new_thinking_id.clone());
+                                                        let new_thinking_id =
+                                                            uuid::Uuid::new_v4().to_string();
+                                                        thinking_message_id =
+                                                            Some(new_thinking_id.clone());
                                                         crate::agent::tool_logger::emit_thinking_start(handle, new_thinking_id);
                                                     }
 
@@ -578,7 +602,9 @@ impl AnthropicBrain {
 
                                                     // Emit thinking_end if we just exited a thinking block
                                                     if thinking_ended {
-                                                        if let Some(ref msg_id) = thinking_message_id {
+                                                        if let Some(ref msg_id) =
+                                                            thinking_message_id
+                                                        {
                                                             crate::agent::tool_logger::emit_thinking_end(
                                                                 handle,
                                                                 msg_id.clone(),
@@ -604,10 +630,14 @@ impl AnthropicBrain {
                                                 // We delay stream_start until after thinking messages for proper ordering,
                                                 // but TTS-only responses still need streaming events so the frontend
                                                 // can show the TTS content in the conversation.
-                                                if !display_text.is_empty() || !extracted_tts_list.is_empty() {
+                                                if !display_text.is_empty()
+                                                    || !extracted_tts_list.is_empty()
+                                                {
                                                     // Emit stream_start on first chunk (text or TTS-only)
                                                     if !response_stream_started {
-                                                        if let (Some(handle), Some(ref msg_id)) = (app_handle, &message_id) {
+                                                        if let (Some(handle), Some(ref msg_id)) =
+                                                            (app_handle, &message_id)
+                                                        {
                                                             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
                                                             response_stream_started = true;
                                                         }
@@ -629,8 +659,10 @@ impl AnthropicBrain {
                                                 if let Some(handle) = app_handle {
                                                     // Emit thinking_start if this is the first chunk
                                                     if api_thinking_message_id.is_none() {
-                                                        let new_thinking_id = uuid::Uuid::new_v4().to_string();
-                                                        api_thinking_message_id = Some(new_thinking_id.clone());
+                                                        let new_thinking_id =
+                                                            uuid::Uuid::new_v4().to_string();
+                                                        api_thinking_message_id =
+                                                            Some(new_thinking_id.clone());
                                                         crate::agent::tool_logger::emit_thinking_start(handle, new_thinking_id);
                                                     }
 
@@ -710,7 +742,10 @@ impl AnthropicBrain {
                             // Emit thinking_end for API thinking blocks
                             if let Some(thinking_text) = current_thinking_content.take() {
                                 if !thinking_text.trim().is_empty() {
-                                    log::debug!("Stream: completed API thinking block with {} chars", thinking_text.len());
+                                    log::debug!(
+                                        "Stream: completed API thinking block with {} chars",
+                                        thinking_text.len()
+                                    );
                                     if let Some(handle) = app_handle {
                                         if let Some(ref msg_id) = api_thinking_message_id {
                                             crate::agent::tool_logger::emit_thinking_end(
@@ -758,7 +793,10 @@ impl AnthropicBrain {
 
             // If we're in the middle of a thinking tag, emit thinking_end with what we have
             if in_thinking_tag && !thinking_content.trim().is_empty() {
-                log::debug!("Emitting incomplete thinking content at stream end: {} chars", thinking_content.len());
+                log::debug!(
+                    "Emitting incomplete thinking content at stream end: {} chars",
+                    thinking_content.len()
+                );
                 if let Some(handle) = app_handle {
                     if let Some(ref msg_id) = thinking_message_id {
                         crate::agent::tool_logger::emit_thinking_end(
@@ -772,7 +810,10 @@ impl AnthropicBrain {
 
             // If there's remaining buffer content outside thinking tags, it needs to be processed
             if !in_thinking_tag && !thinking_buffer.trim().is_empty() {
-                log::debug!("Adding remaining thinking buffer content to accumulated text: '{}'", thinking_buffer);
+                log::debug!(
+                    "Adding remaining thinking buffer content to accumulated text: '{}'",
+                    thinking_buffer
+                );
                 accumulated_text.push_str(&thinking_buffer);
             }
 
@@ -810,7 +851,12 @@ impl AnthropicBrain {
             tts_buffer.clear();
         }
 
-        Ok((accumulated_text, tool_calls, stop_reason, response_stream_started))
+        Ok((
+            accumulated_text,
+            tool_calls,
+            stop_reason,
+            response_stream_started,
+        ))
     }
 
     /// Process text chunk to extract thinking XML tags with streaming support
@@ -858,7 +904,9 @@ impl AnthropicBrain {
                     i += 10; // Skip "<thinking>"
                     chars_to_consume = i;
                     continue;
-                } else if remaining_len < 10 && self.could_be_partial_thinking_opening_tag(&remaining_str) {
+                } else if remaining_len < 10
+                    && self.could_be_partial_thinking_opening_tag(&remaining_str)
+                {
                     // Potential partial opening tag at end of buffer - stop processing here
                     break;
                 } else {
@@ -872,14 +920,19 @@ impl AnthropicBrain {
                 if remaining_str.starts_with("</thinking>") {
                     // Found complete closing tag
                     thinking_ended = true;
-                    log::debug!("Thinking block ended, total content: {} chars", thinking_content.len());
+                    log::debug!(
+                        "Thinking block ended, total content: {} chars",
+                        thinking_content.len()
+                    );
 
                     // Reset thinking state for next potential block
                     *in_thinking_tag = false;
                     i += 11; // Skip "</thinking>"
                     chars_to_consume = i;
                     continue;
-                } else if remaining_len < 11 && self.could_be_partial_thinking_closing_tag(&remaining_str) {
+                } else if remaining_len < 11
+                    && self.could_be_partial_thinking_closing_tag(&remaining_str)
+                {
                     // Potential partial closing tag at end of buffer - stop processing
                     break;
                 } else {
@@ -900,11 +953,20 @@ impl AnthropicBrain {
 
         // Validate no thinking tags remain in output
         if output_text.contains("<thinking>") || output_text.contains("</thinking>") {
-            log::error!("CRITICAL BUG: thinking tags found in output_text during streaming processing!");
-            output_text = output_text.replace("<thinking>", "").replace("</thinking>", "");
+            log::error!(
+                "CRITICAL BUG: thinking tags found in output_text during streaming processing!"
+            );
+            output_text = output_text
+                .replace("<thinking>", "")
+                .replace("</thinking>", "");
         }
 
-        (output_text, thinking_started, thinking_ended, thinking_chunk)
+        (
+            output_text,
+            thinking_started,
+            thinking_ended,
+            thinking_chunk,
+        )
     }
 
     /// Check if a string could be the beginning of a partial "<thinking>" tag
@@ -912,7 +974,17 @@ impl AnthropicBrain {
         if s.is_empty() {
             return false;
         }
-        let partial_tags = ["<", "<t", "<th", "<thi", "<thin", "<think", "<thinki", "<thinkin", "<thinking"];
+        let partial_tags = [
+            "<",
+            "<t",
+            "<th",
+            "<thi",
+            "<thin",
+            "<think",
+            "<thinki",
+            "<thinkin",
+            "<thinking",
+        ];
         partial_tags.iter().any(|&tag| s.eq_ignore_ascii_case(tag))
     }
 
@@ -921,7 +993,18 @@ impl AnthropicBrain {
         if s.is_empty() {
             return false;
         }
-        let partial_tags = ["<", "</", "</t", "</th", "</thi", "</thin", "</think", "</thinki", "</thinkin", "</thinking"];
+        let partial_tags = [
+            "<",
+            "</",
+            "</t",
+            "</th",
+            "</thi",
+            "</thin",
+            "</think",
+            "</thinki",
+            "</thinkin",
+            "</thinking",
+        ];
         partial_tags.iter().any(|&tag| s.eq_ignore_ascii_case(tag))
     }
 
@@ -978,7 +1061,10 @@ impl AnthropicBrain {
                     // Found complete closing tag
                     if !tts_content.trim().is_empty() {
                         extracted_tts_list.push(tts_content.clone());
-                        log::info!("✅ IMMEDIATE: Extracted TTS content during streaming: '{}'", tts_content);
+                        log::info!(
+                            "✅ IMMEDIATE: Extracted TTS content during streaming: '{}'",
+                            tts_content
+                        );
                     }
 
                     // Reset TTS state for next potential block
@@ -1138,9 +1224,9 @@ impl AnthropicBrain {
 /// Save API request to file for debugging in development mode only
 #[cfg(debug_assertions)]
 async fn save_debug_request(request: &AnthropicRequest) {
+    use chrono::Utc;
     use std::fs;
     use std::path::PathBuf;
-    use chrono::Utc;
 
     // Create debug directory if it doesn't exist
     let debug_dir = PathBuf::from("debug");
@@ -1158,7 +1244,11 @@ async fn save_debug_request(request: &AnthropicRequest) {
     match serde_json::to_string_pretty(request) {
         Ok(json_string) => {
             if let Err(e) = fs::write(&filepath, json_string) {
-                log::warn!("Failed to write debug request to {}: {}", filepath.display(), e);
+                log::warn!(
+                    "Failed to write debug request to {}: {}",
+                    filepath.display(),
+                    e
+                );
             } else {
                 log::info!("💾 Debug request saved to: {}", filepath.display());
             }
@@ -1197,7 +1287,8 @@ impl AgentBrain for AnthropicBrain {
 
         // Track tool calls that need results to validate message ordering
         let mut pending_tool_calls: Vec<String> = Vec::new();
-        let mut resolved_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut resolved_tool_calls: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // First pass: collect all tool call IDs and tool result IDs
         for message in messages {
@@ -1291,91 +1382,90 @@ impl AgentBrain for AnthropicBrain {
                     let tool_name = message.name.as_deref().unwrap_or("");
 
                     // Build the tool_result content — special handling for computer tool screenshots
-                    let result_content: ApiToolResultContent =
-                        match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
-                            Ok(json_value) => {
-                                // Check for computer tool with base64 screenshot data
-                                if tool_name == "computer" {
-                                    if let Some(base64_data) =
-                                        json_value.get("base64_image").and_then(|v| v.as_str())
+                    let result_content: ApiToolResultContent = match serde_json::from_str::<
+                        serde_json::Value,
+                    >(
+                        &tool_result_content
+                    ) {
+                        Ok(json_value) => {
+                            // Check for computer tool with base64 screenshot data
+                            if tool_name == "computer" {
+                                if let Some(base64_data) =
+                                    json_value.get("base64_image").and_then(|v| v.as_str())
+                                {
+                                    // Return image content block so the model can see the screenshot
+                                    let mut blocks = vec![ApiToolResultBlock {
+                                        block_type: "image".to_string(),
+                                        source: Some(ApiImageSource {
+                                            source_type: "base64".to_string(),
+                                            media_type: "image/jpeg".to_string(),
+                                            data: base64_data.to_string(),
+                                        }),
+                                        text: None,
+                                    }];
+                                    // Include any text output alongside the image
+                                    if let Some(output_text) =
+                                        json_value.get("output").and_then(|v| v.as_str())
                                     {
-                                        // Return image content block so the model can see the screenshot
-                                        let mut blocks = vec![ApiToolResultBlock {
-                                            block_type: "image".to_string(),
-                                            source: Some(ApiImageSource {
-                                                source_type: "base64".to_string(),
-                                                media_type: "image/jpeg".to_string(),
-                                                data: base64_data.to_string(),
-                                            }),
-                                            text: None,
-                                        }];
-                                        // Include any text output alongside the image
-                                        if let Some(output_text) =
-                                            json_value.get("output").and_then(|v| v.as_str())
-                                        {
-                                            if !output_text.is_empty() {
-                                                blocks.push(ApiToolResultBlock {
-                                                    block_type: "text".to_string(),
-                                                    source: None,
-                                                    text: Some(output_text.to_string()),
-                                                });
-                                            }
+                                        if !output_text.is_empty() {
+                                            blocks.push(ApiToolResultBlock {
+                                                block_type: "text".to_string(),
+                                                source: None,
+                                                text: Some(output_text.to_string()),
+                                            });
                                         }
-                                        log::debug!(
+                                    }
+                                    log::debug!(
                                             "Computer tool result: image content block ({} bytes base64)",
                                             base64_data.len()
                                         );
-                                        ApiToolResultContent::Blocks(blocks)
-                                    } else {
-                                        // Computer tool result without screenshot (e.g., click, type)
-                                        let text = json_value
-                                            .get("output")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("Action completed")
-                                            .to_string();
-                                        ApiToolResultContent::Text(text)
-                                    }
-                                }
-                                // Extract stdout for command results
-                                else if let Some(stdout) =
-                                    json_value.get("stdout").and_then(|v| v.as_str())
-                                {
-                                    ApiToolResultContent::Text(stdout.trim().to_string())
-                                }
-                                // Extract content for file reads
-                                else if let Some(content) =
-                                    json_value.get("content").and_then(|v| v.as_str())
-                                {
-                                    ApiToolResultContent::Text(content.trim().to_string())
-                                }
-                                // For error messages
-                                else if let Some(error) =
-                                    json_value.get("error").and_then(|v| v.as_str())
-                                {
-                                    ApiToolResultContent::Text(
-                                        format!("Error: {}", error.trim()),
-                                    )
-                                }
-                                // Fallback: find first string value or use generic message
-                                else {
-                                    let simplified = json_value.as_object().and_then(|obj| {
-                                        obj.values()
-                                            .find_map(|v| v.as_str().map(|s| s.trim().to_string()))
-                                    });
-                                    ApiToolResultContent::Text(
-                                        simplified.unwrap_or_else(|| {
-                                            "Tool executed successfully".to_string()
-                                        }),
-                                    )
+                                    ApiToolResultContent::Blocks(blocks)
+                                } else {
+                                    // Computer tool result without screenshot (e.g., click, type)
+                                    let text = json_value
+                                        .get("output")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Action completed")
+                                        .to_string();
+                                    ApiToolResultContent::Text(text)
                                 }
                             }
-                            Err(_) => {
-                                // If content is not JSON, use it directly (trimmed)
+                            // Extract stdout for command results
+                            else if let Some(stdout) =
+                                json_value.get("stdout").and_then(|v| v.as_str())
+                            {
+                                ApiToolResultContent::Text(stdout.trim().to_string())
+                            }
+                            // Extract content for file reads
+                            else if let Some(content) =
+                                json_value.get("content").and_then(|v| v.as_str())
+                            {
+                                ApiToolResultContent::Text(content.trim().to_string())
+                            }
+                            // For error messages
+                            else if let Some(error) =
+                                json_value.get("error").and_then(|v| v.as_str())
+                            {
+                                ApiToolResultContent::Text(format!("Error: {}", error.trim()))
+                            }
+                            // Fallback: find first string value or use generic message
+                            else {
+                                let simplified = json_value.as_object().and_then(|obj| {
+                                    obj.values()
+                                        .find_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                                });
                                 ApiToolResultContent::Text(
-                                    tool_result_content.trim().to_string(),
+                                    simplified.unwrap_or_else(|| {
+                                        "Tool executed successfully".to_string()
+                                    }),
                                 )
                             }
-                        };
+                        }
+                        Err(_) => {
+                            // If content is not JSON, use it directly (trimmed)
+                            ApiToolResultContent::Text(tool_result_content.trim().to_string())
+                        }
+                    };
 
                     api_messages.push(ApiMessage {
                         role: "user".to_string(), // Tool results have role "user"
@@ -1418,7 +1508,10 @@ impl AgentBrain for AnthropicBrain {
             )));
         }
 
-        log::info!("Conversation validation passed: {} messages prepared for Anthropic API", api_messages.len());
+        log::info!(
+            "Conversation validation passed: {} messages prepared for Anthropic API",
+            api_messages.len()
+        );
 
         // --- Screenshot History Limiting ---
         // Keep only the N most recent screenshots in the conversation to reduce token usage.
@@ -1492,14 +1585,22 @@ impl AgentBrain for AnthropicBrain {
             if let Some(last_tool) = tools.last_mut() {
                 match last_tool {
                     ApiTool::BuiltIn { cache_control, .. } => {
-                        *cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
+                        *cache_control = Some(CacheControl {
+                            cache_type: "ephemeral".to_string(),
+                        });
                     }
                     ApiTool::Custom { cache_control, .. } => {
-                        *cache_control = Some(CacheControl { cache_type: "ephemeral".to_string() });
+                        *cache_control = Some(CacheControl {
+                            cache_type: "ephemeral".to_string(),
+                        });
                     }
                 }
             }
-            if tools.is_empty() { None } else { Some(tools) }
+            if tools.is_empty() {
+                None
+            } else {
+                Some(tools)
+            }
         };
 
         // Convert system prompt to content block array with cache_control for prompt caching
@@ -1507,7 +1608,9 @@ impl AgentBrain for AnthropicBrain {
             vec![SystemContentBlock {
                 block_type: "text".to_string(),
                 text: prompt.clone(),
-                cache_control: Some(CacheControl { cache_type: "ephemeral".to_string() }),
+                cache_control: Some(CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                }),
             }]
         });
 
@@ -1517,7 +1620,7 @@ impl AgentBrain for AnthropicBrain {
             tools: api_tools,
             system: system_blocks,
             max_tokens: self.max_tokens,
-            stream: None, // Will be set based on streaming mode
+            stream: None,      // Will be set based on streaming mode
             tool_choice: None, // Add tool choice support
         };
 
@@ -1554,7 +1657,14 @@ impl AgentBrain for AnthropicBrain {
             // Combine computer use beta + prompt caching beta in a single header (comma-separated).
             // Prompt caching reduces input token costs by ~90% and latency by ~50-80% for
             // system prompt and tool definitions that remain stable across agent loop turns.
-            .header("anthropic-beta", format!("{},{}", self.resolve_computer_use_beta_header(), crate::constants::api::beta_flags::PROMPT_CACHING))
+            .header(
+                "anthropic-beta",
+                format!(
+                    "{},{}",
+                    self.resolve_computer_use_beta_header(),
+                    crate::constants::api::beta_flags::PROMPT_CACHING
+                ),
+            )
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()
@@ -1573,10 +1683,9 @@ impl AgentBrain for AnthropicBrain {
                 status,
                 error_body
             );
-            return Err(AgentError::LlmError(Self::format_anthropic_http_error_for_user(
-                status,
-                &error_body,
-            )));
+            return Err(AgentError::LlmError(
+                Self::format_anthropic_http_error_for_user(status, &error_body),
+            ));
         }
 
         // --- 4. Handle Response (Streaming or Non-Streaming) ---
@@ -1590,25 +1699,30 @@ impl AgentBrain for AnthropicBrain {
             // messages appear BEFORE the response message in the chat.
 
             let (accumulated_text, tool_calls, stop_reason, stream_was_started) = self
-                .handle_streaming_response(response, Some(&app_handle), Some(message_id.clone()), |chunk, tts_list| {
-                    // Emit text chunk event - pass first TTS item if available for backward compatibility
-                    crate::agent::tool_logger::emit_streaming_text_chunk(
-                        &app_handle,
-                        chunk,
-                        Some(message_id.clone()),
-                        tts_list.first().cloned(),
-                    );
-
-                    // Emit additional TTS items if there are multiple in this chunk
-                    for tts_content in tts_list.iter().skip(1) {
+                .handle_streaming_response(
+                    response,
+                    Some(&app_handle),
+                    Some(message_id.clone()),
+                    |chunk, tts_list| {
+                        // Emit text chunk event - pass first TTS item if available for backward compatibility
                         crate::agent::tool_logger::emit_streaming_text_chunk(
                             &app_handle,
-                            String::new(), // Empty display text for additional TTS-only chunks
+                            chunk,
                             Some(message_id.clone()),
-                            Some(tts_content.clone()),
+                            tts_list.first().cloned(),
                         );
-                    }
-                })
+
+                        // Emit additional TTS items if there are multiple in this chunk
+                        for tts_content in tts_list.iter().skip(1) {
+                            crate::agent::tool_logger::emit_streaming_text_chunk(
+                                &app_handle,
+                                String::new(), // Empty display text for additional TTS-only chunks
+                                Some(message_id.clone()),
+                                Some(tts_content.clone()),
+                            );
+                        }
+                    },
+                )
                 .await?;
 
             // Clean up any remaining thinking tags from the accumulated text

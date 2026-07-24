@@ -1,8 +1,8 @@
 //! Cloud connectivity testing commands
 
-use tauri::State;
 use crate::cloud::config::CloudConfig;
 use crate::settings::manager::SettingsManager;
+use tauri::State;
 
 /// Test cloud backend connectivity
 #[tauri::command]
@@ -20,7 +20,10 @@ pub async fn test_cloud_backend_connection(
 
     // Test the connection
     match config.test_connection().await {
-        Ok(()) => Ok(format!("✅ Successfully connected to cloud backend: {}", config.server_url)),
+        Ok(()) => Ok(format!(
+            "✅ Successfully connected to cloud backend: {}",
+            config.server_url
+        )),
         Err(e) => Err(format!("❌ Cloud connection failed: {}", e)),
     }
 }
@@ -57,7 +60,8 @@ pub async fn enable_cloud_backend(
         .await
         .map_err(|e| format!("Failed to load cloud config: {}", e))?;
 
-    config.enable(&settings_manager)
+    config
+        .enable(&settings_manager)
         .await
         .map_err(|e| format!("Failed to enable cloud: {}", e))?;
 
@@ -73,7 +77,8 @@ pub async fn disable_cloud_backend(
         .await
         .map_err(|e| format!("Failed to load cloud config: {}", e))?;
 
-    config.disable(&settings_manager)
+    config
+        .disable(&settings_manager)
         .await
         .map_err(|e| format!("Failed to disable cloud: {}", e))?;
 

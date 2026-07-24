@@ -1,3 +1,4 @@
+use crate::constants::settings::defaults;
 use computer_use_ai_sdk::Desktop;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,12 +12,10 @@ use std::time::Duration;
 use tauri::Emitter;
 use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, error, info, warn};
-use crate::constants::settings::defaults;
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
-use playwright::api::playwright::Playwright;
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -34,9 +33,9 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 // Physical-input arbiter + parallel session registry
 use crate::agent::input_arbiter::InputArbiter;
 use crate::agents::session::AgentSessionRegistry;
-use crate::constants::{audio, events, errors::templates};
-use crate::utils::string_cache::format_error_cached;
+use crate::constants::{audio, errors::templates, events};
 use crate::utils::rate_limiter::GlobalRateLimiters;
+use crate::utils::string_cache::format_error_cached;
 
 // Helper function for error formatting - uses cached templates for better performance
 fn format_error(template: &'static str, context: &str, error: impl std::fmt::Display) -> String {
@@ -51,7 +50,7 @@ pub struct KeyboardShortcuts {
     pub stop_current_task: String, // Default: Escape
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
     #[serde(default = "KeyboardShortcuts::default_voice_activation")]
-    pub voice_activation: String,  // Default: Option+Shift+V — always-on global voice shortcut
+    pub voice_activation: String, // Default: Option+Shift+V — always-on global voice shortcut
 }
 
 impl KeyboardShortcuts {
@@ -64,14 +63,14 @@ impl KeyboardShortcuts {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum AgentTriggerMode {
     #[default]
-    Tap,  // Press and release to toggle agent mode
+    Tap, // Press and release to toggle agent mode
     Hold, // Hold to activate agent mode, release to stop
 }
 
 /// Dictation trigger mode configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum DictationTriggerMode {
-    Tap,  // Press and release to toggle dictation mode
+    Tap, // Press and release to toggle dictation mode
     #[default]
     Hold, // Hold to activate dictation mode, release to stop
 }
@@ -319,9 +318,9 @@ pub struct AppState {
     pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,
 
     // Async state that needs TokioMutex
-    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
-    pub memory_manager: Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>>,
+    pub memory_manager:
+        Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>>,
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
@@ -333,7 +332,8 @@ pub struct AppState {
 
     // Pre-captured screenshot from PTT release (set during STT finalization, consumed on first agent screenshot call).
     // Tuple stores (screenshot, capture_time) so stale entries can be discarded.
-    pub pending_ptt_screenshot: Arc<TokioMutex<Option<(crate::commands::core::ScreenshotResult, std::time::Instant)>>>,
+    pub pending_ptt_screenshot:
+        Arc<TokioMutex<Option<(crate::commands::core::ScreenshotResult, std::time::Instant)>>>,
 
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
@@ -362,10 +362,10 @@ impl AppState {
     pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false); // Initial state: not cancelled
         info!("Initializing AppState with simplified grouped structure");
-        
+
         // Create rate limiters (cleanup task will be started later in async context)
         let rate_limiters = Arc::new(GlobalRateLimiters::new());
-        
+
         Self {
             desktop: DesktopWrapper::new(desktop),
             shell_sessions: ShellSessions::default(),
@@ -384,33 +384,34 @@ impl AppState {
             timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())),
 
             // Initialize async state
-            playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new({
-            // Use AdvancedMemoryManager but with reduced features to prevent deadlocks
-            use crate::agent::implementations::memory_manager::{AdvancedMemoryManager, MemoryConfig, VisualContextConfig};
+                // Use AdvancedMemoryManager but with reduced features to prevent deadlocks
+                use crate::agent::implementations::memory_manager::{
+                    AdvancedMemoryManager, MemoryConfig, VisualContextConfig,
+                };
 
-            let memory_config = MemoryConfig {
-                max_messages: 200, // INCREASED: Maximum memory capacity (was 150)
-                max_tokens: 120000, // INCREASED: Higher token limit for complex conversations (was 80000)
-                min_messages_to_keep: 30, // INCREASED: Keep even more context (was 20)
-                auto_prune: true, // RE-ENABLED: Safe auto-pruning with higher limits
-                enable_summarization: true, // RE-ENABLED: Summarization for better memory management
-                summarization_batch_size: 15, // INCREASED: More efficient batching (was 12)
-                enable_metrics: true, // ENABLED: Enhanced tracking with error handling
-                enable_summary_cache: true, // RE-ENABLED: Cache for better performance
-            };
+                let memory_config = MemoryConfig {
+                    max_messages: 200,            // INCREASED: Maximum memory capacity (was 150)
+                    max_tokens: 120000, // INCREASED: Higher token limit for complex conversations (was 80000)
+                    min_messages_to_keep: 30, // INCREASED: Keep even more context (was 20)
+                    auto_prune: true,   // RE-ENABLED: Safe auto-pruning with higher limits
+                    enable_summarization: true, // RE-ENABLED: Summarization for better memory management
+                    summarization_batch_size: 15, // INCREASED: More efficient batching (was 12)
+                    enable_metrics: true,       // ENABLED: Enhanced tracking with error handling
+                    enable_summary_cache: true, // RE-ENABLED: Cache for better performance
+                };
 
-            let visual_config = VisualContextConfig {
-                enable_screenshot_compression: true, // RE-ENABLED: Visual compression for memory efficiency
-                screenshot_retention_seconds: 1800, // INCREASED: Even longer retention (30 minutes, was 15)
-                immediate_compression: true, // RE-ENABLED: With safer async handling
-                max_base64_screenshots: 12, // INCREASED: More visual context (was 8)
-                fallback_to_generic_description: true,
-            };
+                let visual_config = VisualContextConfig {
+                    enable_screenshot_compression: true, // RE-ENABLED: Visual compression for memory efficiency
+                    screenshot_retention_seconds: 1800, // INCREASED: Even longer retention (30 minutes, was 15)
+                    immediate_compression: true,        // RE-ENABLED: With safer async handling
+                    max_base64_screenshots: 12,         // INCREASED: More visual context (was 8)
+                    fallback_to_generic_description: true,
+                };
 
-            AdvancedMemoryManager::with_config(memory_config).with_visual_config(visual_config)
-        })),
+                AdvancedMemoryManager::with_config(memory_config).with_visual_config(visual_config)
+            })),
             permissions_state: Arc::new(TokioMutex::new(None)),
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             cloud_client: Arc::new(TokioMutex::new(None)),
@@ -469,14 +470,19 @@ impl AppState {
 
     /// Store a screenshot captured concurrently with PTT STT finalization.
     /// Consumed on the agent's first `computer/screenshot` tool call.
-    pub async fn set_pending_ptt_screenshot(&self, screenshot: crate::commands::core::ScreenshotResult) {
+    pub async fn set_pending_ptt_screenshot(
+        &self,
+        screenshot: crate::commands::core::ScreenshotResult,
+    ) {
         let mut guard = self.pending_ptt_screenshot.lock().await;
         *guard = Some((screenshot, std::time::Instant::now()));
     }
 
     /// Take (and clear) the pre-captured PTT screenshot if one exists and is not stale.
     /// Discards (and returns `None`) if the screenshot is older than `PTT_SCREENSHOT_TTL_SECS`.
-    pub async fn take_pending_ptt_screenshot(&self) -> Option<crate::commands::core::ScreenshotResult> {
+    pub async fn take_pending_ptt_screenshot(
+        &self,
+    ) -> Option<crate::commands::core::ScreenshotResult> {
         let mut guard = self.pending_ptt_screenshot.lock().await;
         match guard.take() {
             Some((screenshot, captured_at))
@@ -485,7 +491,10 @@ impl AppState {
                 Some(screenshot)
             }
             Some(_) => {
-                warn!("[PTT] Discarding stale pre-captured screenshot (older than {}s)", Self::PTT_SCREENSHOT_TTL_SECS);
+                warn!(
+                    "[PTT] Discarding stale pre-captured screenshot (older than {}s)",
+                    Self::PTT_SCREENSHOT_TTL_SECS
+                );
                 None
             }
             None => None,
@@ -525,14 +534,26 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.chatterbox_reference_audio_url.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox reference audio URL", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "Chatterbox reference audio URL",
+                    e,
+                )
+            })
     }
 
     pub fn set_chatterbox_reference_audio_url(&self, url: Option<String>) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.chatterbox_reference_audio_url = url)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox reference audio URL", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_SET,
+                    "Chatterbox reference audio URL",
+                    e,
+                )
+            })
     }
 
     pub fn get_chatterbox_exaggeration(&self) -> Result<f32, String> {
@@ -623,7 +644,13 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.dictation_clipboard_enabled)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation clipboard enabled", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "dictation clipboard enabled",
+                    e,
+                )
+            })
     }
 
     pub fn set_dictation_clipboard_enabled(&self, enabled: bool) -> Result<(), String> {
@@ -665,7 +692,13 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_sensitivity)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "always listening sensitivity", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "always listening sensitivity",
+                    e,
+                )
+            })
     }
 
     pub fn set_always_listening_sensitivity(&self, sensitivity: f32) -> Result<(), String> {
@@ -679,7 +712,13 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.always_listening_wake_words.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "always listening wake words", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "always listening wake words",
+                    e,
+                )
+            })
     }
 
     pub fn set_always_listening_wake_words(&self, wake_words: Vec<String>) -> Result<(), String> {
@@ -693,7 +732,13 @@ impl AppState {
         self.audio_settings
             .lock()
             .map(|settings| settings.notification_sound_enabled)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification sound enabled", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "notification sound enabled",
+                    e,
+                )
+            })
     }
 
     pub fn set_notification_sound_enabled(&self, enabled: bool) -> Result<(), String> {
@@ -722,14 +767,26 @@ impl AppState {
         self.ui_settings
             .lock()
             .map(|settings| settings.performance_monitoring_enabled)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "performance monitoring enabled", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "performance monitoring enabled",
+                    e,
+                )
+            })
     }
 
     pub fn set_performance_monitoring_enabled_internal(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.performance_monitoring_enabled = enabled)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "performance monitoring enabled", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_SET,
+                    "performance monitoring enabled",
+                    e,
+                )
+            })
     }
 
     pub fn get_debug_mode(&self) -> Result<bool, String> {
@@ -806,14 +863,26 @@ impl AppState {
         self.ui_settings
             .lock()
             .map(|settings| settings.notification_persist_important)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification persist important", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_RETRIEVE,
+                    "notification persist important",
+                    e,
+                )
+            })
     }
 
     pub fn set_notification_persist_important(&self, persist: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
             .map(|mut settings| settings.notification_persist_important = persist)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification persist important", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_SET,
+                    "notification persist important",
+                    e,
+                )
+            })
     }
 
     pub fn get_smooth_mouse_movement(&self) -> Result<bool, String> {
@@ -939,10 +1008,9 @@ impl AppState {
     // Method to mark agent execution as finished
     pub fn mark_agent_execution_finished(&self) {
         let result = (|| -> Result<(), String> {
-            let mut execution_state = self
-                .agent_execution
-                .lock()
-                .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e))?;
+            let mut execution_state = self.agent_execution.lock().map_err(|e| {
+                format_error(templates::FAILED_TO_ACCESS, "agent_execution lock", e)
+            })?;
             let execution_id = execution_state.execution_id.take();
             execution_state.execution_active = false;
             execution_state.current_step = None;
@@ -1054,45 +1122,21 @@ impl AppState {
 
     /// Check if onboarding is currently active
     pub fn is_onboarding_active(&self) -> bool {
-        self.onboarding_active.load(std::sync::atomic::Ordering::Acquire)
+        self.onboarding_active
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Set onboarding active state
     pub fn set_onboarding_active(&self, active: bool) {
-        self.onboarding_active.store(active, std::sync::atomic::Ordering::Release);
+        self.onboarding_active
+            .store(active, std::sync::atomic::Ordering::Release);
         info!("Onboarding active state set to: {}", active);
     }
 
-    // Method to get or initialize the Playwright driver
-    async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
-        let mut driver_guard = self.playwright_driver.lock().await;
-        if driver_guard.is_none() {
-            info!("Initializing Playwright driver instance...");
-            match Playwright::initialize().await {
-                Ok(pw_instance) => {
-                    let arc_pw: Arc<Playwright> = Arc::new(pw_instance);
-                    *driver_guard = Some(arc_pw.clone());
-                    info!("Playwright driver initialized and stored in AppState.");
-                    Ok(arc_pw)
-                }
-                Err(e) => {
-                    let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "Playwright driver", e);
-                    error!("{}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        } else {
-            debug!("Reusing existing Playwright driver instance from AppState.");
-            driver_guard
-                .as_ref()
-                .ok_or_else(|| "Playwright driver is None despite check".to_string())
-                .cloned()
-        }
-    }
-
     // Method to get or initialize the browser controller
-    // NOTE: Initializes playwright driver BEFORE acquiring browser_controller lock
-    // to prevent deadlock from nested async lock acquisition.
+    //
+    // NOTE: the browser is constructed OUTSIDE the browser_controller lock to
+    // prevent deadlock from nested async lock acquisition (check-init-recheck).
     pub async fn get_or_init_browser_controller(&self) -> Result<BrowserController, String> {
         // First, check if controller already exists (short lock)
         {
@@ -1104,16 +1148,9 @@ impl AppState {
         }
         // Lock released here
 
-        // Initialize playwright driver OUTSIDE the browser_controller lock
         info!("Initializing persistent browser controller (was None in AppState)");
-        let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
-            format!(
-                "Cannot init BrowserController without Playwright driver: {}",
-                e
-            )
-        })?;
 
-        let new_controller = BrowserController::new(playwright_arc).await.map_err(|e| {
+        let new_controller = BrowserController::new().await.map_err(|e| {
             let err_msg = format_error(templates::FAILED_TO_INITIALIZE, "browser controller", e);
             error!("{}", err_msg);
             err_msg
@@ -1133,7 +1170,9 @@ impl AppState {
     }
 
     // Method to get the persistent memory manager
-    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>> {
+    pub async fn get_memory_manager(
+        &self,
+    ) -> Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>> {
         self.memory_manager.clone()
     }
 
@@ -1181,10 +1220,9 @@ impl AppState {
 
     // Method to mark permissions as checked
     pub fn mark_permissions_checked(&self) -> Result<(), String> {
-        let mut checked_guard = self
-            .permissions_checked
-            .lock()
-            .map_err(|e| format_error(templates::FAILED_TO_ACCESS, "permissions_checked lock", e))?;
+        let mut checked_guard = self.permissions_checked.lock().map_err(|e| {
+            format_error(templates::FAILED_TO_ACCESS, "permissions_checked lock", e)
+        })?;
         *checked_guard = true;
         Ok(())
     }
@@ -1222,8 +1260,9 @@ impl AppState {
 
     // Method to load tool configuration from centralized settings
     pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
+        let settings_manager =
+            crate::settings::manager::SettingsManager::new(app_handle.clone())
+                .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
             &settings_manager,
             self,
@@ -1233,8 +1272,9 @@ impl AppState {
 
     // Method to save tool configuration to centralized settings
     pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
+        let settings_manager =
+            crate::settings::manager::SettingsManager::new(app_handle.clone())
+                .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         crate::agent::tools::tool_config::save_tool_config_to_centralized_settings(
             &settings_manager,
             self,
@@ -1247,8 +1287,9 @@ impl AppState {
     /// Initialize cloud client
     pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         // Load cloud configuration
-        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
+        let settings_manager =
+            crate::settings::manager::SettingsManager::new(app_handle.clone())
+                .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         let config = CloudConfig::load_from_centralized_settings(&settings_manager)
             .await
             .map_err(|e| format_error(templates::FAILED_TO_LOAD, "cloud config", e))?;
@@ -1326,8 +1367,9 @@ impl AppState {
         app_handle: &tauri::AppHandle,
     ) -> Result<(), String> {
         // Save to centralized settings
-        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
+        let settings_manager =
+            crate::settings::manager::SettingsManager::new(app_handle.clone())
+                .map_err(|e| format_error(templates::FAILED_TO_CREATE, "settings manager", e))?;
         config
             .save_to_centralized_settings(&settings_manager)
             .await
@@ -1387,7 +1429,13 @@ impl AppState {
                     if enabled { "enabled" } else { "disabled" }
                 );
             })
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "performance monitoring enabled", e))
+            .map_err(|e| {
+                format_error(
+                    templates::FAILED_TO_SET,
+                    "performance monitoring enabled",
+                    e,
+                )
+            })
     }
 
     // Production cloud connector methods
@@ -1439,7 +1487,10 @@ impl AppState {
     }
 
     /// Initialize enabled MCP servers - OPTIMIZED for parallel startup
-    pub async fn initialize_mcp_servers(&self, app_handle: Option<&tauri::AppHandle>) -> Result<(), String> {
+    pub async fn initialize_mcp_servers(
+        &self,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Result<(), String> {
         debug!("Starting MCP server initialization...");
 
         // CRITICAL FIX: Load MCP server configurations from tool config manager
@@ -1456,7 +1507,9 @@ impl AppState {
         for config in &all_mcp_configs {
             // Only add if not already present to avoid duplicates
             let existing_configs = manager_guard.get_server_configs().await;
-            let already_exists = existing_configs.iter().any(|existing| existing.id == config.id);
+            let already_exists = existing_configs
+                .iter()
+                .any(|existing| existing.id == config.id);
 
             if !already_exists {
                 let mut init_config = config.clone();
@@ -1597,14 +1650,20 @@ impl AppState {
         // Auto-remove servers that failed to start — purge from config entirely.
         // Hold the ToolConfigManager lock across both removal and save to prevent races.
         if !failed_server_ids.is_empty() {
-            warn!("Removing failed MCP servers: {} (re-add in Settings if needed)", failed_names.join(", "));
+            warn!(
+                "Removing failed MCP servers: {} (re-add in Settings if needed)",
+                failed_names.join(", ")
+            );
 
             // Remove from MCP manager first (doesn't need ToolConfigManager lock)
             {
                 let manager_guard = manager.lock().await;
                 for failed_id in &failed_server_ids {
                     if let Err(e) = manager_guard.remove_server(failed_id).await {
-                        debug!("Failed to remove server '{}' from MCP manager: {}", failed_id, e);
+                        debug!(
+                            "Failed to remove server '{}' from MCP manager: {}",
+                            failed_id, e
+                        );
                     }
                 }
             }
@@ -1618,7 +1677,10 @@ impl AppState {
             if let Some(handle) = app_handle {
                 match crate::settings::manager::SettingsManager::new(handle.clone()) {
                     Ok(settings_manager) => {
-                        if let Err(e) = config_guard.save_to_centralized_settings(&settings_manager).await {
+                        if let Err(e) = config_guard
+                            .save_to_centralized_settings(&settings_manager)
+                            .await
+                        {
                             warn!("Failed to persist MCP server removal: {}", e);
                         }
                     }
@@ -1754,7 +1816,11 @@ impl AppState {
 
         if let Err(e) = app_handle.emit(events::system::MCP_STATE_UPDATED, payload) {
             warn!("Failed to emit MCP state update: {}", e);
-            return Err(format_error(templates::FAILED_TO_EMIT, "MCP state update", e));
+            return Err(format_error(
+                templates::FAILED_TO_EMIT,
+                "MCP state update",
+                e,
+            ));
         }
 
         debug!("Emitted MCP state update to frontend");
@@ -1830,7 +1896,10 @@ impl AppState {
     }
 
     /// Initialize MCP servers with atomic deduplication
-    pub async fn initialize_mcp_servers_once(&self, app_handle: Option<&tauri::AppHandle>) -> Result<(), String> {
+    pub async fn initialize_mcp_servers_once(
+        &self,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Result<(), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::sync::Mutex as AsyncMutex;
 
@@ -1887,7 +1956,9 @@ impl AppState {
     /// Update or insert the cursor state for a given agent.
     pub fn update_agent_cursor(&self, cursor: AgentCursorState) {
         match self.agent_cursors.lock() {
-            Ok(mut map) => { map.insert(cursor.agent_id.clone(), cursor); }
+            Ok(mut map) => {
+                map.insert(cursor.agent_id.clone(), cursor);
+            }
             Err(e) => warn!("Failed to update agent cursor: {}", e),
         }
     }
@@ -1895,7 +1966,9 @@ impl AppState {
     /// Remove an agent's cursor (call when the agent finishes or is cancelled).
     pub fn remove_agent_cursor(&self, agent_id: &str) {
         match self.agent_cursors.lock() {
-            Ok(mut map) => { map.remove(agent_id); }
+            Ok(mut map) => {
+                map.remove(agent_id);
+            }
             Err(e) => warn!("Failed to remove agent cursor: {}", e),
         }
     }
@@ -2203,7 +2276,7 @@ mod tests {
 
         // Create a mock permissions state with correct structure
         use crate::commands::permissions::{PermissionStatus, PermissionsState};
-        let mock_permissions = vec![
+        let mock_permissions = [
             PermissionStatus {
                 permission_type: crate::constants::permissions::types::ACCESSIBILITY.to_string(),
                 granted: true,
@@ -2252,9 +2325,9 @@ mod tests {
         let retrieved_state = state.get_permissions_state().await;
         assert!(retrieved_state.is_some());
         let retrieved = retrieved_state.unwrap();
-        assert_eq!(retrieved.accessibility.granted, true);
-        assert_eq!(retrieved.screen_recording.granted, false);
-        assert_eq!(retrieved.all_granted, false);
+        assert!(retrieved.accessibility.granted);
+        assert!(!retrieved.screen_recording.granted);
+        assert!(!retrieved.all_granted);
         assert_eq!(retrieved.app_name, "TestApp");
     }
 

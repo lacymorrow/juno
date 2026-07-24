@@ -3,11 +3,11 @@
 //! Unified settings schema and types for the entire Juno application.
 //! Replaces 12+ scattered JSON configuration files with a single, type-safe structure.
 
+use crate::agent::providers::config::{default_provider_entries, DEFAULT_PROVIDER};
+use crate::constants::settings::defaults;
+use crate::constants::ui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::constants::settings::defaults;
-use crate::agent::providers::config::{default_provider_entries, DEFAULT_PROVIDER};
-use crate::constants::ui;
 
 pub mod manager;
 
@@ -75,7 +75,7 @@ pub struct FloatingBarSettings {
 /// Replaces: agent_settings.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSettings {
-    pub trigger_mode: String, // "tap" or "hold"
+    pub trigger_mode: String,   // "tap" or "hold"
     pub execution_mode: String, // "single" or "multi"
     #[serde(default = "defaults::big_cursor_enabled")]
     pub big_cursor_enabled: bool,
@@ -169,7 +169,6 @@ impl AudioSettings {
         crate::tts::supertonic::DEFAULT_SPEED
     }
 }
-
 
 /// Tool enable/disable configurations
 /// Replaces: tool_config.json

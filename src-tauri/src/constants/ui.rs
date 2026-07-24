@@ -179,7 +179,8 @@ pub mod standard_resolutions {
     pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] = [HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
 
     /// All supported standard resolutions (legacy + high-res)
-    pub const ALL_RESOLUTIONS: [(u32, u32); 7] = [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
+    pub const ALL_RESOLUTIONS: [(u32, u32); 7] =
+        [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
 
     /// Whether a model supports high-resolution screenshots (2,576px).
     /// Returns true for Opus 4.5+ models that use computer_20251124.
@@ -187,8 +188,7 @@ pub mod standard_resolutions {
     /// to current-gen models that support high-res.
     pub fn supports_high_res(model: &str) -> bool {
         use crate::agent::providers::types::model_ids;
-        model_ids::OPUS_4_5_PLUS_MODELS.contains(&model)
-            || matches!(model, "opus" | "sonnet")
+        model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) || matches!(model, "opus" | "sonnet")
     }
 
     /// Select the best standard resolution for a given display and model.
@@ -238,7 +238,11 @@ pub mod standard_resolutions {
             .collect();
 
         // Fall back to full candidate list if none fit (very small display)
-        let pool = if fitting.is_empty() { candidates } else { &fitting };
+        let pool = if fitting.is_empty() {
+            candidates
+        } else {
+            &fitting
+        };
 
         let selected = pool
             .iter()
@@ -258,14 +262,23 @@ pub mod standard_resolutions {
         let aspect_diff = (display_aspect - selected_aspect).abs();
         tracing::debug!(
             "Resolution selection: display {}x{} (aspect {:.3}) → {}x{} (aspect {:.3}, diff {:.3})",
-            display_width, display_height, display_aspect,
-            selected.0, selected.1, selected_aspect, aspect_diff
+            display_width,
+            display_height,
+            display_aspect,
+            selected.0,
+            selected.1,
+            selected_aspect,
+            aspect_diff
         );
         if aspect_diff > 0.2 {
             tracing::warn!(
                 "Aspect ratio mismatch: display {:.3} vs standard {:.3} (diff {:.3}) — \
                  coordinates may be slightly imprecise for display {}x{}",
-                display_aspect, selected_aspect, aspect_diff, display_width, display_height
+                display_aspect,
+                selected_aspect,
+                aspect_diff,
+                display_width,
+                display_height
             );
         }
 
@@ -308,28 +321,40 @@ pub mod standard_resolutions {
         fn test_high_res_16_10_selects_hd_wxga_for_opus() {
             // Opus 4.5+ on 16:10 should get HD_WXGA (1680×1050) over legacy WXGA
             let res = select_best_resolution_for_model(1728, 1080, "opus");
-            assert_eq!(res, HD_WXGA, "Opus on 16:10 should select HD_WXGA (1680×1050)");
+            assert_eq!(
+                res, HD_WXGA,
+                "Opus on 16:10 should select HD_WXGA (1680×1050)"
+            );
         }
 
         #[test]
         fn test_high_res_16_9_selects_hd_1080_for_opus() {
             // Opus 4.5+ on a 16:9 4K display should get HD_1080 (1920×1080)
             let res = select_best_resolution_for_model(3840, 2160, "opus");
-            assert_eq!(res, HD_1080, "Opus on 16:9 4K should select HD_1080 (1920×1080)");
+            assert_eq!(
+                res, HD_1080,
+                "Opus on 16:9 4K should select HD_1080 (1920×1080)"
+            );
         }
 
         #[test]
         fn test_ultra_wide_21_9_selects_uw_1080_for_opus() {
             // Ultra-wide 3440×1440 (21:9) should pick UW_1080 (2560×1080)
             let res = select_best_resolution_for_model(3440, 1440, "opus");
-            assert_eq!(res, UW_1080, "Ultra-wide 21:9 (3440×1440) should select UW_1080 (2560×1080)");
+            assert_eq!(
+                res, UW_1080,
+                "Ultra-wide 21:9 (3440×1440) should select UW_1080 (2560×1080)"
+            );
         }
 
         #[test]
         fn test_ultra_wide_2560x1080_selects_uw_1080_for_opus() {
             // 2560×1080 native ultra-wide
             let res = select_best_resolution_for_model(2560, 1080, "opus");
-            assert_eq!(res, UW_1080, "Native 2560×1080 ultra-wide should select UW_1080");
+            assert_eq!(
+                res, UW_1080,
+                "Native 2560×1080 ultra-wide should select UW_1080"
+            );
         }
 
         #[test]
@@ -342,14 +367,20 @@ pub mod standard_resolutions {
         fn test_very_small_display_falls_back_to_candidates() {
             // Smaller than any standard resolution — should still return something
             let res = select_best_resolution(640, 480);
-            assert_eq!(res, XGA, "640×480 (4:3) should fall back to XGA (closest aspect)");
+            assert_eq!(
+                res, XGA,
+                "640×480 (4:3) should fall back to XGA (closest aspect)"
+            );
         }
 
         #[test]
         fn test_legacy_model_ignores_high_res_candidates() {
             // A legacy model on a large 16:10 display should still get legacy WXGA
             let res = select_best_resolution_for_model(2560, 1600, "claude-2");
-            assert_eq!(res, WXGA, "Legacy model should pick from LEGACY_RESOLUTIONS only");
+            assert_eq!(
+                res, WXGA,
+                "Legacy model should pick from LEGACY_RESOLUTIONS only"
+            );
         }
 
         #[test]

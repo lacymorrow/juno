@@ -126,10 +126,14 @@ pub mod recovery_suggestions {
 // Tool-specific error messages
 pub mod tool_errors {
     // Permission error messages
-    pub const SCREEN_RECORDING_PERMISSION_REQUIRED: &str = "Screen recording permission is required for screenshots";
-    pub const ACCESSIBILITY_PERMISSION_REQUIRED_MOUSE: &str = "Accessibility permission is required for mouse operations";
-    pub const ACCESSIBILITY_PERMISSION_REQUIRED_KEYBOARD: &str = "Accessibility permission is required for keyboard operations";
-    pub const ACCESSIBILITY_PERMISSION_REQUIRED_SCROLL: &str = "Accessibility permission is required for scroll operations";
+    pub const SCREEN_RECORDING_PERMISSION_REQUIRED: &str =
+        "Screen recording permission is required for screenshots";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_MOUSE: &str =
+        "Accessibility permission is required for mouse operations";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_KEYBOARD: &str =
+        "Accessibility permission is required for keyboard operations";
+    pub const ACCESSIBILITY_PERMISSION_REQUIRED_SCROLL: &str =
+        "Accessibility permission is required for scroll operations";
 
     // Computer tool errors
     pub const MISSING_ACTION_PARAMETER: &str = "Missing 'action' parameter";
@@ -145,7 +149,8 @@ pub mod tool_errors {
     pub const MISSING_DURATION_PARAMETER: &str = "Missing 'duration_ms' or 'duration' parameter";
     pub const MISSING_SCROLL_DIRECTION_PARAMETER: &str = "Missing 'scroll_direction' parameter";
     pub const MISSING_SECONDS_PARAMETER: &str = "Missing 'seconds' or 'duration' parameter";
-    pub const MISSING_COORDINATE_PARAMETER_FOR_DRAG: &str = "Missing 'coordinate' parameter for drag operation";
+    pub const MISSING_COORDINATE_PARAMETER_FOR_DRAG: &str =
+        "Missing 'coordinate' parameter for drag operation";
 
     // Bash tool errors
     pub const MISSING_COMMAND_PARAMETER: &str = "Missing 'command' parameter";
@@ -159,8 +164,10 @@ pub mod tool_errors {
     // Security validation errors
     pub const PATH_TRAVERSAL_NOT_ALLOWED: &str = "Path traversal not allowed";
     pub const HOME_DIRECTORY_ACCESS_NOT_ALLOWED: &str = "Home directory access not allowed";
-    pub const LINE_NUMBERS_ARE_ONE_INDEXED_START: &str = "Line numbers are 1-indexed, start_line cannot be 0";
-    pub const LINE_NUMBERS_ARE_ONE_INDEXED_END: &str = "Line numbers are 1-indexed, end_line cannot be 0";
+    pub const LINE_NUMBERS_ARE_ONE_INDEXED_START: &str =
+        "Line numbers are 1-indexed, start_line cannot be 0";
+    pub const LINE_NUMBERS_ARE_ONE_INDEXED_END: &str =
+        "Line numbers are 1-indexed, end_line cannot be 0";
     pub const START_LINE_MUST_BE_LESS_THAN_END: &str = "Start line must be less than end line";
 
     // File operation errors
@@ -169,20 +176,25 @@ pub mod tool_errors {
 
     // Unreachable error messages
     pub const MOUSE_ACTION_ALREADY_MATCHED: &str = "Mouse action already matched in outer pattern";
-    pub const KEYBOARD_ACTION_ALREADY_MATCHED: &str = "Keyboard action already matched in outer pattern";
+    pub const KEYBOARD_ACTION_ALREADY_MATCHED: &str =
+        "Keyboard action already matched in outer pattern";
 
     // Timer tool errors
-    pub const MISSING_DELAY_SECONDS_PARAMETER: &str = "Missing or invalid 'delay_seconds' parameter";
+    pub const MISSING_DELAY_SECONDS_PARAMETER: &str =
+        "Missing or invalid 'delay_seconds' parameter";
     pub const MISSING_CONTEXT_PARAMETER: &str = "Missing or invalid 'context' parameter";
     pub const MISSING_DESCRIPTION_PARAMETER: &str = "Missing or invalid 'description' parameter";
     pub const MISSING_MONITOR_TYPE_PARAMETER: &str = "Missing or invalid 'monitor_type' parameter";
     pub const MISSING_FILE_PATH_PARAMETER: &str = "Missing or invalid 'file_path' parameter";
     pub const MISSING_TIMER_ID_PARAMETER: &str = "Missing or invalid 'timer_id' parameter";
-    pub const INVALID_MONITOR_TYPE: &str = "Invalid monitor_type. Must be one of: created, modified, deleted, size_changed";
-    pub const SCREEN_MONITORING_MACOS_ONLY: &str = "Screen monitoring is only supported on macOS currently";
+    pub const INVALID_MONITOR_TYPE: &str =
+        "Invalid monitor_type. Must be one of: created, modified, deleted, size_changed";
+    pub const SCREEN_MONITORING_MACOS_ONLY: &str =
+        "Screen monitoring is only supported on macOS currently";
     pub const TIMER_MANAGER_NOT_INITIALIZED: &str = "Timer manager not initialized";
     pub const NO_EXPIRED_TIMERS_FOUND: &str = "No expired timers found";
-    pub const FOUND_EXPIRED_TIMERS_WITH_CONTEXT: &str = "Found expired timers with context to resume";
+    pub const FOUND_EXPIRED_TIMERS_WITH_CONTEXT: &str =
+        "Found expired timers with context to resume";
 }
 
 // Tool-specific success messages
@@ -205,7 +217,8 @@ pub mod format_strings {
     // File operation format strings
     pub const FILE_EXTENSION_NOT_ALLOWED: &str = "File extension '{}' not allowed";
     pub const FILE_SIZE_EXCEEDS_LIMIT: &str = "File size {} bytes exceeds limit of {} bytes";
-    pub const START_LINE_EXCEEDS_FILE_LENGTH: &str = "Start line {} exceeds file length of {} lines";
+    pub const START_LINE_EXCEEDS_FILE_LENGTH: &str =
+        "Start line {} exceeds file length of {} lines";
     pub const END_LINE_EXCEEDS_FILE_LENGTH: &str = "End line {} exceeds file length of {} lines";
     pub const FAILED_TO_READ_FILE: &str = "Failed to read file '{}': {}";
     pub const FAILED_TO_WRITE_FILE: &str = "Failed to write file '{}': {}";
@@ -235,29 +248,37 @@ pub mod format_strings {
     pub const WAIT_FAILED: &str = "Wait failed: {}";
     pub const BASH_COMMAND_FAILED: &str = "Bash command failed: {}";
     pub const UNKNOWN_STR_REPLACE_COMMAND: &str = "Unknown str_replace_based_edit_tool command: {}";
-    pub const PARSE_BASH_RESULT_FAILED: &str = "Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'";
+    pub const PARSE_BASH_RESULT_FAILED: &str =
+        "Failed to parse bash command result as JSON: '{}'. Raw result was: '{}'";
     pub const UNKNOWN_ACTION: &str = "Unknown action: {}";
 
     // Logging format strings
     pub const EXECUTING_COMPUTER_ACTION: &str = "Executing computer action: {}";
     pub const RAW_BASH_COMMAND_RESULT: &str = "Raw bash_command result: {}";
-    pub const PARSED_BASH_RESULT: &str = "Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}";
-    pub const MISSING_INVALID_STDOUT: &str = "Missing or invalid 'stdout' field in bash command result: {}";
-    pub const MISSING_INVALID_EXIT_CODE: &str = "Missing or invalid 'exit_code' field in bash command result: {}";
+    pub const PARSED_BASH_RESULT: &str =
+        "Parsed bash result - stdout: '{}', stderr: '{}', exit_code: {}, success: {}";
+    pub const MISSING_INVALID_STDOUT: &str =
+        "Missing or invalid 'stdout' field in bash command result: {}";
+    pub const MISSING_INVALID_EXIT_CODE: &str =
+        "Missing or invalid 'exit_code' field in bash command result: {}";
 
     // Success message format strings
     pub const SUCCESSFULLY_CREATED_FILE: &str = "Successfully created file '{}'";
     pub const SUCCESSFULLY_REPLACED_TEXT_IN: &str = "Successfully replaced text in '{}'";
     pub const TOOL_COMPLETED_SUCCESSFULLY: &str = "✅ {} completed successfully in {}ms";
     pub const TOOL_FAILED: &str = "❌ {} failed";
-    pub const SUCCESSFULLY_REGISTERED_TOOLS: &str = "Successfully registered {} official Anthropic Computer Use tools";
+    pub const SUCCESSFULLY_REGISTERED_TOOLS: &str =
+        "Successfully registered {} official Anthropic Computer Use tools";
 
     // Additional format strings for JSON parsing and bash results
-    pub const FAILED_TO_PARSE_JSON_RESULT: &str = "Failed to parse bash command result as JSON. Error: {}, Raw result: '{}'";
-    pub const MISSING_INVALID_STDERR: &str = "Missing or invalid 'stderr' field in bash command result: {}";
+    pub const FAILED_TO_PARSE_JSON_RESULT: &str =
+        "Failed to parse bash command result as JSON. Error: {}, Raw result: '{}'";
+    pub const MISSING_INVALID_STDERR: &str =
+        "Missing or invalid 'stderr' field in bash command result: {}";
 
     // Timer tool format strings
     pub const SYSTEM_TIME_ERROR: &str = "System time error: {}";
-    pub const TIMER_EXPIRED_TRIGGERING_RESTART: &str = "Timer {} expired, triggering agent restart with context";
+    pub const TIMER_EXPIRED_TRIGGERING_RESTART: &str =
+        "Timer {} expired, triggering agent restart with context";
     pub const FAILED_TO_EMIT_TIMER_EXPIRED_EVENT: &str = "Failed to emit timer-expired event: {}";
 }

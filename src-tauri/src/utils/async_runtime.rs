@@ -34,8 +34,7 @@ pub fn safe_spawn_async_task_with_timeout<F, Fut>(
     task: F,
     timeout_duration: std::time::Duration,
     operation_name: &'static str,
-)
-where
+) where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
@@ -45,7 +44,10 @@ where
                 // Task completed within timeout
             }
             Err(_) => {
-                error!("Async task '{}' timed out after {:?}", operation_name, timeout_duration);
+                error!(
+                    "Async task '{}' timed out after {:?}",
+                    operation_name, timeout_duration
+                );
             }
         }
     });
@@ -95,7 +97,7 @@ mod tests {
                 tx.send("completed").await.unwrap();
             },
             Duration::from_millis(100),
-            "test_operation"
+            "test_operation",
         );
 
         assert_eq!(rx.recv().await, Some("completed"));

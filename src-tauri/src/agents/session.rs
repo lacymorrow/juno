@@ -348,7 +348,11 @@ impl AgentSessionRegistry {
     /// Escape handling uses this so pressing escape only kills the agent
     /// the user is watching; background sessions keep running.
     pub async fn cancel_focused(&self) -> Result<bool, String> {
-        let focused = self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let focused = self
+            .focused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         match focused {
             Some(id) => {
                 self.cancel(&id).await?;
@@ -370,12 +374,19 @@ impl AgentSessionRegistry {
     }
 
     pub fn focused(&self) -> Option<AgentSessionId> {
-        self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.focused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// List a snapshot of every session for the switcher/status-bar UI.
     pub async fn list(&self) -> Vec<AgentSessionInfo> {
-        let focused = self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let focused = self
+            .focused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let sessions = self.sessions.lock().await.clone();
         let mut out = Vec::with_capacity(sessions.len());
         for (id, session) in sessions.iter() {
@@ -458,7 +469,10 @@ impl SessionHandle {
         };
         if let Some(event) = event {
             if let Err(e) = self.app_handle.emit(event, &snapshot) {
-                warn!("Failed to emit {} for session {}: {}", event, snapshot.id, e);
+                warn!(
+                    "Failed to emit {} for session {}: {}",
+                    event, snapshot.id, e
+                );
             }
         }
         broadcast_sessions_updated(&self.app_handle, &self.registry).await;
@@ -525,16 +539,15 @@ mod tests {
         // First session auto-focused; snapshot exposes it.
         let focused_id = registry.focused().expect("focused set");
         assert_eq!(&focused_id, a.id());
-        assert!(listed.iter().any(|s| s.focused && s.id == a.id().to_string()));
+        assert!(listed
+            .iter()
+            .any(|s| s.focused && s.id == a.id().to_string()));
     }
 
     #[tokio::test]
     async fn enforces_parallel_cap() {
         let registry = AgentSessionRegistry::new(1, arbiter());
-        registry
-            .create("first".into())
-            .await
-            .expect("first ok");
+        registry.create("first".into()).await.expect("first ok");
         let result = registry.create("second".into()).await;
         let err = match result {
             Ok(_) => panic!("expected second create to fail"),
@@ -558,10 +571,7 @@ mod tests {
         let mut focused_rx = focused_session.cancel_receiver();
         let background_rx = background.cancel_receiver();
 
-        let cancelled = registry
-            .cancel_focused()
-            .await
-            .expect("cancel_focused ok");
+        let cancelled = registry.cancel_focused().await.expect("cancel_focused ok");
         assert!(cancelled);
 
         // The focused session sees the cancel; the background session does not.

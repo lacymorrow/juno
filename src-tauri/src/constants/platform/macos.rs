@@ -81,10 +81,10 @@ pub mod modifiers {
     use super::CGEventFlags;
 
     // macOS CGEventFlags constants as numeric values
-    pub const COMMAND: CGEventFlags = 0x00100000;  // CGEventFlagCommand
-    pub const SHIFT: CGEventFlags = 0x00020000;    // CGEventFlagShift
-    pub const OPTION: CGEventFlags = 0x00080000;   // CGEventFlagAlternate
-    pub const CONTROL: CGEventFlags = 0x00040000;  // CGEventFlagControl
+    pub const COMMAND: CGEventFlags = 0x00100000; // CGEventFlagCommand
+    pub const SHIFT: CGEventFlags = 0x00020000; // CGEventFlagShift
+    pub const OPTION: CGEventFlags = 0x00080000; // CGEventFlagAlternate
+    pub const CONTROL: CGEventFlags = 0x00040000; // CGEventFlagControl
     pub const FUNCTION: CGEventFlags = 0x00800000; // CGEventFlagSecondaryFn
 }
 
@@ -107,10 +107,14 @@ pub mod system {
 
 // System preferences URLs
 pub mod system_prefs {
-    pub const MICROPHONE_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
-    pub const SCREEN_RECORDING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-    pub const INPUT_MONITORING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
-    pub const ACCESSIBILITY_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    pub const MICROPHONE_PRIVACY_URL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+    pub const SCREEN_RECORDING_PRIVACY_URL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    pub const INPUT_MONITORING_PRIVACY_URL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+    pub const ACCESSIBILITY_PRIVACY_URL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
     // Bundle identifiers
     pub const SYSTEM_PREFERENCES_BUNDLE: &str = "com.apple.systempreferences";

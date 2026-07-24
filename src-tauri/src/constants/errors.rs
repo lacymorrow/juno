@@ -165,7 +165,7 @@ pub mod components {
     pub const SELF_IMPROVEMENT_SYSTEM: &str = "self-improvement system";
     pub const ACCESSIBILITY: &str = "desktop accessibility";
     pub const CLIPBOARD: &str = "clipboard";
-    pub const PLAYWRIGHT_DRIVER: &str = "Playwright driver";
+    pub const BROWSER_DRIVER: &str = "browser driver";
     pub const AUTOMATION: &str = "automation";
     pub const APPLICATION_STATE: &str = "application state";
     pub const CLOUD_CLIENT: &str = "cloud client";
@@ -223,7 +223,8 @@ pub mod actions {
 pub mod user_messages {
     pub const PERMISSION_GUIDANCE_NEEDED: &str = "Permission guidance needed";
     pub const VOICE_UNAVAILABLE: &str = "Voice transcription is not available";
-    pub const SHORTCUT_PERMISSIONS_MISSING: &str = "This may be due to missing Input Monitoring permissions";
+    pub const SHORTCUT_PERMISSIONS_MISSING: &str =
+        "This may be due to missing Input Monitoring permissions";
     pub const ESCAPE_KEY_UNAVAILABLE: &str = "continuing without escape key cancellation";
     pub const SHORTCUTS_UNAVAILABLE: &str = "continuing without shortcuts";
     pub const TTS_ESCAPE_WARNING: &str = "TTS will still work but escape key may not stop it";
@@ -253,5 +254,3 @@ pub mod prefixes {
     pub const DICTATION_INPUT_SHORTCUT: &str = "[Dictation Input Shortcut]";
     pub const DICTATION_TAP_MODE: &str = "[Dictation Tap Mode]";
 }
-
-

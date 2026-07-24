@@ -164,9 +164,7 @@ impl Provider {
                 if model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) {
                     // Tier 1: Opus 4.5+ — both computer and editor are new versions
                     match tool_name {
-                        "computer" => {
-                            return computer_use_api_types::COMPUTER_20251124.to_string()
-                        }
+                        "computer" => return computer_use_api_types::COMPUTER_20251124.to_string(),
                         "str_replace_based_edit_tool" => {
                             return computer_use_api_types::EDIT_TOOL_20250728.to_string()
                         }
@@ -294,24 +292,20 @@ impl Provider {
                     is_recommended: false,
                 },
             ],
-            Provider::Rig => &[
-                ModelDefinition {
-                    id: model_ids::OPENAI_CUA,
-                    name: "Computer-Using Agent (CUA) via Rig",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
-            Provider::Gemini => &[
-                ModelDefinition {
-                    id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
-                    name: "Gemini 2.5 Computer Use (Preview)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
+            Provider::Rig => &[ModelDefinition {
+                id: model_ids::OPENAI_CUA,
+                name: "Computer-Using Agent (CUA) via Rig",
+                category: ModelCategory::ComputerUse,
+                supports_computer_use: true,
+                is_recommended: true,
+            }],
+            Provider::Gemini => &[ModelDefinition {
+                id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
+                name: "Gemini 2.5 Computer Use (Preview)",
+                category: ModelCategory::ComputerUse,
+                supports_computer_use: true,
+                is_recommended: true,
+            }],
             Provider::ClaudeCli => &[
                 ModelDefinition {
                     id: "sonnet",
@@ -494,14 +488,20 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_SONNET_4_5,
         );
-        assert_eq!(computer, "computer_20250124", "Sonnet 4.5 should keep old computer type");
+        assert_eq!(
+            computer, "computer_20250124",
+            "Sonnet 4.5 should keep old computer type"
+        );
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
             model_ids::CLAUDE_SONNET_4_5,
         );
-        assert_eq!(editor, "text_editor_20250728", "Sonnet 4.5 should use new editor type");
+        assert_eq!(
+            editor, "text_editor_20250728",
+            "Sonnet 4.5 should use new editor type"
+        );
     }
 
     #[test]
@@ -512,14 +512,20 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_HAIKU_4_5,
         );
-        assert_eq!(computer, "computer_20250124", "Haiku 4.5 should keep old computer type");
+        assert_eq!(
+            computer, "computer_20250124",
+            "Haiku 4.5 should keep old computer type"
+        );
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
             model_ids::CLAUDE_HAIKU_4_5,
         );
-        assert_eq!(editor, "text_editor_20250728", "Haiku 4.5 should use new editor type");
+        assert_eq!(
+            editor, "text_editor_20250728",
+            "Haiku 4.5 should use new editor type"
+        );
     }
 
     #[test]
@@ -575,11 +581,8 @@ mod tests {
 
     #[test]
     fn test_resolve_tool_type_non_anthropic_passes_through() {
-        let result = Provider::OpenAI.resolve_tool_type(
-            "computer",
-            "computer_20250124",
-            "some-model",
-        );
+        let result =
+            Provider::OpenAI.resolve_tool_type("computer", "computer_20250124", "some-model");
         assert_eq!(result, "computer_20250124");
     }
 }

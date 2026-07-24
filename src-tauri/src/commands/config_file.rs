@@ -40,7 +40,7 @@ pub async fn open_config_directory(app_handle: AppHandle) -> Result<(), String> 
         // Try common file managers
         let file_managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"];
         let mut opened = false;
-        
+
         for fm in &file_managers {
             if std::process::Command::new(fm)
                 .arg(&config_dir)
@@ -51,7 +51,7 @@ pub async fn open_config_directory(app_handle: AppHandle) -> Result<(), String> 
                 break;
             }
         }
-        
+
         if !opened {
             return Err("Failed to open directory: No suitable file manager found".to_string());
         }
@@ -97,7 +97,7 @@ pub async fn open_config_file(app_handle: AppHandle, file_name: String) -> Resul
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
 
     let file_path = config_dir.join(&file_name);
-    
+
     if !file_path.exists() {
         return Err(format!("Configuration file '{}' not found", file_name));
     }
