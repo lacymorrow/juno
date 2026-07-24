@@ -224,6 +224,24 @@ impl AgentSession {
         guard.last_activity_ms = now_ms();
     }
 
+    /// Compare-and-set: transition to `next` only while the status is still
+    /// `expected`. Returns whether the transition happened. Used by the
+    /// needs-input flow so a cancellation that lands mid-wait (status
+    /// `Cancelling`) is never overwritten.
+    pub async fn set_status_if(
+        &self,
+        expected: AgentSessionStatus,
+        next: AgentSessionStatus,
+    ) -> bool {
+        let mut guard = self.inner.lock().await;
+        if guard.status != expected {
+            return false;
+        }
+        guard.status = next;
+        guard.last_activity_ms = now_ms();
+        true
+    }
+
     pub async fn set_current_action(&self, action: Option<String>) {
         let mut guard = self.inner.lock().await;
         guard.current_action = action;
@@ -386,6 +404,40 @@ impl AgentSessionRegistry {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Mark a session as blocked on the user (a risky tool batch is waiting
+    /// for approval). Guarded on `Running` so a session that is already
+    /// cancelling or terminal never flips back into a waiting state.
+    ///
+    /// Returns the post-transition snapshot — `focused` is captured here, in
+    /// the same call, so the caller's notify-if-background gate and the
+    /// snapshot it emits cannot disagree. `None` when the session is unknown
+    /// or not currently `Running`.
+    pub async fn begin_needs_input(&self, id: &AgentSessionId) -> Option<AgentSessionInfo> {
+        let session = self.get(id).await?;
+        if !session
+            .set_status_if(AgentSessionStatus::Running, AgentSessionStatus::NeedsInput)
+            .await
+        {
+            return None;
+        }
+        let focused = self.focused().as_ref() == Some(id);
+        Some(session.snapshot(focused).await)
+    }
+
+    /// Restore `Running` after the input wait resolves (approved, denied, or
+    /// timed out). Guarded on `NeedsInput` so a cancellation that arrived
+    /// mid-wait is not clobbered. Returns whether the status changed.
+    pub async fn end_needs_input(&self, id: &AgentSessionId) -> bool {
+        match self.get(id).await {
+            Some(session) => {
+                session
+                    .set_status_if(AgentSessionStatus::NeedsInput, AgentSessionStatus::Running)
+                    .await
+            }
+            None => false,
+        }
     }
 
     /// List a snapshot of every session for the switcher/status-bar UI.
@@ -642,5 +694,87 @@ mod tests {
         let registry = AgentSessionRegistry::new(4, arbiter());
         let phantom = AgentSessionId::new();
         assert!(registry.set_focused(Some(phantom)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn needs_input_transition_and_guarded_restore() {
+        let registry = AgentSessionRegistry::new(4, arbiter());
+        let session = registry.create("desktop".into()).await.expect("created");
+        session.set_status(AgentSessionStatus::Running).await;
+
+        let snapshot = registry
+            .begin_needs_input(session.id())
+            .await
+            .expect("running session enters needs_input");
+        assert_eq!(snapshot.status, AgentSessionStatus::NeedsInput);
+        assert!(snapshot.focused, "first session is auto-focused");
+
+        assert!(registry.end_needs_input(session.id()).await);
+        let restored = session.snapshot(true).await;
+        assert_eq!(restored.status, AgentSessionStatus::Running);
+
+        // Restore is idempotent — a second call finds Running and no-ops.
+        assert!(!registry.end_needs_input(session.id()).await);
+    }
+
+    #[tokio::test]
+    async fn needs_input_reports_background_session_as_unfocused() {
+        let registry = AgentSessionRegistry::new(4, arbiter());
+        let focused = registry.create("focused".into()).await.expect("created");
+        let background = registry
+            .create("background".into())
+            .await
+            .expect("created");
+        focused.set_status(AgentSessionStatus::Running).await;
+        background.set_status(AgentSessionStatus::Running).await;
+
+        let snapshot = registry
+            .begin_needs_input(background.id())
+            .await
+            .expect("background session enters needs_input");
+        assert!(
+            !snapshot.focused,
+            "background session must be reported unfocused so the caller notifies"
+        );
+    }
+
+    #[tokio::test]
+    async fn needs_input_restore_does_not_clobber_cancellation() {
+        let registry = AgentSessionRegistry::new(4, arbiter());
+        let session = registry.create("desktop".into()).await.expect("created");
+        session.set_status(AgentSessionStatus::Running).await;
+
+        registry
+            .begin_needs_input(session.id())
+            .await
+            .expect("enters needs_input");
+
+        // User cancels from the switcher while the approval prompt is open.
+        registry.cancel(session.id()).await.expect("cancel ok");
+
+        assert!(
+            !registry.end_needs_input(session.id()).await,
+            "restore must not overwrite Cancelling"
+        );
+        let after = session.snapshot(true).await;
+        assert_eq!(after.status, AgentSessionStatus::Cancelling);
+    }
+
+    #[tokio::test]
+    async fn begin_needs_input_requires_running_session() {
+        let registry = AgentSessionRegistry::new(4, arbiter());
+        let session = registry.create("desktop".into()).await.expect("created");
+
+        // Still Starting — the run loop has not begun, so no approval wait
+        // can be user-visible yet.
+        assert!(registry.begin_needs_input(session.id()).await.is_none());
+
+        session.set_status(AgentSessionStatus::Cancelling).await;
+        assert!(registry.begin_needs_input(session.id()).await.is_none());
+
+        // Unknown id after removal.
+        registry.remove(session.id()).await;
+        assert!(registry.begin_needs_input(session.id()).await.is_none());
+        assert!(!registry.end_needs_input(session.id()).await);
     }
 }
