@@ -121,7 +121,7 @@ impl InputArbiter {
 
 impl Default for InputArbiter {
     fn default() -> Self {
-        Self::new(Duration::from_millis(50))
+        Self::new(DEFAULT_COOLDOWN)
     }
 }
 
