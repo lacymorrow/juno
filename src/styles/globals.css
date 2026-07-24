@@ -698,6 +698,62 @@
 .juno-stagger-1 { animation-delay: 0.05s; }
 .juno-stagger-2 { animation-delay: 0.1s; }
 .juno-stagger-3 { animation-delay: 0.15s; }
+
+/* --- Parallel agent roster animations (LAC-1432 / LAC-2830 spec §8) --- */
+
+@keyframes agent-dot-appear {
+    0%   { transform: scale(0); opacity: 0; }
+    60%  { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes agent-dot-remove {
+    0%   { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0); opacity: 0; }
+}
+
+/* Completion pulse: green glow ring expands and fades when an agent finishes */
+@keyframes agent-completion-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6); }
+    70%  { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+    100% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+}
+
+/* Error shake: brief horizontal jitter when an agent fails */
+@keyframes agent-error-shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-2px); }
+    40%      { transform: translateX(2px); }
+    60%      { transform: translateX(-1px); }
+    80%      { transform: translateX(1px); }
+}
+
+/* Needs-input blink: border alternates white / agent identity color */
+@keyframes agent-needs-input-blink {
+    0%, 100% { border-color: white; }
+    50%      { border-color: var(--agent-color, white); }
+}
+
+.animate-agent-dot-appear {
+    animation: agent-dot-appear 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-agent-dot-remove {
+    animation: agent-dot-remove 0.3s ease-in both;
+}
+
+.animate-agent-completion-pulse {
+    animation: agent-completion-pulse 1.2s ease-out;
+}
+
+.animate-agent-error-shake {
+    animation: agent-error-shake 0.3s ease-in-out;
+}
+
+.animate-agent-needs-input-blink {
+    border-width: 2px;
+    animation: agent-needs-input-blink 1s step-end infinite;
+}
 .juno-stagger-4 { animation-delay: 0.2s; }
 .juno-stagger-5 { animation-delay: 0.25s; }
 .juno-stagger-6 { animation-delay: 0.3s; }

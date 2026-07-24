@@ -13,6 +13,23 @@ pub mod window_labels {
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
 }
 
+/// Agent session identity colors (LAC-1432 / LAC-2830 spec section 2).
+/// Fixed 8-color palette assigned slot-by-slot as parallel agent sessions spawn.
+/// Identity colors are used for cursor overlay rings, roster dots, and labels —
+/// never for status dots, which keep the existing blue/yellow/green semantics.
+/// NOTE: keep doc comments in this module free of curly braces — the
+/// generate-ts-constants.js module parser drops constants that follow one.
+pub mod agent_session_colors {
+    pub const SLOT_0: &str = "#3B82F6"; // blue
+    pub const SLOT_1: &str = "#10B981"; // emerald
+    pub const SLOT_2: &str = "#F59E0B"; // amber
+    pub const SLOT_3: &str = "#F43F5E"; // rose
+    pub const SLOT_4: &str = "#8B5CF6"; // violet
+    pub const SLOT_5: &str = "#06B6D4"; // cyan
+    pub const SLOT_6: &str = "#F97316"; // orange
+    pub const SLOT_7: &str = "#EC4899"; // pink
+}
+
 /// UI element IDs used for element targeting and interactions
 pub mod element_ids {
     pub const FLOATING_BAR: &str = "floating-bar";

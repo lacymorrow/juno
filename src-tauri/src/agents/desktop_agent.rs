@@ -54,6 +54,7 @@ impl DesktopAgent {
                 match crate::agent::tools::anthropic_computer_use::execute_computer_tool(
                     &self.app_handle,
                     tool_call.input.clone(),
+                    None,
                 ).await {
                     Ok(result) => Ok(ToolResult {
                         call_id: tool_call.id.clone(),

@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { AgentRosterStrip } from "./AgentRosterStrip";
+import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import type { BarAppearance } from "@/components/bar/barAppearance";
@@ -105,6 +107,7 @@ const FLOATING_BAR_DIMENSIONS = {
   EXPANDED_WIDTH: 280,
   EXPANDED_HEIGHT: 50,
   SHADOW_PADDING: 48, // 24px per side
+  ROSTER_STRIP_HEIGHT: 34, // 22px strip + 6px gap + breathing room (LAC-2830 §3)
 };
 
 /**
@@ -221,6 +224,12 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
    */
   // lastSizeRef not required; managed inside useWindowSize
   const { resizeWindowIfChanged } = useWindowSize(windowLabel);
+
+  // Parallel agent sessions (LAC-1432): the roster strip appears below the
+  // bar when 2+ agents run, so the window grows to make room for it.
+  const { sessions: agentSessions, focusSession } = useAgentSessions();
+  const showRosterStrip = agentSessions.length >= 2;
+
   useEffect(() => {
     const resizeWindow = async () => {
       try {
@@ -232,8 +241,9 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
           UI.BAR_STATES_DICTATION_READY,
           UI.BAR_STATES_SHRINKING,
         ].includes(currentUiState as any);
+        const rosterHeight = showRosterStrip ? FLOATING_BAR_DIMENSIONS.ROSTER_STRIP_HEIGHT : 0;
         const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
-        const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
+        const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING + rosterHeight;
 
         await resizeWindowIfChanged({ width: targetWidth, height: targetHeight });
       } catch (error) {
@@ -242,7 +252,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
     };
 
     resizeWindow();
-  }, [barState.barState]);
+  }, [barState.barState, showRosterStrip]);
 
   // === STANDARDIZED INTERACTION HANDLERS ===
 
@@ -507,7 +517,7 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
   // === RENDER LOGIC ===
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden cursor-grab active:cursor-grabbing flex items-center justify-center p-6" onMouseDown={onDragMouseDown}>
+    <div className="w-screen h-screen relative overflow-hidden cursor-grab active:cursor-grabbing flex flex-col items-center justify-center p-6" onMouseDown={onDragMouseDown}>
       <div
         className={getContainerStyles()}
         style={{
@@ -626,6 +636,16 @@ export function FloatingBar({ barAppearance }: { barAppearance?: BarAppearance }
           </div>
         )}
       </div>
+
+      {/* Parallel-agent roster (LAC-2830 §3): appears when 2+ agents run.
+          Clicking a dot focuses that agent; background sessions keep working. */}
+      {showRosterStrip && (
+        <AgentRosterStrip
+          sessions={agentSessions}
+          onFocus={focusSession}
+          className="mt-1.5"
+        />
+      )}
     </div>
   );
 }

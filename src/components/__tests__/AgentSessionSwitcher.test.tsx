@@ -6,6 +6,7 @@ import type { AgentSessionInfo } from "@/hooks/useAgentSessions";
 const makeSession = (overrides: Partial<AgentSessionInfo> = {}): AgentSessionInfo => ({
 	id: "session-1",
 	agent_name: "orchestrator",
+	color_slot: 0,
 	display_color: "#22c55e",
 	status: "running",
 	current_action: "Clicking Submit button",

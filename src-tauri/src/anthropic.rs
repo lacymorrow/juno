@@ -378,13 +378,9 @@ async fn execute_agent_internal(
     // If the parallel cap is hit we log and continue — the queue guarantees
     // at most one run at a time today, so the cap should never actually bite
     // until LAC-1432 lifts the queue serialization.
-    let _session_handle = {
+    let session_handle = {
         let registry = state.agent_sessions();
-        let color = crate::agents::next_session_color();
-        match registry
-            .create("orchestrator".to_string(), color.clone())
-            .await
-        {
+        match registry.create("orchestrator".to_string()).await {
             Ok(session) => {
                 session.set_status(crate::agents::AgentSessionStatus::Running).await;
                 let handle = crate::agents::SessionHandle::new(
@@ -392,6 +388,14 @@ async fn execute_agent_internal(
                     session,
                     app_handle.clone(),
                 );
+                let focused = handle.is_focused();
+                let snapshot = handle.session().snapshot(focused).await;
+                if let Err(e) = app_handle.emit(
+                    crate::constants::events::agent_sessions::STARTED,
+                    &snapshot,
+                ) {
+                    warn!("Failed to emit agent-session-started: {}", e);
+                }
                 crate::agents::broadcast_sessions_updated(&app_handle, &registry).await;
                 Some(handle)
             }
@@ -404,6 +408,15 @@ async fn execute_agent_internal(
             }
         }
     };
+
+    // Identity context handed to the computer-use tool registration so the
+    // overlay cursor is keyed by session id and drawn in the session color.
+    let session_tool_context = session_handle.as_ref().map(|handle| {
+        crate::agent::tools::anthropic_computer_use::SessionToolContext {
+            session_id: handle.session().id().to_string(),
+            color: handle.session().display_color().to_string(),
+        }
+    });
 
     // TODO: TARS Integration disabled - event system not yet implemented
     // let agent_run_start_event = JunoAgentEvent::AgentRunStart {
@@ -456,7 +469,40 @@ async fn execute_agent_internal(
         }
     };
 
-    let cancel_rx = state.cancel_rx.clone();
+    // Cancellation: merge the global cancel channel (stop-all, legacy paths)
+    // with this session's private cancel channel (per-session cancel from the
+    // switcher UI / focused-escape). The runner and all specialists observe
+    // the merged receiver, so cancelling one session never disturbs others.
+    // The forwarding task exits when the run drops its receivers (merged_tx
+    // closes), so it cannot leak across runs.
+    let cancel_rx = match session_handle.as_ref() {
+        Some(handle) => {
+            let (merged_tx, merged_rx) = tokio::sync::watch::channel(false);
+            let mut global_rx = state.cancel_rx.clone();
+            let mut session_rx = handle.session().cancel_receiver();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = merged_tx.closed() => break,
+                        changed = global_rx.changed() => {
+                            if changed.is_err() || *global_rx.borrow() {
+                                let _ = merged_tx.send(true);
+                                break;
+                            }
+                        }
+                        changed = session_rx.changed() => {
+                            if changed.is_err() || *session_rx.borrow() {
+                                let _ = merged_tx.send(true);
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            merged_rx
+        }
+        None => state.cancel_rx.clone(),
+    };
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
@@ -600,9 +646,10 @@ async fn execute_agent_internal(
 
             // In companion mode, skip all computer use tools — agent observes only
             if !companion_mode {
-                if let Err(e) = BrainFactory::register_computer_use_tools(
+                if let Err(e) = BrainFactory::register_computer_use_tools_for_session(
                     &mut single_agent_tool_provider,
                     app_handle.clone(),
+                    session_tool_context.clone(),
                 )
                 .await
                 {
@@ -764,9 +811,10 @@ async fn execute_agent_internal(
 
             // In companion mode, skip all computer use tools — agent observes only
             if !companion_mode {
-                if let Err(e) = BrainFactory::register_computer_use_tools(
+                if let Err(e) = BrainFactory::register_computer_use_tools_for_session(
                     &mut specialist_tool_provider,
                     app_handle.clone(),
+                    session_tool_context.clone(),
                 )
                 .await
                 {
@@ -995,6 +1043,58 @@ async fn execute_agent_internal(
         "Agent execution marked as finished for ID: {}",
         execution_id
     );
+
+    // --- Parallel-session terminal state (LAC-1432) ---
+    // Give the roster UI a final status snapshot (and lifecycle event) before
+    // the RAII SessionHandle removes the row, and notify the user when a
+    // BACKGROUND session ends — the focused session's outcome is already on
+    // screen, so notifying for it would be noise. Cancellations are always
+    // user-initiated, so they never notify.
+    if let Some(handle) = session_handle.as_ref() {
+        use crate::agents::AgentSessionStatus;
+        let terminal_status = match &agent_result {
+            Ok(_) => AgentSessionStatus::Finished,
+            Err(AgentError::Terminated) => AgentSessionStatus::Cancelled,
+            Err(_) => AgentSessionStatus::Failed,
+        };
+        let was_focused = handle.is_focused();
+        handle.mark_terminal(terminal_status).await;
+
+        if !was_focused
+            && !crate::cli::headless::is_headless_mode()
+            && terminal_status != AgentSessionStatus::Cancelled
+        {
+            let agent_name = handle.session().agent_name().to_string();
+            let (title, message, level) = match &agent_result {
+                Ok(message) => (
+                    format!("{} — Complete", agent_name),
+                    message.chars().take(140).collect::<String>(),
+                    "success".to_string(),
+                ),
+                Err(e) => (
+                    format!("{} — Failed", agent_name),
+                    e.to_string().chars().take(140).collect::<String>(),
+                    "error".to_string(),
+                ),
+            };
+            let data = crate::commands::notifications::NotificationData {
+                title,
+                message,
+                level,
+                important: Some(matches!(terminal_status, AgentSessionStatus::Failed)),
+                timeout: None,
+            };
+            if let Err(e) = crate::commands::notifications::send_notification(
+                app_handle.clone(),
+                state.clone(),
+                data,
+            )
+            .await
+            {
+                warn!("Failed to send background-session notification: {}", e);
+            }
+        }
+    }
 
     // TODO: TARS Integration disabled - event system not yet implemented
     // let agent_run_end_event = JunoAgentEvent::AgentRunEnd {

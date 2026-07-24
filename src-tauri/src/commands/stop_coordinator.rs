@@ -168,10 +168,25 @@ impl StopCoordinator {
         if let Some(agent_op_id) = self.try_register_operation("agent_stop").await {
             info!("[StopCoordinator] Signaling agent cancellation");
 
-            let cancel_requested = *app_state.cancel_rx.borrow();
-            if !cancel_requested {
-                app_state.signal_cancel();
-                cleanup_results.push("Agent cancellation signaled".to_string());
+            // Parallel sessions (LAC-1432): escape/stop targets only the
+            // FOCUSED session so background agents keep working. The global
+            // cancel signal remains the fallback when no session is
+            // registered (legacy paths, headless runs).
+            let cancelled_focused = match app_state.agent_sessions().cancel_focused().await {
+                Ok(cancelled) => cancelled,
+                Err(e) => {
+                    warn!("[StopCoordinator] Failed to cancel focused session: {}", e);
+                    false
+                }
+            };
+            if cancelled_focused {
+                cleanup_results.push("Focused agent session cancelled".to_string());
+            } else {
+                let cancel_requested = *app_state.cancel_rx.borrow();
+                if !cancel_requested {
+                    app_state.signal_cancel();
+                    cleanup_results.push("Agent cancellation signaled".to_string());
+                }
             }
 
             app_state.mark_agent_execution_finished();
