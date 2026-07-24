@@ -28,6 +28,37 @@ pub mod agent {
     pub const QUERY_READY: &str = "agent-query-ready";
 }
 
+/// Parallel agent-session lifecycle events (LAC-1432).
+///
+/// The frontend session-switcher and status bar listen to these events
+/// so the UI stays in sync with the backend `AgentSessionRegistry`
+/// without polling. Every registry mutation that changes visible state
+/// (create / focus / status / current action / remove) fires
+/// `AGENT_SESSIONS_UPDATED` with the full snapshot; `AGENT_SESSION_FOCUSED`
+/// fires additionally when the focused session changes so cursor
+/// overlays can key off the focus change without diffing the list.
+pub mod agent_sessions {
+    /// Full snapshot of all live sessions. Payload is a list of
+    /// AgentSessionInfo values. Also serves as the action-update channel:
+    /// it fires whenever a session's current action or status changes.
+    /// NOTE: no curly braces in doc comments here — generate-ts-constants.js
+    /// silently drops constants that follow one.
+    pub const UPDATED: &str = "agent-sessions-updated";
+    /// Focus changed. Payload has a nullable `session_id` string field.
+    pub const FOCUSED: &str = "agent-session-focused";
+    /// A new session started. Payload: AgentSessionInfo snapshot.
+    pub const STARTED: &str = "agent-session-started";
+    /// A session finished successfully. Payload: AgentSessionInfo snapshot.
+    pub const COMPLETED: &str = "agent-session-completed";
+    /// A session was cancelled by the user. Payload: AgentSessionInfo snapshot.
+    pub const CANCELLED: &str = "agent-session-cancelled";
+    /// A session failed with an error. Payload: AgentSessionInfo snapshot.
+    pub const FAILED: &str = "agent-session-failed";
+    /// A session is blocked waiting on user input. Payload: AgentSessionInfo
+    /// snapshot. Fired while a risky tool batch is pending user approval.
+    pub const NEEDS_INPUT: &str = "agent-session-needs-input";
+}
+
 /// Streaming events
 pub mod streaming {
     pub const TEXT_STREAM: &str = "agent-text-stream";

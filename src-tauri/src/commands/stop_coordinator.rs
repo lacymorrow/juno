@@ -203,13 +203,38 @@ impl StopCoordinator {
         if let Some(agent_op_id) = self.try_register_operation("agent_stop").await {
             info!("[StopCoordinator] Signaling agent cancellation");
 
-            let cancel_requested = *app_state.cancel_rx.borrow();
-            if !cancel_requested {
-                app_state.signal_cancel();
-                cleanup_results.push("Agent cancellation signaled".to_string());
+            // Parallel sessions (LAC-1432): escape/stop targets only the
+            // FOCUSED session so background agents keep working. The global
+            // cancel signal remains the fallback when no session is
+            // registered (legacy paths, headless runs).
+            let cancelled_focused = match app_state.agent_sessions().cancel_focused().await {
+                Ok(cancelled) => cancelled,
+                Err(e) => {
+                    warn!("[StopCoordinator] Failed to cancel focused session: {}", e);
+                    false
+                }
+            };
+            if cancelled_focused {
+                cleanup_results.push("Focused agent session cancelled".to_string());
+            } else {
+                let cancel_requested = *app_state.cancel_rx.borrow();
+                if !cancel_requested {
+                    app_state.signal_cancel();
+                    cleanup_results.push("Agent cancellation signaled".to_string());
+                }
             }
 
-            app_state.mark_agent_execution_finished();
+            // The global "is executing" flag serves the whole app, not just
+            // the focused session. Only clear it when no OTHER session is
+            // still running — the cancelled session itself may linger in the
+            // registry until its run tears down, hence <= 1 rather than == 0.
+            // (Its own run clears the flag again on exit.) Today the queue
+            // serializes runs so this gate is a no-op, but once LAC-1432
+            // lifts the cap, clearing unconditionally would switch off
+            // execution UI while background agents are still working.
+            if !cancelled_focused || app_state.agent_sessions().len().await <= 1 {
+                app_state.mark_agent_execution_finished();
+            }
             self.unregister_operation(&agent_op_id).await;
         }
 

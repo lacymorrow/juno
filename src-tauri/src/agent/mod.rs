@@ -1,6 +1,7 @@
 pub mod core; // Core agent traits and types for orchestration
 pub mod error_recovery; // Enhanced error recovery with checkpoint and rollback
 pub mod implementations;
+pub mod input_arbiter; // Physical input serialization across parallel agent sessions
 pub mod intelligence;
 pub mod multi_agent; // Multi-agent orchestration system
 pub mod prompts; // Centralized prompt management system

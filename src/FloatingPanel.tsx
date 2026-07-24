@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useDragWindow } from "@/hooks/useDragWindow";
+import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { UI } from "@/lib/constants.generated";
 import "./styles/globals.css";
 
@@ -19,13 +20,23 @@ const SETTINGS_HEIGHT = 180 + 24; // 204
 
 // Helper function to get window dimensions for each panel mode
 function getWindowDimensionsForMode(
-  mode: "compact" | "expanded" | "chat" | "settings"
+  mode: "compact" | "expanded" | "chat" | "settings",
+  agentSessionCount = 0
 ) {
   switch (mode) {
     case "compact":
       return { width: COMPACT_WIDTH, height: COMPACT_HEIGHT };
     case "expanded":
-      return { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
+      // Grow with the agent summary rows (LAC-2830 §4) — mirrors the
+      // content growth inside TransparentFloatingPanel, same 160px cap.
+      return {
+        width: EXPANDED_WIDTH,
+        height:
+          EXPANDED_HEIGHT +
+          (agentSessionCount > 0
+            ? Math.min(agentSessionCount * 32 + 60, 160)
+            : 0),
+      };
     case "chat":
       return { width: CHAT_WIDTH, height: CHAT_HEIGHT };
     case "settings":
@@ -42,6 +53,7 @@ export default function FloatingPanel() {
   const [panelMode, setPanelMode] = useState<
     "compact" | "expanded" | "chat" | "settings"
   >("compact");
+  const { sessions: agentSessions } = useAgentSessions();
 
   useEffect(() => {
     let mounted = true;
@@ -98,7 +110,10 @@ export default function FloatingPanel() {
     const resizeWindow = async () => {
       try {
         const appWindow = getCurrentWindow();
-        const dimensions = getWindowDimensionsForMode(panelMode);
+        const dimensions = getWindowDimensionsForMode(
+          panelMode,
+          agentSessions.length
+        );
 
         if (panelMode === "compact") {
           // Compact state - delay to allow CSS transitions to complete
@@ -143,7 +158,7 @@ export default function FloatingPanel() {
         clearTimeout(timeoutId);
       }
     };
-  }, [panelMode, windowReady]);
+  }, [panelMode, windowReady, agentSessions.length]);
 
   // Listen for Rust-based window hover events (same as floating bar)
   useEffect(() => {
