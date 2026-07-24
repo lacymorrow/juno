@@ -30,6 +30,9 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+// Physical-input arbiter + parallel session registry
+use crate::agent::input_arbiter::InputArbiter;
+use crate::agents::session::AgentSessionRegistry;
 use crate::constants::{audio, errors::templates, events};
 use crate::utils::rate_limiter::GlobalRateLimiters;
 use crate::utils::string_cache::format_error_cached;
@@ -342,9 +345,15 @@ pub struct AppState {
     // Rate limiting for command safety
     pub rate_limiters: Arc<GlobalRateLimiters>,
 
+    // Parallel agent sessions (LAC-1432): each running agent gets its own
+    // isolated cancellation, status, and cursor identity. The registry
+    // also owns the shared input arbiter, so coordinate-based physical
+    // input is serialized across sessions while AX-grounded actions
+    // continue to run in parallel.
+    agent_sessions: Arc<AgentSessionRegistry>,
+
     // Per-agent cursor positions for multi-agent overlay (Phase 4)
     pub agent_cursors: Arc<StdMutex<HashMap<String, AgentCursorState>>>,
-
     // Dynamic storage for other state components
     state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
@@ -421,12 +430,38 @@ impl AppState {
             // Use the rate limiters created above
             rate_limiters,
 
+            // Initialize parallel-agent session registry. DEFAULT_COOLDOWN
+            // matches the existing UI-action cooldown used by
+            // anthropic_computer_use.rs; the parallel cap of 12 mirrors the
+            // orchestrator's max_parallel_tasks so we don't outrun the
+            // higher-level scheduler. Note the cap exceeds the 8-slot
+            // SESSION_COLOR_SLOTS identity palette — sessions 9-12 reuse
+            // colors of sessions 1-4, an accepted visual collision per the
+            // LAC-2830 spec (ColorAllocator wraps mod palette size).
+            agent_sessions: Arc::new(AgentSessionRegistry::new(
+                12,
+                Arc::new(InputArbiter::new(
+                    crate::agent::input_arbiter::DEFAULT_COOLDOWN,
+                )),
+            )),
+
             // Initialize per-agent cursor tracking
             agent_cursors: Arc::new(StdMutex::new(HashMap::new())),
-
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
+    }
+
+    /// Registry of parallel agent sessions (LAC-1432).
+    pub fn agent_sessions(&self) -> Arc<AgentSessionRegistry> {
+        self.agent_sessions.clone()
+    }
+
+    /// Shared physical-input arbiter. Callers that emit CGEvent-based
+    /// clicks, drags, or typing must acquire a guard from this arbiter
+    /// so parallel agents cannot fight over the single hardware pointer.
+    pub fn input_arbiter(&self) -> Arc<InputArbiter> {
+        self.agent_sessions.input_arbiter()
     }
 
     /// Initialize rate limiter cleanup task (must be called after Tokio runtime is ready)

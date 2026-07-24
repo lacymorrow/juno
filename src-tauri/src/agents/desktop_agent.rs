@@ -51,9 +51,17 @@ impl DesktopAgent {
             "computer" => {
                 // Delegate to the official Anthropic Computer Use tool implementation
                 // This handles all computer actions: click, type, scroll, screenshot, etc.
+                //
+                // TODO(LAC-3073): session_id is None because the SpecializedAgent
+                // path (AgentFactory → handle_task) is not wired through the
+                // AgentSessionRegistry — no session id exists here yet, and this
+                // instance is shared across runs so it must not store one.
+                // Consequence: roster `current_action` doesn't update during
+                // orchestrated DesktopAgent runs (input arbitration is unaffected).
                 match crate::agent::tools::anthropic_computer_use::execute_computer_tool(
                     &self.app_handle,
                     tool_call.input.clone(),
+                    None,
                 )
                 .await
                 {

@@ -452,6 +452,18 @@ impl BrainFactory {
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
+        Self::register_computer_use_tools_for_session(provider, app_handle, None).await
+    }
+
+    /// Register computer use tools bound to a parallel agent session
+    /// (LAC-1432). The session id keys the desktop overlay cursor and
+    /// attributes physical input in the input arbiter; `None` preserves
+    /// the legacy process-unique cursor identity.
+    pub async fn register_computer_use_tools_for_session(
+        provider: &mut LocalToolProvider,
+        app_handle: tauri::AppHandle,
+        session: Option<crate::agent::tools::anthropic_computer_use::SessionToolContext>,
+    ) -> Result<(), String> {
         info!("🔧 Registering Computer Use tools (race-condition safe)...");
 
         // Use a global mutex to ensure that only one thread can register tools at a time
@@ -476,7 +488,17 @@ impl BrainFactory {
         provider.set_mcp_manager(mcp_manager);
 
         // Register the official Anthropic Computer Use tools (per-provider instance)
-        register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+        match session {
+            Some(ctx) => {
+                crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools_for_session(
+                    provider,
+                    app_handle.clone(),
+                    ctx,
+                )
+                .await?
+            }
+            None => register_anthropic_computer_use_tools(provider, app_handle.clone()).await?,
+        }
 
         // Register additional desktop automation tools (per-provider instance)
         crate::agent::tools::desktop_tools::register_desktop_tools(
