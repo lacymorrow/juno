@@ -786,41 +786,79 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
 }
 
 /// Handle agent transcription stop (threshold reached)
+///
+/// Parallelizes screenshot capture with STT finalization (Whisper inference).
+/// Both operations start at PTT release time and run concurrently:
+/// - stop_dictation() blocks while Whisper processes the audio (~200-400ms)
+/// - capture_screenshot_command() runs in parallel (~50-100ms)
+///
+/// The pre-captured screenshot is stored in AppState and consumed on the
+/// agent's first `computer/screenshot` tool call, saving one full round-trip.
 async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
-    // Stop transcription to trigger final result processing
-    // This will cause the voice-transcription:final-result event to be emitted
-    // which will then process the transcribed text with the agent
+    let ptt_release_time = std::time::Instant::now();
+
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_dictation(
+            // Spawn screenshot capture concurrently with STT finalization.
+            // The screenshot is captured at PTT release time, matching the screen
+            // state the user saw when they spoke.
+            let app_for_screenshot = app_handle.clone();
+            let screenshot_task = tauri::async_runtime::spawn(async move {
+                let state = app_for_screenshot.state::<state::AppState>();
+                crate::commands::core::capture_screenshot_command(app_for_screenshot.clone(), state).await
+            });
+
+            // STT finalization: blocks while Whisper runs inference on the recorded audio.
+            // This will emit voice-transcription:final-result when complete.
+            let stt_result = tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
                 controller_state,
             )
-            .await
-            {
+            .await;
+
+            // Collect screenshot result (it runs concurrently so it should already be done).
+            let screenshot_elapsed = ptt_release_time.elapsed().as_millis();
+            match screenshot_task.await {
+                Ok(Ok(screenshot)) => {
+                    let app_state = app_handle.state::<state::AppState>();
+                    app_state.set_pending_ptt_screenshot(screenshot).await;
+                    info!(
+                        "[PTT Parallel] Screenshot captured and cached in {}ms total elapsed (STT + screenshot ran concurrently)",
+                        screenshot_elapsed
+                    );
+                }
+                Ok(Err(e)) => {
+                    warn!("[PTT Parallel] Screenshot capture failed ({}ms elapsed): {} — agent will capture on demand", screenshot_elapsed, e);
+                }
+                Err(e) => {
+                    warn!("[PTT Parallel] Screenshot task panicked ({}ms elapsed): {} — agent will capture on demand", screenshot_elapsed, e);
+                }
+            }
+
+            match stt_result {
                 Ok(_) => {
-                    info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
+                    info!(
+                        "[Agent Mode] STT finalization complete in {}ms — final result will be processed",
+                        ptt_release_time.elapsed().as_millis()
+                    );
 
                     // Unregister the escape key we registered during transcription start.
                     // The agent query submission path will re-register its own escape user.
                     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                     let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
-
-                    // Note: We don't call synchronize_component_state(false) here because the agent will continue
-                    // processing the transcribed text. The agent-active false will be handled
-                    // after the agent completes processing the query.
                 }
                 Err(e) => {
                     error!("[Agent Mode] Failed to stop transcription: {}", e);
 
-                    // Unregister escape key on failure path
+                    // STT failed — no query will be submitted so discard the cached screenshot.
+                    let app_state = app_handle.state::<state::AppState>();
+                    app_state.take_pending_ptt_screenshot().await;
+
                     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                     let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
 
-                    // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use synchronize_component_state to update UI manager AND emit event
                     if let Err(e) = utils::synchronize_component_state(
                         app_handle,
                         "agent",
@@ -835,14 +873,11 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
         None => {
             warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
 
-            // Unregister escape key on failure path
             let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
             let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
 
-            // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use synchronize_component_state to update UI manager AND emit event
             if let Err(e) = utils::synchronize_component_state(
                 app_handle,
                 "agent",

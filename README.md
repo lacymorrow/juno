@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/juno5.png" alt="Juno" width="128" height="128" />
+  <img src="https://raw.githubusercontent.com/lacymorrow/juno/HEAD/public/juno5.png" alt="Juno" width="128" height="128" />
 </p>
 
 <h1 align="center">Juno</h1>
@@ -183,6 +183,7 @@ See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for details.
 ## Community
 
 - [junebug.ai](https://junebug.ai) — Website & download
+- [Discussions](https://github.com/lacymorrow/juno/discussions) — Questions, use cases, ideas
 - [GitHub Issues](https://github.com/lacymorrow/juno/issues) — Bug reports & feature requests
 - [Blog](https://junebug.ai/blog) — Technical articles about building Juno
 - [@junebug_ai](https://x.com/junebug_ai) — Product updates

@@ -73,9 +73,23 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                     // Get display information to calculate proper scaling
                     match get_display_dimensions() {
                         Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
-                            // Select the best standard resolution for this display
-                            let (standard_width, standard_height) =
-                                crate::constants::ui::standard_resolutions::select_best_resolution(display_width, display_height);
+                            // Select the best standard resolution for this display, model-aware.
+                            // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
+                            // so the image Claude receives matches the declared display_width_px/display_height_px.
+                            use crate::constants::ui::standard_resolutions;
+                            let model = coordinates::get_current_model();
+                            let display_aspect = display_width as f64 / display_height as f64;
+                            let (standard_width, standard_height) = if model.is_empty() {
+                                standard_resolutions::select_best_resolution(display_width, display_height)
+                            } else {
+                                standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+                            };
+                            info!(
+                                "Resolution selection: display {}x{} (aspect {:.3}) → standard {}x{} (model: {})",
+                                display_width, display_height, display_aspect,
+                                standard_width, standard_height,
+                                if model.is_empty() { "unknown/legacy" } else { &model }
+                            );
 
                             // Determine if we need to scale the screenshot to match standard resolution
                             let needs_scaling = original_width != standard_width || original_height != standard_height;
@@ -644,14 +658,9 @@ pub async fn set_agent_trigger_mode(
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    // Get current settings or create default
+    // Get current settings or create default — use struct update so new fields inherit defaults
     let mut agent_settings = settings_manager.get_agent_settings().await
-        .unwrap_or_else(|_| AgentSettings {
-            trigger_mode: mode.clone(),
-            execution_mode: "multi".to_string(),
-            big_cursor_enabled: crate::constants::settings::defaults::BIG_CURSOR_ENABLED,
-            big_cursor_scale: crate::constants::settings::defaults::BIG_CURSOR_SCALE,
-        });
+        .unwrap_or_else(|_| AgentSettings { trigger_mode: mode.clone(), ..AgentSettings::default() });
 
     // Update trigger mode
     agent_settings.trigger_mode = mode.clone();

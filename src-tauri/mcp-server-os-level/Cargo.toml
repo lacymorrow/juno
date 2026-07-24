@@ -1,6 +1,6 @@
 [package]
 name = "computer-use-ai-sdk"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 description = "Desktop UI automation through accessibility APIs"
 authors = ["m13v, louis030195"]
@@ -36,6 +36,7 @@ accessibility-sys = "0.2.0"
 core-foundation = "0.10.0"
 core-foundation-sys = "0.8.7"
 core-graphics = "0.24.0"
+foreign-types = "0.5"
 image = { version = "0.25.1", features = ["png", "jpeg"] }
 libc = "0.2"
 objc = "0.2.7"

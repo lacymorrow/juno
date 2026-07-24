@@ -1,7 +1,7 @@
 import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { WINDOW_LABELS } from "@/lib/constants.generated";
 import { getPermissionsStatus } from "@/lib/permissions-service";
 
@@ -33,16 +33,26 @@ export default function OnboardingWindow() {
     return () => mediaQuery.removeEventListener("change", handler);
   }, []);
 
-  // Notify backend that onboarding is active (registers escape key, suppresses agent/dictation actions)
+  // Deferred cleanup timer ref — shared across StrictMode mount/unmount cycles.
+  const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear onboarding active state when this window is destroyed.
+  // The backend sets active=true before opening this window, so no mount-time call is needed.
+  // The deferred setTimeout(0) lets React StrictMode's synchronous remount cancel the cleanup
+  // before it fires, preventing a false→true flap on every startup in development.
   useEffect(() => {
-    invoke("set_onboarding_active", { active: true }).catch((e) =>
-      console.warn("Failed to set onboarding active:", e)
-    );
+    if (cleanupTimerRef.current !== null) {
+      clearTimeout(cleanupTimerRef.current);
+      cleanupTimerRef.current = null;
+    }
 
     return () => {
-      invoke("set_onboarding_active", { active: false }).catch((e) =>
-        console.warn("Failed to clear onboarding active:", e)
-      );
+      cleanupTimerRef.current = setTimeout(() => {
+        cleanupTimerRef.current = null;
+        invoke("set_onboarding_active", { active: false }).catch((e) =>
+          console.warn("Failed to clear onboarding active:", e)
+        );
+      }, 0);
     };
   }, []);
 

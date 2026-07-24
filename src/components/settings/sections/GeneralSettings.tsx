@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { Slider } from "@/components/ui/slider";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { Eye, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
@@ -37,6 +37,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
   const [bigCursorScale, setBigCursorScale] = useState(3.0);
   const [bigCursorLoading, setBigCursorLoading] = useState(false);
+  const [companionMode, setCompanionMode] = useState(false);
+  const [companionModeLoading, setCompanionModeLoading] = useState(false);
+  const [systemCursorSize, setSystemCursorSize] = useState(1.0);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -63,6 +66,12 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         setBigCursorEnabled(cursorEnabled);
         const cursorScale = await invoke<number>("get_big_cursor_scale");
         setBigCursorScale(cursorScale);
+
+        // Load companion mode
+        const companionEnabled = await invoke<boolean>("get_companion_mode");
+        setCompanionMode(companionEnabled);
+        const sysSize = await invoke<number>("get_system_cursor_size");
+        setSystemCursorSize(sysSize);
       } catch (error) {
         console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
@@ -152,6 +161,10 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     try {
       await invoke("set_big_cursor_enabled", { enabled });
       setBigCursorEnabled(enabled);
+      if (!enabled) {
+        const sysSize = await invoke<number>("get_system_cursor_size");
+        setSystemCursorSize(sysSize);
+      }
     } catch (error) {
       console.error("Failed to update big cursor setting:", error);
       toast.error("Failed to update big cursor setting");
@@ -171,6 +184,20 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     } catch (error) {
       console.error("Failed to persist big cursor scale:", error);
       toast.error("Failed to update cursor scale");
+    }
+  };
+
+  const handleCompanionModeChange = async (enabled: boolean) => {
+    if (companionModeLoading) return;
+    setCompanionModeLoading(true);
+    try {
+      await invoke("set_companion_mode", { enabled });
+      setCompanionMode(enabled);
+    } catch (error) {
+      console.error("Failed to update companion mode:", error);
+      toast.error("Failed to update companion mode");
+    } finally {
+      setCompanionModeLoading(false);
     }
   };
 
@@ -391,6 +418,42 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
       <Card>
         <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Eye className="w-5 h-5 text-purple-500" />
+            Companion Mode
+          </CardTitle>
+          <CardDescription>
+            Observe-only mode: Juno watches your screen and advises without
+            clicking, typing, or taking any actions
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label
+                htmlFor="companion-mode"
+                className="text-sm font-medium"
+              >
+                Enable Companion Mode
+              </Label>
+              <p className="text-xs text-gray-500">
+                Ask questions like "What does this error mean?" or "Walk me
+                through this UI" — Juno describes and advises but never
+                acts
+              </p>
+            </div>
+            <Switch
+              id="companion-mode"
+              checked={companionMode}
+              onCheckedChange={handleCompanionModeChange}
+              disabled={companionModeLoading}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Big Cursor</CardTitle>
           <CardDescription>
             Make the mouse cursor larger while the agent is controlling
@@ -398,6 +461,29 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {systemCursorSize > 1.0 && (
+            <div className="flex items-center justify-between rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                Cursor is currently enlarged ({systemCursorSize.toFixed(1)}x)
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await invoke("test_cursor_restore");
+                    const sysSize = await invoke<number>("get_system_cursor_size");
+                    setSystemCursorSize(sysSize);
+                    toast.success("Cursor restored to normal");
+                  } catch (e) {
+                    toast.error("Failed to restore cursor");
+                  }
+                }}
+              >
+                Reset to Normal
+              </Button>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
@@ -443,6 +529,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_scale", { scale: bigCursorScale });
+                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      setSystemCursorSize(sysSize);
                       toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
                     } catch (e) {
                       toast.error("Failed to test cursor scale");
@@ -457,6 +545,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_restore");
+                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      setSystemCursorSize(sysSize);
                       toast.success("Cursor restored to normal");
                     } catch (e) {
                       toast.error("Failed to restore cursor");

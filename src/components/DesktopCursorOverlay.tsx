@@ -1,351 +1,1215 @@
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState, useRef } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useCallback, useEffect, useReducer, useRef } from "react";
+import {
+  getCurrentWindow,
+  LogicalSize,
+  PhysicalPosition,
+  availableMonitors,
+} from "@tauri-apps/api/window";
+import { useEventListener } from "@/hooks/useEventListener";
+import { EVENTS } from "@/lib/constants.generated";
 
-// Cursor highlight and click visualization types
-type CursorHighlight = {
-  x: number;
-  y: number;
-  active: boolean;
-  timestamp: number;
+type CursorState = "idle" | "moving" | "clicking" | "thinking";
+
+// Maximum number of simultaneous agent cursors rendered.
+const MAX_AGENT_SLOTS = 8;
+const TRAIL_COUNT = 5;
+// Hot-spot matches cx/cy of the tip circle in JunoCursorShape (SVG viewBox coords).
+const HOT_SPOT = 5;
+const CURSOR_FADE_DELAY_MS = 1500;
+const CLICK_ANIM_DURATION_MS = 700;
+
+// LAC-1920: Pre-action targeting reticle duration. Matches the 500ms cooldown
+// between computer-use actions so the reticle finishes fading just as the
+// action lands. Must match the longest keyframe in the juno-preview-* set.
+const PREVIEW_ANIM_DURATION_MS = 500;
+
+// Human-readable labels shown above the reticle when the agent is about to act.
+const PREVIEW_ACTION_LABELS: Record<string, string> = {
+  left_click: "clicking",
+  right_click: "right-clicking",
+  middle_click: "middle-clicking",
+  double_click: "double-clicking",
+  triple_click: "triple-clicking",
+  left_click_drag: "dragging",
+  mouse_move: "moving to",
+  left_mouse_down: "pressing",
+  left_mouse_up: "releasing",
+  scroll: "scrolling",
 };
 
-type ClickVisualization = {
+// Cached MediaQueryList — avoids creating a new object on every 60fps animation frame.
+const REDUCED_MOTION_MQL =
+  typeof window !== "undefined"
+    ? window.matchMedia?.("(prefers-reduced-motion: reduce)")
+    : null;
+
+// ─── POINT flying cursor ───────────────────────────────────────────────────────
+const FLIGHT_DURATION = 380; // ms — bezier arc from last landed to target
+const LINGER_DURATION = 1600; // ms — display time after landing before hiding
+
+type CursorPointPayload = {
   x: number;
   y: number;
-  color: string;
-  id: number;
-  timestamp: number;
+  label: string | null;
+  screen: number | null;
 };
 
-const DesktopCursorOverlay = () => {
-  const [cursorHighlight, setCursorHighlight] =
-    useState<CursorHighlight | null>(null);
-  const [clickVisualizations, setClickVisualizations] = useState<
-    ClickVisualization[]
-  >([]);
-  const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false"
+// Quadratic bezier: P(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+function bezier(t: number, p0: number, p1: number, p2: number): number {
+  const mt = 1 - t;
+  return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
+}
+
+// ─── Onboarding cursor constants ─────────────────────────────────────────────
+// Accent color (#8B5CF6) matches JunoCursorShape and the app's brand violet.
+const ONBOARDING_ACCENT = "#8B5CF6";
+// Pulsing ring: 24px base radius, 4px amplitude (expressed in CSS scale), 1.2 Hz (833ms period)
+const RING_BASE_RADIUS = 24;
+// RING_AMPLITUDE_PX = 4 is encoded in the CSS keyframe scale factor: 1.17 ≈ (24+4)/24
+const RING_PERIOD_MS = 833;
+// Speech bubble appears 200ms after cursor arrives, text streams at 25ms/char
+const BUBBLE_APPEAR_DELAY_MS = 200;
+const BUBBLE_CHAR_INTERVAL_MS = 25;
+
+// ─── CSS Animations ───────────────────────────────────────────────────────────
+const CURSOR_CSS = `
+  .juno-cursor {
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+    will-change: transform, opacity;
+    transition: opacity 0.35s ease;
+  }
+
+  .juno-cursor--idle svg {
+    animation: juno-breathe 3s ease-in-out infinite;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
+
+  .juno-cursor--thinking svg {
+    animation: juno-wobble 0.55s ease-in-out infinite;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
+
+  .juno-cursor--clicking svg {
+    animation: juno-recoil 0.22s ease-out;
+    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  }
+
+  @keyframes juno-breathe {
+    0%, 100% { opacity: 0.72; transform: scale(1); }
+    50%       { opacity: 0.96; transform: scale(1.05); }
+  }
+
+  @keyframes juno-wobble {
+    0%, 100% { transform: rotate(0deg)   translateX(0px); }
+    20%      { transform: rotate(-5deg)  translateX(-1.5px); }
+    40%      { transform: rotate(4deg)   translateX(1.5px); }
+    60%      { transform: rotate(-3deg)  translateX(-1px); }
+    80%      { transform: rotate(2.5deg) translateX(0.8px); }
+  }
+
+  @keyframes juno-recoil {
+    0%   { transform: scale(1)    rotate(0deg); }
+    30%  { transform: scale(0.83) rotate(-7deg); }
+    100% { transform: scale(1)    rotate(0deg); }
+  }
+
+  @keyframes juno-ripple {
+    0%   { transform: scale(0.2); opacity: 1; }
+    100% { transform: scale(3.2); opacity: 0; }
+  }
+  .juno-ripple-active {
+    animation: juno-ripple 0.7s ease-out forwards;
+  }
+
+  /* LAC-1920: Pre-action targeting reticle — shows BEFORE a computer-use
+     action fires. Container positioned via left/top; children use
+     translate(-50%, -50%) so scale animations start centred on the point. */
+  @keyframes juno-preview-expand {
+    0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.8; }
+    60%  { transform: translate(-50%, -50%) scale(1.1); opacity: 0.5; }
+    100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0;   }
+  }
+  @keyframes juno-preview-pulse {
+    0%   { transform: translate(-50%, -50%) scale(0.6);  opacity: 0;   }
+    20%  { transform: translate(-50%, -50%) scale(1.1);  opacity: 1;   }
+    80%  { transform: translate(-50%, -50%) scale(1.0);  opacity: 0.9; }
+    100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0;   }
+  }
+  @keyframes juno-preview-dot {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+    20%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes juno-preview-label {
+    0%   { opacity: 0; transform: translateX(-50%) translateY(4px);  }
+    20%  { opacity: 1; transform: translateX(-50%) translateY(0);    }
+    70%  { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-2px); }
+  }
+  .juno-preview-active .juno-preview-outer { animation: juno-preview-expand 0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-inner { animation: juno-preview-pulse  0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-dot   { animation: juno-preview-dot    0.5s ease-out forwards; }
+  .juno-preview-active .juno-preview-label { animation: juno-preview-label  0.5s ease-out forwards; }
+
+  /* ── Onboarding cursor animations ─────────────────────────────────────── */
+
+  /* Pulsing highlight ring at 1.2Hz (833ms period) */
+  @keyframes onb-ring-pulse {
+    0%, 100% { transform: scale(1);   opacity: 0.9; }
+    50%       { transform: scale(1.17); opacity: 0.55; }
+  }
+  .onb-ring-active {
+    animation: onb-ring-pulse ${RING_PERIOD_MS}ms ease-in-out infinite;
+  }
+
+  /* Bubble fade-in */
+  @keyframes onb-bubble-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0)   scale(1); }
+  }
+  .onb-bubble-visible {
+    animation: onb-bubble-in 0.18s ease-out forwards;
+  }
+
+  /* Celebration: cursor spin */
+  @keyframes onb-celebrate-spin {
+    0%   { transform: rotate(0deg) scale(1); }
+    30%  { transform: rotate(20deg) scale(1.15); }
+    60%  { transform: rotate(-10deg) scale(1.1); }
+    100% { transform: rotate(0deg) scale(1); }
+  }
+  .onb-celebrate-spin {
+    animation: onb-celebrate-spin 0.55s ease-in-out forwards;
+  }
+
+  /* Glow burst ring */
+  @keyframes onb-glow-burst {
+    0%   { transform: scale(0.3); opacity: 1; }
+    100% { transform: scale(2.8); opacity: 0; }
+  }
+  .onb-glow-burst-active {
+    animation: onb-glow-burst 0.6s ease-out forwards;
+  }
+
+  /* Celebration particle */
+  @keyframes onb-particle-fly {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { opacity: 0; }
+  }
+`;
+
+// ─── Cursor SVG ───────────────────────────────────────────────────────────────
+// Arrow cursor: hot-spot at (5, 5). `color` controls the gradient stop.
+const JunoCursorShape = ({ color = "#8B5CF6" }: { color?: string }) => {
+  const gradId = `juno-body-${color.replace("#", "")}`;
+  return (
+    <svg
+      width="36"
+      height="44"
+      viewBox="0 0 36 44"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ display: "block" }}
+      aria-hidden="true"
+    >
+      <defs>
+        <filter id="juno-glow" x="-65%" y="-55%" width="230%" height="210%">
+          <feGaussianBlur stdDeviation="2.5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        <linearGradient
+          id={gradId}
+          x1="5" y1="5" x2="30" y2="42"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0%" stopColor={color} stopOpacity="0.95" />
+          <stop offset="100%" stopColor="rgba(12, 8, 55, 0.92)" />
+        </linearGradient>
+      </defs>
+
+      {/* Drop shadow */}
+      <path
+        d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
+        fill="rgba(0,0,0,0.32)"
+        transform="translate(1.5, 1.5)"
+      />
+      {/* Arrow body */}
+      <path
+        d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
+        fill={`url(#${gradId})`}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        filter="url(#juno-glow)"
+        strokeOpacity="0.88"
+      />
+      {/* Hot-spot glow ring */}
+      <circle cx="5" cy="5" r="4.5" fill={color} fillOpacity="0.45" filter="url(#juno-glow)" />
+      <circle cx="5" cy="5" r="2" fill="white" />
+    </svg>
   );
-  const overlayWindowRef = useRef<any>(null);
+};
 
-  // Initialize overlay window reference and create window if needed
-  useEffect(() => {
-    const initializeOverlay = async () => {
-      // Try to get existing window
-      let window = WebviewWindow.getByLabel("desktop-cursor-overlay");
+// ─── Per-slot cursor refs ─────────────────────────────────────────────────────
+interface SlotRefs {
+  cursor: HTMLDivElement | null;
+  trails: (HTMLDivElement | null)[];
+  ripples: (HTMLDivElement | null)[];
+  hideTimer: ReturnType<typeof setTimeout> | null;
+  clickTimer: ReturnType<typeof setTimeout> | null;
+  trailBuffer: { x: number; y: number }[];
+  state: CursorState;
+  nextRippleIdx: number;
+}
 
-      if (!window) {
-        // Window doesn't exist, create it
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("open_desktop_cursor_overlay");
-          // Get the window reference after creation
-          window = WebviewWindow.getByLabel("desktop-cursor-overlay");
-        } catch (error) {
-          console.error(
-            "Failed to create desktop cursor overlay window:",
-            error
-          );
-          return;
-        }
+// ─── Reducer for active agent-slot mapping ────────────────────────────────────
+type SlotMap = Map<string, number>; // agentId → slot index
+
+type SlotAction =
+  | { type: "assign"; agentId: string; slot: number }
+  | { type: "release"; agentId: string };
+
+function slotReducer(map: SlotMap, action: SlotAction): SlotMap {
+  const next = new Map(map);
+  if (action.type === "assign") {
+    next.set(action.agentId, action.slot);
+  } else {
+    next.delete(action.agentId);
+  }
+  return next;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+// AgentCursorUpdate payload from backend
+interface AgentCursorUpdate {
+  agent_id: string;
+  x: number;
+  y: number;
+  state: string;
+  color: string;
+}
+
+interface AgentCursorRemove {
+  agent_id: string;
+}
+
+export const DesktopCursorOverlay = () => {
+  // Slot assignment: agentId → 0..MAX_AGENT_SLOTS-1
+  const [slotMap, dispatch] = useReducer(slotReducer, new Map<string, number>());
+
+  // Per-slot imperative refs (indexed 0..MAX_AGENT_SLOTS-1)
+  const slots = useRef<SlotRefs[]>(
+    Array.from({ length: MAX_AGENT_SLOTS }, () => ({
+      cursor: null,
+      trails: Array<null>(TRAIL_COUNT).fill(null),
+      ripples: Array<null>(5).fill(null),
+      hideTimer: null,
+      clickTimer: null,
+      trailBuffer: [],
+      state: "idle" as CursorState,
+      nextRippleIdx: 0,
+    }))
+  );
+
+  // Colors per slot (assigned at first AgentCursorUpdate, persisted for the session)
+  const slotColors = useRef<(string | null)[]>(Array(MAX_AGENT_SLOTS).fill(null));
+
+  // Tracks which slots are currently occupied
+  const occupiedSlots = useRef<Set<number>>(new Set());
+
+  // ── LAC-1920: Pre-action reticle refs ─────────────────────────────────────
+  // Single global reticle (not per-slot) — backend emits one preview per
+  // computer-use action; agents on different slots share the same reticle.
+  const previewRef = useRef<HTMLDivElement>(null);
+  const previewLabelRef = useRef<HTMLDivElement>(null);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── POINT flying cursor refs ───────────────────────────────────────────────
+  const flyDivRef = useRef<HTMLDivElement | null>(null);
+  const flyLabelRef = useRef<HTMLDivElement | null>(null);
+  const flyRippleRef = useRef<HTMLDivElement | null>(null);
+  const flyAnimFrameRef = useRef<number | null>(null);
+  const flyLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLandedRef = useRef<{ x: number; y: number } | null>(null);
+
+  // ── Onboarding cursor refs (cursor-animation-frame driven) ─────────────────
+  // All positioned imperatively to avoid 60fps React re-renders.
+  const onbCursorRef = useRef<HTMLDivElement | null>(null);     // cursor sprite
+  const onbRingRef = useRef<HTMLDivElement | null>(null);       // pulsing highlight ring
+  const onbBubbleRef = useRef<HTMLDivElement | null>(null);     // speech bubble container
+  const onbBubbleTextRef = useRef<HTMLSpanElement | null>(null);// streamed text inside bubble
+  const onbGlowRef = useRef<HTMLDivElement | null>(null);       // celebration glow burst ring
+  const onbParticlesRef = useRef<(HTMLDivElement | null)[]>([]); // 6 particle dots
+  const onbBubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onbBubbleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Current cursor position — bubble needs this to anchor itself
+  const onbPosRef = useRef<{ x: number; y: number }>({ x: -300, y: -300 });
+
+  // ── Slot allocation ────────────────────────────────────────────────────────
+  const getOrAssignSlot = (agentId: string, map: SlotMap): number | null => {
+    const existing = map.get(agentId);
+    if (existing !== undefined) return existing;
+
+    for (let i = 0; i < MAX_AGENT_SLOTS; i++) {
+      if (!occupiedSlots.current.has(i)) {
+        occupiedSlots.current.add(i);
+        dispatch({ type: "assign", agentId, slot: i });
+        return i;
       }
-
-      overlayWindowRef.current = window;
-    };
-
-    initializeOverlay();
-  }, []);
-
-  // Check localStorage for settings changes
-  useEffect(() => {
-    const checkSettings = () => {
-      const enabled =
-        localStorage.getItem("juno-show-desktop-cursor-visualization") !==
-        "false";
-      setIsEnabled(enabled);
-    };
-
-    checkSettings();
-    const interval = setInterval(checkSettings, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Position overlay window at cursor location with throttling
-  const lastPositionUpdate = useRef<number>(0);
-  const positionUpdateThrottle = 16; // ~60fps throttling
-
-  const positionOverlay = async (
-    x: number,
-    y: number,
-    force: boolean = false
-  ) => {
-    if (!overlayWindowRef.current) return;
-
-    // Throttle position updates unless forced (for initial positioning)
-    const now = Date.now();
-    if (!force && now - lastPositionUpdate.current < positionUpdateThrottle) {
-      return;
     }
-    lastPositionUpdate.current = now;
+    return null; // all slots full
+  };
 
-    try {
-      // Position the window slightly offset from cursor to center the visualization
-      const offsetX = Math.max(0, x - 100); // Center 200px visualization circle
-      const offsetY = Math.max(0, y - 100);
-
-      await overlayWindowRef.current.setPosition({
-        type: "Logical",
-        x: offsetX,
-        y: offsetY,
-      });
-
-      // Resize window to accommodate visualization (200x200 for circles)
-      await overlayWindowRef.current.setSize({
-        type: "Logical",
-        width: 200,
-        height: 200,
-      });
-    } catch (error) {
-      console.warn("Failed to position overlay window:", error);
+  // ── Imperative slot helpers ────────────────────────────────────────────────
+  const applySlotState = (slot: SlotRefs, state: CursorState) => {
+    slot.state = state;
+    if (slot.cursor) {
+      slot.cursor.className = `juno-cursor juno-cursor--${state}`;
     }
   };
 
-  // Listen for cursor highlight events
-  useEffect(() => {
-    if (!isEnabled) return;
+  const moveSlotTo = (slot: SlotRefs, x: number, y: number) => {
+    if (!slot.cursor) return;
+    slot.cursor.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
 
-    let mounted = true;
-    const unlistenFns: (() => void)[] = [];
+    slot.trailBuffer.push({ x, y });
+    if (slot.trailBuffer.length > TRAIL_COUNT) slot.trailBuffer.shift();
 
-    const setupListeners = async () => {
-      try {
-        // Cursor highlight start
-        const unlistenStart = await listen<[number, number]>(
-          "ui-cursor-highlight-start",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y] = event.payload;
-            setCursorHighlight({ x, y, active: true, timestamp: Date.now() });
-            await positionOverlay(x, y, true);
-            if (overlayWindowRef.current) {
-              await overlayWindowRef.current.show();
-            }
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenStart);
-        else unlistenStart();
+    const isMoving = slot.state === "moving";
+    slot.trails.forEach((el, i) => {
+      if (!el) return;
+      const pos = slot.trailBuffer[slot.trailBuffer.length - 1 - i];
+      if (pos && isMoving) {
+        el.style.transform = `translate(${pos.x - 4}px, ${pos.y - 4}px)`;
+        el.style.opacity = String(((TRAIL_COUNT - i) / TRAIL_COUNT) * 0.22);
+      } else {
+        el.style.opacity = "0";
+      }
+    });
+  };
 
-        // Cursor highlight move
-        const unlistenMove = await listen<[number, number]>(
-          "ui-cursor-highlight-move",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y] = event.payload;
-            setCursorHighlight((prev) =>
-              prev ? { ...prev, x, y, timestamp: Date.now() } : null
-            );
-            await positionOverlay(x, y);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenMove);
-        else unlistenMove();
+  const revealSlot = (slot: SlotRefs) => {
+    if (slot.hideTimer) { clearTimeout(slot.hideTimer); slot.hideTimer = null; }
+    if (slot.cursor) slot.cursor.style.opacity = "1";
+  };
 
-        // Cursor highlight stop
-        const unlistenStop = await listen<[number, number]>(
-          "ui-cursor-highlight-stop",
-          async () => {
-            if (!mounted) return;
-            setCursorHighlight(null);
-            setTimeout(async () => {
-              if (mounted && overlayWindowRef.current) {
-                await overlayWindowRef.current.hide();
-              }
-            }, 500);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenStop);
-        else unlistenStop();
+  const scheduleSlotFade = (slot: SlotRefs, delayMs: number) => {
+    if (slot.hideTimer) clearTimeout(slot.hideTimer);
+    slot.hideTimer = setTimeout(() => {
+      if (slot.cursor) slot.cursor.style.opacity = "0";
+      slot.trailBuffer = [];
+      slot.trails.forEach((el) => { if (el) el.style.opacity = "0"; });
+    }, delayMs);
+  };
 
-        // Click visualizations
-        const unlistenClick = await listen<[number, number, string]>(
-          "click-visualization",
-          async (event) => {
-            if (!mounted) return;
-            const [x, y, color] = event.payload;
-            const newClick: ClickVisualization = {
-              x,
-              y,
-              color,
-              id: Date.now(),
-              timestamp: Date.now(),
-            };
+  const fireSlotRipple = (slot: SlotRefs, x: number, y: number, color: string) => {
+    const idx = slot.nextRippleIdx % slot.ripples.length;
+    slot.nextRippleIdx++;
+    const el = slot.ripples[idx];
+    if (!el) return;
+    el.style.left = `${x - 20}px`;
+    el.style.top = `${y - 20}px`;
+    el.style.borderColor = color;
+    el.style.backgroundColor = `${color}18`;
+    el.classList.remove("juno-ripple-active");
+    void el.offsetWidth;
+    el.classList.add("juno-ripple-active");
+  };
 
-            setClickVisualizations((prev) => [...prev, newClick]);
-            await positionOverlay(x, y, true);
-            if (overlayWindowRef.current) {
-              await overlayWindowRef.current.show();
-            }
-            setTimeout(async () => {
-              if (mounted && overlayWindowRef.current) {
-                await overlayWindowRef.current.hide();
-              }
-            }, 1000);
-          }
-        );
-        if (mounted) unlistenFns.push(unlistenClick);
-        else unlistenClick();
-      } catch (error) {
-        console.error("Failed to setup cursor overlay listeners:", error);
+  // ── LAC-1920: Fire pre-action targeting reticle at (x, y) ────────────────
+  const firePreview = (x: number, y: number, action: string) => {
+    const el = previewRef.current;
+    if (!el) return;
+
+    // Position container so its centre sits at (x, y). Children use
+    // translate(-50%, -50%) to centre on the container.
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+
+    // Update label text (raw action name if we have no friendly label).
+    if (previewLabelRef.current) {
+      previewLabelRef.current.textContent =
+        PREVIEW_ACTION_LABELS[action] ?? action;
+    }
+
+    // Restart animation — same forced-reflow trick as fireSlotRipple.
+    el.classList.remove("juno-preview-active");
+    void el.offsetWidth; // intentional forced reflow — do not remove
+    el.classList.add("juno-preview-active");
+
+    // Clear active class once the animation finishes so the reticle doesn't
+    // linger as a static shape (all animations use `forwards` at opacity 0).
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      if (previewRef.current) {
+        previewRef.current.classList.remove("juno-preview-active");
+      }
+    }, PREVIEW_ANIM_DURATION_MS);
+  };
+
+  // ── POINT: fly cursor to (targetX, targetY) along a bezier arc ───────────
+  const flyTo = useCallback((targetX: number, targetY: number, label: string | null) => {
+    if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
+    if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
+
+    const startX = lastLandedRef.current?.x ?? targetX - 250;
+    const startY = lastLandedRef.current?.y ?? targetY - 80;
+
+    // Perpendicular bezier control point — 15% of flight distance, max 80px arc
+    const midX = (startX + targetX) / 2;
+    const midY = (startY + targetY) / 2;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const perp = Math.min(0.15, 80 / Math.max(dist, 1));
+    const ctrlX = midX - dy * perp;
+    const ctrlY = midY + dx * perp;
+
+    if (flyDivRef.current) {
+      flyDivRef.current.style.opacity = "1";
+      flyDivRef.current.style.transform = `translate(${startX}px, ${startY}px)`;
+    }
+    if (flyLabelRef.current) {
+      flyLabelRef.current.style.opacity = "0";
+      flyLabelRef.current.textContent = label ?? "";
+    }
+    if (flyRippleRef.current) {
+      flyRippleRef.current.style.opacity = "0";
+      flyRippleRef.current.classList.remove("juno-ripple-active");
+    }
+
+    const startTime = Date.now();
+    const tick = () => {
+      const elapsed = Date.now() - startTime;
+      const tRaw = Math.min(elapsed / FLIGHT_DURATION, 1);
+      // Ease-in-out cubic
+      const t = tRaw < 0.5 ? 4 * tRaw * tRaw * tRaw : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
+      const curX = bezier(t, startX, ctrlX, targetX);
+      const curY = bezier(t, startY, ctrlY, targetY);
+      if (flyDivRef.current) {
+        flyDivRef.current.style.transform = `translate(${curX}px, ${curY}px)`;
+      }
+      if (tRaw < 1) {
+        flyAnimFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        lastLandedRef.current = { x: targetX, y: targetY };
+        if (label && flyLabelRef.current) flyLabelRef.current.style.opacity = "1";
+        if (flyRippleRef.current) {
+          flyRippleRef.current.style.opacity = "1";
+          flyRippleRef.current.classList.remove("juno-ripple-active");
+          void flyRippleRef.current.offsetWidth;
+          flyRippleRef.current.classList.add("juno-ripple-active");
+        }
+        flyLingerRef.current = setTimeout(() => {
+          if (flyDivRef.current) flyDivRef.current.style.opacity = "0";
+          if (flyLabelRef.current) flyLabelRef.current.style.opacity = "0";
+        }, LINGER_DURATION);
       }
     };
+    flyAnimFrameRef.current = requestAnimationFrame(tick);
+  }, []);
 
-    setupListeners();
+  // ── Window setup ──────────────────────────────────────────────────────────
+  // Phase D / LAC-1882: span the union of all connected monitors so the
+  // onboarding cursor can fly to a System Settings window on a non-primary
+  // display. Single-monitor users get the same coverage as before.
+  useEffect(() => {
+    let mounted = true;
+    const setupWindow = async () => {
+      try {
+        const win = getCurrentWindow();
+        // Compute the bounding rectangle that contains every monitor. Each
+        // monitor has physical { position: {x,y}, size: {width,height} }.
+        // We fall back to window.screen if the API errors (e.g. headless test).
+        let originX = 0;
+        let originY = 0;
+        let spanWidth = window.screen.width;
+        let spanHeight = window.screen.height;
+        try {
+          const monitors = await availableMonitors();
+          if (monitors.length > 0) {
+            let minX = Number.POSITIVE_INFINITY;
+            let minY = Number.POSITIVE_INFINITY;
+            let maxX = Number.NEGATIVE_INFINITY;
+            let maxY = Number.NEGATIVE_INFINITY;
+            for (const m of monitors) {
+              // Tauri monitor coords are physical pixels; for setSize we use
+              // logical pixels (assume scale factor 1 for span; the overlay
+              // is transparent + pointer-events:none so an oversize window
+              // is harmless).
+              const scale = m.scaleFactor || 1;
+              const lx = m.position.x / scale;
+              const ly = m.position.y / scale;
+              const lw = m.size.width / scale;
+              const lh = m.size.height / scale;
+              if (lx < minX) minX = lx;
+              if (ly < minY) minY = ly;
+              if (lx + lw > maxX) maxX = lx + lw;
+              if (ly + lh > maxY) maxY = ly + lh;
+            }
+            if (Number.isFinite(minX) && Number.isFinite(maxX)) {
+              originX = minX;
+              originY = minY;
+              spanWidth = maxX - minX;
+              spanHeight = maxY - minY;
+            }
+          }
+        } catch (err) {
+          console.debug("[JunoCursor] availableMonitors failed; using primary display:", err);
+        }
 
+        await Promise.all([
+          win.setSize(new LogicalSize(spanWidth, spanHeight)),
+          // PhysicalPosition is in raw pixels; multiplying by primary scale is
+          // approximate, but Tauri normalizes by primary monitor's scale.
+          win.setPosition(new PhysicalPosition(Math.round(originX), Math.round(originY))),
+          win.setIgnoreCursorEvents(true),
+        ]);
+        if (mounted) await win.show();
+      } catch (err) {
+        console.error("[JunoCursor] Window setup failed:", err);
+      }
+    };
+    setupWindow();
     return () => {
       mounted = false;
-      for (const unlisten of unlistenFns) {
-        unlisten();
-      }
+      slots.current.forEach((slot) => {
+        if (slot.hideTimer) clearTimeout(slot.hideTimer);
+        if (slot.clickTimer) clearTimeout(slot.clickTimer);
+      });
+      if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
+      if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
+      if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
+      if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
+      if (previewTimer.current) clearTimeout(previewTimer.current);
     };
-  }, [isEnabled]);
+  }, []);
 
-  // Clean up old click visualizations
-  useEffect(() => {
-    if (clickVisualizations.length === 0) return;
+  // ── Multi-agent cursor events ─────────────────────────────────────────────
+  useEventListener<AgentCursorUpdate>("agent-cursor-update", (payload) => {
+    const slotIdx = getOrAssignSlot(payload.agent_id, slotMap);
+    if (slotIdx === null) return; // all slots occupied
 
-    const cleanupTimeout = setTimeout(() => {
-      const now = Date.now();
-      setClickVisualizations((prev) =>
-        prev.filter((click) => now - click.timestamp < 1500)
-      );
-    }, 100);
+    // Store the color for this slot if not yet set
+    if (!slotColors.current[slotIdx]) {
+      slotColors.current[slotIdx] = payload.color;
+    }
 
-    return () => clearTimeout(cleanupTimeout);
-  }, [clickVisualizations]);
+    const slot = slots.current[slotIdx];
+    revealSlot(slot);
+    moveSlotTo(slot, payload.x, payload.y);
 
-  // Don't render if disabled
-  if (!isEnabled) {
-    return null;
-  }
+    const state = (payload.state as CursorState) || "idle";
+    if (state === "clicking") {
+      applySlotState(slot, "clicking");
+      fireSlotRipple(slot, payload.x, payload.y, payload.color);
+      if (slot.clickTimer) clearTimeout(slot.clickTimer);
+      slot.clickTimer = setTimeout(() => {
+        applySlotState(slot, "idle");
+        scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
+      }, CLICK_ANIM_DURATION_MS);
+    } else {
+      applySlotState(slot, state);
+      if (state === "idle") scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
+    }
+  });
+
+  useEventListener<AgentCursorRemove>("agent-cursor-remove", ({ agent_id }) => {
+    const slotIdx = slotMap.get(agent_id);
+    if (slotIdx === undefined) return;
+
+    const slot = slots.current[slotIdx];
+    if (slot.cursor) slot.cursor.style.opacity = "0";
+    slot.trailBuffer = [];
+    slot.trails.forEach((el) => { if (el) el.style.opacity = "0"; });
+    if (slot.hideTimer) { clearTimeout(slot.hideTimer); slot.hideTimer = null; }
+    if (slot.clickTimer) { clearTimeout(slot.clickTimer); slot.clickTimer = null; }
+    slotColors.current[slotIdx] = null;
+    occupiedSlots.current.delete(slotIdx);
+    dispatch({ type: "release", agentId: agent_id });
+  });
+
+  // ── Legacy single-agent cursor events (backward compat) ──────────────────
+  // These events are emitted by smooth_mouse_move for the HID path.
+  // They map to slot 0 with the default purple color.
+  const LEGACY_SLOT = 0;
+
+  useEventListener<[number, number]>("ui-cursor-highlight-start", ([x, y]) => {
+    if (!occupiedSlots.current.has(LEGACY_SLOT)) occupiedSlots.current.add(LEGACY_SLOT);
+    const slot = slots.current[LEGACY_SLOT];
+    revealSlot(slot);
+    moveSlotTo(slot, x, y);
+    applySlotState(slot, "moving");
+  });
+
+  useEventListener<[number, number]>("ui-cursor-highlight-move", ([x, y]) => {
+    const slot = slots.current[LEGACY_SLOT];
+    moveSlotTo(slot, x, y);
+    if (slot.state !== "clicking") applySlotState(slot, "moving");
+  });
+
+  useEventListener<[number, number]>("ui-cursor-highlight-stop", ([x, y]) => {
+    const slot = slots.current[LEGACY_SLOT];
+    moveSlotTo(slot, x, y);
+    applySlotState(slot, "idle");
+    scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
+  });
+
+  useEventListener<[number, number, string]>("click-visualization", ([x, y, color]) => {
+    const slot = slots.current[LEGACY_SLOT];
+    revealSlot(slot);
+    moveSlotTo(slot, x, y);
+    fireSlotRipple(slot, x, y, color);
+    applySlotState(slot, "clicking");
+    if (slot.clickTimer) clearTimeout(slot.clickTimer);
+    slot.clickTimer = setTimeout(() => {
+      applySlotState(slot, "idle");
+      scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
+    }, CLICK_ANIM_DURATION_MS);
+  });
+
+  useEventListener("agent-thinking-start", () => {
+    const slot = slots.current[LEGACY_SLOT];
+    if (slot.state === "idle") { revealSlot(slot); applySlotState(slot, "thinking"); }
+  });
+
+  useEventListener("agent-thinking-end", () => {
+    const slot = slots.current[LEGACY_SLOT];
+    if (slot.state === "thinking") { applySlotState(slot, "idle"); scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS); }
+  });
+
+  // ── POINT teaching cursor — agent [POINT:x,y:label:screenN] ──────────────
+  // payload.screen is parsed + forwarded but coordinates are treated as global
+  // screen space. TODO: map screenN to display origin for multi-monitor support.
+  useEventListener<CursorPointPayload>(EVENTS.UI_CURSOR_POINT, (payload) => {
+    flyTo(payload.x, payload.y, payload.label ?? null);
+  });
+
+  // ── LAC-1920: Pre-action targeting reticle ────────────────────────────────
+  // Fires ~500ms BEFORE a coordinate-based computer-use action so the user
+  // can see WHERE the agent is about to click/scroll/drag before it acts.
+  useEventListener<{
+    action: string;
+    coordinate: [number, number];
+    timestamp: number;
+  }>("computer-use-preview", ({ action, coordinate }) => {
+    const [x, y] = coordinate;
+    firePreview(x, y, action);
+  });
+
+  // ── Onboarding cursor — cursor-animation-frame at 60fps ───────────────────
+  // Backend emits {x, y, t, style} via animate_cursor_to. We move the onboarding
+  // cursor sprite imperatively so React never re-renders at 60fps.
+  //
+  // Phase D / LAC-1882: under `prefers-reduced-motion: reduce` we honor the
+  // backend's animation by only applying the final frame (`t === 1`). The
+  // cursor effectively teleports to the destination — no Bezier sweep, no
+  // intermediate motion. Backend still emits all frames; we just discard them.
+  useEventListener<{ x: number; y: number; t: number; style: string }>(
+    EVENTS.CURSOR_ANIMATION_FRAME,
+    ({ x, y, t }) => {
+      const reducedMotion = REDUCED_MOTION_MQL?.matches ?? false;
+
+      // Under reduced motion, only the final frame (t=1) lands the cursor.
+      // Skipping intermediate frames also drops the per-event DOM writes.
+      if (reducedMotion && t < 1) {
+        return;
+      }
+
+      onbPosRef.current = { x, y };
+
+      // Cursor sprite
+      if (onbCursorRef.current) {
+        onbCursorRef.current.style.opacity = "1";
+        onbCursorRef.current.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
+      }
+      // Highlight ring follows cursor
+      if (onbRingRef.current) {
+        const r = RING_BASE_RADIUS;
+        onbRingRef.current.style.left = `${x - r}px`;
+        onbRingRef.current.style.top = `${y - r}px`;
+      }
+      // Bubble follows cursor (above-right of cursor tip)
+      if (onbBubbleRef.current) {
+        onbBubbleRef.current.style.left = `${x + 20}px`;
+        onbBubbleRef.current.style.top = `${y - 48}px`;
+      }
+    }
+  );
+
+  // ── Onboarding highlight ring ─────────────────────────────────────────────
+  useEventListener<{ x: number; y: number; radius: number }>(
+    EVENTS.CURSOR_HIGHLIGHT,
+    ({ x, y, radius }) => {
+      const r = radius || RING_BASE_RADIUS;
+      if (!onbRingRef.current) return;
+      const el = onbRingRef.current;
+      el.style.width = `${r * 2}px`;
+      el.style.height = `${r * 2}px`;
+      el.style.left = `${x - r}px`;
+      el.style.top = `${y - r}px`;
+      el.style.opacity = "1";
+      el.classList.remove("onb-ring-active");
+      void el.offsetWidth; // force reflow
+      el.classList.add("onb-ring-active");
+    }
+  );
+
+  // ── Onboarding speech bubble ──────────────────────────────────────────────
+  // Appears BUBBLE_APPEAR_DELAY_MS after the event, then streams text at
+  // BUBBLE_CHAR_INTERVAL_MS per character.
+  useEventListener<{ x: number; y: number; text: string }>(
+    EVENTS.CURSOR_BUBBLE,
+    ({ x, y, text }) => {
+      // Cancel any in-flight bubble timers
+      if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
+      if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
+
+      if (onbBubbleTextRef.current) onbBubbleTextRef.current.textContent = "";
+      if (onbBubbleRef.current) {
+        const el = onbBubbleRef.current;
+        el.style.opacity = "0";
+        el.style.left = `${x + 20}px`;
+        el.style.top = `${y - 48}px`;
+        el.classList.remove("onb-bubble-visible");
+      }
+
+      onbBubbleTimerRef.current = setTimeout(() => {
+        if (!onbBubbleRef.current || !onbBubbleTextRef.current) return;
+        onbBubbleRef.current.classList.add("onb-bubble-visible");
+
+        let charIdx = 0;
+        onbBubbleIntervalRef.current = setInterval(() => {
+          if (!onbBubbleTextRef.current) return;
+          if (charIdx >= text.length) {
+            if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
+            return;
+          }
+          onbBubbleTextRef.current.textContent = text.slice(0, ++charIdx);
+        }, BUBBLE_CHAR_INTERVAL_MS);
+      }, BUBBLE_APPEAR_DELAY_MS);
+    }
+  );
+
+  // ── Dismiss cursor overlay ────────────────────────────────────────────────
+  useEventListener<{ animate: boolean }>(EVENTS.CURSOR_DISMISS_OVERLAY, () => {
+    if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
+    if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
+
+    // Fade cursor sprite
+    if (onbCursorRef.current) onbCursorRef.current.style.opacity = "0";
+    // Fade ring
+    if (onbRingRef.current) {
+      onbRingRef.current.style.opacity = "0";
+      onbRingRef.current.classList.remove("onb-ring-active");
+    }
+    // Fade bubble
+    if (onbBubbleRef.current) {
+      onbBubbleRef.current.style.opacity = "0";
+      onbBubbleRef.current.classList.remove("onb-bubble-visible");
+    }
+  });
+
+  // ── Celebration micro-animation ───────────────────────────────────────────
+  // Backend (Phase C) can emit this after onboarding complete.
+  // Spin the cursor, fire a glow ring, and shoot 6 particle dots.
+  useEventListener<{ x?: number; y?: number }>("cursor-celebration", (payload) => {
+    const cx = payload?.x ?? onbPosRef.current.x;
+    const cy = payload?.y ?? onbPosRef.current.y;
+
+    // Spin cursor sprite
+    if (onbCursorRef.current) {
+      const el = onbCursorRef.current;
+      el.classList.remove("onb-celebrate-spin");
+      void el.offsetWidth;
+      el.classList.add("onb-celebrate-spin");
+    }
+
+    // Glow burst ring
+    if (onbGlowRef.current) {
+      const el = onbGlowRef.current;
+      const r = 32;
+      el.style.left = `${cx - r}px`;
+      el.style.top = `${cy - r}px`;
+      el.style.width = `${r * 2}px`;
+      el.style.height = `${r * 2}px`;
+      el.style.opacity = "1";
+      el.classList.remove("onb-glow-burst-active");
+      void el.offsetWidth;
+      el.classList.add("onb-glow-burst-active");
+    }
+
+    // Particle dots — 6 directions
+    const ANGLES = [0, 60, 120, 180, 240, 300];
+    onbParticlesRef.current.forEach((el, i) => {
+      if (!el) return;
+      const angle = (ANGLES[i] ?? 0) * (Math.PI / 180);
+      const dist = 48 + Math.random() * 24;
+      const tx = Math.cos(angle) * dist;
+      const ty = Math.sin(angle) * dist;
+      el.style.left = `${cx - 4}px`;
+      el.style.top = `${cy - 4}px`;
+      el.style.opacity = "1";
+      el.style.setProperty("--tx", `${tx}px`);
+      el.style.setProperty("--ty", `${ty}px`);
+      el.style.animation = "none";
+      void el.offsetWidth;
+      el.style.animation = `onb-particle-fly 0.6s ease-out ${i * 40}ms forwards`;
+      el.style.transform = `translate(var(--tx), var(--ty))`;
+    });
+  });
+
+  // ── Render: N cursor sprites ───────────────────────────────────────────────
 
   return (
     <div
-      className="desktop-cursor-overlay"
       style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        width: "200px",
-        height: "200px",
+        inset: 0,
         pointerEvents: "none",
-        zIndex: 999999,
-        overflow: "visible",
+        overflow: "hidden",
+        background: "transparent",
       }}
     >
-      {/* Cursor highlight circle - smooth movement indicator */}
-      {cursorHighlight && cursorHighlight.active && (
-        <div
-          className="cursor-highlight-circle"
+      <style>{CURSOR_CSS}</style>
+
+      {Array.from({ length: MAX_AGENT_SLOTS }, (_, slotIdx) => {
+        // Derive color: check slotColors ref first, fall back to palette
+        const color = slotColors.current[slotIdx] ?? "#8B5CF6";
+
+        return (
+          <div key={`cursor-slot-${slotIdx}`}>
+            {/* Motion trail dots */}
+            {Array.from({ length: TRAIL_COUNT }, (__, i) => (
+              <div
+                key={`trail-${slotIdx}-${i}`}
+                ref={(el) => { slots.current[slotIdx].trails[i] = el; }}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: `${color}a6`,
+                  opacity: 0,
+                  transform: "translate(-200px, -200px)",
+                  pointerEvents: "none",
+                  willChange: "transform, opacity",
+                }}
+              />
+            ))}
+
+            {/* Click ripple pool */}
+            {Array.from({ length: 5 }, (__, i) => (
+              <div
+                key={`ripple-${slotIdx}-${i}`}
+                ref={(el) => { slots.current[slotIdx].ripples[i] = el; }}
+                style={{
+                  position: "absolute",
+                  width: 40,
+                  height: 40,
+                  borderRadius: "50%",
+                  border: "2px solid",
+                  opacity: 0,
+                  pointerEvents: "none",
+                }}
+              />
+            ))}
+
+            {/* Cursor sprite */}
+            <div
+              ref={(el) => { slots.current[slotIdx].cursor = el; }}
+              className="juno-cursor juno-cursor--idle"
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                opacity: 0,
+                transform: "translate(-200px, -200px)",
+                pointerEvents: "none",
+              }}
+            >
+              <JunoCursorShape color={color} />
+            </div>
+          </div>
+        );
+      })}
+
+      {/* ── Onboarding cursor overlay ────────────────────────────────────── */}
+
+      {/* Onboarding cursor sprite — backend moves this via cursor-animation-frame */}
+      <div
+        ref={onbCursorRef}
+        className="juno-cursor juno-cursor--idle"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          opacity: 0,
+          transform: "translate(-300px, -300px)",
+          pointerEvents: "none",
+          transition: "opacity 0.4s ease",
+        }}
+      >
+        <JunoCursorShape color={ONBOARDING_ACCENT} />
+      </div>
+
+      {/* Pulsing highlight ring — shown by cursor-highlight event */}
+      <div
+        ref={onbRingRef}
+        style={{
+          position: "absolute",
+          borderRadius: "50%",
+          border: `3px solid ${ONBOARDING_ACCENT}`,
+          boxShadow: `0 0 12px 3px ${ONBOARDING_ACCENT}55`,
+          opacity: 0,
+          pointerEvents: "none",
+          width: RING_BASE_RADIUS * 2,
+          height: RING_BASE_RADIUS * 2,
+          top: -300,
+          left: -300,
+          transition: "opacity 0.25s ease",
+        }}
+      />
+
+      {/* Speech bubble — shown by cursor-bubble event */}
+      <div
+        ref={onbBubbleRef}
+        style={{
+          position: "absolute",
+          opacity: 0,
+          top: -300,
+          left: -300,
+          pointerEvents: "none",
+          maxWidth: 240,
+          backgroundColor: "rgba(15, 12, 45, 0.92)",
+          backdropFilter: "blur(10px)",
+          border: `1px solid ${ONBOARDING_ACCENT}55`,
+          borderRadius: 10,
+          padding: "7px 12px",
+          boxShadow: `0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px ${ONBOARDING_ACCENT}22`,
+          // Triangle pointer at bottom-left
+          filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.3))",
+        }}
+      >
+        <span
+          ref={onbBubbleTextRef}
           style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "60px",
-            height: "60px",
-            borderRadius: "50%",
-            border: "3px solid rgba(74, 144, 226, 0.8)",
-            backgroundColor: "rgba(74, 144, 226, 0.1)",
-            transform: "translate(-50%, -50%)",
-            animation: "cursor-pulse 1.5s ease-in-out infinite",
-            boxShadow:
-              "0 0 20px rgba(74, 144, 226, 0.4), inset 0 0 20px rgba(74, 144, 226, 0.1)",
+            color: "#e2e8f0",
+            fontSize: 12,
+            fontWeight: 500,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
           }}
         />
-      )}
+      </div>
 
-      {/* Additional ripple effect for movement */}
-      {cursorHighlight && cursorHighlight.active && (
+      {/* Celebration glow burst ring */}
+      <div
+        ref={onbGlowRef}
+        style={{
+          position: "absolute",
+          borderRadius: "50%",
+          border: `2px solid ${ONBOARDING_ACCENT}`,
+          backgroundColor: `${ONBOARDING_ACCENT}22`,
+          opacity: 0,
+          pointerEvents: "none",
+          top: -300,
+          left: -300,
+        }}
+      />
+
+      {/* Celebration particle dots — 6 of them */}
+      {Array.from({ length: 6 }, (_, i) => (
         <div
-          className="cursor-ripple"
+          key={`onb-particle-${i}`}
+          ref={(el) => { onbParticlesRef.current[i] = el; }}
           style={{
             position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "100px",
-            height: "100px",
+            width: 6,
+            height: 6,
             borderRadius: "50%",
-            border: "2px solid rgba(74, 144, 226, 0.3)",
-            transform: "translate(-50%, -50%)",
-            animation: "cursor-ripple 2s ease-out infinite",
-          }}
-        />
-      )}
-
-      {/* Click visualizations */}
-      {clickVisualizations.map((click) => (
-        <div
-          key={click.id}
-          className="desktop-click-indicator"
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: "40px",
-            height: "40px",
-            borderRadius: "50%",
-            backgroundColor: `${click.color}60`,
-            border: `3px solid ${click.color}`,
-            transform: "translate(-50%, -50%)",
-            animation: "desktop-click-animation 1s ease-out forwards",
-            boxShadow: `0 0 15px ${click.color}40`,
+            backgroundColor: i % 2 === 0 ? ONBOARDING_ACCENT : "#C4B5FD",
+            opacity: 0,
+            pointerEvents: "none",
+            top: -300,
+            left: -300,
           }}
         />
       ))}
 
-      {/* Styles for animations */}
-      <style>{`
-        @keyframes cursor-pulse {
-          0% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.1);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1);
-            opacity: 0.8;
-          }
-        }
+      {/* POINT teaching cursor — flies to agent-pointed coordinates */}
+      <div
+        ref={flyDivRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          opacity: 0,
+          transform: "translate(-200px, -200px)",
+          pointerEvents: "none",
+          willChange: "transform, opacity",
+        }}
+      >
+        <svg
+          width="36"
+          height="36"
+          viewBox="0 0 36 36"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <defs>
+            <filter id="point-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="1" dy="2" stdDeviation="2" floodColor="rgba(0,0,0,0.4)" />
+            </filter>
+          </defs>
+          <path
+            d="M6 4L28 18L17 19.5L12 30L6 4Z"
+            fill="white"
+            stroke="#1a1a2e"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            filter="url(#point-shadow)"
+          />
+          <circle cx="6.5" cy="4.5" r="2.5" fill="#6366f1" />
+        </svg>
 
-        @keyframes cursor-ripple {
-          0% {
-            transform: translate(-50%, -50%) scale(0.8);
-            opacity: 0.6;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1.8);
-            opacity: 0;
-          }
-        }
+        {/* Label tooltip — fades in on landing */}
+        <div
+          ref={flyLabelRef}
+          style={{
+            position: "absolute",
+            top: "40px",
+            left: 0,
+            backgroundColor: "rgba(15, 15, 30, 0.88)",
+            backdropFilter: "blur(8px)",
+            color: "#e2e8f0",
+            fontSize: "12px",
+            fontWeight: 500,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid rgba(99,102,241,0.4)",
+            whiteSpace: "nowrap",
+            opacity: 0,
+            transition: "opacity 0.18s ease-out",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
+          }}
+        />
 
-        @keyframes desktop-click-animation {
-          0% {
-            transform: translate(-50%, -50%) scale(0.3);
-            opacity: 1;
-          }
-          50% {
-            transform: translate(-50%, -50%) scale(1.2);
-            opacity: 0.8;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(2);
-            opacity: 0;
-          }
-        }
-      `}</style>
+        {/* Landing ripple — reuses .juno-ripple-active keyframe */}
+        <div
+          ref={flyRippleRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: 40,
+            height: 40,
+            transform: "translate(-8px, -8px)",
+            borderRadius: "50%",
+            border: "2px solid rgba(99,102,241,0.6)",
+            opacity: 0,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+
+      {/* LAC-1920: Pre-action targeting reticle. Repositioned via left/top
+          on each `computer-use-preview` event; children centre on the
+          container via translate(-50%, -50%). Only visible while the
+          `juno-preview-active` class is applied. */}
+      <div
+        ref={previewRef}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: 0,
+          height: 0,
+          pointerEvents: "none",
+        }}
+      >
+        {/* Outer expanding ring */}
+        <div
+          className="juno-preview-outer"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 80,
+            height: 80,
+            borderRadius: "50%",
+            border: "2px solid rgba(99, 179, 237, 0.5)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+          }}
+        />
+        {/* Inner targeting reticle */}
+        <div
+          className="juno-preview-inner"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            border: "2.5px solid rgba(66, 153, 225, 0.9)",
+            backgroundColor: "rgba(66, 153, 225, 0.15)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+            boxShadow:
+              "0 0 12px rgba(66, 153, 225, 0.6), inset 0 0 8px rgba(66, 153, 225, 0.2)",
+          }}
+        />
+        {/* Crosshair center dot */}
+        <div
+          className="juno-preview-dot"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            backgroundColor: "rgba(66, 153, 225, 0.9)",
+            opacity: 0,
+            transform: "translate(-50%, -50%)",
+          }}
+        />
+        {/* Action label — text set imperatively via previewLabelRef */}
+        <div
+          ref={previewLabelRef}
+          className="juno-preview-label"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: -38,
+            transform: "translateX(-50%)",
+            fontSize: 10,
+            fontWeight: 600,
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            color: "rgba(226, 232, 240, 0.95)",
+            backgroundColor: "rgba(15, 15, 30, 0.82)",
+            border: "1px solid rgba(99, 179, 237, 0.5)",
+            padding: "3px 8px",
+            borderRadius: 6,
+            whiteSpace: "nowrap",
+            opacity: 0,
+            letterSpacing: "0.02em",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.35)",
+          }}
+        />
+      </div>
     </div>
   );
 };

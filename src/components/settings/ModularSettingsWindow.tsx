@@ -1,8 +1,9 @@
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Brain,
+  CalendarClock,
   Keyboard,
   Mic,
   Network,
@@ -18,6 +19,7 @@ import {
   AIProviderSettings,
   SecuritySettings,
   AdvancedSettings,
+  AutomationsSettings,
   NetworkSettings,
   ShortcutsSettings,
   ToolsSettings,
@@ -50,6 +52,12 @@ const settingsCategories: SettingsCategory[] = [
     description: "Enable/disable agent tools and categories",
   },
   {
+    id: "automations",
+    name: "Automations",
+    icon: <CalendarClock className="w-8 h-8" />,
+    description: "Scheduled agent tasks that run automatically",
+  },
+  {
     id: "network",
     name: "Network",
     icon: <Network className="w-8 h-8" />,
@@ -77,7 +85,7 @@ const settingsCategories: SettingsCategory[] = [
 
 export default function ModularSettingsWindow() {
   const [selectedCategory, setSelectedCategory] = useState("general");
-  const settings = useSettings();
+  const settings = useSettingsContext();
   const window = getCurrentWindow();
 
   useEffect(() => {
@@ -114,6 +122,8 @@ export default function ModularSettingsWindow() {
         return <AIProviderSettings settings={settings} />;
       case "tools":
         return <ToolsSettings settings={settings} />;
+      case "automations":
+        return <AutomationsSettings />;
       case "network":
         return <NetworkSettings settings={settings} />;
       case "security":
@@ -130,7 +140,7 @@ export default function ModularSettingsWindow() {
   return (
     <div className="flex w-full min-w-0 h-screen bg-gray-50">
       {/* Sidebar with categories - macOS style */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
@@ -179,7 +189,7 @@ export default function ModularSettingsWindow() {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Title bar area */}
         <div className="h-12 flex items-center justify-between px-6 bg-transparent">
           <div className="flex items-center gap-3">

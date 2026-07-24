@@ -80,6 +80,13 @@ pub fn is_claude_cli_available() -> bool {
     detect_claude_cli().is_ok()
 }
 
+/// Check if Claude CLI is both installed and authenticated.
+/// Runs `claude auth status --json` and returns Ok(()) if logged in.
+pub async fn check_cli_auth_status() -> Result<(), AgentError> {
+    let binary_path = detect_claude_cli()?;
+    check_auth_status(&binary_path).await
+}
+
 /// Check Claude CLI authentication status by running `claude auth status`.
 /// Caches the result for the session — only runs the subprocess once.
 /// Returns Ok(()) if authenticated, or an error with details.

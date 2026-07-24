@@ -23,6 +23,22 @@ interface CachedValue<T> {
 	timestamp: number;
 }
 
+interface WhisperModelInfo {
+	id: string;
+	filename: string;
+	display_name: string;
+	size_mb: number;
+	downloaded: boolean;
+	is_default: boolean;
+}
+
+interface WhisperDownloadProgress {
+	model_id: string;
+	bytes_downloaded: number;
+	total_bytes: number;
+	percent: number;
+}
+
 interface SettingsCache {
 	ttsProvider?: CachedValue<string>;
 	dictationClipboardEnabled?: CachedValue<boolean>;
@@ -41,6 +57,8 @@ interface SettingsCache {
 	keyboardShortcuts?: CachedValue<KeyboardShortcuts>;
 	mcpServers?: CachedValue<MCPServerConfig[]>;
 	mcpServerStatuses?: CachedValue<Record<string, MCPServerStatus>>;
+	whisperModels?: CachedValue<WhisperModelInfo[]>;
+	currentWhisperModel?: CachedValue<string>;
 }
 
 // Cache with 30-second TTL to prevent excessive API calls
@@ -101,6 +119,16 @@ export function useSettings() {
 	// TTS Settings
 	const [ttsProvider, setTtsProvider] = useState<string>("system");
 
+	// Chatterbox TTS Settings
+	const [chatterboxReferenceAudioUrl, setChatterboxReferenceAudioUrl] = useState<string>("");
+	const [chatterboxExaggeration, setChatterboxExaggeration] = useState<number>(0.5);
+	const [chatterboxUseHd, setChatterboxUseHd] = useState<boolean>(false);
+
+	// Supertonic TTS Settings
+	const [supertonicServerUrl, setSupertonicServerUrl] = useState<string>("http://localhost:8000");
+	const [supertonicVoice, setSupertonicVoice] = useState<string>("M1");
+	const [supertonicSpeed, setSupertonicSpeed] = useState<number>(1.05);
+
 	// AI Provider Settings
 	const [providers, setProviders] = useState<ProviderInfo[]>([]);
 	const [activeProvider, setActiveProvider] = useState<string>("");
@@ -128,6 +156,12 @@ export function useSettings() {
 	const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] = useState<number>(0.5);
 	const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>([...AUDIO.DEFAULT_WAKE_WORDS]);
 	const [wakeWordsInput, setWakeWordsInput] = useState<string>("");
+
+	// Whisper Model Settings
+	const [whisperModels, setWhisperModels] = useState<WhisperModelInfo[]>([]);
+	const [currentWhisperModel, setCurrentWhisperModel] = useState<string>("large-v3-turbo");
+	const [whisperDownloading, setWhisperDownloading] = useState<string | null>(null);
+	const [whisperDownloadProgress, setWhisperDownloadProgress] = useState<WhisperDownloadProgress | null>(null);
 
 	// Tool Configuration Settings
 	const [toolConfigurations, setToolConfigurations] = useState<Record<string, ToolCategory>>({});
@@ -165,6 +199,7 @@ export function useSettings() {
 		dictation_input: "",
 		stop_current_task: "",
 		open_settings: "",
+		voice_activation: "",
 	});
 	const [shortcutsLoading, setShortcutsLoading] = useState<boolean>(false);
 	const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
@@ -287,6 +322,65 @@ export function useSettings() {
 		};
 	}, []); // No deps needed — handler always gets latest state via event payload
 
+	// Listen for whisper model download events
+	useEffect(() => {
+		let unlistenProgress: (() => void) | undefined;
+		let unlistenComplete: (() => void) | undefined;
+		let unlistenError: (() => void) | undefined;
+		let mounted = true;
+
+		const setup = async () => {
+			try {
+				const fnProgress = await listen<WhisperDownloadProgress>(
+					"whisper-download-progress",
+					(event) => {
+						if (!mounted) return;
+						setWhisperDownloadProgress(event.payload);
+					}
+				);
+				const fnComplete = await listen<{ model_id: string }>(
+					"whisper-download-complete",
+					(event) => {
+						if (!mounted) return;
+						setWhisperDownloading(null);
+						setWhisperDownloadProgress(null);
+						setCurrentWhisperModel(event.payload.model_id);
+						invalidateCache("whisperModels");
+						invalidateCache("currentWhisperModel");
+					}
+				);
+				const fnError = await listen<{ model_id: string; error: string }>(
+					"whisper-download-error",
+					(event) => {
+						if (!mounted) return;
+						console.error("Whisper download error:", event.payload.error);
+						setWhisperDownloading(null);
+						setWhisperDownloadProgress(null);
+					}
+				);
+				if (mounted) {
+					unlistenProgress = fnProgress;
+					unlistenComplete = fnComplete;
+					unlistenError = fnError;
+				} else {
+					fnProgress();
+					fnComplete();
+					fnError();
+				}
+			} catch (error) {
+				console.error("Failed to setup whisper download listeners:", error);
+			}
+		};
+
+		setup();
+		return () => {
+			mounted = false;
+			unlistenProgress?.();
+			unlistenComplete?.();
+			unlistenError?.();
+		};
+	}, []);
+
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
 		try {
@@ -334,6 +428,34 @@ export function useSettings() {
 			setAlwaysListeningWakeWords(wakeWords);
 			setWakeWordsInput(wakeWords.join(", "));
 
+			// Load Chatterbox-specific settings
+			try {
+				const chatterboxSettings = await invokeCommand<{
+					reference_audio_url: string | null;
+					exaggeration: number;
+					use_hd: boolean;
+				}>("get_chatterbox_settings_command");
+				setChatterboxReferenceAudioUrl(chatterboxSettings.reference_audio_url ?? "");
+				setChatterboxExaggeration(chatterboxSettings.exaggeration);
+				setChatterboxUseHd(chatterboxSettings.use_hd);
+			} catch (error) {
+				console.warn("Failed to load Chatterbox settings:", error);
+			}
+
+			// Load Supertonic-specific settings
+			try {
+				const stSettings = await invokeCommand<{
+					server_url: string;
+					voice: string;
+					speed: number;
+				}>("get_supertonic_settings_command");
+				setSupertonicServerUrl(stSettings.server_url);
+				setSupertonicVoice(stSettings.voice);
+				setSupertonicSpeed(stSettings.speed);
+			} catch (error) {
+				console.warn("Failed to load Supertonic settings:", error);
+			}
+
 			if (currentActiveProvider) {
 				const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
 					providerId: currentActiveProvider,
@@ -350,6 +472,9 @@ export function useSettings() {
 
 			// Load permissions status with caching
 			await loadPermissionsStatus();
+
+			// Load whisper model info
+			await loadWhisperModels();
 
 			// Load tool configurations with caching
 			await loadToolConfigurations();
@@ -496,6 +621,48 @@ export function useSettings() {
 		);
 		invalidateCache('ttsProvider');
 		setTtsProvider(newProvider);
+	}, [invokeCommand]);
+
+	const handleChatterboxSettingsChange = useCallback(async (
+		referenceAudioUrl: string,
+		exaggeration: number,
+		useHd: boolean,
+	) => {
+		await invokeCommand(
+			"set_chatterbox_settings_command",
+			{
+				referenceAudioUrl: referenceAudioUrl || null,
+				exaggeration,
+				useHd,
+			},
+			{
+				showSuccessToast: true,
+				successMessage: "Chatterbox settings saved",
+				errorMessage: "Failed to save Chatterbox settings",
+			}
+		);
+		setChatterboxReferenceAudioUrl(referenceAudioUrl);
+		setChatterboxExaggeration(exaggeration);
+		setChatterboxUseHd(useHd);
+	}, [invokeCommand]);
+
+	const handleSupertonicSettingsChange = useCallback(async (
+		serverUrl: string,
+		voice: string,
+		speed: number,
+	) => {
+		await invokeCommand(
+			"set_supertonic_settings_command",
+			{ serverUrl, voice, speed },
+			{
+				showSuccessToast: true,
+				successMessage: "Supertonic settings saved",
+				errorMessage: "Failed to save Supertonic settings",
+			}
+		);
+		setSupertonicServerUrl(serverUrl);
+		setSupertonicVoice(voice);
+		setSupertonicSpeed(speed);
 	}, [invokeCommand]);
 
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
@@ -724,6 +891,53 @@ export function useSettings() {
 		}
 	};
 
+	const loadWhisperModels = useCallback(async () => {
+		try {
+			const [models, current] = await Promise.all([
+				getCachedOrFetch("whisperModels", () =>
+					invokeCommand<WhisperModelInfo[]>("get_whisper_models")
+				),
+				getCachedOrFetch("currentWhisperModel", () =>
+					invokeCommand<string>("get_current_whisper_model")
+				),
+			]);
+			setWhisperModels(models);
+			setCurrentWhisperModel(current);
+		} catch (error) {
+			console.error("Error loading whisper models:", error);
+		}
+	}, [invokeCommand]);
+
+	const handleWhisperModelDownload = useCallback(async (modelId: string) => {
+		try {
+			setWhisperDownloading(modelId);
+			setWhisperDownloadProgress(null);
+			await invokeCommand("download_whisper_model", { modelId });
+		} catch (error) {
+			console.error("Failed to start whisper model download:", error);
+			setWhisperDownloading(null);
+			toast.error(`Failed to download model: ${error}`);
+		}
+	}, [invokeCommand]);
+
+	const handleWhisperModelChange = useCallback(async (modelId: string) => {
+		try {
+			await invokeCommand(
+				"set_whisper_model",
+				{ modelId },
+				{
+					showSuccessToast: true,
+					successMessage: "Whisper model switched",
+					errorMessage: "Failed to switch model",
+				}
+			);
+			setCurrentWhisperModel(modelId);
+			invalidateCache("currentWhisperModel");
+		} catch (error) {
+			console.error("Failed to switch whisper model:", error);
+		}
+	}, [invokeCommand]);
+
 	const invalidateToolConfigCache = useCallback(() => {
 		invalidateCache('toolConfigurations');
 	}, []);
@@ -731,6 +945,12 @@ export function useSettings() {
 	return {
 		// State
 		ttsProvider,
+		chatterboxReferenceAudioUrl,
+		chatterboxExaggeration,
+		chatterboxUseHd,
+		supertonicServerUrl,
+		supertonicVoice,
+		supertonicSpeed,
 		providers,
 		activeProvider,
 		providerSettings,
@@ -763,9 +983,17 @@ export function useSettings() {
 		editingShortcut,
 		setEditingShortcut,
 
+		// Whisper model
+		whisperModels,
+		currentWhisperModel,
+		whisperDownloading,
+		whisperDownloadProgress,
+
 		// Actions
 		loadAllSettings,
 		handleTtsProviderChange,
+		handleChatterboxSettingsChange,
+		handleSupertonicSettingsChange,
 		handleActiveProviderChange,
 		handleSaveProviderSettings,
 		handleSoundEnabledChange,
@@ -780,6 +1008,9 @@ export function useSettings() {
 		loadPermissionsStatus,
 		loadKeyboardShortcuts,
 		loadToolConfigurations,
+		loadWhisperModels,
+		handleWhisperModelDownload,
+		handleWhisperModelChange,
 		setToolConfigurations,
 		invalidateToolConfigCache,
 		loadMcpServers,

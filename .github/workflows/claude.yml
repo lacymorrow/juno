@@ -20,22 +20,32 @@ jobs:
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
+    # The secrets context is not allowed in `if:` expressions (workflow parse
+    # error), so evaluate the presence check once here (LAC-3035).
+    env:
+      HAS_CLAUDE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
+      # The action fails env validation when CLAUDE_CODE_OAUTH_TOKEN is unset.
+      # Skip cleanly until the secret exists (LAC-3035).
+      - name: Notice when CLAUDE_CODE_OAUTH_TOKEN is missing
+        if: env.HAS_CLAUDE_OAUTH_TOKEN != 'true'
+        run: echo "::notice::Skipping Claude PR assistant — CLAUDE_CODE_OAUTH_TOKEN repo secret is not set (LAC-3035)."
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Run Claude PR Action
-        uses: grll/claude-code-action@beta
+        if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
+        # Official action with OAuth token support. Replaces the unmaintained
+        # grll/claude-code-action fork, whose access/refresh token secrets
+        # expired in 2025 (LAC-3035).
+        uses: anthropics/claude-code-action@v1
         with:
-          use_oauth: true
-          claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
-          claude_refresh_token: ${{ secrets.CLAUDE_REFRESH_TOKEN }}
-          claude_expires_at: ${{ secrets.CLAUDE_EXPIRES_AT }}
-
-          timeout_minutes: "60"
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

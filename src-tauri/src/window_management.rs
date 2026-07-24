@@ -24,6 +24,11 @@ pub struct WindowConfig {
     pub resizable: bool,
     pub center: bool,
     pub transparent_title_bar: bool,
+    /// Whether to steal application focus when the window is shown.
+    /// Must be false for all overlay windows (floating-bar, floating-panel,
+    /// desktop-cursor-overlay) — setting focus calls [NSApp activateIgnoringOtherApps:YES]
+    /// which yanks keyboard focus away from the user's active application.
+    pub focus: bool,
 }
 
 impl WindowConfig {
@@ -40,6 +45,7 @@ impl WindowConfig {
             resizable: true,
             center: true,
             transparent_title_bar: true,
+            focus: true,
         }
     }
 
@@ -49,13 +55,14 @@ impl WindowConfig {
             label: window_labels::ONBOARDING.to_string(),
             title: "Welcome to Juno".to_string(),
             url: "/onboarding".to_string(),
-            width: 440.0,  // Match tauri.conf.json
-            height: 700.0,  // Match tauri.conf.json
-            min_width: 200.0,  // Match tauri.conf.json
-            min_height: 300.0,  // Match tauri.conf.json
-            resizable: false,  // Match tauri.conf.json
+            width: 440.0,
+            height: 700.0,
+            min_width: 200.0,
+            min_height: 300.0,
+            resizable: false,
             center: true,
-            transparent_title_bar: false,  // Match tauri.conf.json
+            transparent_title_bar: false,
+            focus: true,
         }
     }
 
@@ -65,13 +72,14 @@ impl WindowConfig {
             label: window_labels::MAIN.to_string(),
             title: "Juno".to_string(),
             url: "/".to_string(),
-            width: 600.0,  // Match tauri.conf.json
-            height: 700.0,  // Match tauri.conf.json
+            width: 600.0,
+            height: 700.0,
             min_width: 400.0,
             min_height: 300.0,
             resizable: true,
-            center: false, // Don't center main window as it may have saved position
+            center: false,
             transparent_title_bar: true,
+            focus: true,
         }
     }
 
@@ -88,6 +96,7 @@ impl WindowConfig {
             resizable: false,
             center: false,
             transparent_title_bar: true,
+            focus: false, // Overlay must never steal focus from the user's active app
         }
     }
 }
@@ -103,17 +112,20 @@ impl WindowManager {
             // Check if window is actually valid (not destroyed)
             match existing_window.is_visible() {
                 Ok(_) => {
-                    // Window is valid, show and focus it
                     existing_window.show().map_err(|e| e.to_string())?;
-                    existing_window.set_focus().map_err(|e| e.to_string())?;
-                    // Always unminimize to ensure it's visible even if previously minimized
-                    existing_window.unminimize().map_err(|e| e.to_string())?;
-                    
+                    // Only steal app focus for windows that explicitly request it.
+                    // Overlay windows (cursor overlay, floating panel) must not activate
+                    // Juno — that would yank keyboard focus from the user's active app.
+                    if config.focus {
+                        existing_window.set_focus().map_err(|e| e.to_string())?;
+                        existing_window.unminimize().map_err(|e| e.to_string())?;
+                    }
+
                     info!("Showed existing {} window", config.label);
                     return Ok(());
                 }
                 Err(_) => {
-                    // Window exists in registry but is invalid/destroyed, continue to create new one
+                    // Window exists in registry but is invalid/destroyed, create new one
                     info!("Existing {} window is invalid, creating new one", config.label);
                 }
             }
@@ -129,7 +141,7 @@ impl WindowManager {
         .inner_size(config.width, config.height)
         .min_inner_size(config.min_width, config.min_height)
         .resizable(config.resizable)
-        .visible(true); // Start visible to avoid display issues
+        .visible(true);
 
         if config.center {
             builder = builder.center();
@@ -150,9 +162,11 @@ impl WindowManager {
             }
         }
 
-        // Ensure window is visible and focused
-        if let Err(e) = window.set_focus() {
-            warn!("Failed to set focus for {} window: {}", config.label, e);
+        // Only take focus for non-overlay windows
+        if config.focus {
+            if let Err(e) = window.set_focus() {
+                warn!("Failed to set focus for {} window: {}", config.label, e);
+            }
         }
 
         info!("Successfully created and showed {} window", config.label);

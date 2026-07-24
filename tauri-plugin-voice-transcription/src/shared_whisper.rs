@@ -43,14 +43,14 @@ impl SharedWhisperManager {
             let guard = SHARED_WHISPER_CONTEXT.read()
                 .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
             if let Some(existing) = guard.as_ref() {
-                info!("[SharedWhisper] Shared context already exists, returning existing instance");
+                debug!("[SharedWhisper] Shared context already exists, returning existing instance");
                 return Ok(existing.clone());
             }
         }
 
         // Create the new context (expensive, done without holding the lock)
         let arc_context = Self::create_context(model_path)?;
-        info!("[SharedWhisper] WhisperContext created successfully");
+        debug!("[SharedWhisper] WhisperContext created successfully");
 
         // Write lock to set the global context
         let mut guard = SHARED_WHISPER_CONTEXT.write()
@@ -73,7 +73,7 @@ impl SharedWhisperManager {
 
         // Create the new context (expensive, done without holding the lock)
         let arc_context = Self::create_context(model_path)?;
-        info!("[SharedWhisper] New WhisperContext created successfully");
+        debug!("[SharedWhisper] New WhisperContext created successfully");
 
         // Write lock to replace the global context
         let mut guard = SHARED_WHISPER_CONTEXT.write()
@@ -116,7 +116,7 @@ impl SharedWhisperManager {
             "performance_impact": if initialized { "Eliminated duplicate loading" } else { "Potential duplicate loading" }
         });
 
-        info!("[SharedWhisper] Status check: {}", status);
+        debug!("[SharedWhisper] Status check: {}", status);
         status
     }
 

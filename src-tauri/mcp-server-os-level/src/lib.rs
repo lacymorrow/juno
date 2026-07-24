@@ -226,6 +226,32 @@ impl Desktop {
         self.engine.left_click(x, y, modifiers)
     }
 
+    /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    /// Returns the name of the method that succeeded.
+    pub fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.engine.left_click_no_warp(x, y, modifiers)
+    }
+
+    /// Right-click without warping the cursor.
+    pub fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
+        self.engine.right_click_no_warp(x, y)
+    }
+
+    /// Double-click without warping the cursor.
+    pub fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        self.engine.double_click_no_warp(x, y, modifiers)
+    }
+
+    /// Post a mouse event directly to a specific process by PID without moving the cursor.
+    pub fn post_mouse_event_to_pid(&self, pid: i32, event_type_str: &str, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.post_mouse_event_to_pid(pid, event_type_str, x, y)
+    }
+
+    /// Post a key event directly to a specific process by PID without changing focus.
+    pub fn post_key_event_to_pid(&self, pid: i32, keycode: u16, key_down: bool) -> Result<(), AutomationError> {
+        self.engine.post_key_event_to_pid(pid, keycode, key_down)
+    }
+
     /// Simulate a right click (down + up) at specified coordinates.
     pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
         self.engine.right_click(x, y, modifiers)

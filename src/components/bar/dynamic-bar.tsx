@@ -23,6 +23,11 @@ import { useDragWindow } from "@/hooks/useDragWindow";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
+import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
+import {
+  SkillGhostText,
+  SkillSuggestionList,
+} from "@/components/SkillAutocomplete";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -339,9 +344,20 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
   const [componentPinned, setComponentPinned] = useState(false);
   const streamContentRef = useRef("");
   const rafRef = useRef(0);
+  const responseScrollRef = useRef<HTMLDivElement>(null);
+  // Follow streaming output unless the user scrolls up to read earlier text.
+  const stickToBottomRef = useRef(true);
   const [localInputValue, setLocalInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const pinnedInputRef = useRef<HTMLInputElement>(null);
+
+  const handleResponseScroll = useCallback(() => {
+    const el = responseScrollRef.current;
+    if (!el) return;
+    // Re-engage following once the user returns near the bottom.
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+  }, []);
 
   const dismissComponent = useCallback(() => {
     setAgentResponseContent(null);
@@ -398,6 +414,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
           () => {
             if (!mounted) return;
             streamContentRef.current = "";
+            stickToBottomRef.current = true;
             setAgentResponseContent(null);
             setIsStreamingContent(true);
             setComponentPinned(false);
@@ -492,6 +509,14 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     };
   }, []);
 
+  // Keep the response view pinned to the newest content while streaming,
+  // unless the user has scrolled up (handleResponseScroll re-engages).
+  useEffect(() => {
+    const el = responseScrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [agentResponseContent]);
+
   // Dismiss pinned content when backend leaves agent/status states
   useEffect(() => {
     const s = barState.barState;
@@ -506,6 +531,27 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       dismissComponent();
     }
   }, [barState.barState, dismissComponent]);
+
+  // ── Slash-command autocomplete ──
+  // Active for both the main input and the pinned follow-up input (they
+  // share localInputValue and are mutually exclusive in the UI). Declared
+  // before the resize effect, which grows the window for the dropdown.
+  const skillAutocomplete = useSkillAutocomplete({
+    value: localInputValue,
+    onAccept: setLocalInputValue,
+    enabled:
+      barState.barState === UI.BAR_STATES_INPUT ||
+      barState.barState === UI.BAR_STATES_EXPANDING ||
+      componentPinned,
+  });
+
+  // Extra window height needed for the dropdown below the island in input
+  // mode (rows ≈29px + panel padding/margin). Pinned mode renders the list
+  // inside the existing 260px window, so no extra height there.
+  const suggestionPanelHeight =
+    skillAutocomplete.open && barState.barState === UI.BAR_STATES_INPUT
+      ? skillAutocomplete.suggestions.length * 29 + 20
+      : 0;
 
   // ── Window + island resize ──
   // Key invariant: window must always be >= island size.
@@ -526,6 +572,8 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
       return;
 
     const next = getDimensions(barState.barState);
+    // Room for the autocomplete dropdown below the island while typing.
+    next.height += suggestionPanelHeight;
     const prev = prevDimensionsRef.current;
     const isGrowing = next.width > prev.width || next.height > prev.height;
 
@@ -557,7 +605,7 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
     }
 
     return () => { cancelled = true; };
-  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent, isStreamingContent, componentPinned]);
+  }, [barState.barState, setSize, resizeWindowIfChanged, agentResponseContent, isStreamingContent, componentPinned, suggestionPanelHeight]);
 
   // Clean up shrink timer on unmount
   useEffect(() => {
@@ -767,21 +815,30 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                 audioLevel={barState.audioLevel}
               />
               <div className="flex-1 min-w-0 flex flex-col justify-center">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={localInputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  onFocus={handleFocus}
-                  onBlur={handleBlur}
-                  className={cn(
-                    "w-full bg-transparent border-none outline-none",
-                    "text-[13px] text-white/90 placeholder:text-white/20",
-                    "tracking-[-0.02em] pb-1.5",
-                  )}
-                  disabled={barState.barState !== UI.BAR_STATES_INPUT}
-                  autoFocus
-                />
+                <div className="relative">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={localInputValue}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={skillAutocomplete.handleKeyDown}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                    className={cn(
+                      "w-full bg-transparent border-none outline-none",
+                      "text-[13px] text-white/90 placeholder:text-white/20",
+                      "tracking-[-0.02em] pb-1.5",
+                    )}
+                    disabled={barState.barState !== UI.BAR_STATES_INPUT}
+                    autoFocus
+                  />
+                  <SkillGhostText
+                    value={localInputValue}
+                    ghostText={skillAutocomplete.ghostText}
+                    className="flex items-center pb-1.5 text-[13px] tracking-[-0.02em]"
+                    ghostClassName="text-white/25"
+                  />
+                </div>
                 <div className="h-px bg-white/[0.06]" />
               </div>
               <span
@@ -805,7 +862,11 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                 animation: `bar-content-in 0.25s ease-out ${SHRINK_DELAY_MS}ms both`,
               }}
             >
-              <div className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]">
+              <div
+                ref={responseScrollRef}
+                onScroll={handleResponseScroll}
+                className="relative flex-1 p-4 overflow-y-auto text-white/80 text-[13px] leading-[1.6] tracking-[-0.01em]"
+              >
                 <MixedContentRenderer
                   content={agentResponseContent}
                   isStreaming={isStreamingContent}
@@ -846,21 +907,42 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
                     );
                     setLocalInputValue("");
                   }}
-                  className="flex items-center gap-2 px-4 pb-3 pt-0"
+                  className="relative flex items-center gap-2 px-4 pb-3 pt-0"
                 >
-                  <input
-                    ref={pinnedInputRef}
-                    type="text"
-                    value={localInputValue}
-                    onChange={(e) => setLocalInputValue(e.target.value)}
-                    className={cn(
-                      "flex-1 bg-white/[0.06] border border-white/[0.08] rounded-md",
-                      "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
-                      "outline-none focus:border-white/[0.15]",
-                      "tracking-[-0.01em] transition-colors duration-150",
-                    )}
-                    placeholder="follow up"
-                  />
+                  {/* Dropdown opens upward over the response content */}
+                  {skillAutocomplete.open && (
+                    <div className="absolute bottom-full left-4 right-4 z-20 mb-1.5">
+                      <SkillSuggestionList
+                        variant="bar"
+                        suggestions={skillAutocomplete.suggestions}
+                        selectedIndex={skillAutocomplete.selectedIndex}
+                        onSelect={skillAutocomplete.accept}
+                        onHighlight={skillAutocomplete.setSelectedIndex}
+                      />
+                    </div>
+                  )}
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      ref={pinnedInputRef}
+                      type="text"
+                      value={localInputValue}
+                      onChange={(e) => setLocalInputValue(e.target.value)}
+                      onKeyDown={skillAutocomplete.handleKeyDown}
+                      className={cn(
+                        "w-full bg-white/[0.06] border border-white/[0.08] rounded-md",
+                        "px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/20",
+                        "outline-none focus:border-white/[0.15]",
+                        "tracking-[-0.01em] transition-colors duration-150",
+                      )}
+                      placeholder="follow up"
+                    />
+                    <SkillGhostText
+                      value={localInputValue}
+                      ghostText={skillAutocomplete.ghostText}
+                      className="flex items-center border border-transparent px-3 py-1.5 text-[12px] tracking-[-0.01em]"
+                      ghostClassName="text-white/25"
+                    />
+                  </div>
                   <span
                     className={cn(
                       "text-[10px] tracking-[0.04em] transition-opacity duration-200 select-none shrink-0",
@@ -936,6 +1018,21 @@ const DynamicBarContent = (_props: { barAppearance?: BarAppearance }) => {
           )}
         </DynamicIsland>
       </div>
+
+      {/* Skill autocomplete dropdown — floats below the island while typing.
+          Island in input mode is 371x84 at top padding 24, so the panel
+          anchors at y=116. The resize effect above grows the window to fit. */}
+      {isInputState && skillAutocomplete.open && (
+        <div className="absolute left-1/2 top-[116px] z-20 w-[347px] -translate-x-1/2">
+          <SkillSuggestionList
+            variant="bar"
+            suggestions={skillAutocomplete.suggestions}
+            selectedIndex={skillAutocomplete.selectedIndex}
+            onSelect={skillAutocomplete.accept}
+            onHighlight={skillAutocomplete.setSelectedIndex}
+          />
+        </div>
+      )}
     </div>
   );
 };

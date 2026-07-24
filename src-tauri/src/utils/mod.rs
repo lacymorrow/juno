@@ -1187,11 +1187,11 @@ fn get_window_titles_by_pid() -> std::collections::HashMap<i32, Vec<String>> {
         // Allocate lookup keys once — reused across every window in the list
         let pid_key: *mut objc::runtime::Object = msg_send![
             class!(NSString),
-            stringWithUTF8String: b"kCGWindowOwnerPID\0".as_ptr()
+            stringWithUTF8String: c"kCGWindowOwnerPID".as_ptr()
         ];
         let name_key: *mut objc::runtime::Object = msg_send![
             class!(NSString),
-            stringWithUTF8String: b"kCGWindowName\0".as_ptr()
+            stringWithUTF8String: c"kCGWindowName".as_ptr()
         ];
 
         for i in 0..count {
@@ -2197,6 +2197,46 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
     }
 
     context_parts.join("\n")
+}
+
+/// Pre-warm the TLS session to `api.anthropic.com` by sending a lightweight HEAD request.
+///
+/// TLS handshakes add 200-500ms to the first API call. Sending a HEAD request at startup
+/// caches the session ticket at the OS/TLS layer, so the first real POST /v1/messages
+/// skips the full handshake and reuses the cached session instead.
+///
+/// Safe to call multiple times — the warmup is fire-and-forget and errors are silently
+/// ignored (degraded to cold-start latency, not a failure).
+pub async fn warmup_tls_session() {
+    let start = std::time::Instant::now();
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS,
+        ))
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS,
+        ))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("TLS warmup: failed to build HTTP client: {}", e);
+            return;
+        }
+    };
+
+    match client.head("https://api.anthropic.com").send().await {
+        Ok(_) => {
+            tracing::info!(
+                "TLS warmup: api.anthropic.com session cached in {}ms",
+                start.elapsed().as_millis()
+            );
+        }
+        Err(e) => {
+            tracing::debug!("TLS warmup: HEAD request failed (non-critical): {}", e);
+        }
+    }
 }
 
 #[cfg(test)]
