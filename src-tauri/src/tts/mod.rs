@@ -4,13 +4,13 @@ pub mod replicate;
 pub mod supertonic;
 pub mod system;
 
-use tauri::{State, AppHandle};
 use crate::state::AppState;
-use tracing::{info, warn, error, debug};
+use regex::Regex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
-use regex::Regex;
+use tracing::{debug, error, info, warn};
 
 // Global flags for TTS coordination
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -28,15 +28,23 @@ fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
 
 fn register_audio_pid(pid: u32) {
     match audio_pid_registry().lock() {
-        Ok(mut pids) => { pids.push(pid); }
-        Err(e) => { warn!("[TTS] Failed to register audio PID {}: {}", pid, e); }
+        Ok(mut pids) => {
+            pids.push(pid);
+        }
+        Err(e) => {
+            warn!("[TTS] Failed to register audio PID {}: {}", pid, e);
+        }
     }
 }
 
 fn unregister_audio_pid(pid: u32) {
     match audio_pid_registry().lock() {
-        Ok(mut pids) => { pids.retain(|&p| p != pid); }
-        Err(e) => { warn!("[TTS] Failed to unregister audio PID {}: {}", pid, e); }
+        Ok(mut pids) => {
+            pids.retain(|&p| p != pid);
+        }
+        Err(e) => {
+            warn!("[TTS] Failed to unregister audio PID {}: {}", pid, e);
+        }
     }
 }
 
@@ -78,12 +86,18 @@ impl AudioPlaybackHandle {
         // Only add minimal delay if audio completed suspiciously fast (< 50ms)
         if elapsed < std::time::Duration::from_millis(50) {
             let safety_delay = std::time::Duration::from_millis(25);
-            info!("Audio completed very quickly ({}ms), adding safety delay of {}ms",
-                  elapsed.as_millis(), safety_delay.as_millis());
+            info!(
+                "Audio completed very quickly ({}ms), adding safety delay of {}ms",
+                elapsed.as_millis(),
+                safety_delay.as_millis()
+            );
             tokio::time::sleep(safety_delay).await;
         }
 
-        info!("Audio playback completion confirmed after {}ms", elapsed.as_millis());
+        info!(
+            "Audio playback completion confirmed after {}ms",
+            elapsed.as_millis()
+        );
         Ok(())
     }
 }
@@ -141,21 +155,31 @@ pub fn filter_tts_content(text: &str) -> String {
     // Clean up whitespace and normalize
     match Regex::new(r"\s+") {
         Ok(whitespace_regex) => {
-            filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
+            filtered_text = whitespace_regex
+                .replace_all(&filtered_text, " ")
+                .to_string();
         }
         Err(e) => {
             tracing::warn!("Failed to compile whitespace regex: {}", e);
             // Fallback to simple space normalization
-            filtered_text = filtered_text.split_whitespace().collect::<Vec<_>>().join(" ");
+            filtered_text = filtered_text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
         }
     }
     filtered_text = filtered_text.trim().to_string();
 
-    debug!("[TTS Filter] Filtered text length: {} chars", filtered_text.len());
+    debug!(
+        "[TTS Filter] Filtered text length: {} chars",
+        filtered_text.len()
+    );
     if filtered_text.len() != text.len() {
-        debug!("[TTS Filter] Content was filtered: '{}' -> '{}'",
-               text.chars().take(100).collect::<String>(),
-               filtered_text.chars().take(100).collect::<String>());
+        debug!(
+            "[TTS Filter] Content was filtered: '{}' -> '{}'",
+            text.chars().take(100).collect::<String>(),
+            filtered_text.chars().take(100).collect::<String>()
+        );
     }
 
     filtered_text
@@ -163,15 +187,21 @@ pub fn filter_tts_content(text: &str) -> String {
 
 /// Play base64 audio with proper completion tracking and error handling
 /// Returns an AudioPlaybackHandle that can be awaited for completion
-async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlaybackHandle, String> {
+async fn play_base64_audio_with_tracking(
+    base64_audio: &str,
+) -> Result<AudioPlaybackHandle, String> {
     use base64::prelude::*;
     use std::io::Write;
     use tempfile::Builder as TempFileBuilder;
 
-    info!("Playing TTS audio with completion tracking ({} bytes)", base64_audio.len());
+    info!(
+        "Playing TTS audio with completion tracking ({} bytes)",
+        base64_audio.len()
+    );
 
     // Decode base64 audio data
-    let audio_bytes = BASE64_STANDARD.decode(base64_audio)
+    let audio_bytes = BASE64_STANDARD
+        .decode(base64_audio)
         .map_err(|e| format!("Failed to decode base64 TTS audio: {}", e))?;
 
     // Create temporary file for audio playback
@@ -182,10 +212,12 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
         .map_err(|e| format!("Failed to create temporary file for TTS audio: {}", e))?;
 
     // Write audio data to temporary file
-    temp_file.write_all(&audio_bytes)
+    temp_file
+        .write_all(&audio_bytes)
         .map_err(|e| format!("Failed to write TTS audio to temporary file: {}", e))?;
 
-    temp_file.flush()
+    temp_file
+        .flush()
         .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
 
     let temp_path = temp_file.path().to_path_buf();
@@ -234,7 +266,8 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("macOS afplay completed successfully");
                         } else {
-                            let error_msg = format!("macOS afplay exited with non-zero status: {}", status);
+                            let error_msg =
+                                format!("macOS afplay exited with non-zero status: {}", status);
                             error!("{}", error_msg);
 
                             // Store error for propagation
@@ -242,13 +275,14 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                             error_notify_clone.notify_one();
 
                             // Check if it failed immediately (before actually playing audio)
-                            let pid_check = std::process::Command::new("pgrep")
-                                .arg("afplay")
-                                .output();
+                            let pid_check =
+                                std::process::Command::new("pgrep").arg("afplay").output();
 
                             if let Ok(output) = pid_check {
                                 if output.stdout.is_empty() {
-                                    warn!("afplay process not found - audio may have failed to start");
+                                    warn!(
+                                        "afplay process not found - audio may have failed to start"
+                                    );
                                 }
                             }
                         }
@@ -306,7 +340,8 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                         if status.success() {
                             info!("Linux aplay completed successfully");
                         } else {
-                            let error_msg = format!("Linux aplay exited with non-zero status: {}", status);
+                            let error_msg =
+                                format!("Linux aplay exited with non-zero status: {}", status);
                             error!("{}", error_msg);
 
                             // Store error for propagation
@@ -314,13 +349,14 @@ async fn play_base64_audio_with_tracking(base64_audio: &str) -> Result<AudioPlay
                             error_notify_clone.notify_one();
 
                             // Check if it failed immediately
-                            let pid_check = std::process::Command::new("pgrep")
-                                .arg("aplay")
-                                .output();
+                            let pid_check =
+                                std::process::Command::new("pgrep").arg("aplay").output();
 
                             if let Ok(output) = pid_check {
                                 if output.stdout.is_empty() {
-                                    warn!("aplay process not found - audio may have failed to start");
+                                    warn!(
+                                        "aplay process not found - audio may have failed to start"
+                                    );
                                 }
                             }
                         }
@@ -390,7 +426,11 @@ pub fn stop_speech() {
         return;
     }
 
-    info!("[TTS] Stopping {} Juno audio process(es): {:?}", pids_to_kill.len(), pids_to_kill);
+    info!(
+        "[TTS] Stopping {} Juno audio process(es): {:?}",
+        pids_to_kill.len(),
+        pids_to_kill
+    );
 
     #[cfg(unix)]
     for pid in pids_to_kill {
@@ -399,7 +439,11 @@ pub fn stop_speech() {
             debug!("[TTS] Sent SIGTERM to Juno audio process PID {}", pid);
         } else {
             // ESRCH (errno 3) means process already exited — not an error
-            debug!("[TTS] kill({}) returned error: {} (process may have already exited)", pid, std::io::Error::last_os_error());
+            debug!(
+                "[TTS] kill({}) returned error: {} (process may have already exited)",
+                pid,
+                std::io::Error::last_os_error()
+            );
         }
     }
 }
@@ -427,7 +471,10 @@ fn set_tts_playing(playing: bool) {
 // Register escape key for TTS cancellation - CENTRALIZED
 pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if let Err(e) = coordinator.register_escape_user(app_handle, "tts_playback").await {
+    if let Err(e) = coordinator
+        .register_escape_user(app_handle, "tts_playback")
+        .await
+    {
         warn!("[TTS] Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
     } else {
         info!("[TTS] Registered escape key for TTS cancellation");
@@ -437,8 +484,14 @@ pub async fn register_tts_escape_key(app_handle: &AppHandle) {
 // Unregister escape key after TTS completion - CENTRALIZED
 pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if let Err(e) = coordinator.unregister_escape_user(app_handle, "tts_playback").await {
-        warn!("[TTS] Failed to unregister escape key after TTS: {} - continuing anyway", e);
+    if let Err(e) = coordinator
+        .unregister_escape_user(app_handle, "tts_playback")
+        .await
+    {
+        warn!(
+            "[TTS] Failed to unregister escape key after TTS: {} - continuing anyway",
+            e
+        );
     } else {
         info!("[TTS] Unregistered escape key after TTS completion");
     }
@@ -462,38 +515,58 @@ pub async fn set_tts_provider_command(
     info!("Setting TTS provider to: {}", provider);
 
     // Validate provider
-    let valid_providers = ["off", "system", "elevenlabs", "replicate", "kokoro", "chatterbox", "supertonic"];
+    let valid_providers = [
+        "off",
+        "system",
+        "elevenlabs",
+        "replicate",
+        "kokoro",
+        "chatterbox",
+        "supertonic",
+    ];
     if !valid_providers.contains(&provider.as_str()) {
-        return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
+        return Err(format!(
+            "Invalid TTS provider: {}. Valid providers: {:?}",
+            provider, valid_providers
+        ));
     }
 
     // Get current settings from centralized system
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Update centralized settings
     audio_settings.tts_provider = provider.clone();
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update app state for backward compatibility
-    state.set_tts_provider(provider.clone()).map_err(|e| format!("Failed to set tts_provider: {}", e))?;
+    state
+        .set_tts_provider(provider.clone())
+        .map_err(|e| format!("Failed to set tts_provider: {}", e))?;
 
-    info!("TTS provider set to: {} (saved to centralized settings)", provider);
+    info!(
+        "TTS provider set to: {} (saved to centralized settings)",
+        provider
+    );
     Ok(())
 }
 
 // Command to get the Kokoro voice from centralized settings
 #[tauri::command]
-pub async fn get_kokoro_voice_command(
-    app_handle: AppHandle,
-) -> Result<String, String> {
+pub async fn get_kokoro_voice_command(app_handle: AppHandle) -> Result<String, String> {
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
     Ok(audio_settings.kokoro_voice)
 }
@@ -510,14 +583,19 @@ pub async fn set_kokoro_voice_command(
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     audio_settings.kokoro_voice = voice.clone();
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
-    state.set_kokoro_voice(voice.clone())
+    state
+        .set_kokoro_voice(voice.clone())
         .map_err(|e| format!("Failed to set kokoro_voice in state: {}", e))?;
 
     info!("Kokoro voice set to: {}", voice);
@@ -531,7 +609,9 @@ pub async fn get_chatterbox_settings_command(
 ) -> Result<serde_json::Value, String> {
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
     Ok(serde_json::json!({
         "reference_audio_url": audio_settings.chatterbox_reference_audio_url,
@@ -549,51 +629,71 @@ pub async fn set_chatterbox_settings_command(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    info!("Setting Chatterbox settings: ref_audio={:?}, exaggeration={:.2}, hd={}", reference_audio_url, exaggeration, use_hd);
+    info!(
+        "Setting Chatterbox settings: ref_audio={:?}, exaggeration={:.2}, hd={}",
+        reference_audio_url, exaggeration, use_hd
+    );
 
     if !(0.0..=2.0).contains(&exaggeration) {
-        return Err(format!("Chatterbox exaggeration must be between 0.0 and 2.0, got {}", exaggeration));
+        return Err(format!(
+            "Chatterbox exaggeration must be between 0.0 and 2.0, got {}",
+            exaggeration
+        ));
     }
 
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     audio_settings.chatterbox_reference_audio_url = reference_audio_url.clone();
     audio_settings.chatterbox_exaggeration = exaggeration;
     audio_settings.chatterbox_use_hd = use_hd;
 
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save Chatterbox settings: {}", e))?;
 
-    state.set_chatterbox_reference_audio_url(reference_audio_url)
-        .map_err(|e| format!("Failed to set Chatterbox reference audio URL in state: {}", e))?;
-    state.set_chatterbox_exaggeration(exaggeration)
+    state
+        .set_chatterbox_reference_audio_url(reference_audio_url)
+        .map_err(|e| {
+            format!(
+                "Failed to set Chatterbox reference audio URL in state: {}",
+                e
+            )
+        })?;
+    state
+        .set_chatterbox_exaggeration(exaggeration)
         .map_err(|e| format!("Failed to set Chatterbox exaggeration in state: {}", e))?;
-    state.set_chatterbox_use_hd(use_hd)
+    state
+        .set_chatterbox_use_hd(use_hd)
         .map_err(|e| format!("Failed to set Chatterbox HD mode in state: {}", e))?;
 
     info!("Chatterbox settings saved");
     Ok(())
 }
 
-
 // New command to get current TTS provider
 #[tauri::command]
-pub async fn get_tts_provider_command(
-    app_handle: AppHandle,
-) -> Result<String, String> {
+pub async fn get_tts_provider_command(app_handle: AppHandle) -> Result<String, String> {
     // Get provider from centralized settings
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     // Reduced logging frequency - only log at debug level
-    tracing::debug!("Current TTS provider from centralized settings: {}", audio_settings.tts_provider);
+    tracing::debug!(
+        "Current TTS provider from centralized settings: {}",
+        audio_settings.tts_provider
+    );
     Ok(audio_settings.tts_provider)
 }
 
@@ -616,11 +716,16 @@ pub async fn invoke_tts(
     // CRITICAL FIX 3: Reset stop flag at the start of each operation
     reset_tts_stop_flag();
 
-    let provider = state.get_tts_provider().map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
+    let provider = state
+        .get_tts_provider()
+        .map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
-        info!("TTS is set to '{}'. Skipping TTS for text: {}...", provider, short_text);
+        info!(
+            "TTS is set to '{}'. Skipping TTS for text: {}...",
+            provider, short_text
+        );
         return Ok("TTS_DISABLED_BY_SETTING".to_string());
     }
 
@@ -640,7 +745,8 @@ pub async fn invoke_tts(
     register_tts_escape_key(&app_handle).await;
 
     // Execute TTS with proper completion tracking
-    let result = execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
+    let result =
+        execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
     // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
     result
@@ -780,8 +886,6 @@ async fn execute_tts_with_completion_tracking(
     result
 }
 
-
-
 // Execute TTS with fallback logic (no blocking, no race conditions)
 async fn execute_tts_with_fallback(
     text: String,
@@ -789,7 +893,10 @@ async fn execute_tts_with_fallback(
     app_state: AppState,
 ) -> Result<String, String> {
     // Check network connectivity for cloud-based providers
-    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs" | "chatterbox");
+    let is_cloud_provider = matches!(
+        primary_provider.to_lowercase().as_str(),
+        "replicate" | "elevenlabs" | "chatterbox"
+    );
 
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
@@ -811,7 +918,10 @@ async fn execute_tts_with_fallback(
         "system" => vec!["system"],
         "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
         _ => {
-            warn!("Unknown primary TTS provider: '{}'. Using system fallback only.", primary_provider);
+            warn!(
+                "Unknown primary TTS provider: '{}'. Using system fallback only.",
+                primary_provider
+            );
             vec!["system"]
         }
     };
@@ -826,15 +936,24 @@ async fn execute_tts_with_fallback(
         }
 
         let is_primary = index == 0;
-        info!("Attempting TTS with provider: {} ({})", fallback_provider, if is_primary { "primary" } else { "fallback" });
+        info!(
+            "Attempting TTS with provider: {} ({})",
+            fallback_provider,
+            if is_primary { "primary" } else { "fallback" }
+        );
 
-        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await {
+        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider)
+            .await
+        {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
                 }
                 if !is_primary {
-                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", primary_provider, fallback_provider);
+                    warn!(
+                        "Primary TTS provider '{}' failed, but fallback '{}' succeeded",
+                        primary_provider, fallback_provider
+                    );
                 }
                 return Ok(result);
             }
@@ -847,7 +966,9 @@ async fn execute_tts_with_fallback(
                 if is_primary && is_network_error {
                     warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
                     // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system").await {
+                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system")
+                        .await
+                    {
                         Ok(system_result) => {
                             warn!("Network error detected, successfully fell back to system TTS");
                             return Ok(system_result);
@@ -896,32 +1017,46 @@ pub async fn invoke_tts_for_provider(
         "chatterbox" => {
             let (ref_url, exaggeration, use_hd) = _state
                 .as_ref()
-                .map(|s| (
-                    s.get_chatterbox_reference_audio_url().ok().flatten(),
-                    s.get_chatterbox_exaggeration().unwrap_or(0.5),
-                    s.get_chatterbox_use_hd().unwrap_or(false),
-                ))
+                .map(|s| {
+                    (
+                        s.get_chatterbox_reference_audio_url().ok().flatten(),
+                        s.get_chatterbox_exaggeration().unwrap_or(0.5),
+                        s.get_chatterbox_use_hd().unwrap_or(false),
+                    )
+                })
                 .unwrap_or((None, 0.5, false));
             replicate::invoke_chatterbox_tts(text, ref_url, exaggeration, use_hd).await
         }
         "supertonic" => {
             let (server_url, voice, speed) = _state
                 .as_ref()
-                .map(|s| (
-                    s.get_supertonic_server_url().unwrap_or_else(|_| supertonic::DEFAULT_SERVER_URL.to_string()),
-                    s.get_supertonic_voice().unwrap_or_else(|_| supertonic::DEFAULT_VOICE.to_string()),
-                    s.get_supertonic_speed().unwrap_or(supertonic::DEFAULT_SPEED),
-                ))
-                .unwrap_or((supertonic::DEFAULT_SERVER_URL.to_string(), supertonic::DEFAULT_VOICE.to_string(), supertonic::DEFAULT_SPEED));
+                .map(|s| {
+                    (
+                        s.get_supertonic_server_url()
+                            .unwrap_or_else(|_| supertonic::DEFAULT_SERVER_URL.to_string()),
+                        s.get_supertonic_voice()
+                            .unwrap_or_else(|_| supertonic::DEFAULT_VOICE.to_string()),
+                        s.get_supertonic_speed()
+                            .unwrap_or(supertonic::DEFAULT_SPEED),
+                    )
+                })
+                .unwrap_or((
+                    supertonic::DEFAULT_SERVER_URL.to_string(),
+                    supertonic::DEFAULT_VOICE.to_string(),
+                    supertonic::DEFAULT_SPEED,
+                ));
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
         "system" => system::invoke_system_tts(text).await,
         "off" => {
-             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
-             Ok("TTS_DISABLED_BY_SETTING".to_string())
+            warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
+            Ok("TTS_DISABLED_BY_SETTING".to_string())
         }
         _ => {
-            warn!("Unknown TTS provider specified: '{}'. Cannot invoke.", provider);
+            warn!(
+                "Unknown TTS provider specified: '{}'. Cannot invoke.",
+                provider
+            );
             Err(format!("Unknown TTS provider: {}", provider))
         }
     }
@@ -933,7 +1068,9 @@ pub async fn get_supertonic_settings_command(
 ) -> Result<serde_json::Value, String> {
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
     Ok(serde_json::json!({
         "server_url": audio_settings.supertonic_server_url,
@@ -950,30 +1087,43 @@ pub async fn set_supertonic_settings_command(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    info!("Setting Supertonic settings: server_url={}, voice={}, speed={:.2}", server_url, voice, speed);
+    info!(
+        "Setting Supertonic settings: server_url={}, voice={}, speed={:.2}",
+        server_url, voice, speed
+    );
 
     if !(0.5..=2.0).contains(&speed) {
-        return Err(format!("Supertonic speed must be between 0.5 and 2.0, got {}", speed));
+        return Err(format!(
+            "Supertonic speed must be between 0.5 and 2.0, got {}",
+            speed
+        ));
     }
 
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     audio_settings.supertonic_server_url = server_url.clone();
     audio_settings.supertonic_voice = voice.clone();
     audio_settings.supertonic_speed = speed;
 
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save Supertonic settings: {}", e))?;
 
-    state.set_supertonic_server_url(server_url)
+    state
+        .set_supertonic_server_url(server_url)
         .map_err(|e| format!("Failed to set Supertonic server URL in state: {}", e))?;
-    state.set_supertonic_voice(voice)
+    state
+        .set_supertonic_voice(voice)
         .map_err(|e| format!("Failed to set Supertonic voice in state: {}", e))?;
-    state.set_supertonic_speed(speed)
+    state
+        .set_supertonic_speed(speed)
         .map_err(|e| format!("Failed to set Supertonic speed in state: {}", e))?;
 
     info!("Supertonic settings saved");
@@ -1036,7 +1186,8 @@ mod tests {
 
     #[test]
     fn test_filter_urls_and_paths() {
-        let input = "Visit https://example.com or check /home/user/file.txt and ~/documents/readme.md";
+        let input =
+            "Visit https://example.com or check /home/user/file.txt and ~/documents/readme.md";
         let result = filter_tts_content(input);
         assert!(result.contains("https://example.com"));
     }
@@ -1057,7 +1208,8 @@ mod tests {
 
     #[test]
     fn test_filter_json_structures() {
-        let input = "The config is {\"port\": 8080, \"host\": \"localhost\"} and array is [1, 2, 3].";
+        let input =
+            "The config is {\"port\": 8080, \"host\": \"localhost\"} and array is [1, 2, 3].";
         let result = filter_tts_content(input);
         assert!(result.contains("\"port\": 8080"));
     }

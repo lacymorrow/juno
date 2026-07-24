@@ -55,17 +55,16 @@ pub mod extensions {
 
     // File extension arrays for SecurityConfig (production)
     pub const PRODUCTION_EXTENSIONS: &[&str] = &[
-        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
-        "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
-        "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala"
+        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp", "css", "html", "xml",
+        "json", "yaml", "yml", "toml", "cfg", "ini", "sh", "bat", "ps1", "sql", "go", "rb", "php",
+        "swift", "kt", "scala",
     ];
 
     // File extension arrays for SecurityConfig (development mode)
     pub const DEVELOPMENT_EXTENSIONS: &[&str] = &[
-        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp",
-        "css", "html", "xml", "json", "yaml", "yml", "toml", "cfg", "ini",
-        "sh", "bat", "ps1", "sql", "go", "rb", "php", "swift", "kt", "scala",
-        "log", "out", "err", "tmp"
+        "txt", "md", "rs", "js", "ts", "py", "java", "c", "cpp", "h", "hpp", "css", "html", "xml",
+        "json", "yaml", "yml", "toml", "cfg", "ini", "sh", "bat", "ps1", "sql", "go", "rb", "php",
+        "swift", "kt", "scala", "log", "out", "err", "tmp",
     ];
 }
 
@@ -117,7 +116,8 @@ pub mod shell_commands {
     pub const RECURSIVE_FLAG: &str = "-r";
 
     // Browser binaries
-    pub const CHROME_BINARY_MACOS: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    pub const CHROME_BINARY_MACOS: &str =
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     pub const CHROMIUM_BINARY_MACOS: &str = "/Applications/Chromium.app/Contents/MacOS/Chromium";
 }
 

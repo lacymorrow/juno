@@ -6,21 +6,23 @@
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
-use std::sync::{Arc, Mutex, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
-use std::time::{SystemTime, UNIX_EPOCH, Duration, Instant};
 
-use crate::{state, cli, agent, commands};
+use crate::{agent, cli, commands, state};
 
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
     fmt()
         .with_env_filter(
             EnvFilter::from_default_env().add_directive(
-                "info".parse().unwrap_or_else(|_| tracing::level_filters::LevelFilter::INFO.into())
-            )
+                "info"
+                    .parse()
+                    .unwrap_or_else(|_| tracing::level_filters::LevelFilter::INFO.into()),
+            ),
         )
         .with_target(false) // Hide target module names for cleaner output
         .with_thread_ids(false) // Hide thread IDs for cleaner output
@@ -92,7 +94,7 @@ pub fn validate_environment_variables() {
     for var in critical_vars.iter() {
         match env::var(var) {
             Ok(val) if !val.is_empty() => {} // Key exists and is non-empty
-            _ => missing_vars.push(*var),     // Missing or empty
+            _ => missing_vars.push(*var),    // Missing or empty
         }
     }
 
@@ -107,11 +109,13 @@ pub fn validate_environment_variables() {
 
 // Rate limiter and cache for desktop engine initialization
 // Stores (last_init_timestamp, cached_desktop_instance)
-static DESKTOP_CACHE: LazyLock<Mutex<(u64, Option<Arc<Desktop>>)>> = LazyLock::new(|| Mutex::new((0, None)));
+static DESKTOP_CACHE: LazyLock<Mutex<(u64, Option<Arc<Desktop>>)>> =
+    LazyLock::new(|| Mutex::new((0, None)));
 const DESKTOP_INIT_COOLDOWN_MS: u64 = 2000; // 2 second cooldown
 
 // Permission check caching to prevent redundant checks
-static PERMISSION_CACHE: LazyLock<Mutex<Option<(bool, Instant)>>> = LazyLock::new(|| Mutex::new(None));
+static PERMISSION_CACHE: LazyLock<Mutex<Option<(bool, Instant)>>> =
+    LazyLock::new(|| Mutex::new(None));
 const PERMISSION_CACHE_DURATION: Duration = Duration::from_secs(10); // 10 second cache
 
 /// Initialize the Desktop Automation Engine with proper error handling and rate limiting
@@ -143,7 +147,9 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     if let Ok(perm_cache) = PERMISSION_CACHE.lock() {
         if let Some((has_permissions, timestamp)) = *perm_cache {
             if timestamp.elapsed() < PERMISSION_CACHE_DURATION && !has_permissions {
-                debug!("Permission cache indicates no permissions, skipping desktop initialization");
+                debug!(
+                    "Permission cache indicates no permissions, skipping desktop initialization"
+                );
                 return None;
             }
         }
@@ -163,15 +169,20 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
             }
 
             Some(Arc::new(instance))
-        },
+        }
         Err(e) => {
             warn!("Failed to initialize Desktop Automation Engine: {}", e);
             info!("App will start with limited functionality - desktop automation features will be disabled");
-            info!("The app will still open and show the permission flow to guide you through setup");
+            info!(
+                "The app will still open and show the permission flow to guide you through setup"
+            );
 
             // Check if this is specifically a permission error
             let error_str = e.to_string();
-            if error_str.contains("permission") || error_str.contains("accessibility") || error_str.contains("denied") {
+            if error_str.contains("permission")
+                || error_str.contains("accessibility")
+                || error_str.contains("denied")
+            {
                 info!("Permission-related error detected - the app's permission flow will guide you through setup");
                 info!("System Settings may have opened automatically to grant permissions");
 
@@ -210,7 +221,9 @@ pub fn clear_permission_cache() {
 }
 
 /// Handle CLI command processing and determine if app should continue
-pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+pub fn handle_cli_processing(
+    desktop_arc: &Option<Arc<Desktop>>,
+) -> Result<bool, crate::error_handling::JunoError> {
     let cli = cli::Cli::parse();
 
     // Check if this is a headless operation
@@ -231,9 +244,11 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool,
 }
 
 /// Handle headless CLI operations
-async fn handle_headless_cli_async(cli: &cli::Cli, _desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+async fn handle_headless_cli_async(
+    cli: &cli::Cli,
+    _desktop_arc: &Option<Arc<Desktop>>,
+) -> Result<bool, crate::error_handling::JunoError> {
     use crate::cli::headless::HeadlessRuntime;
-
 
     // Create minimal Tauri app for CLI operations if needed
     let app_handle = create_minimal_tauri_app().await?;
@@ -255,13 +270,19 @@ async fn handle_headless_cli_async(cli: &cli::Cli, _desktop_arc: &Option<Arc<Des
 }
 
 /// Synchronous wrapper for headless CLI handling
-fn handle_headless_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+fn handle_headless_cli(
+    cli: &cli::Cli,
+    desktop_arc: &Option<Arc<Desktop>>,
+) -> Result<bool, crate::error_handling::JunoError> {
     // Reuse existing async runtime managed by Tauri instead of creating a new one
     tauri::async_runtime::block_on(handle_headless_cli_async(cli, desktop_arc))
 }
 
 /// Handle legacy CLI flags for backward compatibility
-fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+fn handle_legacy_cli(
+    cli: &cli::Cli,
+    desktop_arc: &Option<Arc<Desktop>>,
+) -> Result<bool, crate::error_handling::JunoError> {
     // If handle_cli_commands returns Ok(true), it means a command was executed
     // and the application should exit.
     if let Some(desktop_ref) = desktop_arc.as_ref() {
@@ -280,17 +301,15 @@ fn handle_legacy_cli(cli: &cli::Cli, desktop_arc: &Option<Arc<Desktop>>) -> Resu
         // Handle CLI commands without desktop instance - create minimal instance for CLI only
         // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
         match Desktop::new(false, false) {
-            Ok(minimal_desktop) => {
-                match cli::runner::handle_cli_commands(cli, &minimal_desktop) {
-                    Ok(should_exit) => {
-                        if should_exit {
-                            return Ok(false);
-                        }
+            Ok(minimal_desktop) => match cli::runner::handle_cli_commands(cli, &minimal_desktop) {
+                Ok(should_exit) => {
+                    if should_exit {
+                        return Ok(false);
                     }
-                    Err(e) => {
-                        error!("CLI command execution failed with minimal desktop: {}", e);
-                        return Err(e);
-                    }
+                }
+                Err(e) => {
+                    error!("CLI command execution failed with minimal desktop: {}", e);
+                    return Err(e);
                 }
             },
             Err(_) => {
@@ -401,7 +420,9 @@ impl StartupSequence {
         init_ai_providers();
     }
 
-    fn handle_cli(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
+    fn handle_cli(
+        desktop_arc: &Option<Arc<Desktop>>,
+    ) -> Result<bool, crate::error_handling::JunoError> {
         info!("⚡ Processing CLI arguments...");
         handle_cli_processing(desktop_arc)
     }
@@ -427,29 +448,21 @@ pub fn quick_startup() -> Result<(Option<Arc<Desktop>>, state::AppState), String
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_startup_sequence_creation() {
-        // Test that StartupSequence can be created and basic methods work
-        // This is a basic structure test since full startup requires system resources
-        assert!(true, "StartupSequence should be constructible");
-    }
-
+    /// Smoke test: validation must not panic on whatever environment the test
+    /// runner happens to have. Reaching the end of the function *is* the
+    /// assertion; there is no return value to inspect.
     #[test]
     fn test_environment_validation_safety() {
-        // Test that environment validation doesn't crash
         validate_environment_variables();
-        assert!(true, "Environment validation should complete safely");
     }
 
+    /// Smoke test: startup must surface a missing desktop engine or absent
+    /// permissions as `Err`, never as a panic. Either outcome is valid — CI has
+    /// no accessibility grants, a dev machine does — so the assertion is that we
+    /// return at all.
     #[test]
     fn test_quick_startup_safety() {
-        // Test that quick startup handles missing permissions gracefully
-        // In test environment, desktop engine may fail, but should not crash
-        match quick_startup() {
-            Ok(_) => println!("Quick startup succeeded"),
-            Err(e) => println!("Quick startup handled error gracefully: {}", e),
-        }
-        assert!(true, "Quick startup should handle errors gracefully");
+        let _ = quick_startup();
     }
 
     #[test]
@@ -459,20 +472,35 @@ mod tests {
         assert!(cli.is_headless(), "Should detect headless mode");
 
         let cli_with_command = cli::Cli::parse_from(vec!["juno", "agent", "status"]);
-        assert!(cli_with_command.is_headless(), "Should detect headless mode with subcommands");
+        assert!(
+            cli_with_command.is_headless(),
+            "Should detect headless mode with subcommands"
+        );
 
         let cli_gui = cli::Cli::parse_from(vec!["juno"]);
-        assert!(!cli_gui.is_headless(), "Should not detect headless mode for GUI");
+        assert!(
+            !cli_gui.is_headless(),
+            "Should not detect headless mode for GUI"
+        );
     }
 
     #[test]
     fn test_legacy_cli_detection() {
         // Test legacy CLI flag detection
-        let cli = cli::Cli::parse_from(vec!["juno", "--tts-provider", "system", "--tts-text", "test"]);
+        let cli = cli::Cli::parse_from(vec![
+            "juno",
+            "--tts-provider",
+            "system",
+            "--tts-text",
+            "test",
+        ]);
         assert!(cli.has_legacy_flags(), "Should detect legacy TTS flags");
 
         let cli_normal = cli::Cli::parse_from(vec!["juno", "query", "test"]);
-        assert!(!cli_normal.has_legacy_flags(), "Should not detect legacy flags in modern CLI");
+        assert!(
+            !cli_normal.has_legacy_flags(),
+            "Should not detect legacy flags in modern CLI"
+        );
     }
 
     #[test]
@@ -480,9 +508,9 @@ mod tests {
         // Test that the create_minimal_tauri_app function logic is sound
         // We can't run the actual async function in a unit test, but we can verify
         // the synchronization primitives work correctly
+        use crate::error_handling::JunoError;
         use std::sync::{Arc, Mutex};
         use tokio::sync::oneshot;
-        use crate::error_handling::JunoError;
 
         // Test the container pattern we use for app handle storage
         let app_handle_container = Arc::new(Mutex::new(None::<String>)); // Use String as a simple test type
@@ -497,7 +525,10 @@ mod tests {
         // Simulate retrieving the value
         {
             let container = app_handle_container.lock().unwrap();
-            assert!(container.is_some(), "Container should hold the stored value");
+            assert!(
+                container.is_some(),
+                "Container should hold the stored value"
+            );
             assert_eq!(container.as_ref().unwrap(), "test_handle");
         }
 

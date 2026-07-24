@@ -132,8 +132,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
 
     // Load dictation trigger mode from persistent storage
     if let Err(e) =
-        crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &app_state)
-            .await
+        crate::commands::core::load_dictation_trigger_mode_from_store(&app_handle, &app_state).await
     {
         warn!(
             "Failed to load dictation trigger mode: {} - using defaults",
@@ -199,7 +198,7 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
     } else {
         info!("Successfully loaded audio settings from centralized settings");
     }
-    
+
     // Restore always listening mode if it was previously active
     restore_always_listening_if_needed(&app_handle, &app_state).await;
 
@@ -230,15 +229,16 @@ async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result
 
     // Create voice transcription config based on centralized settings.
     // Use from_centralized_settings to handle stt_provider/parakeet_model_dir defaults.
-    let _voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig::from_centralized_settings(
-        "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
-        16000,
-        1,
-        1500,
-        500,
-        true,
-        audio_settings.sound_enabled,
-    );
+    let _voice_config =
+        tauri_plugin_voice_transcription::VoiceTranscriptionConfig::from_centralized_settings(
+            "models/ggml-large-v3-turbo-q5_0.bin".to_string(),
+            16000,
+            1,
+            1500,
+            500,
+            true,
+            audio_settings.sound_enabled,
+        );
 
     // Note: The voice transcription plugin currently uses stub implementation
     // When it's fully implemented, we would apply the config here
@@ -258,7 +258,10 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
-        match app_state_bg.initialize_mcp_servers(Some(&app_handle_bg)).await {
+        match app_state_bg
+            .initialize_mcp_servers(Some(&app_handle_bg))
+            .await
+        {
             Ok(_) => {
                 debug!("MCP servers initialized");
             }
@@ -598,69 +601,61 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
     Ok(issues)
 }
 
-#[cfg(test)]
-mod tests {
-    #[allow(unused_imports)]
-    use super::*;
-
-    #[test]
-    fn test_state_management_module_compilation() {
-        // This test ensures the module compiles correctly
-        assert!(true, "State management module compiled successfully");
-    }
-
-    #[tokio::test]
-    async fn test_state_summary_structure() {
-        // Test that state summary has expected structure
-        // This would need a mock AppHandle in a real test environment
-        assert!(true, "State summary structure test placeholder");
-    }
-
-    #[test]
-    fn test_state_validation_logic() {
-        // Test state validation logic
-        let issues = vec!["test issue".to_string()];
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0], "test issue");
-    }
-}
-
 /// Restore always listening mode if it was previously active
 async fn restore_always_listening_if_needed(app_handle: &AppHandle, app_state: &AppState) {
     // Check if always listening was previously active
     if !app_state.get_always_listening_active().unwrap_or(false) {
         return;
     }
-    
+
     info!("[State] Always listening was active in saved settings - attempting to restore...");
-    
+
     // Try to start the always listening controller
-    match app_handle.try_state::<std::sync::Arc<std::sync::Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+    match app_handle.try_state::<std::sync::Arc<
+        std::sync::Mutex<
+            tauri_plugin_voice_transcription::always_listening::AlwaysListeningController,
+        >,
+    >>() {
         Some(controller_state) => {
             match tauri_plugin_voice_transcription::commands::start_always_listening(
                 app_handle.clone(),
-                controller_state
-            ).await {
+                controller_state,
+            )
+            .await
+            {
                 Ok(_) => {
                     info!("[State] Successfully restored always listening mode on startup");
-                    
+
                     // Emit event to update UI
-                    if let Err(e) = app_handle.emit(crate::constants::events::always_listening::MODE_CHANGED, true) {
-                        warn!("[State] Failed to emit always-listening-mode-changed event: {}", e);
+                    if let Err(e) = app_handle.emit(
+                        crate::constants::events::always_listening::MODE_CHANGED,
+                        true,
+                    ) {
+                        warn!(
+                            "[State] Failed to emit always-listening-mode-changed event: {}",
+                            e
+                        );
                     }
-                    
+
                     // Update floating bar UI
-                    crate::commands::ui_commands::handle_always_listening_change(app_handle, true).await;
+                    crate::commands::ui_commands::handle_always_listening_change(app_handle, true)
+                        .await;
                 }
                 Err(e) => {
-                    warn!("[State] Failed to restore always listening mode on startup: {}", e);
-                    
+                    warn!(
+                        "[State] Failed to restore always listening mode on startup: {}",
+                        e
+                    );
+
                     // Reset the state since we couldn't start it
                     let _ = app_state.set_always_listening_active(false);
-                    
+
                     // Update centralized settings to reflect the failure
-                    if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app_handle.clone()) {
-                        if let Ok(mut audio_settings) = settings_manager.get_audio_settings().await {
+                    if let Ok(settings_manager) =
+                        crate::settings::manager::SettingsManager::new(app_handle.clone())
+                    {
+                        if let Ok(mut audio_settings) = settings_manager.get_audio_settings().await
+                        {
                             audio_settings.always_listening_active = false;
                             let _ = settings_manager.set_audio_settings(&audio_settings).await;
                         }
@@ -672,14 +667,30 @@ async fn restore_always_listening_if_needed(app_handle: &AppHandle, app_state: &
             warn!("[State] Always listening controller not available at startup - resetting state");
             // Reset the state since controller isn't available
             let _ = app_state.set_always_listening_active(false);
-            
+
             // Update centralized settings
-            if let Ok(settings_manager) = crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+            if let Ok(settings_manager) =
+                crate::settings::manager::SettingsManager::new(app_handle.clone())
+            {
                 if let Ok(mut audio_settings) = settings_manager.get_audio_settings().await {
                     audio_settings.always_listening_active = false;
                     let _ = settings_manager.set_audio_settings(&audio_settings).await;
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn test_state_validation_logic() {
+        // Test state validation logic
+        let issues = ["test issue".to_string()];
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0], "test issue");
     }
 }

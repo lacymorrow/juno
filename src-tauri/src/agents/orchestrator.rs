@@ -1057,8 +1057,7 @@ impl Orchestrator {
             _ => 1.0,
         };
 
-        ((base_batch_size as f32 * load_factor * agent_factor) as usize)
-            .clamp(1, 8)
+        ((base_batch_size as f32 * load_factor * agent_factor) as usize).clamp(1, 8)
     }
 
     /// NEW: Adaptive timeout calculation based on task characteristics

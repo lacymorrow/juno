@@ -23,10 +23,10 @@
 use crate::agent::core::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use serde_json::{json, Value};
-use std::process::Command;
-use std::path::{Path, PathBuf};
 use std::fs;
-use tracing::{info, error};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tracing::{error, info};
 
 /// Registers self-awareness and introspection tools with the tool provider.
 ///
@@ -59,7 +59,8 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
     // Build self tool
     let build_self_def = ToolDefinition {
         name: "build_self".to_string(),
-        description: "Build and compile the Juno application using Cargo in development mode".to_string(),
+        description: "Build and compile the Juno application using Cargo in development mode"
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -79,14 +80,17 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
         beta_flag: None,
     };
 
-    provider.register_async_tool(build_self_def, |input| {
-        async move { build_self_exec(input).await }
-    }).await;
+    provider
+        .register_async_tool(build_self_def, |input| async move {
+            build_self_exec(input).await
+        })
+        .await;
 
     // Analyze source code structure tool
     let analyze_source_def = ToolDefinition {
         name: "analyze_source_structure".to_string(),
-        description: "Analyze the source code structure and architecture of the Juno application".to_string(),
+        description: "Analyze the source code structure and architecture of the Juno application"
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -108,14 +112,17 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
         beta_flag: None,
     };
 
-    provider.register_async_tool(analyze_source_def, |input| {
-        async move { analyze_source_structure_exec(input).await }
-    }).await;
+    provider
+        .register_async_tool(analyze_source_def, |input| async move {
+            analyze_source_structure_exec(input).await
+        })
+        .await;
 
     // Inspect prompt system tool
     let inspect_prompts_def = ToolDefinition {
         name: "inspect_prompt_system".to_string(),
-        description: "Inspect the current prompt system configuration and available prompts".to_string(),
+        description: "Inspect the current prompt system configuration and available prompts"
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -130,14 +137,18 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
         beta_flag: None,
     };
 
-    provider.register_async_tool(inspect_prompts_def, |input| {
-        async move { inspect_prompt_system_exec(input).await }
-    }).await;
+    provider
+        .register_async_tool(inspect_prompts_def, |input| async move {
+            inspect_prompt_system_exec(input).await
+        })
+        .await;
 
     // Get system info tool
     let system_info_def = ToolDefinition {
         name: "get_system_info".to_string(),
-        description: "Get information about the current system, environment, and build configuration".to_string(),
+        description:
+            "Get information about the current system, environment, and build configuration"
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {}
@@ -146,9 +157,11 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
         beta_flag: None,
     };
 
-    provider.register_async_tool(system_info_def, |_input| {
-        async move { get_system_info_exec().await }
-    }).await;
+    provider
+        .register_async_tool(system_info_def, |_input| async move {
+            get_system_info_exec().await
+        })
+        .await;
 
     info!("Self-awareness tools registered successfully");
 }
@@ -172,9 +185,14 @@ pub async fn register_self_awareness_tools(provider: &mut LocalToolProvider) {
 /// - `check`: Syntax and type checking only
 async fn build_self_exec(input: Value) -> Result<Value, String> {
     let target = input["target"].as_str().unwrap_or("dev");
-    let manifest_path = input["manifest_path"].as_str().unwrap_or("src-tauri/Cargo.toml");
+    let manifest_path = input["manifest_path"]
+        .as_str()
+        .unwrap_or("src-tauri/Cargo.toml");
 
-    info!("Building self with target: {}, manifest: {}", target, manifest_path);
+    info!(
+        "Building self with target: {}, manifest: {}",
+        target, manifest_path
+    );
 
     // Determine the cargo command based on target
     let mut cmd = Command::new("cargo");
@@ -189,14 +207,17 @@ async fn build_self_exec(input: Value) -> Result<Value, String> {
             cmd.args(["check", "--manifest-path", manifest_path]);
         }
         _ => {
-            return Err(format!("Invalid target: {}. Must be 'dev', 'release', or 'check'", target));
+            return Err(format!(
+                "Invalid target: {}. Must be 'dev', 'release', or 'check'",
+                target
+            ));
         }
     }
 
     // Execute the build command
-    let output = cmd.output().map_err(|e| {
-        format!("Failed to execute cargo command: {}", e)
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute cargo command: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -238,7 +259,10 @@ async fn analyze_source_structure_exec(input: Value) -> Result<Value, String> {
     let path = input["path"].as_str().unwrap_or(".");
     let depth = input["depth"].as_u64().unwrap_or(3) as usize;
 
-    info!("Analyzing source structure at path: {}, depth: {}", path, depth);
+    info!(
+        "Analyzing source structure at path: {}, depth: {}",
+        path, depth
+    );
 
     let base_path = Path::new(path);
     if !base_path.exists() {
@@ -342,9 +366,11 @@ async fn get_system_info_exec() -> Result<Value, String> {
         .unwrap_or_else(|_| "Unknown".to_string());
 
     // Get environment variables
-    let cargo_manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| "Unknown".to_string());
+    let cargo_manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| "Unknown".to_string());
     let cargo_pkg_name = std::env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "Unknown".to_string());
-    let cargo_pkg_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "Unknown".to_string());
+    let cargo_pkg_version =
+        std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "Unknown".to_string());
 
     // Detect workspace root (look for Cargo.toml with workspace)
     let workspace_root = find_workspace_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -411,7 +437,11 @@ fn analyze_directory(path: &Path, max_depth: usize, current_depth: usize) -> Res
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let entry_path = entry.path();
-        let name = entry_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = entry_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
         // Skip hidden files and common build directories
         if name.starts_with('.') || name == "target" || name == "node_modules" || name == "dist" {
@@ -419,7 +449,11 @@ fn analyze_directory(path: &Path, max_depth: usize, current_depth: usize) -> Res
         }
 
         if entry_path.is_dir() {
-            children.push(analyze_directory(&entry_path, max_depth, current_depth + 1)?);
+            children.push(analyze_directory(
+                &entry_path,
+                max_depth,
+                current_depth + 1,
+            )?);
         } else {
             children.push(json!({
                 "name": name,
@@ -474,7 +508,7 @@ fn analyze_file_types(structure: &Value) -> Value {
     collect_file_types(structure, &mut file_types);
 
     let mut types_vec: Vec<_> = file_types.into_iter().collect();
-    types_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    types_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     json!(types_vec.into_iter().take(10).collect::<Vec<_>>())
 }
@@ -489,9 +523,15 @@ fn analyze_file_types(structure: &Value) -> Value {
 /// # Arguments
 /// * `structure` - JSON structure to traverse
 /// * `file_types` - Mutable map to accumulate file type counts
-fn collect_file_types(structure: &Value, file_types: &mut std::collections::HashMap<String, usize>) {
+fn collect_file_types(
+    structure: &Value,
+    file_types: &mut std::collections::HashMap<String, usize>,
+) {
     if structure["type"] == "file" {
-        let extension = structure["extension"].as_str().unwrap_or("no_extension").to_string();
+        let extension = structure["extension"]
+            .as_str()
+            .unwrap_or("no_extension")
+            .to_string();
         *file_types.entry(extension).or_insert(0) += 1;
     } else if structure["type"] == "directory" {
         if let Some(children) = structure["children"].as_array() {
@@ -534,10 +574,17 @@ fn identify_key_directories(structure: &Value) -> Vec<String> {
 fn collect_key_directories(structure: &Value, key_dirs: &mut Vec<String>, path: &str) {
     if structure["type"] == "directory" {
         let name = structure["name"].as_str().unwrap_or("");
-        let current_path = if path.is_empty() { name.to_string() } else { format!("{}/{}", path, name) };
+        let current_path = if path.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", path, name)
+        };
 
         // Check if this is a key directory
-        if matches!(name, "src" | "src-tauri" | "components" | "agent" | "tools" | "prompts" | "commands" | "lib") {
+        if matches!(
+            name,
+            "src" | "src-tauri" | "components" | "agent" | "tools" | "prompts" | "commands" | "lib"
+        ) {
             key_dirs.push(current_path.clone());
         }
 

@@ -1,15 +1,15 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 #[cfg(target_os = "macos")]
-use objc::{class, msg_send, sel, sel_impl};
+use cocoa::base::{id, nil};
+#[cfg(target_os = "macos")]
+use cocoa::foundation::{NSAutoreleasePool, NSString};
 #[cfg(target_os = "macos")]
 use objc::runtime::{BOOL, YES};
 #[cfg(target_os = "macos")]
-use cocoa::foundation::{NSString, NSAutoreleasePool};
-#[cfg(target_os = "macos")]
-use cocoa::base::{nil, id};
+use objc::{class, msg_send, sel, sel_impl};
 
 /// Microphone permission status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +42,10 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
     // Fast path: return cached result
     if PERMISSION_CACHED.load(Ordering::SeqCst) {
         let granted = PERMISSION_GRANTED.load(Ordering::SeqCst);
-        debug!("Returning cached microphone permission: {}", if granted { "granted" } else { "denied" });
+        debug!(
+            "Returning cached microphone permission: {}",
+            if granted { "granted" } else { "denied" }
+        );
         return if granted {
             MicrophonePermissionStatus::Granted
         } else {
@@ -56,7 +59,8 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
         // AVCaptureDevice.authorizationStatus(for: .audio) — the correct macOS TCC API
         let av_capture_device_class = class!(AVCaptureDevice);
         let media_type: id = NSString::alloc(nil).init_str("soun"); // AVMediaTypeAudio
-        let status: i64 = msg_send![av_capture_device_class, authorizationStatusForMediaType: media_type];
+        let status: i64 =
+            msg_send![av_capture_device_class, authorizationStatusForMediaType: media_type];
 
         // AVAuthorizationStatus enum:
         //   0 = NotDetermined
@@ -71,7 +75,10 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
                 MicrophonePermissionStatus::Granted
             }
             2 | 1 => {
-                debug!("Microphone permission is denied/restricted (AVCaptureDevice, status={})", status);
+                debug!(
+                    "Microphone permission is denied/restricted (AVCaptureDevice, status={})",
+                    status
+                );
                 PERMISSION_GRANTED.store(false, Ordering::SeqCst);
                 PERMISSION_CACHED.store(true, Ordering::SeqCst);
                 MicrophonePermissionStatus::Denied
@@ -99,7 +106,10 @@ pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatu
     use std::sync::Mutex;
 
     // Prevent concurrent permission requests — only one dialog at a time
-    if PERMISSION_REQUEST_IN_FLIGHT.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    if PERMISSION_REQUEST_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         info!("Microphone permission request already in flight, waiting for result");
         // Another request is in progress — poll the cache until it resolves
         let start_time = std::time::Instant::now();
@@ -114,7 +124,9 @@ pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatu
                 });
             }
             if start_time.elapsed() > timeout {
-                return Err("Timeout waiting for in-flight microphone permission request".to_string());
+                return Err(
+                    "Timeout waiting for in-flight microphone permission request".to_string(),
+                );
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
@@ -133,7 +145,8 @@ pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatu
     }
     let _guard = InFlightGuard;
 
-    let result: Arc<Mutex<Option<Result<MicrophonePermissionStatus, String>>>> = Arc::new(Mutex::new(None));
+    let result: Arc<Mutex<Option<Result<MicrophonePermissionStatus, String>>>> =
+        Arc::new(Mutex::new(None));
     let result_clone = result.clone();
 
     // AVCaptureDevice.requestAccess(for: .audio) must be called; it handles
@@ -231,9 +244,9 @@ pub fn is_microphone_available() -> bool {
         {
             if output.status.success() {
                 let result = String::from_utf8_lossy(&output.stdout);
-                return result.contains("Input") ||
-                       result.contains("Microphone") ||
-                       result.contains("Built-in Microphone");
+                return result.contains("Input")
+                    || result.contains("Microphone")
+                    || result.contains("Built-in Microphone");
             }
         }
 

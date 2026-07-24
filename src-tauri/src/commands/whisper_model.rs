@@ -1,12 +1,11 @@
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
-use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
-use futures_util::StreamExt;
 
-const HUGGINGFACE_BASE_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const HUGGINGFACE_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 // (id, filename, display_name, size_mb, is_default)
 const MODEL_DEFS: &[(&str, &str, &str, u32, bool)] = &[
@@ -141,8 +140,7 @@ pub async fn download_whisper_model(
     app: AppHandle,
     download_state: tauri::State<'_, Arc<Mutex<WhisperDownloadState>>>,
 ) -> Result<(), String> {
-    let def = find_model_def(&model_id)
-        .ok_or_else(|| format!("Unknown model id: {}", model_id))?;
+    let def = find_model_def(&model_id).ok_or_else(|| format!("Unknown model id: {}", model_id))?;
 
     let (_, filename, _, _, _) = *def;
     let models_dir = get_models_dir(&app)?;
@@ -191,10 +189,7 @@ pub async fn download_whisper_model(
                 );
             }
             Err(e) => {
-                error!(
-                    "[WhisperModel] Download failed for {}: {}",
-                    model_id_bg, e
-                );
+                error!("[WhisperModel] Download failed for {}: {}", model_id_bg, e);
                 let _ = app_bg.emit(
                     "whisper-download-error",
                     serde_json::json!({ "model_id": model_id_bg, "error": e }),
@@ -218,7 +213,10 @@ async fn download_to_disk(
     filename: &str,
 ) -> Result<(), String> {
     // Guard against directory traversal (e.g. a crafted filename containing "..")
-    if models_dir.components().any(|c| c == std::path::Component::ParentDir) {
+    if models_dir
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Invalid models directory: path traversal not allowed".to_string());
     }
     tokio::fs::create_dir_all(models_dir)
@@ -307,8 +305,7 @@ async fn download_to_disk(
 
 #[tauri::command]
 pub async fn set_whisper_model(model_id: String, app: AppHandle) -> Result<(), String> {
-    let def = find_model_def(&model_id)
-        .ok_or_else(|| format!("Unknown model id: {}", model_id))?;
+    let def = find_model_def(&model_id).ok_or_else(|| format!("Unknown model id: {}", model_id))?;
 
     let (_, filename, _, _, _) = *def;
     let models_dir = get_models_dir(&app)?;
@@ -325,11 +322,16 @@ pub async fn set_whisper_model(model_id: String, app: AppHandle) -> Result<(), S
 
     use tauri_plugin_voice_transcription::SharedWhisperManager;
 
-    info!("[WhisperModel] Switching to model: {} at {}", model_id, path_str);
+    info!(
+        "[WhisperModel] Switching to model: {} at {}",
+        model_id, path_str
+    );
     let shared_context = SharedWhisperManager::reinitialize(&path_str)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
-    if let Some(vc_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::VoiceController>>>() {
+    if let Some(vc_state) =
+        app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::VoiceController>>>()
+    {
         match vc_state.try_lock() {
             Ok(mut vc) => {
                 if let Err(e) = vc.update_shared_context(&path_str, shared_context.clone()) {
@@ -345,18 +347,26 @@ pub async fn set_whisper_model(model_id: String, app: AppHandle) -> Result<(), S
         }
     }
 
-    if let Some(al_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::AlwaysListeningController>>>() {
+    if let Some(al_state) =
+        app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::AlwaysListeningController>>>()
+    {
         match al_state.try_lock() {
             Ok(mut al) => {
                 if let Err(e) = al.update_shared_context(&path_str, shared_context.clone()) {
-                    warn!("[WhisperModel] Failed to update AlwaysListeningController: {}", e);
+                    warn!(
+                        "[WhisperModel] Failed to update AlwaysListeningController: {}",
+                        e
+                    );
                 }
             }
             Err(std::sync::TryLockError::WouldBlock) => {
                 warn!("[WhisperModel] AlwaysListeningController busy — will use new model on next use");
             }
             Err(std::sync::TryLockError::Poisoned(e)) => {
-                error!("[WhisperModel] AlwaysListeningController mutex poisoned: {}", e);
+                error!(
+                    "[WhisperModel] AlwaysListeningController mutex poisoned: {}",
+                    e
+                );
             }
         }
     }

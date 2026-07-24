@@ -33,7 +33,10 @@ pub(crate) async fn emit_sessions_updated(app: &AppHandle, state: &AppState) {
     if let Err(e) = app.emit(events::agent_sessions::UPDATED, &list) {
         warn!("Failed to emit agent-sessions-updated: {}", e);
     } else {
-        debug!("Emitted agent-sessions-updated with {} sessions", list.len());
+        debug!(
+            "Emitted agent-sessions-updated with {} sessions",
+            list.len()
+        );
     }
 }
 
@@ -68,10 +71,7 @@ pub async fn list_agent_sessions(
 pub async fn get_focused_agent_session(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    Ok(state
-        .agent_sessions()
-        .focused()
-        .map(|id| id.to_string()))
+    Ok(state.agent_sessions().focused().map(|id| id.to_string()))
 }
 
 /// Focus a session so escape cancels it and its cursor overlay highlights.
@@ -139,10 +139,7 @@ mod tests {
     use std::time::Duration;
 
     fn registry() -> AgentSessionRegistry {
-        AgentSessionRegistry::new(
-            4,
-            Arc::new(InputArbiter::new(Duration::from_millis(0))),
-        )
+        AgentSessionRegistry::new(4, Arc::new(InputArbiter::new(Duration::from_millis(0))))
     }
 
     // Command handlers require a Tauri State/AppHandle so we cover them via

@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
 use super::types::CloudError;
-use tracing::info;
 use crate::settings::CloudSettings;
+use tracing::info;
 
 /// Production cloud endpoints - verified healthy and operational
 pub const PRODUCTION_WS_URL: &str = "wss://juno-cloud-backend.fly.dev/ws";
@@ -83,14 +83,12 @@ static ALLOWED_COMMANDS: &[&str] = &[
 ];
 
 /// Lazy-initialized Vec<String> for denied commands
-static DENIED_COMMANDS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
-    DENIED_COMMANDS.iter().map(|&s| s.to_string()).collect()
-});
+static DENIED_COMMANDS_VEC: LazyLock<Vec<String>> =
+    LazyLock::new(|| DENIED_COMMANDS.iter().map(|&s| s.to_string()).collect());
 
 /// Lazy-initialized Vec<String> for allowed commands
-static ALLOWED_COMMANDS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
-    ALLOWED_COMMANDS.iter().map(|&s| s.to_string()).collect()
-});
+static ALLOWED_COMMANDS_VEC: LazyLock<Vec<String>> =
+    LazyLock::new(|| ALLOWED_COMMANDS.iter().map(|&s| s.to_string()).collect());
 
 /// Cloud configuration settings - maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,10 +101,10 @@ pub struct CloudConfig {
     pub auto_connect: bool,
     pub reconnect_interval: u64, // seconds
     pub heartbeat_interval: u64, // seconds
-    pub command_timeout: u64, // seconds - generous timeout
+    pub command_timeout: u64,    // seconds - generous timeout
     pub security_level: SecurityLevel,
     pub allowed_commands: Vec<String>, // All commands allowed by default
-    pub denied_commands: Vec<String>, // Only truly destructive commands
+    pub denied_commands: Vec<String>,  // Only truly destructive commands
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,7 +129,7 @@ impl Default for CloudConfig {
             command_timeout: 600, // Increased from 300 to 600 seconds (10 minutes)
             security_level: SecurityLevel::Low, // Changed from Medium to Low (maximally permissive)
             allowed_commands: ALLOWED_COMMANDS_VEC.clone(), // Use lazy-initialized static
-            denied_commands: DENIED_COMMANDS_VEC.clone(),   // Use lazy-initialized static
+            denied_commands: DENIED_COMMANDS_VEC.clone(), // Use lazy-initialized static
         }
     }
 }
@@ -140,7 +138,9 @@ impl CloudConfig {
     /// Load configuration from centralized settings or create default.
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Cloud service initialization and settings management.
-    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, CloudError> {
+    pub async fn load_from_centralized_settings(
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<Self, CloudError> {
         match settings_manager.get_cloud_settings().await {
             Ok(cloud_settings) => {
                 let mut config = Self::from_centralized_settings(&cloud_settings);
@@ -153,7 +153,9 @@ impl CloudConfig {
                 info!("Failed to load cloud settings from centralized system ({}), creating maximally permissive default", e);
                 // No valid configuration found, create and save maximally permissive default
                 let default_config = Self::default();
-                default_config.save_to_centralized_settings(settings_manager).await?;
+                default_config
+                    .save_to_centralized_settings(settings_manager)
+                    .await?;
                 Ok(default_config)
             }
         }
@@ -176,11 +178,18 @@ impl CloudConfig {
     /// Save configuration to centralized settings.
     /// Converts current configuration to CloudSettings and saves via SettingsManager.
     /// Used by: Cloud settings UI and configuration updates.
-    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
+    pub async fn save_to_centralized_settings(
+        &self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), CloudError> {
         let cloud_settings = self.to_centralized_settings();
 
-        settings_manager.set_cloud_settings(&cloud_settings).await
-            .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud settings: {}", e)))?;
+        settings_manager
+            .set_cloud_settings(&cloud_settings)
+            .await
+            .map_err(|e| {
+                CloudError::ConfigError(format!("Failed to save cloud settings: {}", e))
+            })?;
 
         info!("Saved maximally permissive cloud configuration to centralized settings");
         Ok(())
@@ -191,16 +200,23 @@ impl CloudConfig {
         if self.enabled {
             // API key is optional for initial connection - backend handles device registration
             if self.server_url.is_empty() {
-                return Err(CloudError::ConfigError("Server URL cannot be empty".to_string()));
+                return Err(CloudError::ConfigError(
+                    "Server URL cannot be empty".to_string(),
+                ));
             }
 
             if !self.server_url.starts_with("ws://") && !self.server_url.starts_with("wss://") {
-                return Err(CloudError::ConfigError("Server URL must be a WebSocket URL (ws:// or wss://)".to_string()));
+                return Err(CloudError::ConfigError(
+                    "Server URL must be a WebSocket URL (ws:// or wss://)".to_string(),
+                ));
             }
 
             // Validate production URL format
             if self.server_url == PRODUCTION_WS_URL {
-                info!("✅ Using verified production backend: {}", PRODUCTION_WS_URL);
+                info!(
+                    "✅ Using verified production backend: {}",
+                    PRODUCTION_WS_URL
+                );
             }
         }
 
@@ -217,30 +233,44 @@ impl CloudConfig {
                     info!("✅ Backend health check passed: {}", health_url);
                     Ok(())
                 } else {
-                    Err(CloudError::ConfigError(format!("Backend health check failed with status: {}", response.status())))
+                    Err(CloudError::ConfigError(format!(
+                        "Backend health check failed with status: {}",
+                        response.status()
+                    )))
                 }
             }
-            Err(e) => {
-                Err(CloudError::ConfigError(format!("Failed to connect to backend: {}", e)))
-            }
+            Err(e) => Err(CloudError::ConfigError(format!(
+                "Failed to connect to backend: {}",
+                e
+            ))),
         }
     }
 
     /// Update API key and save
-    pub async fn set_api_key(&mut self, api_key: String, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
+    pub async fn set_api_key(
+        &mut self,
+        api_key: String,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), CloudError> {
         self.api_key = Some(api_key);
         self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Enable cloud connectivity
-    pub async fn enable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
+    pub async fn enable(
+        &mut self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), CloudError> {
         self.enabled = true;
         self.validate()?;
         self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Disable cloud connectivity
-    pub async fn disable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
+    pub async fn disable(
+        &mut self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), CloudError> {
         self.enabled = false;
         self.save_to_centralized_settings(settings_manager).await
     }
@@ -251,14 +281,21 @@ impl CloudConfig {
         // Use static slice for faster iteration
         for &denied_cmd in DENIED_COMMANDS.iter() {
             if command.contains(denied_cmd) {
-                log::warn!("🚫 Command '{}' blocked due to destructive pattern: '{}'", command, denied_cmd);
+                log::warn!(
+                    "🚫 Command '{}' blocked due to destructive pattern: '{}'",
+                    command,
+                    denied_cmd
+                );
                 return false;
             }
         }
 
         // All security levels now behave the same - maximally permissive
         // Allow all commands except those in the denied list
-        log::info!("✅ Command '{}' allowed (maximally permissive mode)", command);
+        log::info!(
+            "✅ Command '{}' allowed (maximally permissive mode)",
+            command
+        );
         true
     }
 
@@ -267,7 +304,9 @@ impl CloudConfig {
     fn is_safe_command(&self, command: &str) -> bool {
         // Check against denied list - if not denied, it's safe
         // Use static slice for faster iteration
-        !DENIED_COMMANDS.iter().any(|&denied| command.contains(denied))
+        !DENIED_COMMANDS
+            .iter()
+            .any(|&denied| command.contains(denied))
     }
 
     /// Get the corresponding API URL for the WebSocket URL

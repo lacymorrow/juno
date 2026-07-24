@@ -1,5 +1,6 @@
 use crate::agent::core::AgentError;
 use crate::constants::agent::config::CONTINUATION_REQUEST_TIMEOUT_SECONDS;
+use crate::constants::events;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,7 +8,6 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, error, info, warn};
-use crate::constants::events;
 
 /// Request for agent continuation when max iterations reached
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,7 +290,9 @@ pub async fn get_pending_continuation_requests(
 
 /// Tauri command: Check if there are any pending continuation requests
 #[tauri::command]
-pub async fn has_pending_continuation_requests(_state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn has_pending_continuation_requests(
+    _state: State<'_, AppState>,
+) -> Result<bool, String> {
     let manager = get_continuation_manager();
     let requests = manager.get_pending_requests().await;
     Ok(!requests.is_empty())

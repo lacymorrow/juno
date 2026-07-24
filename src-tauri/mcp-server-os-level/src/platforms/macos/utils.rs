@@ -1,17 +1,19 @@
+use super::element::MacOSUIElement; // Added for the new function
+use crate::element::UIElementImpl; // Import the trait providing .attributes()
+use crate::AutomationError;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import AXUIElementAttributes trait
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use core_foundation::string::CFString;
-use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID, CGGetActiveDisplayList, CGDirectDisplayID}; // Use CGGetActiveDisplayList
-use core_graphics::geometry::{CGRect, CGPoint}; // Removed CGPointMake, CGRectContainsPoint
-use core_graphics::image::CGImage;
-use image::{ImageBuffer, ImageFormat, Rgba, imageops}; // Use ImageFormat instead of ImageOutputFormat. Removed unused Pixel, RgbaImage. Added imageops
-use std::io::Cursor; // Added for image encoding
-use tracing::{debug, warn}; // Added warn
-use super::element::MacOSUIElement; // Added for the new function
-use crate::element::UIElementImpl; // Import the trait providing .attributes()
-use core_graphics::event::{CGEvent}; // From HEAD
+use core_graphics::display::{
+    CGDirectDisplayID, CGDisplay, CGDisplayBounds, CGGetActiveDisplayList, CGMainDisplayID,
+}; // Use CGGetActiveDisplayList
+use core_graphics::event::CGEvent; // From HEAD
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID}; // From HEAD
-use crate::AutomationError; // From Main
+use core_graphics::geometry::{CGPoint, CGRect}; // Removed CGPointMake, CGRectContainsPoint
+use core_graphics::image::CGImage;
+use image::{imageops, ImageBuffer, ImageFormat, Rgba}; // Use ImageFormat instead of ImageOutputFormat. Removed unused Pixel, RgbaImage. Added imageops
+use std::io::Cursor; // Added for image encoding
+use tracing::{debug, warn}; // Added warn // From Main
 
 // Modified to return Vec<String> for multiple possible role matches
 pub(crate) fn map_generic_role_to_macos_roles(role: &str) -> Vec<String> {
@@ -155,10 +157,7 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
     }
 
     // Check title, description and other text attributes
-    let contains_in_title = e
-        .title()
-        .ok()
-        .is_some_and(|t| t.to_string().contains(text));
+    let contains_in_title = e.title().ok().is_some_and(|t| t.to_string().contains(text));
 
     let contains_in_desc = e
         .description()
@@ -193,23 +192,33 @@ pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
     // 1. Get current cursor position
     let cursor_point = {
         // Use kCGEventSourceStateHIDSystemState to get the event source for system events
-        let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("Failed to create HID event source".to_string()))?;
+        let event_source =
+            CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+                AutomationError::PlatformError("Failed to create HID event source".to_string())
+            })?;
         let event = CGEvent::new(event_source).map_err(|_| {
-            AutomationError::PlatformError("Failed to create null CGEvent to get location".to_string())
+            AutomationError::PlatformError(
+                "Failed to create null CGEvent to get location".to_string(),
+            )
         })?;
         event.location() // This returns CGPoint in global coordinates
     };
-    debug!("Current cursor position: ({}, {})", cursor_point.x, cursor_point.y);
+    debug!(
+        "Current cursor position: ({}, {})",
+        cursor_point.x, cursor_point.y
+    );
 
     // 2. Find the display containing the cursor
     let target_display_id = match find_display_containing_point(cursor_point) {
         Ok(id) => {
             debug!("Cursor found on display ID: {}", id);
             id
-        },
+        }
         Err(e) => {
-            warn!("Failed to find display for cursor at ({}, {}): {}. Falling back to main display.", cursor_point.x, cursor_point.y, e);
+            warn!(
+                "Failed to find display for cursor at ({}, {}): {}. Falling back to main display.",
+                cursor_point.x, cursor_point.y, e
+            );
             unsafe { CGMainDisplayID() } // Fallback to main display
         }
     };
@@ -252,7 +261,10 @@ pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, Au
     // Get the center point of the element
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
-    let element_center_point = CGPoint { x: center_x, y: center_y }; // Construct CGPoint directly
+    let element_center_point = CGPoint {
+        x: center_x,
+        y: center_y,
+    }; // Construct CGPoint directly
 
     // Find the display containing the element's center point
     let target_display_id = match find_display_containing_point(element_center_point) {
@@ -286,25 +298,32 @@ pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, Au
 
     // Crop the ImageBuffer
     // Check if crop dimensions are valid within the display buffer
-    if crop_x + crop_width > display_buffer.width() || crop_y + crop_height > display_buffer.height() {
+    if crop_x + crop_width > display_buffer.width()
+        || crop_y + crop_height > display_buffer.height()
+    {
         warn!(
             "Element bounds ({}, {}, {}, {}) exceed screen dimensions ({}, {}). Clamping crop.",
-            crop_x, crop_y, crop_width, crop_height, display_buffer.width(), display_buffer.height()
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
+            display_buffer.width(),
+            display_buffer.height()
         );
         // Optionally clamp dimensions, or return error. For now, let crop_imm handle it (it might panic or return subimage).
         // Let's clamp to avoid panic from crop_imm if width/height are 0 or exceed boundaries after clamping x/y.
         let clamped_width = crop_width.min(display_buffer.width().saturating_sub(crop_x));
         let clamped_height = crop_height.min(display_buffer.height().saturating_sub(crop_y));
-         if clamped_width == 0 || clamped_height == 0 {
-             // Add element context to this error message as well
-             let attrs = element.attributes();
-             let role = attrs.role;
-             let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
-             let err_msg = format!(
+        if clamped_width == 0 || clamped_height == 0 {
+            // Add element context to this error message as well
+            let attrs = element.attributes();
+            let role = attrs.role;
+            let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+            let err_msg = format!(
                 "Element bounds result in zero-size crop area after clamping. Role: '{}', Label: '{}', Original Bounds: ({}, {}, {}, {}), Clamped Crop: ({}, {}, {}, {})",
                 role, label, x, y, width, height, crop_x, crop_y, clamped_width, clamped_height
              );
-             warn!("{}", err_msg);
+            warn!("{}", err_msg);
             // Keep this as PlatformError for now, as it's a different condition (clamping issue)
             return Err(AutomationError::PlatformError(err_msg));
         }
@@ -314,37 +333,34 @@ pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, Au
             crop_y,
             clamped_width,
             clamped_height,
-        ).to_image();
-         encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
-
+        )
+        .to_image();
+        encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
     } else if crop_width == 0 || crop_height == 0 {
-         // Also add context here for the direct zero-size crop case
-         let attrs = element.attributes();
-         let role = attrs.role;
-         let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
-         let err_msg = format!(
+        // Also add context here for the direct zero-size crop case
+        let attrs = element.attributes();
+        let role = attrs.role;
+        let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+        let err_msg = format!(
             "Element bounds result in zero-size crop area before clamping (likely due to u32 conversion). Role: '{}', Label: '{}', Original Bounds: ({}, {}, {}, {})",
             role, label, x, y, width, height
          );
-         warn!("{}", err_msg);
-         // Keep this as PlatformError as well (conversion/clamping issue)
-         Err(AutomationError::PlatformError(err_msg))
+        warn!("{}", err_msg);
+        // Keep this as PlatformError as well (conversion/clamping issue)
+        Err(AutomationError::PlatformError(err_msg))
     } else {
         // Crop the buffer using the original element bounds (as u32)
-        let cropped_buffer = imageops::crop_imm(
-            &display_buffer,
-            crop_x,
-            crop_y,
-            crop_width,
-            crop_height
-        ).to_image();
-         encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
+        let cropped_buffer =
+            imageops::crop_imm(&display_buffer, crop_x, crop_y, crop_width, crop_height).to_image();
+        encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
     }
 }
 
 /// Captures a screenshot of a specific window and encodes it as base64 PNG.
 /// `window_element` should be a UIElement representing a window (role == "AXWindow").
-pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<String, AutomationError> {
+pub fn capture_window_screenshot(
+    window_element: &MacOSUIElement,
+) -> Result<String, AutomationError> {
     // Verify that the element is a window
     let attrs = window_element.attributes();
     if attrs.role != "AXWindow" {
@@ -377,7 +393,10 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
     // Get the center point of the window to determine which display it's on
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
-    let window_center_point = CGPoint { x: center_x, y: center_y };
+    let window_center_point = CGPoint {
+        x: center_x,
+        y: center_y,
+    };
 
     // Find the display containing the window's center point
     let target_display_id = match find_display_containing_point(window_center_point) {
@@ -408,10 +427,17 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
     let display_buffer = capture_display_buffer(Some(target_display_id))?;
 
     // Validate crop dimensions
-    if crop_x + crop_width > display_buffer.width() || crop_y + crop_height > display_buffer.height() {
+    if crop_x + crop_width > display_buffer.width()
+        || crop_y + crop_height > display_buffer.height()
+    {
         warn!(
             "Window bounds ({}, {}, {}, {}) exceed screen dimensions ({}, {}). Clamping crop.",
-            crop_x, crop_y, crop_width, crop_height, display_buffer.width(), display_buffer.height()
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
+            display_buffer.width(),
+            display_buffer.height()
         );
 
         let clamped_width = crop_width.min(display_buffer.width().saturating_sub(crop_x));
@@ -433,7 +459,8 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
             crop_y,
             clamped_width,
             clamped_height,
-        ).to_image();
+        )
+        .to_image();
         encode_imagebuffer_to_base64_png(&cropped_buffer)
     } else if crop_width == 0 || crop_height == 0 {
         let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
@@ -445,19 +472,16 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
         Err(AutomationError::PlatformError(err_msg))
     } else {
         // Crop the buffer using the window bounds
-        let cropped_buffer = imageops::crop_imm(
-            &display_buffer,
-            crop_x,
-            crop_y,
-            crop_width,
-            crop_height
-        ).to_image();
+        let cropped_buffer =
+            imageops::crop_imm(&display_buffer, crop_x, crop_y, crop_width, crop_height).to_image();
         encode_imagebuffer_to_base64_png(&cropped_buffer)
     }
 }
 
 /// Converts a CGImage into an ImageBuffer<Rgba<u8>, Vec<u8>>.
-fn cgimage_to_imagebuffer(cg_image: CGImage) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
+fn cgimage_to_imagebuffer(
+    cg_image: CGImage,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     let width = cg_image.width();
     let height = cg_image.height();
     let data = cg_image.data();
@@ -494,7 +518,9 @@ fn cgimage_to_imagebuffer(cg_image: CGImage) -> Result<ImageBuffer<Rgba<u8>, Vec
 }
 
 /// Encodes an ImageBuffer into a base64 PNG string.
-fn encode_imagebuffer_to_base64_png(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<String, AutomationError> {
+fn encode_imagebuffer_to_base64_png(
+    buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) -> Result<String, AutomationError> {
     let mut png_data = Cursor::new(Vec::new());
     buffer
         .write_to(&mut png_data, ImageFormat::Png)
@@ -505,7 +531,10 @@ fn encode_imagebuffer_to_base64_png(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> 
 
 /// Encodes an ImageBuffer into a base64 JPEG string at the specified quality (1-100).
 /// JPEG is ~60% smaller than PNG for UI screenshots with negligible quality loss at quality >= 80.
-pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>, quality: u8) -> Result<String, AutomationError> {
+pub fn encode_imagebuffer_to_base64_jpeg(
+    buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    quality: u8,
+) -> Result<String, AutomationError> {
     // JPEG doesn't support alpha — convert RGBA to RGB
     let (width, height) = buffer.dimensions();
     let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
@@ -514,12 +543,17 @@ pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>
         rgb_data.push(pixel[1]); // G
         rgb_data.push(pixel[2]); // B
     }
-    let rgb_buffer: ImageBuffer<image::Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgb_data)
-        .ok_or_else(|| AutomationError::PlatformError("Failed to create RGB buffer for JPEG encoding".to_string()))?;
+    let rgb_buffer: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, rgb_data).ok_or_else(|| {
+            AutomationError::PlatformError(
+                "Failed to create RGB buffer for JPEG encoding".to_string(),
+            )
+        })?;
 
     let mut jpeg_data = Cursor::new(Vec::new());
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_data, quality);
-    rgb_buffer.write_with_encoder(encoder)
+    rgb_buffer
+        .write_with_encoder(encoder)
         .map_err(|e| AutomationError::PlatformError(format!("Failed to encode JPEG: {}", e)))?;
     let base64_string = BASE64_STANDARD.encode(jpeg_data.into_inner());
     Ok(base64_string)
@@ -535,15 +569,18 @@ pub fn encode_imagebuffer_to_base64_jpeg(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>
 /// confused by its own interface elements (main window, floating panel, floating bar,
 /// desktop cursor overlay, onboarding, and settings windows).
 #[cfg(feature = "screencapturekit-backend")]
-fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
+fn capture_via_screencapturekit(
+    display_id: Option<CGDirectDisplayID>,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
     use screencapturekit::shareable_content::SCShareableContent;
-    use screencapturekit::stream::content_filter::SCContentFilter;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
 
     // Get shareable content (enumerates displays/windows)
-    let content = SCShareableContent::get()
-        .map_err(|e| AutomationError::PlatformError(format!("SCShareableContent::get failed: {}", e)))?;
+    let content = SCShareableContent::get().map_err(|e| {
+        AutomationError::PlatformError(format!("SCShareableContent::get failed: {}", e))
+    })?;
 
     let displays = content.displays();
 
@@ -552,10 +589,17 @@ fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result
         displays.iter().find(|d| d.display_id() == id)
     } else {
         displays.first()
-    }.ok_or_else(|| AutomationError::PlatformError("No displays found via ScreenCaptureKit".to_string()))?;
+    }
+    .ok_or_else(|| {
+        AutomationError::PlatformError("No displays found via ScreenCaptureKit".to_string())
+    })?;
 
-    debug!("ScreenCaptureKit: capturing display {} ({}x{})",
-        target_display.display_id(), target_display.width(), target_display.height());
+    debug!(
+        "ScreenCaptureKit: capturing display {} ({}x{})",
+        target_display.display_id(),
+        target_display.width(),
+        target_display.height()
+    );
 
     // Self-exclusion: collect all windows owned by this process so the AI agent never
     // sees the companion UI in screenshots. Uses PID (not bundle ID) so this works for
@@ -595,16 +639,18 @@ fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result
     let config = SCStreamConfiguration::new();
 
     // Capture single screenshot (synchronous — blocks until complete)
-    let image = SCScreenshotManager::capture_image(&filter, &config)
-        .map_err(|e| AutomationError::PlatformError(format!("SCScreenshotManager capture failed: {}", e)))?;
+    let image = SCScreenshotManager::capture_image(&filter, &config).map_err(|e| {
+        AutomationError::PlatformError(format!("SCScreenshotManager capture failed: {}", e))
+    })?;
 
     let width = image.width();
     let height = image.height();
     debug!("ScreenCaptureKit: captured {}x{} image", width, height);
 
     // Get raw RGBA pixel data directly from SCK's CGImage
-    let rgba_data = image.rgba_data()
-        .map_err(|e| AutomationError::PlatformError(format!("Failed to get RGBA data from SCK image: {}", e)))?;
+    let rgba_data = image.rgba_data().map_err(|e| {
+        AutomationError::PlatformError(format!("Failed to get RGBA data from SCK image: {}", e))
+    })?;
 
     let data_len = rgba_data.len();
 
@@ -620,7 +666,9 @@ fn capture_via_screencapturekit(display_id: Option<CGDirectDisplayID>) -> Result
 ///
 /// Uses ScreenCaptureKit (macOS 14.0+) when available for better performance,
 /// falling back to the legacy CGDisplay::screenshot() path on older macOS versions.
-fn capture_display_buffer(display_id: Option<CGDirectDisplayID>) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
+fn capture_display_buffer(
+    display_id: Option<CGDirectDisplayID>,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     // Try ScreenCaptureKit first (macOS 14.0+, 8x faster, 50% less CPU)
     #[cfg(feature = "screencapturekit-backend")]
     {
@@ -630,7 +678,10 @@ fn capture_display_buffer(display_id: Option<CGDirectDisplayID>) -> Result<Image
                 return Ok(buffer);
             }
             Err(e) => {
-                warn!("ScreenCaptureKit capture failed, falling back to CoreGraphics: {}", e);
+                warn!(
+                    "ScreenCaptureKit capture failed, falling back to CoreGraphics: {}",
+                    e
+                );
             }
         }
     }
@@ -642,7 +693,9 @@ fn capture_display_buffer(display_id: Option<CGDirectDisplayID>) -> Result<Image
 
 /// Legacy screenshot capture using CGDisplay::screenshot.
 /// Deprecated in macOS 15.0 — prefer ScreenCaptureKit via `capture_display_buffer()`.
-fn capture_screenshot_cgimage_legacy(display_id: Option<CGDirectDisplayID>) -> Result<CGImage, AutomationError> {
+fn capture_screenshot_cgimage_legacy(
+    display_id: Option<CGDirectDisplayID>,
+) -> Result<CGImage, AutomationError> {
     unsafe {
         let target_display_id = display_id.unwrap_or_else(|| {
             warn!("capture_screenshot_cgimage_legacy called with None display_id, defaulting to main display.");
@@ -650,7 +703,10 @@ fn capture_screenshot_cgimage_legacy(display_id: Option<CGDirectDisplayID>) -> R
         });
         let cg_image = CGDisplay::screenshot(CGDisplayBounds(target_display_id), 0, 0, 0)
             .ok_or_else(|| {
-                AutomationError::PlatformError(format!("Failed to capture screenshot for display ID {}", target_display_id))
+                AutomationError::PlatformError(format!(
+                    "Failed to capture screenshot for display ID {}",
+                    target_display_id
+                ))
             })?;
         Ok(cg_image)
     }
@@ -664,13 +720,23 @@ fn find_display_containing_point(point: CGPoint) -> Result<CGDirectDisplayID, Au
         let mut display_count: u32 = 0;
 
         // Get the list of online displays
-        let result = CGGetActiveDisplayList(MAX_DISPLAYS, online_displays.as_mut_ptr(), &mut display_count);
-        if result != 0 { // Check for errors (kCGErrorSuccess is 0)
-            return Err(AutomationError::PlatformError(format!("Failed to get online display list: error code {}", result)));
+        let result = CGGetActiveDisplayList(
+            MAX_DISPLAYS,
+            online_displays.as_mut_ptr(),
+            &mut display_count,
+        );
+        if result != 0 {
+            // Check for errors (kCGErrorSuccess is 0)
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get online display list: error code {}",
+                result
+            )));
         }
 
         if display_count == 0 {
-            return Err(AutomationError::PlatformError("No active displays found".to_string()));
+            return Err(AutomationError::PlatformError(
+                "No active displays found".to_string(),
+            ));
         }
 
         // Iterate through the displays and check if the point is within their bounds
@@ -678,14 +744,20 @@ fn find_display_containing_point(point: CGPoint) -> Result<CGDirectDisplayID, Au
             let display_id = online_displays[i as usize];
             let bounds: CGRect = CGDisplayBounds(display_id);
             if bounds.contains(&point) {
-                debug!("Point ({}, {}) found on display {} with bounds {:?}", point.x, point.y, display_id, bounds);
+                debug!(
+                    "Point ({}, {}) found on display {} with bounds {:?}",
+                    point.x, point.y, display_id, bounds
+                );
                 return Ok(display_id);
             }
         }
 
         // If no display contains the point (e.g., point is in the bezel space?)
         // Fallback: return the main display ID
-        warn!("Point ({}, {}) not found within any display bounds. Falling back to main display.", point.x, point.y);
+        warn!(
+            "Point ({}, {}) not found within any display bounds. Falling back to main display.",
+            point.x, point.y
+        );
         Ok(CGMainDisplayID())
         // Or return an error if preferred:
         // Err(AutomationError::PlatformError(format!("Point ({}, {}) not found on any active display", point.x, point.y)))
@@ -702,13 +774,18 @@ pub fn check_accessibility_permissions() -> bool {
     }
 }
 
-pub fn get_display_bounds(display_id: Option<CGDirectDisplayID>) -> Result<CGRect, AutomationError> {
+pub fn get_display_bounds(
+    display_id: Option<CGDirectDisplayID>,
+) -> Result<CGRect, AutomationError> {
     unsafe {
         // Use unwrap_or_else with a closure for unsafe call
-        let target_display_id = display_id.unwrap_or_else(|| CGMainDisplayID() );
+        let target_display_id = display_id.unwrap_or_else(|| CGMainDisplayID());
         let bounds = CGDisplayBounds(target_display_id);
         if bounds.size.width == 0.0 || bounds.size.height == 0.0 {
-            Err(AutomationError::PlatformError(format!("Invalid display bounds for display ID: {:?}", target_display_id)))
+            Err(AutomationError::PlatformError(format!(
+                "Invalid display bounds for display ID: {:?}",
+                target_display_id
+            )))
         } else {
             Ok(bounds)
         }
@@ -777,18 +854,30 @@ mod tests {
         assert_eq!(macos_role_to_generic_role("AXButton"), vec!["button"]);
         assert_eq!(macos_role_to_generic_role("AXMenuItem"), vec!["button"]);
         assert_eq!(macos_role_to_generic_role("AXMenuBarItem"), vec!["button"]);
-        assert_eq!(macos_role_to_generic_role("axtextfield"), vec!["textfield", "input", "textbox", "url", "urlfield"]); // Case insensitive
+        assert_eq!(
+            macos_role_to_generic_role("axtextfield"),
+            vec!["textfield", "input", "textbox", "url", "urlfield"]
+        ); // Case insensitive
         assert_eq!(macos_role_to_generic_role("AXList"), vec!["list"]);
         assert_eq!(macos_role_to_generic_role("AXCell"), vec!["listitem"]);
         assert_eq!(macos_role_to_generic_role("AXSheet"), vec!["dialog"]);
         assert_eq!(macos_role_to_generic_role("AXDialog"), vec!["dialog"]);
-        assert_eq!(macos_role_to_generic_role("AXGroup"), vec!["group", "genericElement"]);
+        assert_eq!(
+            macos_role_to_generic_role("AXGroup"),
+            vec!["group", "genericElement"]
+        );
     }
 
     #[test]
     fn test_macos_role_to_generic_role_unknown() {
-        assert_eq!(macos_role_to_generic_role("AXUnknownRole"), vec!["AXUnknownRole"]);
-        assert_eq!(macos_role_to_generic_role("SomeOtherRole"), vec!["SomeOtherRole"]);
+        assert_eq!(
+            macos_role_to_generic_role("AXUnknownRole"),
+            vec!["AXUnknownRole"]
+        );
+        assert_eq!(
+            macos_role_to_generic_role("SomeOtherRole"),
+            vec!["SomeOtherRole"]
+        );
     }
 
     #[test]
@@ -860,6 +949,10 @@ mod tests {
 
         // The full capture pipeline must succeed without panicking
         let result = capture_and_encode_screenshot();
-        assert!(result.is_ok(), "capture_and_encode_screenshot failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "capture_and_encode_screenshot failed: {:?}",
+            result.err()
+        );
     }
 }

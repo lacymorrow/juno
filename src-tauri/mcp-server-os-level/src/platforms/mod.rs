@@ -1,8 +1,8 @@
 use crate::element::UIElement;
-use crate::{AutomationError, Selector, ElementTreeNode};
+use crate::{AutomationError, ElementTreeNode, Selector};
 use anyhow::Result;
-use std::any::Any;
 use serde_json::Value as JsonValue;
+use std::any::Any;
 
 /// The common trait that all platform-specific engines must implement
 pub trait AccessibilityEngine: Send + Sync + Any {
@@ -109,7 +109,12 @@ pub trait AccessibilityEngine: Send + Sync + Any {
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
     /// Default impl falls back to `left_click` for platforms that don't support process-targeted events.
-    fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    fn left_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         self.left_click(x, y, modifiers)?;
         Ok("HID-default")
     }
@@ -121,19 +126,35 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     }
 
     /// Double-click without warping the cursor. Default falls back to `double_click`.
-    fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    fn double_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         self.double_click(x, y, modifiers)?;
         Ok("HID-default")
     }
 
     /// Post a mouse event directly to a process by PID without moving the cursor.
     /// Default is a no-op (only meaningful on macOS).
-    fn post_mouse_event_to_pid(&self, _pid: i32, _event_type_str: &str, _x: f64, _y: f64) -> Result<(), AutomationError> {
+    fn post_mouse_event_to_pid(
+        &self,
+        _pid: i32,
+        _event_type_str: &str,
+        _x: f64,
+        _y: f64,
+    ) -> Result<(), AutomationError> {
         Ok(())
     }
 
     /// Post a key event directly to a process by PID without affecting focus.
-    fn post_key_event_to_pid(&self, _pid: i32, _keycode: u16, _key_down: bool) -> Result<(), AutomationError> {
+    fn post_key_event_to_pid(
+        &self,
+        _pid: i32,
+        _keycode: u16,
+        _key_down: bool,
+    ) -> Result<(), AutomationError> {
         Ok(())
     }
 

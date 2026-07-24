@@ -11,9 +11,7 @@ use crate::platforms::tree_search::{
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
-use accessibility_sys::{
-    kAXErrorNoValue, kAXFrontmostAttribute,
-};
+use accessibility_sys::{kAXErrorNoValue, kAXFrontmostAttribute};
 use anyhow::Result;
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
@@ -749,21 +747,25 @@ impl AccessibilityEngine for MacOSEngine {
         if error != 0 || result_element.is_null() {
             tracing::debug!(
                 "AX hit-test at ({:.0}, {:.0}): no element (error={})",
-                x, y, error
+                x,
+                y,
+                error
             );
             return None;
         }
 
         // Wrap the returned element. AXUIElementCopyElementAtPosition follows
         // the Create Rule — caller owns the returned reference.
-        let ax_element = unsafe {
-            accessibility::AXUIElement::wrap_under_create_rule(result_element)
-        };
+        let ax_element =
+            unsafe { accessibility::AXUIElement::wrap_under_create_rule(result_element) };
 
         tracing::debug!("AX hit-test at ({:.0}, {:.0}): found element", x, y);
         Some(self.wrap_element(
             ThreadSafeAXUIElement::new(ax_element),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         ))
     }
 
@@ -2320,9 +2322,18 @@ impl AccessibilityEngine for MacOSEngine {
         element.get_tree() // Delegate to the UIElement's get_tree method
     }
 
-    fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    fn left_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) {
+            None
+        } else {
+            flags
+        };
         interaction::left_click_no_warp(x, y, flags_opt)
     }
 
@@ -2330,27 +2341,64 @@ impl AccessibilityEngine for MacOSEngine {
         interaction::right_click_no_warp(x, y)
     }
 
-    fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    fn double_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) {
+            None
+        } else {
+            flags
+        };
         interaction::double_click_no_warp(x, y, flags_opt)
     }
 
-    fn post_mouse_event_to_pid(&self, pid: i32, event_type_str: &str, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn post_mouse_event_to_pid(
+        &self,
+        pid: i32,
+        event_type_str: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<(), AutomationError> {
         use core_graphics::event::CGMouseButton;
         use core_graphics::geometry::CGPoint;
         let position = CGPoint::new(x, y);
         let (event_type, button) = match event_type_str {
-            "left_down" => (core_graphics::event::CGEventType::LeftMouseDown, CGMouseButton::Left),
-            "left_up" => (core_graphics::event::CGEventType::LeftMouseUp, CGMouseButton::Left),
-            "right_down" => (core_graphics::event::CGEventType::RightMouseDown, CGMouseButton::Right),
-            "right_up" => (core_graphics::event::CGEventType::RightMouseUp, CGMouseButton::Right),
-            _ => return Err(AutomationError::InvalidArgument(format!("Unknown event type: {}", event_type_str))),
+            "left_down" => (
+                core_graphics::event::CGEventType::LeftMouseDown,
+                CGMouseButton::Left,
+            ),
+            "left_up" => (
+                core_graphics::event::CGEventType::LeftMouseUp,
+                CGMouseButton::Left,
+            ),
+            "right_down" => (
+                core_graphics::event::CGEventType::RightMouseDown,
+                CGMouseButton::Right,
+            ),
+            "right_up" => (
+                core_graphics::event::CGEventType::RightMouseUp,
+                CGMouseButton::Right,
+            ),
+            _ => {
+                return Err(AutomationError::InvalidArgument(format!(
+                    "Unknown event type: {}",
+                    event_type_str
+                )))
+            }
         };
         interaction::post_mouse_event_to_pid(pid, event_type, position, button, None)
     }
 
-    fn post_key_event_to_pid(&self, pid: i32, keycode: u16, key_down: bool) -> Result<(), AutomationError> {
+    fn post_key_event_to_pid(
+        &self,
+        pid: i32,
+        keycode: u16,
+        key_down: bool,
+    ) -> Result<(), AutomationError> {
         interaction::post_key_event_to_pid(pid, keycode, key_down)
     }
 }

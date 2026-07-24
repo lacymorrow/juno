@@ -1,13 +1,13 @@
-use std::env;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::env;
 use tracing::{debug, info};
 
+use crate::agent::providers::types::model_ids;
 use crate::agent::{
     core::{AgentAction, AgentError, Message, Role, ToolDefinition},
     traits::AgentBrain,
 };
-use crate::agent::providers::types::model_ids;
 
 /// Implementation of AgentBrain using Rig library
 pub struct RigBrain {
@@ -22,12 +22,16 @@ impl RigBrain {
     /// (which handles the Rig → OpenAI key fallback). Falls back to OPENAI_API_KEY env var.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
         // api_key already resolved by resolve_provider() (Rig → OpenAI fallback)
-        let openai_api_key = config.api_key.clone()
+        let openai_api_key = config
+            .api_key
+            .clone()
             .or_else(|| env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                "OpenAI API key not found for Rig provider".into()
-            ))?;
-        let model = config.model.clone()
+            .ok_or_else(|| {
+                AgentError::ConfigurationError("OpenAI API key not found for Rig provider".into())
+            })?;
+        let model = config
+            .model
+            .clone()
             .unwrap_or_else(|| model_ids::OPENAI_CUA.to_string());
         Ok(Self {
             openai_api_key,
@@ -78,16 +82,19 @@ impl AgentBrain for RigBrain {
 
             if let Some(tool_calls) = &message.tool_calls {
                 // Message with tool calls
-                let formatted_tool_calls = tool_calls.iter().map(|tc| {
-                    serde_json::json!({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": tc.input.to_string()
-                        }
+                let formatted_tool_calls = tool_calls
+                    .iter()
+                    .map(|tc| {
+                        serde_json::json!({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": tc.input.to_string()
+                            }
+                        })
                     })
-                }).collect::<Vec<_>>();
+                    .collect::<Vec<_>>();
 
                 openai_messages.push(serde_json::json!({
                     "role": role,
@@ -111,16 +118,19 @@ impl AgentBrain for RigBrain {
         }
 
         // Format tools for OpenAI API
-        let tools = available_tools.iter().map(|tool| {
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema
-                }
+        let tools = available_tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema
+                    }
+                })
             })
-        }).collect::<Vec<_>>();
+            .collect::<Vec<_>>();
 
         // Prepare the request payload
         let payload = serde_json::json!({
@@ -133,23 +143,33 @@ impl AgentBrain for RigBrain {
         debug!("Sending request to OpenAI API");
 
         // Send request to OpenAI API
-        let response = client.post("https://api.openai.com/v1/chat/completions")
+        let response = client
+            .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.openai_api_key))
             .header("Content-Type", "application/json")
             .json(&payload)
             .send()
             .await
-            .map_err(|e| AgentError::LlmError(format!("Failed to send request to OpenAI: {}", e)))?;
+            .map_err(|e| {
+                AgentError::LlmError(format!("Failed to send request to OpenAI: {}", e))
+            })?;
 
         // Check for HTTP errors
         if !response.status().is_success() {
-            let error_text = response.text().await
+            let error_text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Could not read error response".to_string());
-            return Err(AgentError::LlmError(format!("OpenAI API error: {}", error_text)));
+            return Err(AgentError::LlmError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
 
         // Parse the response
-        let response_json: serde_json::Value = response.json().await
+        let response_json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| AgentError::LlmError(format!("Failed to parse OpenAI response: {}", e)))?;
 
         debug!("Received response from OpenAI");
@@ -163,15 +183,19 @@ impl AgentBrain for RigBrain {
                 if !tool_calls_array.is_empty() {
                     // Extract the first tool call (can be expanded to handle multiple)
                     let tool_call = &tool_calls_array[0];
-                    let tool_name = tool_call["function"]["name"].as_str()
-                        .ok_or_else(|| AgentError::LlmError("Tool name missing in response".to_string()))?;
+                    let tool_name = tool_call["function"]["name"].as_str().ok_or_else(|| {
+                        AgentError::LlmError("Tool name missing in response".to_string())
+                    })?;
 
                     // Parse arguments
-                    let arguments_str = tool_call["function"]["arguments"].as_str()
-                        .ok_or_else(|| AgentError::LlmError("Tool arguments missing in response".to_string()))?;
+                    let arguments_str =
+                        tool_call["function"]["arguments"].as_str().ok_or_else(|| {
+                            AgentError::LlmError("Tool arguments missing in response".to_string())
+                        })?;
 
-                    let arguments: Value = serde_json::from_str(arguments_str)
-                        .map_err(|e| AgentError::LlmError(format!("Failed to parse tool arguments: {}", e)))?;
+                    let arguments: Value = serde_json::from_str(arguments_str).map_err(|e| {
+                        AgentError::LlmError(format!("Failed to parse tool arguments: {}", e))
+                    })?;
 
                     // If the assistant provided a text response, consider it a thought or intermediate step
                     // For now, we will treat any text from assistant as part of its thought process
@@ -195,7 +219,8 @@ impl AgentBrain for RigBrain {
         }
 
         // No tool calls, extract the message content
-        let response_text = message["content"].as_str()
+        let response_text = message["content"]
+            .as_str()
             .ok_or_else(|| AgentError::LlmError("Response content missing".to_string()))?
             .to_string();
 

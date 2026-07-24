@@ -1,7 +1,13 @@
 # Rust CI blocker: `src-tauri` cannot build from a clean checkout
 
-**Status:** open
+**Status:** RESOLVED 2026-07-23 — option 3 (replace the dependency).
 **Discovered:** 2026-07-23, while adding build CI (PR #477)
+
+> `playwright` 0.0.20 was replaced with **chromiumoxide 0.9** on branch
+> `feat/replace-playwright-with-cdp`. `src-tauri` now builds from a clean
+> checkout with no network fetch of any third-party binary, and
+> `.github/workflows/ci.yml` gained a `Rust (fmt + clippy + test)` job on
+> macOS. The rest of this document is kept as the post-mortem.
 
 ## Symptom
 
@@ -65,5 +71,21 @@ size assert.
    (e.g. driving the JS Playwright over CDP, or `chromiumoxide`). Largest change,
    removes the abandoned dependency entirely.
 
-Until one of these lands, CI intentionally gates only the frontend
-(`tsc` + `vite build`); see `.github/workflows/ci.yml`.
+## Resolution
+
+**Option 3 was taken.** `chromiumoxide` speaks CDP directly from pure Rust: no
+bundled Node runtime, no driver download at build time, and no 17.7MB blob
+`include_bytes!`d into every binary. The port was close to 1:1 because page
+operations already went through JavaScript evaluation.
+
+The decisive detail, found while investigating: the crate's
+`/tmp/build-playwright-rust/driver.zip` cache is gated behind
+`cfg!(debug_assertions)`, so **release builds never consulted it** and always
+attempted the dead download. `bun run tauri build` had therefore been failing
+for everyone, on every machine — only debug builds worked, and only where a
+stale driver happened to be cached. The first successful release build in this
+repo since the CDN went dark was produced on the replacement branch.
+
+A copy of the old 2021 driver (sha256 `29a5901…`, 17,723,787 bytes) is preserved
+at `~/.local/share/juno-build-artifacts/` should the old path ever need
+reconstructing.

@@ -1,12 +1,15 @@
 use crate::agent::providers::claude_cli;
+use crate::constants::events;
 use crate::settings::{manager::SettingsManager, OnboardingSettings};
 use serde::{Deserialize, Serialize};
-use std::sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, LazyLock,
+};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use crate::constants::events;
 
 // ── Onboarding state machine ──────────────────────────────────────────────────
 
@@ -149,12 +152,18 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 
     // Clear onboarding active state so shortcut handlers resume normal behavior
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
-        warn!("Failed to clear onboarding active state on completion: {}", e);
+        warn!(
+            "Failed to clear onboarding active state on completion: {}",
+            e
+        );
     }
 
     // Show the main window now that onboarding is done
     if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
-        warn!("Failed to show main window after onboarding completion: {}", e);
+        warn!(
+            "Failed to show main window after onboarding completion: {}",
+            e
+        );
     }
 
     Ok(())
@@ -286,7 +295,10 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     // Set onboarding active so shortcut handlers suppress normal behavior and
     // the escape key monitor starts (mirrors initialize_onboarding_system)
     if let Err(e) = set_onboarding_active(app.clone(), true).await {
-        error!("[Onboarding] Failed to set onboarding active during restart: {}", e);
+        error!(
+            "[Onboarding] Failed to set onboarding active during restart: {}",
+            e
+        );
     }
 
     // Open the onboarding window
@@ -386,7 +398,10 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
         crate::platform::escape_key_monitor::stop();
     }
 
-    info!("[Onboarding] Active state set to: {} (was: {})", active, was_active);
+    info!(
+        "[Onboarding] Active state set to: {} (was: {})",
+        active, was_active
+    );
     Ok(())
 }
 
@@ -445,7 +460,10 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
         // immediately. The frontend no longer calls set_onboarding_active(true) on mount —
         // it only clears the flag on real unmount (window destroyed).
         if let Err(e) = set_onboarding_active(app_handle.clone(), true).await {
-            error!("[Onboarding] Failed to set onboarding active during init: {}", e);
+            error!(
+                "[Onboarding] Failed to set onboarding active during init: {}",
+                e
+            );
         }
 
         // Open the onboarding window and give it focus
@@ -516,7 +534,10 @@ pub async fn get_onboarding_state() -> Result<OnboardingStateInfo, String> {
 /// - `"skip"` — same as next; only meaningful on skippable phases
 /// - `"reset"` — return to `Greeting` (used by restart_onboarding)
 #[tauri::command]
-pub async fn onboarding_action(app: AppHandle, action: String) -> Result<OnboardingStateInfo, String> {
+pub async fn onboarding_action(
+    app: AppHandle,
+    action: String,
+) -> Result<OnboardingStateInfo, String> {
     let new_phase = {
         let mut phase = ONBOARDING_PHASE.lock().await;
         match action.as_str() {
@@ -626,7 +647,7 @@ pub async fn animate_cursor_to(
         // Control point: midpoint offset perpendicular to the chord (arcs upward/left)
         let arc_height = distance * 0.25;
         let perp_x = -dy / distance * arc_height;
-        let perp_y =  dx / distance * arc_height;
+        let perp_y = dx / distance * arc_height;
         let cx = (from_x + to_x) / 2.0 + perp_x;
         let cy = (from_y + to_y) / 2.0 + perp_y;
 
@@ -707,8 +728,11 @@ pub async fn dismiss_cursor_overlay(app: AppHandle) -> Result<(), String> {
     // Bump generation so any in-flight animation task self-aborts
     ANIMATION_GENERATION.fetch_add(1, Ordering::AcqRel);
 
-    app.emit(events::cursor::DISMISS_OVERLAY, serde_json::json!({ "animate": true }))
-        .map_err(|e| format!("Failed to emit cursor dismiss: {}", e))
+    app.emit(
+        events::cursor::DISMISS_OVERLAY,
+        serde_json::json!({ "animate": true }),
+    )
+    .map_err(|e| format!("Failed to emit cursor dismiss: {}", e))
 }
 
 /// Save the user's selected role during onboarding.

@@ -6,8 +6,6 @@
 /// Central settings store file name
 pub const SETTINGS_STORE_FILE: &str = "app_settings.json";
 
-
-
 /// Top-level settings keys in the unified store
 pub mod store_keys {
     pub const KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts";
@@ -141,8 +139,12 @@ pub mod defaults {
     pub const BIG_CURSOR_ENABLED: bool = true;
     pub const BIG_CURSOR_SCALE: f32 = 3.0;
 
-    pub fn big_cursor_enabled() -> bool { BIG_CURSOR_ENABLED }
-    pub fn big_cursor_scale() -> f32 { BIG_CURSOR_SCALE }
+    pub fn big_cursor_enabled() -> bool {
+        BIG_CURSOR_ENABLED
+    }
+    pub fn big_cursor_scale() -> f32 {
+        BIG_CURSOR_SCALE
+    }
 
     // Default keyboard shortcuts (cross-platform)
     #[cfg(target_os = "macos")]

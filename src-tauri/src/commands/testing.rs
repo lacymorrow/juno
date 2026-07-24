@@ -1,4 +1,3 @@
-
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -456,7 +455,7 @@ async fn execute_test_scenario(
     let mut tool_calls = Vec::new();
     let mut errors = Vec::new();
     let mut steps_taken = 0;
-    
+
     // Execute scenario setup
     for setup_command in &scenario.setup_commands {
         match execute_setup_command(app, setup_command).await {

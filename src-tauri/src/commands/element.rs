@@ -1,20 +1,19 @@
 //! Commands related to UI element interaction (focus, info, click, find, screenshots)
 //! Consolidated to production functions with conditional debug features
 
+use super::send_dev_tool_notification;
 use crate::state::AppState;
 use computer_use_ai_sdk::{AutomationError, Selector};
-use tauri::{AppHandle, State};
 use serde_json;
-use tracing::{info, error};
-use super::send_dev_tool_notification; // Use helper from parent module
+use tauri::{AppHandle, State};
+use tracing::{error, info}; // Use helper from parent module
 
+#[cfg(target_os = "macos")]
+use computer_use_ai_sdk::platforms::macos::element::{
+    get_focused_element_ns_workspace, MacOSUIElement,
+};
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
-#[cfg(target_os = "macos")]
-use computer_use_ai_sdk::platforms::macos::element::{get_focused_element_ns_workspace, MacOSUIElement};
-
-
-
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -46,28 +45,37 @@ pub(crate) async fn capture_element_screenshot_command(
         Ok(base64_string) => {
             println!("[DEV_TOOL] Element screenshot captured successfully.");
             // Send notification on success
-            send_dev_tool_notification(&app, "Element Screenshot", "Focused element screenshot captured.")?;
+            send_dev_tool_notification(
+                &app,
+                "Element Screenshot",
+                "Focused element screenshot captured.",
+            )?;
             Ok(base64_string)
-        },
-        Err(e) => {
-            match e {
-                AutomationError::ZeroElementDimensions { role, label, x, y, width, height } => {
-                    let user_friendly_err_msg = format!(
+        }
+        Err(e) => match e {
+            AutomationError::ZeroElementDimensions {
+                role,
+                label,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let user_friendly_err_msg = format!(
                         "Error: The focused element ('{}', Label: '{}') reported zero or negative dimensions ({}, {}, {}, {}) and could not be captured.",
                         role,
                         label,
                         x, y, width, height
                     );
-                    println!("[DEV_TOOL] Error: {}", user_friendly_err_msg);
-                    Err(user_friendly_err_msg)
-                }
-                _ => {
-                    let err_msg = format!("Failed to capture element screenshot: {}", e);
-                    println!("[DEV_TOOL] Error: {}", err_msg);
-                    Err(err_msg)
-                }
+                println!("[DEV_TOOL] Error: {}", user_friendly_err_msg);
+                Err(user_friendly_err_msg)
             }
-        }
+            _ => {
+                let err_msg = format!("Failed to capture element screenshot: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
+                Err(err_msg)
+            }
+        },
     }
 }
 
@@ -81,20 +89,36 @@ pub(crate) async fn capture_element_screenshot_command(
 }
 
 #[tauri::command]
-pub(crate) async fn get_focused_element_info(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+pub(crate) async fn get_focused_element_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
-    log_debug_operation("get_focused_element_info", "Getting focused element info using NSWorkspace", &debug_config);
+    log_debug_operation(
+        "get_focused_element_info",
+        "Getting focused element info using NSWorkspace",
+        &debug_config,
+    );
     info!("Executing get_focused_element_info");
 
     #[cfg(target_os = "macos")]
     let result = get_focused_element_ns_workspace(false, true);
 
     #[cfg(not(target_os = "macos"))]
-    let result: Result<computer_use_ai_sdk::UIElement, AutomationError> = Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()));
+    let result: Result<computer_use_ai_sdk::UIElement, AutomationError> =
+        Err(AutomationError::UnsupportedPlatform(
+            "macOS specific functionality not available on this platform".to_string(),
+        ));
 
     match result {
         Ok(element) => {
@@ -105,7 +129,11 @@ pub(crate) async fn get_focused_element_info(app: AppHandle, state: State<'_, Ap
                 Ok(json_string) => {
                     // Send debug notification if enabled
                     if debug_config.send_notifications {
-                        let _ = send_debug_notification(&app, "Focus Info", "Focused element info retrieved");
+                        let _ = send_debug_notification(
+                            &app,
+                            "Focus Info",
+                            "Focused element info retrieved",
+                        );
                     }
 
                     Ok(json_string)
@@ -118,7 +146,10 @@ pub(crate) async fn get_focused_element_info(app: AppHandle, state: State<'_, Ap
             }
         }
         Err(e) => {
-            let error_msg = format!("Failed to call get_focused_element_info (NSWorkspace): {}", e);
+            let error_msg = format!(
+                "Failed to call get_focused_element_info (NSWorkspace): {}",
+                e
+            );
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -126,13 +157,26 @@ pub(crate) async fn get_focused_element_info(app: AppHandle, state: State<'_, Ap
 }
 
 #[tauri::command]
-pub(crate) async fn click_focused_element(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+pub(crate) async fn click_focused_element(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
-    log_debug_operation("click_focused_element", "Clicking focused element", &debug_config);
+    log_debug_operation(
+        "click_focused_element",
+        "Clicking focused element",
+        &debug_config,
+    );
     info!("Executing click_focused_element");
 
     #[cfg(target_os = "macos")]
@@ -168,58 +212,82 @@ pub(crate) async fn click_focused_element(app: AppHandle, state: State<'_, AppSt
 
     #[cfg(not(target_os = "macos"))]
     {
-        Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()).to_string())
+        Err(AutomationError::UnsupportedPlatform(
+            "macOS specific functionality not available on this platform".to_string(),
+        )
+        .to_string())
     }
 }
 
 #[tauri::command]
-pub(crate) async fn find_element_by_selector(selector_str: String, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, validators};
+pub(crate) async fn find_element_by_selector(
+    selector_str: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&selector_str)?;
     }
 
-    log_debug_operation("find_element_by_selector", &format!("Finding element by selector: {}", selector_str), &debug_config);
-    info!("Executing find_element_by_selector for selector: {}", selector_str);
+    log_debug_operation(
+        "find_element_by_selector",
+        &format!("Finding element by selector: {}", selector_str),
+        &debug_config,
+    );
+    info!(
+        "Executing find_element_by_selector for selector: {}",
+        selector_str
+    );
 
     let selector: Selector = selector_str.as_str().into();
     let desktop = &state.desktop;
 
     match desktop.locator(selector) {
-        Ok(locator) => {
-            match locator.first() {
-                Ok(Some(element)) => {
-                    info!("Found element for selector: {}", selector_str);
+        Ok(locator) => match locator.first() {
+            Ok(Some(element)) => {
+                info!("Found element for selector: {}", selector_str);
 
-                    let attrs = element.attributes();
-                    match serde_json::to_string_pretty(&attrs) {
-                        Ok(json_string) => Ok(json_string),
-                        Err(e) => {
-                            let error_msg = format!("Failed to serialize found element attributes: {}", e);
-                            error!("{}", error_msg);
-                            Err(error_msg)
-                        }
+                let attrs = element.attributes();
+                match serde_json::to_string_pretty(&attrs) {
+                    Ok(json_string) => Ok(json_string),
+                    Err(e) => {
+                        let error_msg =
+                            format!("Failed to serialize found element attributes: {}", e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
                     }
                 }
-                Ok(None) => {
-                    let error_msg = format!("Element not found for selector: {}", selector_str);
-                    error!("{}", error_msg);
-                    Err(error_msg)
-                }
-                Err(e) => {
-                    let error_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
-                    error!("{}", error_msg);
-                    Err(error_msg)
-                }
             }
-        }
+            Ok(None) => {
+                let error_msg = format!("Element not found for selector: {}", selector_str);
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "Error finding element for selector '{}': {}",
+                    selector_str, e
+                );
+                error!("{}", error_msg);
+                Err(error_msg)
+            }
+        },
         Err(e) => {
-            let error_msg = format!("Error creating locator for selector '{}': {}", selector_str, e);
+            let error_msg = format!(
+                "Error creating locator for selector '{}': {}",
+                selector_str, e
+            );
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -227,19 +295,36 @@ pub(crate) async fn find_element_by_selector(selector_str: String, state: State<
 }
 
 #[tauri::command]
-pub(crate) async fn click_element_by_selector(selector_str: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+pub(crate) async fn click_element_by_selector(
+    selector_str: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&selector_str)?;
     }
 
-    log_debug_operation("click_element_by_selector", &format!("Clicking element by selector: {}", selector_str), &debug_config);
-    info!("Executing click_element_by_selector for selector: {}", selector_str);
+    log_debug_operation(
+        "click_element_by_selector",
+        &format!("Clicking element by selector: {}", selector_str),
+        &debug_config,
+    );
+    info!(
+        "Executing click_element_by_selector for selector: {}",
+        selector_str
+    );
 
     let selector: Selector = selector_str.as_str().into();
     let desktop = &state.desktop;
@@ -248,40 +333,60 @@ pub(crate) async fn click_element_by_selector(selector_str: String, app: AppHand
         Ok(locator) => {
             match locator.first() {
                 Ok(Some(element)) => {
-                    info!("Found element, attempting click for selector: {}", selector_str);
+                    info!(
+                        "Found element, attempting click for selector: {}",
+                        selector_str
+                    );
 
                     match element.click() {
                         Ok(_) => {
-                            info!("Successfully clicked element matching selector: {}", selector_str);
+                            info!(
+                                "Successfully clicked element matching selector: {}",
+                                selector_str
+                            );
 
                             // Send debug notification if enabled
                             if debug_config.send_notifications {
-                                let _ = send_debug_notification(&app, "Click Element", &format!("Clicked element matching: {}", selector_str));
+                                let _ = send_debug_notification(
+                                    &app,
+                                    "Click Element",
+                                    &format!("Clicked element matching: {}", selector_str),
+                                );
                             }
 
                             Ok(())
                         }
                         Err(e) => {
-                            let error_msg = format!("Failed to click element found by selector '{}': {}", selector_str, e);
+                            let error_msg = format!(
+                                "Failed to click element found by selector '{}': {}",
+                                selector_str, e
+                            );
                             error!("{}", error_msg);
                             Err(error_msg)
                         }
                     }
                 }
                 Ok(None) => {
-                    let error_msg = format!("Element not found for click selector: {}", selector_str);
+                    let error_msg =
+                        format!("Element not found for click selector: {}", selector_str);
                     error!("{}", error_msg);
                     Err(error_msg)
                 }
                 Err(e) => {
-                    let error_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
+                    let error_msg = format!(
+                        "Error finding element for selector '{}': {}",
+                        selector_str, e
+                    );
                     error!("{}", error_msg);
                     Err(error_msg)
                 }
             }
         }
         Err(e) => {
-            let error_msg = format!("Error creating locator for selector '{}': {}", selector_str, e);
+            let error_msg = format!(
+                "Error creating locator for selector '{}': {}",
+                selector_str, e
+            );
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -289,13 +394,26 @@ pub(crate) async fn click_element_by_selector(selector_str: String, app: AppHand
 }
 
 #[tauri::command]
-pub(crate) async fn get_selected_text(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+pub(crate) async fn get_selected_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
-    log_debug_operation("get_selected_text", "Getting selected text from focused element", &debug_config);
+    log_debug_operation(
+        "get_selected_text",
+        "Getting selected text from focused element",
+        &debug_config,
+    );
     info!("Executing get_selected_text");
 
     #[cfg(target_os = "macos")]
@@ -306,7 +424,10 @@ pub(crate) async fn get_selected_text(app: AppHandle, state: State<'_, AppState>
                 let attrs = element.attributes();
                 let selected_text = attrs.value.unwrap_or_else(|| "".to_string());
 
-                info!("Successfully retrieved selected text (length: {})", selected_text.len());
+                info!(
+                    "Successfully retrieved selected text (length: {})",
+                    selected_text.len()
+                );
 
                 // Send debug notification if enabled
                 if debug_config.send_notifications {
@@ -315,7 +436,11 @@ pub(crate) async fn get_selected_text(app: AppHandle, state: State<'_, AppState>
                     } else {
                         selected_text.clone()
                     };
-                    let _ = send_debug_notification(&app, "Selected Text", &format!("Retrieved: {}", preview));
+                    let _ = send_debug_notification(
+                        &app,
+                        "Selected Text",
+                        &format!("Retrieved: {}", preview),
+                    );
                 }
 
                 Ok(selected_text)

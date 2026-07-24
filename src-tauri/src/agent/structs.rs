@@ -85,8 +85,8 @@ pub struct ToolCall {
 pub struct ToolResult {
     pub call_id: String, // Reference back to the ToolCall id
     pub output: Value,   // The result from the tool (JSON value)
-    // Consider adding success/failure status
-    // pub success: bool,
+                         // Consider adding success/failure status
+                         // pub success: bool,
 }
 
 // Basic definition for a tool known by the agent
@@ -99,13 +99,13 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentState {
-    Idle,      // Waiting to start
-    Thinking,  // Processing, deciding next step (e.g., calling LLM)
-    Executing, // Running a tool
-    Responding, // Preparing final response
-    Finished,  // Completed successfully
+    Idle,           // Waiting to start
+    Thinking,       // Processing, deciding next step (e.g., calling LLM)
+    Executing,      // Running a tool
+    Responding,     // Preparing final response
+    Finished,       // Completed successfully
     Failed(String), // Encountered an error
-    Paused,    // Temporarily stopped, can be resumed
+    Paused,         // Temporarily stopped, can be resumed
 }
 
 // Represents the action the agent decided to take next
@@ -116,7 +116,7 @@ pub enum AgentAction {
     Finish(String), // Finish with a final message
 
     Error(AgentError),
-    Think,         // Continue the thinking loop if more work needed
+    Think, // Continue the thinking loop if more work needed
 }
 
 #[cfg(test)]
@@ -127,7 +127,10 @@ mod tests {
     #[test]
     fn test_agent_error_display() {
         let error = AgentError::LlmError("Connection failed".to_string());
-        assert_eq!(error.to_string(), "LLM communication error: Connection failed");
+        assert_eq!(
+            error.to_string(),
+            "LLM communication error: Connection failed"
+        );
 
         let error = AgentError::MaxStepsReached;
         assert_eq!(error.to_string(), "Maximum steps reached");
@@ -248,7 +251,7 @@ mod tests {
         let state = AgentState::Failed("Test error".to_string());
         match state {
             AgentState::Failed(msg) => assert_eq!(msg, "Test error"),
-            _ => assert!(false, "Expected Failed state"),
+            other => panic!("Expected Failed state, got {:?}", other),
         }
     }
 
@@ -281,19 +284,19 @@ mod tests {
                 assert_eq!(calls.len(), 1);
                 assert_eq!(calls[0], tool_call);
             }
-            _ => assert!(false, "Expected ExecuteTool action"),
+            other => panic!("Expected ExecuteTool action, got {:?}", other),
         }
 
         let action = AgentAction::RespondToUser("Hello".to_string());
         match action {
             AgentAction::RespondToUser(msg) => assert_eq!(msg, "Hello"),
-            _ => assert!(false, "Expected RespondToUser action"),
+            other => panic!("Expected RespondToUser action, got {:?}", other),
         }
 
         let action = AgentAction::Finish("Done".to_string());
         match action {
             AgentAction::Finish(msg) => assert_eq!(msg, "Done"),
-            _ => assert!(false, "Expected Finish action"),
+            other => panic!("Expected Finish action, got {:?}", other),
         }
 
         let action = AgentAction::Finish("Task completed".to_string());
@@ -301,14 +304,14 @@ mod tests {
             AgentAction::Finish(msg) => {
                 assert_eq!(msg, "Task completed");
             }
-            _ => assert!(false, "Expected Finish action"),
+            other => panic!("Expected Finish action, got {:?}", other),
         }
 
         let error = AgentError::MaxStepsReached;
         let action = AgentAction::Error(error.clone());
         match action {
             AgentAction::Error(e) => assert_eq!(e, error),
-            _ => assert!(false, "Expected Error action"),
+            other => panic!("Expected Error action, got {:?}", other),
         }
     }
 

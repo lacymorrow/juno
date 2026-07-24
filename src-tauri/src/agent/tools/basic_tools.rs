@@ -17,8 +17,8 @@
 //! Used by: Orchestrator agent, coding specialists, general agent workflows
 //! Registration: Called via `register_basic_tools()` during agent initialization
 
-use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::core::ToolDefinition;
+use crate::agent::implementations::tool_provider::LocalToolProvider;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -167,7 +167,7 @@ impl SecurityConfig {
 
         // In development, we don't restrict by extension but still prevent executables
         config.allowed_extensions.clear(); // Allow reading any non-executable file type
-        
+
         // Still maintain workspace boundaries in development
         config
     }
@@ -190,23 +190,14 @@ fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
         Ok(entries) => {
             let mut items = Vec::new();
             for entry in entries.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    let is_dir = entry
-                        .file_type()
-                        .map(|ft| ft.is_dir())
-                        .unwrap_or(false);
-                    items.push(if is_dir {
-                        format!("{}/", name)
-                    } else {
-                        name
-                    });
+                let name = entry.file_name().to_string_lossy().to_string();
+                let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                items.push(if is_dir { format!("{}/", name) } else { name });
             }
             items.sort();
             Ok(items.join("\n"))
         }
-        Err(e) => {
-            Err(format!("Failed to list directory: {}", e))
-        }
+        Err(e) => Err(format!("Failed to list directory: {}", e)),
     }
 }
 
@@ -238,7 +229,7 @@ mod basic_tools_impl {
             if path_str.contains("..") {
                 return Err("Path traversal (..) is not allowed in production".to_string());
             }
-            
+
             // Block only the most sensitive files in production
             if path_str.contains("/etc/passwd") || path_str.contains("/etc/shadow") {
                 return Err("Access to system password files is not allowed".to_string());
@@ -250,7 +241,7 @@ mod basic_tools_impl {
         // Validate file extensions
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
-            
+
             // In development mode, only block truly dangerous executables
             if config.debug_mode {
                 let dangerous_exts = ["exe", "com", "scr", "bat", "cmd", "msi"];
@@ -266,11 +257,12 @@ mod basic_tools_impl {
                         ext_str
                     ));
                 }
-                
+
                 // And enforce allowed list if configured
-                if !config.allowed_extensions.is_empty() && 
-                   !config.allowed_extensions.contains(&ext_str) && 
-                   !ext_str.is_empty() {
+                if !config.allowed_extensions.is_empty()
+                    && !config.allowed_extensions.contains(&ext_str)
+                    && !ext_str.is_empty()
+                {
                     return Err(format!(
                         "File extension '{}' is not in the allowed list for production mode",
                         ext_str
@@ -287,7 +279,7 @@ mod basic_tools_impl {
                 .map_err(|e| format!("Failed to get current directory: {}", e))?;
             current_dir.join(&path)
         };
-        
+
         // Canonicalize path to resolve symlinks and normalize
         let canonical_path = match full_path.canonicalize() {
             Ok(p) => p,
@@ -301,15 +293,15 @@ mod basic_tools_impl {
                             } else {
                                 full_path.clone()
                             }
-                        },
-                        Err(_) => full_path.clone()
+                        }
+                        Err(_) => full_path.clone(),
                     }
                 } else {
                     full_path.clone()
                 }
             }
         };
-        
+
         // Enforce workspace boundaries
         if let Some(workspace_root) = &config.workspace_root {
             if !canonical_path.starts_with(workspace_root) {
@@ -336,8 +328,6 @@ mod basic_tools_impl {
 
         Ok(canonical_path)
     }
-
-
 
     /// Creates the tool definition for the `read_file` tool.
     ///
@@ -418,7 +408,10 @@ mod basic_tools_impl {
             Err(e) => {
                 // Check if path is a directory and gracefully handle by listing contents
                 if validated_path.is_dir() {
-                    log::info!("📁 Path is a directory, listing contents instead: {:?}", validated_path);
+                    log::info!(
+                        "📁 Path is a directory, listing contents instead: {:?}",
+                        validated_path
+                    );
 
                     match list_directory_contents(&validated_path) {
                         Ok(directory_listing) => {
@@ -433,8 +426,15 @@ mod basic_tools_impl {
                             }))
                         }
                         Err(dir_err) => {
-                            log::error!("❌ Failed to list directory {:?}: {}", validated_path, dir_err);
-                            Err(format!("Failed to list directory '{}': {}", path_str, dir_err))
+                            log::error!(
+                                "❌ Failed to list directory {:?}: {}",
+                                validated_path,
+                                dir_err
+                            );
+                            Err(format!(
+                                "Failed to list directory '{}': {}",
+                                path_str, dir_err
+                            ))
                         }
                     }
                 } else {
@@ -444,10 +444,6 @@ mod basic_tools_impl {
             }
         }
     }
-
-
-
-
 }
 
 /// Registers basic file tools with balanced security.

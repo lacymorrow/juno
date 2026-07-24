@@ -4,9 +4,9 @@
 //! for the Juno application. It provides a centralized interface for creating,
 //! managing, and controlling all application windows.
 
-use tauri::{AppHandle, Manager, Emitter, WebviewUrl, WebviewWindowBuilder};
-use tracing::{info, warn, error};
 use crate::constants::{self, ui::window_labels};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tracing::{error, info, warn};
 
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -106,7 +106,10 @@ pub struct WindowManager;
 
 impl WindowManager {
     /// Create or show a window with the given configuration
-    pub async fn create_or_show_window(app: &AppHandle, config: WindowConfig) -> Result<(), String> {
+    pub async fn create_or_show_window(
+        app: &AppHandle,
+        config: WindowConfig,
+    ) -> Result<(), String> {
         // Check if window already exists and is valid
         if let Some(existing_window) = app.get_webview_window(&config.label) {
             // Check if window is actually valid (not destroyed)
@@ -126,22 +129,22 @@ impl WindowManager {
                 }
                 Err(_) => {
                     // Window exists in registry but is invalid/destroyed, create new one
-                    info!("Existing {} window is invalid, creating new one", config.label);
+                    info!(
+                        "Existing {} window is invalid, creating new one",
+                        config.label
+                    );
                 }
             }
         }
 
         // Create new window if it doesn't exist
-        let mut builder = WebviewWindowBuilder::new(
-            app,
-            &config.label,
-            WebviewUrl::App(config.url.into()),
-        )
-        .title(&config.title)
-        .inner_size(config.width, config.height)
-        .min_inner_size(config.min_width, config.min_height)
-        .resizable(config.resizable)
-        .visible(true);
+        let mut builder =
+            WebviewWindowBuilder::new(app, &config.label, WebviewUrl::App(config.url.into()))
+                .title(&config.title)
+                .inner_size(config.width, config.height)
+                .min_inner_size(config.min_width, config.min_height)
+                .resizable(config.resizable)
+                .visible(true);
 
         if config.center {
             builder = builder.center();
@@ -231,8 +234,13 @@ impl WindowManager {
     pub async fn toggle_fullscreen(app: &AppHandle, label: &str) -> Result<(), String> {
         if let Some(window) = app.get_webview_window(label) {
             let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
-            window.set_fullscreen(!is_fullscreen).map_err(|e| e.to_string())?;
-            info!("Toggled fullscreen for {} window to {}", label, !is_fullscreen);
+            window
+                .set_fullscreen(!is_fullscreen)
+                .map_err(|e| e.to_string())?;
+            info!(
+                "Toggled fullscreen for {} window to {}",
+                label, !is_fullscreen
+            );
         }
         Ok(())
     }
@@ -312,7 +320,8 @@ pub async fn open_desktop_cursor_overlay(app: AppHandle) -> Result<(), String> {
 /// Get window states for tray menu and other uses
 pub async fn get_window_states(app: &AppHandle) -> (bool, bool) {
     let main_visible = WindowManager::is_window_visible(app, constants::window_labels::MAIN);
-    let floating_bar_visible = WindowManager::is_window_visible(app, constants::window_labels::FLOATING_BAR);
+    let floating_bar_visible =
+        WindowManager::is_window_visible(app, constants::window_labels::FLOATING_BAR);
     (main_visible, floating_bar_visible)
 }
 
@@ -331,19 +340,12 @@ mod tests {
         let onboarding_config = WindowConfig::onboarding();
         assert_eq!(onboarding_config.label, window_labels::ONBOARDING);
         assert_eq!(onboarding_config.title, "Welcome to Juno");
-        assert_eq!(onboarding_config.width, 440.0);  // Match tauri.conf.json
-        assert!(!onboarding_config.resizable);  // Match tauri.conf.json
+        assert_eq!(onboarding_config.width, 440.0); // Match tauri.conf.json
+        assert!(!onboarding_config.resizable); // Match tauri.conf.json
 
         let main_config = WindowConfig::main();
         assert_eq!(main_config.label, window_labels::MAIN);
         assert_eq!(main_config.title, "Juno");
         assert!(!main_config.center); // Main window should not auto-center
-    }
-
-    #[test]
-    fn test_window_manager_safety() {
-        // Test that WindowManager operations are safe and don't cause crashes
-        // This is a placeholder test since we can't easily mock AppHandle
-        assert!(true, "WindowManager should handle missing windows gracefully");
     }
 }

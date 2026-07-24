@@ -19,10 +19,10 @@ use crate::agent::tools::{
 };
 use crate::agent::traits::{AgentRunnable, MemoryManager, ToolProvider};
 use crate::constants::{agent, events};
-use crate::state::AppState;
-use crate::utils::{format_system_context_for_agent, gather_system_context};
-use crate::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
 use crate::persistent_memory::PersistentMemoryStore;
+use crate::state::AppState;
+use crate::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
+use crate::utils::{format_system_context_for_agent, gather_system_context};
 // TARS Integration: Import event types
 // TODO: Implement event system - currently disabled due to incomplete implementation
 // use crate::agent::events::JunoAgentEvent;
@@ -72,7 +72,7 @@ impl AgentExecutionQueue {
         // Clear pending queue and add new query atomically
         self.pending_queries.clear().await;
         self.pending_queries.push(queued_query).await?;
-        
+
         info!("Queued new agent query with ID: {}", query_id);
         Ok(query_id)
     }
@@ -115,7 +115,7 @@ impl AgentExecutionQueue {
     async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
         // Get next query from queue
         let query = self.pending_queries.pop().await?;
-        
+
         // Try to start execution atomically
         let guard = match self.coordinator.try_start_execution(query.id.clone()).await {
             Ok(guard) => guard,
@@ -129,11 +129,8 @@ impl AgentExecutionQueue {
         info!("Starting atomic agent execution for query ID: {}", query.id);
 
         // Execute the actual agent logic
-        let result = execute_agent_internal(
-            query.query.clone(),
-            state,
-            query.app_handle.clone()
-        ).await;
+        let result =
+            execute_agent_internal(query.query.clone(), state, query.app_handle.clone()).await;
 
         // Guard automatically cleans up on drop
         drop(guard);
@@ -141,7 +138,10 @@ impl AgentExecutionQueue {
         // Handle execution result
         match result {
             Ok(()) => {
-                info!("Agent execution completed successfully for query ID: {}", query.id);
+                info!(
+                    "Agent execution completed successfully for query ID: {}",
+                    query.id
+                );
             }
             Err(e) => {
                 error!("Agent execution failed for query {}: {}", query.id, e);
@@ -150,7 +150,6 @@ impl AgentExecutionQueue {
 
         Some(query)
     }
-
 }
 
 /// Global agent execution queue instance
@@ -169,7 +168,7 @@ pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
     pub audio_base64: Option<String>,
-    pub agent_state: String,               // Send final state to frontend
+    pub agent_state: String, // Send final state to frontend
     pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
 }
 
@@ -189,18 +188,48 @@ pub fn is_jsx_content(content: &str) -> bool {
 
     // Use static array for better performance than contains() calls
     const JSX_INDICATORS: &[&str] = &[
-        "Card", "Alert", "Button", "Badge", "Circle", "Rectangle", "Triangle",
-        "StatusCard", "ColorShowcase", "VisualDemo", "className=", "jsx", "React",
-        "WeatherCard", "FileListCard", "SystemStatusCard", "ComparisonCard",
-        "TimerCard", "LinkCard", "TaskSummaryCard", "ProgressBar",
-        "ActionButton", "QueryButton", "OpenButton", "CopyButton",
-        "AnimatedCard", "AnimatedList", "AnimatedProgress", "GlowBadge",
-        "ShimmerText", "Confetti", "PulseRing", "AnimatedDivider",
-        "Stat", "MiniChart", "AnimatedNumber"
+        "Card",
+        "Alert",
+        "Button",
+        "Badge",
+        "Circle",
+        "Rectangle",
+        "Triangle",
+        "StatusCard",
+        "ColorShowcase",
+        "VisualDemo",
+        "className=",
+        "jsx",
+        "React",
+        "WeatherCard",
+        "FileListCard",
+        "SystemStatusCard",
+        "ComparisonCard",
+        "TimerCard",
+        "LinkCard",
+        "TaskSummaryCard",
+        "ProgressBar",
+        "ActionButton",
+        "QueryButton",
+        "OpenButton",
+        "CopyButton",
+        "AnimatedCard",
+        "AnimatedList",
+        "AnimatedProgress",
+        "GlowBadge",
+        "ShimmerText",
+        "Confetti",
+        "PulseRing",
+        "AnimatedDivider",
+        "Stat",
+        "MiniChart",
+        "AnimatedNumber",
     ];
 
     // Check for JSX patterns efficiently
-    JSX_INDICATORS.iter().any(|&pattern| content.contains(pattern))
+    JSX_INDICATORS
+        .iter()
+        .any(|&pattern| content.contains(pattern))
 }
 
 /// Optimized determination of substantial user communication
@@ -209,7 +238,9 @@ fn is_substantial_user_communication(content: &str) -> bool {
     let trimmed = content.trim();
 
     // Early exit for empty or very short content
-    if trimmed.is_empty() || trimmed.len() < crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH {
+    if trimmed.is_empty()
+        || trimmed.len() < crate::constants::text::limits::MIN_SUBSTANTIAL_COMMUNICATION_LENGTH
+    {
         return false;
     }
 
@@ -217,11 +248,27 @@ fn is_substantial_user_communication(content: &str) -> bool {
 
     // Optimized simple status patterns using static array
     const SIMPLE_STATUS_PATTERNS: &[&str] = &[
-        "task completed", "operation successful", "done", "finished", "success",
-        "failed", "error", "completed successfully", "operation completed",
-        "task finished", "file saved", "file created", "file deleted",
-        "command executed", "action completed", "processed successfully",
-        "unable to", "couldn't", "can't", "not found", "already exists"
+        "task completed",
+        "operation successful",
+        "done",
+        "finished",
+        "success",
+        "failed",
+        "error",
+        "completed successfully",
+        "operation completed",
+        "task finished",
+        "file saved",
+        "file created",
+        "file deleted",
+        "command executed",
+        "action completed",
+        "processed successfully",
+        "unable to",
+        "couldn't",
+        "can't",
+        "not found",
+        "already exists",
     ];
 
     // Check for simple status messages with early exit
@@ -251,7 +298,9 @@ fn is_substantial_user_communication(content: &str) -> bool {
     }
 
     // 3. Long single sentence check
-    if trimmed.len() > crate::constants::text::limits::MIN_DETAILED_CONTENT_LENGTH && sentence_endings >= 1 {
+    if trimmed.len() > crate::constants::text::limits::MIN_DETAILED_CONTENT_LENGTH
+        && sentence_endings >= 1
+    {
         return true;
     }
 
@@ -262,13 +311,30 @@ fn is_substantial_user_communication(content: &str) -> bool {
 
     // 5. Content indicators check (most expensive, done last)
     const CONTENT_INDICATORS: &[&str] = &[
-        "here's", "i found", "i've", "discovered", "located", "retrieved",
-        "extracted", "analysis", "results show", "data indicates", "information",
-        "details", "explanation", "because", "since", "therefore", "however",
-        "additionally", "furthermore"
+        "here's",
+        "i found",
+        "i've",
+        "discovered",
+        "located",
+        "retrieved",
+        "extracted",
+        "analysis",
+        "results show",
+        "data indicates",
+        "information",
+        "details",
+        "explanation",
+        "because",
+        "since",
+        "therefore",
+        "however",
+        "additionally",
+        "furthermore",
     ];
 
-    CONTENT_INDICATORS.iter().any(|&indicator| lower_content.contains(indicator))
+    CONTENT_INDICATORS
+        .iter()
+        .any(|&indicator| lower_content.contains(indicator))
 }
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
@@ -282,7 +348,12 @@ pub async fn submit_query(
     info!("Received query for event-driven processing: {}", query);
 
     // --- Rate limiting check for AI operations ---
-    if let Err(e) = state.rate_limiters.ai_operations.check("default_user").await {
+    if let Err(e) = state
+        .rate_limiters
+        .ai_operations
+        .check("default_user")
+        .await
+    {
         warn!("Rate limit exceeded for AI operations");
         return Err(e.to_user_message());
     }
@@ -305,27 +376,29 @@ pub async fn submit_query(
     //     timestamp: chrono::Utc::now().timestamp_millis() as u64,
     //     session_id: Some(crate::agent::events::generate_session_id()),
     // };
-    // 
+    //
     // // Emit event for logging/observability (non-blocking)
     // if let Err(e) = state.emit_event(user_message_event).await {
     //     warn!("Failed to emit user message event for logging: {}", e);
     //     // Don't fail the entire request for logging issues
     // }
-    
+
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
     // The event-driven refactor was incomplete and caused tool calls to not execute
     info!("Executing agent directly for query: {}", trimmed_query);
-    
+
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
-    let _query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await
+    let _query_id = queue
+        .queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone())
+        .await
         .map_err(|e| format!("Failed to queue query: {}", e))?;
-    
+
     // Execute the next queued query (will be the one we just queued)
     if queue.execute_next_query(state.clone()).await.is_none() {
         warn!("execute_next_query returned None despite having a queued query - execution may have been blocked by a concurrent run");
     }
-    
+
     Ok(())
 }
 
@@ -355,7 +428,10 @@ async fn execute_agent_internal(
         None => None,
     };
 
-    let companion_mode = agent_settings.as_ref().map(|s| s.companion_mode).unwrap_or(false);
+    let companion_mode = agent_settings
+        .as_ref()
+        .map(|s| s.companion_mode)
+        .unwrap_or(false);
     if companion_mode {
         info!("🔍 Companion mode enabled — computer use tools will be withheld");
     }
@@ -363,7 +439,10 @@ async fn execute_agent_internal(
     // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
     let _cursor_guard = match &agent_settings {
         Some(s) if s.big_cursor_enabled => {
-            info!("[CursorScale] Big cursor enabled, scaling to {:.1}x", s.big_cursor_scale);
+            info!(
+                "[CursorScale] Big cursor enabled, scaling to {:.1}x",
+                s.big_cursor_scale
+            );
             crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
         }
         Some(_) => crate::cursor_scale::CursorScaleGuard::noop(),
@@ -382,7 +461,9 @@ async fn execute_agent_internal(
         let registry = state.agent_sessions();
         match registry.create("orchestrator".to_string()).await {
             Ok(session) => {
-                session.set_status(crate::agents::AgentSessionStatus::Running).await;
+                session
+                    .set_status(crate::agents::AgentSessionStatus::Running)
+                    .await;
                 let handle = crate::agents::SessionHandle::new(
                     registry.clone(),
                     session,
@@ -390,10 +471,9 @@ async fn execute_agent_internal(
                 );
                 let focused = handle.is_focused();
                 let snapshot = handle.session().snapshot(focused).await;
-                if let Err(e) = app_handle.emit(
-                    crate::constants::events::agent_sessions::STARTED,
-                    &snapshot,
-                ) {
+                if let Err(e) =
+                    app_handle.emit(crate::constants::events::agent_sessions::STARTED, &snapshot)
+                {
                     warn!("Failed to emit agent-session-started: {}", e);
                 }
                 crate::agents::broadcast_sessions_updated(&app_handle, &registry).await;
@@ -449,7 +529,10 @@ async fn execute_agent_internal(
     if !crate::cli::headless::is_headless_mode() {
         {
             let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-            if let Err(e) = coordinator.register_escape_user(&app_handle, "agent_execution").await {
+            if let Err(e) = coordinator
+                .register_escape_user(&app_handle, "agent_execution")
+                .await
+            {
                 warn!("Failed to configure escape key for agent execution: {} - continuing without escape key cancellation", e);
             }
         }
@@ -515,12 +598,18 @@ async fn execute_agent_internal(
         let current_execution_id = uuid::Uuid::new_v4().to_string();
 
         // Mark current execution so new tools won't be considered orphaned
-        if let Err(e) = memory_manager.set_current_execution_id(&current_execution_id).await {
+        if let Err(e) = memory_manager
+            .set_current_execution_id(&current_execution_id)
+            .await
+        {
             warn!("Failed to set current execution ID for orchestrator: {}", e);
         }
 
         // Use the safe clean method that only removes tool calls from previous executions
-        if let Err(e) = memory_manager.clean_orphaned_tool_calls_from_previous_executions().await {
+        if let Err(e) = memory_manager
+            .clean_orphaned_tool_calls_from_previous_executions()
+            .await
+        {
             warn!("Failed to clean orphaned tool calls: {}", e);
         }
 
@@ -542,7 +631,7 @@ async fn execute_agent_internal(
     // --- Setup Tool Provider Based on Agent Mode ---
     let agent_mode = BrainFactory::get_agent_mode_with_app_handle(&app_handle).await;
     info!("Using agent mode: {:?}", agent_mode);
-    
+
     // TEMPORARY DEBUG FIX: Force single agent mode for computer use tasks
     // This ensures direct tool access instead of delegation
     let lower_query = trimmed_query.to_lowercase();
@@ -553,7 +642,7 @@ async fn execute_agent_internal(
         || lower_query.contains("computer")
         || lower_query.contains("spiral")
         || lower_query.contains("draw");
-        
+
     // Companion mode always runs single-agent — multi-agent + companion is contradictory
     // (orchestrator would hold delegation tools while being told it can't act).
     // Takes effect on the next query; current in-flight run keeps its tools.
@@ -561,7 +650,10 @@ async fn execute_agent_internal(
         info!("🔍 Companion mode: forcing single-agent path (no delegation)");
         AgentMode::Single
     } else if contains_computer_keywords {
-        warn!("FORCING SINGLE AGENT MODE for computer use task: {}", trimmed_query);
+        warn!(
+            "FORCING SINGLE AGENT MODE for computer use task: {}",
+            trimmed_query
+        );
         AgentMode::Single
     } else {
         agent_mode
@@ -573,7 +665,8 @@ async fn execute_agent_internal(
             info!("🔧 Setting up SINGLE AGENT mode with direct tools (no delegation)");
 
             // Create a clean tool provider for single agent with direct tools only
-            let mut single_agent_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+            let mut single_agent_tool_provider =
+                LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Companion mode: no action tools — agent is observe-only
             if !companion_mode {
@@ -584,7 +677,8 @@ async fn execute_agent_internal(
                     &mut single_agent_tool_provider,
                     state.clone(),
                     app_handle.clone(),
-                ).await;
+                )
+                .await;
                 info!("✅ Registered desktop tools for single agent");
             } else {
                 info!("🔍 Companion mode: skipping basic + desktop tool registration");
@@ -620,15 +714,21 @@ async fn execute_agent_internal(
                             };
 
                         let result = match current_tool_name_captured.as_str() {
-                            "browser_navigate" => browser_controller_instance.navigate(&input).await,
+                            "browser_navigate" => {
+                                browser_controller_instance.navigate(&input).await
+                            }
                             "browser_extract_content" => {
                                 browser_controller_instance.extract_content(&input).await
                             }
-                            "browser_interact" => browser_controller_instance.interact(&input).await,
+                            "browser_interact" => {
+                                browser_controller_instance.interact(&input).await
+                            }
                             "browser_get_current_url" => {
                                 browser_controller_instance.get_current_url(&input).await
                             }
-                            "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
+                            "browser_screenshot" => {
+                                browser_controller_instance.screenshot(&input).await
+                            }
                             _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
                         };
 
@@ -641,7 +741,10 @@ async fn execute_agent_internal(
                 single_agent_tool_provider
                     .register_async_tool(definition.clone(), executor)
                     .await;
-                info!("✅ Registered browser tool for single agent: {}", definition.name);
+                info!(
+                    "✅ Registered browser tool for single agent: {}",
+                    definition.name
+                );
             }
 
             // In companion mode, skip all computer use tools — agent observes only
@@ -653,10 +756,16 @@ async fn execute_agent_internal(
                 )
                 .await
                 {
-                    let err_msg = format!("Failed to register Computer Use tools for single agent: {}", e);
+                    let err_msg = format!(
+                        "Failed to register Computer Use tools for single agent: {}",
+                        e
+                    );
                     error!("{}", err_msg);
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(&app_handle, "agent_execution")
+                        .await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -668,13 +777,17 @@ async fn execute_agent_internal(
             // Create single agent brain with enriched system prompt including available MCP tools
             let brain_result = {
                 // Load prompt manager to render system prompt with variables
-                let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
-                    Ok(m) => Some(m),
-                    Err(e) => {
-                        warn!("Failed to create settings manager: {}. Using default prompts.", e);
-                        None
-                    }
-                };
+                let settings_manager =
+                    match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            warn!(
+                                "Failed to create settings manager: {}. Using default prompts.",
+                                e
+                            );
+                            None
+                        }
+                    };
 
                 // Collect available tool names including MCP tools (enabled only)
                 let mut available_tool_names: Vec<String> = {
@@ -690,7 +803,12 @@ async fn execute_agent_internal(
                 } else {
                     let mcp_manager = state.get_mcp_manager().await;
                     let guard = mcp_manager.lock().await;
-                    guard.get_all_tools().await.into_iter().map(|t| t.tool_definition.name).collect()
+                    guard
+                        .get_all_tools()
+                        .await
+                        .into_iter()
+                        .map(|t| t.tool_definition.name)
+                        .collect()
                 };
 
                 // Ensure MCP tools are included in the total list
@@ -698,7 +816,9 @@ async fn execute_agent_internal(
 
                 // Build prompt context
                 let prompt_manager = if let Some(ref sm) = settings_manager {
-                    PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
+                    PromptManager::load_from_centralized_settings(sm)
+                        .await
+                        .unwrap_or_else(|_| PromptManager::new())
                 } else {
                     PromptManager::new()
                 };
@@ -749,8 +869,11 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(&app_handle, "agent_execution")
+                        .await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -790,7 +913,8 @@ async fn execute_agent_internal(
             info!("🔧 Setting up MULTI-AGENT mode with orchestrator delegation");
 
             // Create tool provider for specialist agents (used by delegation system)
-            let mut specialist_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+            let mut specialist_tool_provider =
+                LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Companion mode always forces Single, so this block is unreachable when companion=true.
             // Guards are applied here symmetrically with the Single path so the boundary holds
@@ -807,7 +931,8 @@ async fn execute_agent_internal(
                 &mut specialist_tool_provider,
                 state.clone(),
                 app_handle.clone(),
-            ).await;
+            )
+            .await;
 
             // In companion mode, skip all computer use tools — agent observes only
             if !companion_mode {
@@ -818,10 +943,16 @@ async fn execute_agent_internal(
                 )
                 .await
                 {
-                    let err_msg = format!("Failed to register Computer Use tools for specialist agent: {}", e);
+                    let err_msg = format!(
+                        "Failed to register Computer Use tools for specialist agent: {}",
+                        e
+                    );
                     error!("{}", err_msg);
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(&app_handle, "agent_execution")
+                        .await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -850,7 +981,8 @@ async fn execute_agent_internal(
                     let app_handle_captured = app_handle_for_tool_executor.clone();
                     let current_tool_name_captured = tool_name.clone();
                     async move {
-                        let state_from_handle = app_handle_captured.state::<crate::state::AppState>();
+                        let state_from_handle =
+                            app_handle_captured.state::<crate::state::AppState>();
 
                         let browser_controller_instance =
                             match state_from_handle.get_or_init_browser_controller().await {
@@ -866,15 +998,21 @@ async fn execute_agent_internal(
                             };
 
                         let result = match current_tool_name_captured.as_str() {
-                            "browser_navigate" => browser_controller_instance.navigate(&input).await,
+                            "browser_navigate" => {
+                                browser_controller_instance.navigate(&input).await
+                            }
                             "browser_extract_content" => {
                                 browser_controller_instance.extract_content(&input).await
                             }
-                            "browser_interact" => browser_controller_instance.interact(&input).await,
+                            "browser_interact" => {
+                                browser_controller_instance.interact(&input).await
+                            }
                             "browser_get_current_url" => {
                                 browser_controller_instance.get_current_url(&input).await
                             }
-                            "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
+                            "browser_screenshot" => {
+                                browser_controller_instance.screenshot(&input).await
+                            }
                             _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
                         };
 
@@ -891,30 +1029,43 @@ async fn execute_agent_internal(
                         .register_async_tool(definition.clone(), executor)
                         .await;
                 }
-                info!("✅ Registered browser tool for specialist agents: {}", definition.name);
+                info!(
+                    "✅ Registered browser tool for specialist agents: {}",
+                    definition.name
+                );
             }
 
             // Create orchestrator provider first and enrich it with MCP tools so it can directly use custom MCP tools
-            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+            let mut orchestrator_tool_provider =
+                LocalToolProvider::with_app_handle(app_handle.clone());
             let mcp_manager_for_orchestrator = state.get_mcp_manager().await;
             orchestrator_tool_provider.set_mcp_manager(mcp_manager_for_orchestrator.clone());
             if let Err(e) = orchestrator_tool_provider.refresh_mcp_tools().await {
-                warn!("Failed to refresh MCP tools for orchestrator provider: {}", e);
+                warn!(
+                    "Failed to refresh MCP tools for orchestrator provider: {}",
+                    e
+                );
             }
 
             // Build orchestrator system prompt with available MCP tools listed for visibility
             let orchestrator_brain_result = {
                 // Settings → PromptManager
-                let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
-                    Ok(m) => Some(m),
-                    Err(e) => {
-                        warn!("Failed to create settings manager: {}. Using default prompts.", e);
-                        None
-                    }
-                };
+                let settings_manager =
+                    match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            warn!(
+                                "Failed to create settings manager: {}. Using default prompts.",
+                                e
+                            );
+                            None
+                        }
+                    };
 
                 let prompt_manager = if let Some(ref sm) = settings_manager {
-                    PromptManager::load_from_centralized_settings(sm).await.unwrap_or_else(|_| PromptManager::new())
+                    PromptManager::load_from_centralized_settings(sm)
+                        .await
+                        .unwrap_or_else(|_| PromptManager::new())
                 } else {
                     PromptManager::new()
                 };
@@ -986,8 +1137,11 @@ async fn execute_agent_internal(
                         error_message_id,
                         err_msg.clone(),
                     );
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(&app_handle, "agent_execution").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(&app_handle, "agent_execution")
+                        .await;
                     state.mark_agent_execution_finished();
                     return Err(err_msg);
                 }
@@ -1117,8 +1271,14 @@ async fn execute_agent_internal(
     // Skip in headless mode — escape key was never registered
     if !crate::cli::headless::is_headless_mode() {
         let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-        if let Err(e) = coordinator.unregister_escape_user(&app_handle, "agent_execution").await {
-            warn!("Failed to unregister escape key after agent execution: {} - continuing anyway", e);
+        if let Err(e) = coordinator
+            .unregister_escape_user(&app_handle, "agent_execution")
+            .await
+        {
+            warn!(
+                "Failed to unregister escape key after agent execution: {} - continuing anyway",
+                e
+            );
         }
     }
 
@@ -1182,7 +1342,10 @@ async fn execute_agent_internal(
                         )
                         .await
                         {
-                            warn!("{}", format!("{}: {}", "Failed to play cancellation sound", e));
+                            warn!(
+                                "{}",
+                                format!("{}: {}", "Failed to play cancellation sound", e)
+                            );
                         }
                     }
                     (
@@ -1219,7 +1382,10 @@ async fn execute_agent_internal(
                         )
                         .await
                         {
-                            warn!("{}", format!("{}: {}", "Failed to play network error sound", e));
+                            warn!(
+                                "{}",
+                                format!("{}: {}", "Failed to play network error sound", e)
+                            );
                         }
                     }
 
@@ -1335,7 +1501,10 @@ async fn execute_agent_internal(
                 "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit(events::agent::ERROR, event_data) {
-                warn!("{}", format!("{}: {}", "Failed to emit agent-error event", e));
+                warn!(
+                    "{}",
+                    format!("{}: {}", "Failed to emit agent-error event", e)
+                );
             }
         });
     }
@@ -1364,9 +1533,16 @@ pub async fn handle_tts_completion(
     // Play agent success sound now that TTS has finished — skip in headless mode
     if !crate::cli::headless::is_headless_mode() {
         if let Err(e) =
-            crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
+            crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone())
+                .await
         {
-            warn!("{}", format!("{}: {}", "Failed to play success sound after TTS completion", e));
+            warn!(
+                "{}",
+                format!(
+                    "{}: {}",
+                    "Failed to play success sound after TTS completion", e
+                )
+            );
         }
     }
 
@@ -1569,8 +1745,8 @@ async fn execute_specialized_agent_task(
     // This prevents ANY tool calls from being tracked in the orchestrator's memory space
     // which would cause the "orphaned tool call" API error
     let specialist_memory = {
-        use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
         use crate::agent::core::{Message, Role};
+        use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
 
         // Create a completely fresh memory manager for specialist
         let mut fresh_memory = AdvancedMemoryManager::new();
@@ -1603,10 +1779,11 @@ async fn execute_specialized_agent_task(
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
     let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
-    let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle)) {
-        Ok(brain) => brain,
-        Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
-    };
+    let specialist_brain =
+        match BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle)) {
+            Ok(brain) => brain,
+            Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
+        };
 
     // Create specialist agent runner with the isolated memory
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
@@ -1708,7 +1885,10 @@ fn inject_persistent_memory(system_prompt: String, app_handle: &tauri::AppHandle
                     warn!("Failed to record persistent memory access: {}", e);
                 }
             });
-            info!("Injecting {} persistent memory entries into system prompt", entry_count);
+            info!(
+                "Injecting {} persistent memory entries into system prompt",
+                entry_count
+            );
             format!("{}{}", system_prompt, block)
         }
         Ok(None) => system_prompt,

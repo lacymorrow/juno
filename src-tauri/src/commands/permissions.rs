@@ -1,18 +1,21 @@
 // CIDRE-powered native permission system - eliminates osascript admin privilege prompts
 // All permission checking now uses native APIs through NativePermissionChecker
 
-use crate::constants::timeouts;
 use crate::commands::native_permissions::{NativePermissionChecker, NativePermissionStatus};
+use crate::constants::errors::templates::FAILED_TO_EMIT;
+use crate::constants::events;
+use crate::constants::timeouts;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
 use tauri::async_runtime::JoinHandle;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
-use crate::constants::events;
-use crate::constants::errors::templates::FAILED_TO_EMIT;
 
 // ── Per-permission dialog deduplication ──────────────────────────────────────
 //
@@ -32,7 +35,9 @@ static INPUT_MONITORING_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
 
 /// Helper function to format error messages with proper template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Permission status information for frontend consumption
@@ -58,9 +63,8 @@ pub struct PermissionsState {
 
 // Permission monitoring task handle
 type MonitoringTask = Arc<Mutex<Option<(JoinHandle<()>, CancellationToken)>>>;
-static MONITORING_TASK: std::sync::LazyLock<MonitoringTask> = std::sync::LazyLock::new(|| {
-    Arc::new(Mutex::new(None))
-});
+static MONITORING_TASK: std::sync::LazyLock<MonitoringTask> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 // Short-TTL cache for check_permissions_status_native — eliminates redundant native calls during startup.
 // INVARIANT: lock must NEVER be held across an .await point — always released within its own {} scope.
@@ -84,7 +88,10 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
             .map_err(|_| "Permissions cache lock poisoned".to_string())?;
         if let Some((cached_at, ref state)) = *cache {
             if is_cache_fresh(cached_at) {
-                debug!("Returning cached permissions state (age: {:?})", cached_at.elapsed());
+                debug!(
+                    "Returning cached permissions state (age: {:?})",
+                    cached_at.elapsed()
+                );
                 return Ok(state.clone());
             }
         }
@@ -158,7 +165,10 @@ pub async fn get_permissions_state(app: AppHandle) -> Result<PermissionsState, S
 
     // Check if we have cached permissions state (from reset_onboarding)
     if let Some(cached_state) = app_state.get_permissions_state().await {
-        info!("Returning cached permissions state: all_granted={}", cached_state.all_granted);
+        info!(
+            "Returning cached permissions state: all_granted={}",
+            cached_state.all_granted
+        );
         return Ok(cached_state);
     }
 
@@ -195,7 +205,10 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
                     match NativePermissionChecker::request_accessibility_permission() {
                         Ok(()) => {
                             info!("Accessibility permission request triggered successfully");
-                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                timeouts::PERMISSION_CHECK_DELAY_MS,
+                            ))
+                            .await;
                             match NativePermissionChecker::check_accessibility_permission() {
                                 Ok(granted) => {
                                     if granted {
@@ -213,7 +226,10 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
                         }
                         Err(e) => {
                             error!("Error requesting accessibility permissions: {}", e);
-                            Err(format!("Failed to request accessibility permissions: {}", e))
+                            Err(format!(
+                                "Failed to request accessibility permissions: {}",
+                                e
+                            ))
                         }
                     }
                 }
@@ -317,7 +333,10 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
                     match NativePermissionChecker::request_screen_recording_permission() {
                         Ok(()) => {
                             info!("Screen recording permission request triggered successfully");
-                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                timeouts::PERMISSION_CHECK_DELAY_MS,
+                            ))
+                            .await;
                             match NativePermissionChecker::check_screen_recording_permission() {
                                 Ok(granted) => {
                                     if granted {
@@ -335,14 +354,20 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
                         }
                         Err(e) => {
                             error!("Error requesting screen recording permissions: {}", e);
-                            Err(format!("Failed to request screen recording permissions: {}", e))
+                            Err(format!(
+                                "Failed to request screen recording permissions: {}",
+                                e
+                            ))
                         }
                     }
                 }
             }
             Err(e) => {
                 error!("Error checking screen recording permissions: {}", e);
-                Err(format!("Failed to check screen recording permissions: {}", e))
+                Err(format!(
+                    "Failed to check screen recording permissions: {}",
+                    e
+                ))
             }
         };
         invalidate_permissions_cache();
@@ -383,7 +408,10 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
                     match NativePermissionChecker::request_input_monitoring_permission() {
                         Ok(()) => {
                             info!("Input monitoring permission request triggered successfully");
-                            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                timeouts::PERMISSION_CHECK_DELAY_MS,
+                            ))
+                            .await;
                             match NativePermissionChecker::check_input_monitoring_permission() {
                                 Ok(granted) => {
                                     if granted {
@@ -401,14 +429,20 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
                         }
                         Err(e) => {
                             error!("Error requesting input monitoring permissions: {}", e);
-                            Err(format!("Failed to request input monitoring permissions: {}", e))
+                            Err(format!(
+                                "Failed to request input monitoring permissions: {}",
+                                e
+                            ))
                         }
                     }
                 }
             }
             Err(e) => {
                 error!("Error checking input monitoring permissions: {}", e);
-                Err(format!("Failed to check input monitoring permissions: {}", e))
+                Err(format!(
+                    "Failed to check input monitoring permissions: {}",
+                    e
+                ))
             }
         };
         invalidate_permissions_cache();
@@ -429,20 +463,34 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
     #[cfg(target_os = "macos")]
     {
         let url = match preference_pane.as_str() {
-            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
-            "screen_recording" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-            "input_monitoring" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+            "accessibility" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            "microphone" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
+            "screen_recording" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            }
+            "input_monitoring" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
             _ => return Err(format!("Unknown preference pane: {}", preference_pane)),
         };
 
         match Command::new("open").args([url]).status() {
             Ok(status) => {
                 if status.success() {
-                    info!("Successfully opened system preferences for {}", preference_pane);
+                    info!(
+                        "Successfully opened system preferences for {}",
+                        preference_pane
+                    );
                     Ok(())
                 } else {
-                    Err(format!("Failed to open system preferences for {}", preference_pane))
+                    Err(format!(
+                        "Failed to open system preferences for {}",
+                        preference_pane
+                    ))
                 }
             }
             Err(e) => {
@@ -476,7 +524,9 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
     info!("Starting permissions monitoring (1s continuous polling)");
 
     let task_handle = MONITORING_TASK.clone();
-    let mut task_guard = task_handle.lock().map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
+    let mut task_guard = task_handle
+        .lock()
+        .map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
 
     // Stop existing monitoring if running
     if let Some((handle, token)) = task_guard.take() {
@@ -546,14 +596,22 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
 }
 
 /// Emit `permission-granted` when a permission flips from denied → granted.
-fn emit_granted_if_flipped(app: &AppHandle, permission_type: &str, was_granted: bool, now_granted: bool) {
+fn emit_granted_if_flipped(
+    app: &AppHandle,
+    permission_type: &str,
+    was_granted: bool,
+    now_granted: bool,
+) {
     if !was_granted && now_granted {
         info!("Permission flipped to granted: {}", permission_type);
         if let Err(e) = app.emit(
             events::permissions::GRANTED,
             serde_json::json!({ "permission_type": permission_type }),
         ) {
-            warn!("Failed to emit permission-granted for {}: {}", permission_type, e);
+            warn!(
+                "Failed to emit permission-granted for {}: {}",
+                permission_type, e
+            );
         }
     }
 }
@@ -564,7 +622,9 @@ pub async fn stop_permissions_monitoring() -> Result<(), String> {
     info!("Stopping permissions monitoring");
 
     let task_handle = MONITORING_TASK.clone();
-    let mut task_guard = task_handle.lock().map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
+    let mut task_guard = task_handle
+        .lock()
+        .map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
 
     if let Some((handle, token)) = task_guard.take() {
         token.cancel();
@@ -598,7 +658,10 @@ pub async fn prompt_app_restart_after_permissions(app: AppHandle) -> Result<Stri
     if permissions.all_granted {
         Ok("All required permissions are now granted. The app will work optimally.".to_string())
     } else {
-        Ok("Some permissions are still missing. Please grant them for full functionality.".to_string())
+        Ok(
+            "Some permissions are still missing. Please grant them for full functionality."
+                .to_string(),
+        )
     }
 }
 
@@ -612,7 +675,10 @@ pub async fn check_restart_needed_after_permissions() -> Result<bool, String> {
 
 /// Handle restart logic after permissions are granted
 #[tauri::command]
-pub async fn handle_restart_after_permissions(app: AppHandle, auto_restart: bool) -> Result<String, String> {
+pub async fn handle_restart_after_permissions(
+    app: AppHandle,
+    auto_restart: bool,
+) -> Result<String, String> {
     let status = prompt_app_restart_after_permissions(app.clone()).await?;
 
     if auto_restart {
@@ -661,7 +727,11 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
     let audio_devices_status = check_audio_devices_system().await;
 
     // Provide comprehensive microphone functionality assessment
-    let recommendation = determine_microphone_recommendation(&voice_status, &always_listening_status, &audio_devices_status);
+    let recommendation = determine_microphone_recommendation(
+        &voice_status,
+        &always_listening_status,
+        &audio_devices_status,
+    );
 
     Ok(serde_json::json!({
         "voice_transcription": voice_status,
@@ -698,9 +768,9 @@ async fn check_audio_devices_system() -> serde_json::Value {
                         })
                     } else {
                         // Fallback to text parsing
-                        let has_microphone = result.contains("Built-in Microphone") ||
-                                           result.contains("Microphone") ||
-                                           result.contains("Input");
+                        let has_microphone = result.contains("Built-in Microphone")
+                            || result.contains("Microphone")
+                            || result.contains("Input");
                         serde_json::json!({
                             "status": "success",
                             "method": "system_profiler_text",
@@ -739,17 +809,20 @@ async fn check_audio_devices_system() -> serde_json::Value {
 fn determine_microphone_recommendation(
     voice_status: &serde_json::Value,
     always_listening_status: &serde_json::Value,
-    audio_devices_status: &serde_json::Value
+    audio_devices_status: &serde_json::Value,
 ) -> String {
-    let voice_available = voice_status.get("voice_controller_available")
+    let voice_available = voice_status
+        .get("voice_controller_available")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let always_listening_available = always_listening_status.get("always_listening_available")
+    let always_listening_available = always_listening_status
+        .get("always_listening_available")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let audio_devices_detected = audio_devices_status.get("has_audio_devices")
+    let audio_devices_detected = audio_devices_status
+        .get("has_audio_devices")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -824,8 +897,12 @@ mod tests {
     #[test]
     fn test_permissions_cache_ttl_respected() {
         // Verify is_cache_fresh() correctly classifies entries on both sides of the TTL boundary.
-        let expired = Instant::now() - Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS + 1);
-        assert!(!is_cache_fresh(expired), "entry older than TTL should not be fresh");
+        let expired =
+            Instant::now() - Duration::from_secs(timeouts::PERMISSIONS_CACHE_TTL_SECONDS + 1);
+        assert!(
+            !is_cache_fresh(expired),
+            "entry older than TTL should not be fresh"
+        );
 
         let fresh = Instant::now();
         assert!(is_cache_fresh(fresh), "entry just created should be fresh");
@@ -842,8 +919,8 @@ mod tests {
         };
 
         assert_eq!(status.permission_type, "test");
-        assert_eq!(status.granted, true);
-        assert_eq!(status.required, false);
+        assert!(status.granted);
+        assert!(!status.required);
     }
 
     #[test]
@@ -882,7 +959,7 @@ mod tests {
 
         // Should be true because only required permissions (accessibility, screen_recording) are granted
         let all_granted = accessibility.granted && screen_recording.granted;
-        assert_eq!(all_granted, true);
+        assert!(all_granted);
 
         let permissions_state = PermissionsState {
             accessibility,
@@ -893,14 +970,16 @@ mod tests {
             app_name: "test".to_string(),
         };
 
-        assert_eq!(permissions_state.all_granted, true);
+        assert!(permissions_state.all_granted);
     }
 
     #[test]
     fn test_system_settings_url_safety() {
         // Test that our system settings URLs are safe and properly formatted
-        let accessibility_url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-        let microphone_url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+        let accessibility_url =
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+        let microphone_url =
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
 
         assert!(accessibility_url.starts_with("x-apple.systempreferences:"));
         assert!(microphone_url.contains("Privacy_Microphone"));
@@ -917,15 +996,7 @@ mod tests {
             instructions: "Fix test".to_string(),
         });
 
-        assert_eq!(result.granted, false);
+        assert!(!result.granted);
         assert_eq!(result.description, "Test failed");
-    }
-
-    #[test]
-    fn test_no_admin_dependency_in_permission_checks() {
-        // Ensure our permission checking functions don't reference admin privileges
-        // This is a compile-time test - if admin privilege calls were present,
-        // they would be visible in the code above
-        assert!(true, "No admin privilege dependencies found in native permission system");
     }
 }

@@ -34,10 +34,18 @@ impl std::fmt::Display for CoordinateValidationError {
                 write!(f, "coordinate must have exactly 2 elements, got {}", len)
             }
             CoordinateValidationError::NotInteger(index, value) => {
-                write!(f, "coordinate[{}] must be an integer, got '{}'", index, value)
+                write!(
+                    f,
+                    "coordinate[{}] must be an integer, got '{}'",
+                    index, value
+                )
             }
             CoordinateValidationError::OutOfBounds(index, value) => {
-                write!(f, "coordinate[{}] value {} is out of reasonable bounds (-1000-7680)", index, value)
+                write!(
+                    f,
+                    "coordinate[{}] value {} is out of reasonable bounds (-1000-7680)",
+                    index, value
+                )
             }
         }
     }
@@ -70,14 +78,19 @@ impl ValidatedCoordinate {
 /// - isinstance(coordinate, list) -> coordinate.as_array()
 /// - len(coordinate) == 2 -> coordinate.len() == 2
 /// - coordinate values must be integers
-pub fn validate_coordinate_strict(coordinate_value: &Value) -> Result<ValidatedCoordinate, CoordinateValidationError> {
+pub fn validate_coordinate_strict(
+    coordinate_value: &Value,
+) -> Result<ValidatedCoordinate, CoordinateValidationError> {
     // Step 1: isinstance(coordinate, list) check
-    let coordinate_array = coordinate_value.as_array()
+    let coordinate_array = coordinate_value
+        .as_array()
         .ok_or(CoordinateValidationError::NotArray)?;
 
     // Step 2: len(coordinate) == 2 check
     if coordinate_array.len() != 2 {
-        return Err(CoordinateValidationError::InvalidLength(coordinate_array.len()));
+        return Err(CoordinateValidationError::InvalidLength(
+            coordinate_array.len(),
+        ));
     }
 
     // Step 3: Extract and validate integer coordinates
@@ -92,7 +105,10 @@ pub fn validate_coordinate_strict(coordinate_value: &Value) -> Result<ValidatedC
 }
 
 /// Extract integer coordinate value with strict type validation
-fn extract_integer_coordinate(value: &Value, index: usize) -> Result<i64, CoordinateValidationError> {
+fn extract_integer_coordinate(
+    value: &Value,
+    index: usize,
+) -> Result<i64, CoordinateValidationError> {
     // Try integer first (exact match)
     if let Some(int_val) = value.as_i64() {
         return Ok(int_val);
@@ -113,7 +129,7 @@ fn extract_integer_coordinate(value: &Value, index: usize) -> Result<i64, Coordi
     // All other cases are invalid
     Err(CoordinateValidationError::NotInteger(
         index,
-        value.to_string()
+        value.to_string(),
     ))
 }
 
@@ -132,8 +148,12 @@ fn validate_coordinate_bounds(coord: i64, index: usize) -> Result<(), Coordinate
 }
 
 /// Validate coordinate parameter from JSON input with Anthropic API compliance
-pub fn validate_coordinate_parameter(input: &Value, param_name: &str) -> Result<ValidatedCoordinate, CoordinateValidationError> {
-    let coordinate_value = input.get(param_name)
+pub fn validate_coordinate_parameter(
+    input: &Value,
+    param_name: &str,
+) -> Result<ValidatedCoordinate, CoordinateValidationError> {
+    let coordinate_value = input
+        .get(param_name)
         .ok_or(CoordinateValidationError::Missing)?;
 
     validate_coordinate_strict(coordinate_value)
@@ -143,7 +163,7 @@ pub fn validate_coordinate_parameter(input: &Value, param_name: &str) -> Result<
 pub fn validate_coordinate_pair(
     input: &Value,
     start_param: &str,
-    end_param: &str
+    end_param: &str,
 ) -> Result<(ValidatedCoordinate, ValidatedCoordinate), CoordinateValidationError> {
     let start_coord = validate_coordinate_parameter(input, start_param)?;
     let end_coord = validate_coordinate_parameter(input, end_param)?;
@@ -182,27 +202,37 @@ mod tests {
     fn test_invalid_length() {
         let coord = json!([100, 200, 300]);
         let result = validate_coordinate_strict(&coord);
-        assert!(matches!(result, Err(CoordinateValidationError::InvalidLength(3))));
+        assert!(matches!(
+            result,
+            Err(CoordinateValidationError::InvalidLength(3))
+        ));
     }
 
     #[test]
     fn test_invalid_float_coordinates() {
         let coord = json!([100.5, 200]);
         let result = validate_coordinate_strict(&coord);
-        assert!(matches!(result, Err(CoordinateValidationError::NotInteger(0, _))));
+        assert!(matches!(
+            result,
+            Err(CoordinateValidationError::NotInteger(0, _))
+        ));
     }
 
     #[test]
     fn test_out_of_bounds() {
         let coord = json!([10000, 200]);
         let result = validate_coordinate_strict(&coord);
-        assert!(matches!(result, Err(CoordinateValidationError::OutOfBounds(0, 10000))));
+        assert!(matches!(
+            result,
+            Err(CoordinateValidationError::OutOfBounds(0, 10000))
+        ));
     }
 
     #[test]
     fn test_coordinate_parameter_validation() {
         let input = json!({"coordinate": [150, 250]});
-        let result = validate_coordinate_parameter(&input, "coordinate").expect("Should validate coordinate parameter");
+        let result = validate_coordinate_parameter(&input, "coordinate")
+            .expect("Should validate coordinate parameter");
         assert_eq!(result.x, 150);
         assert_eq!(result.y, 250);
     }

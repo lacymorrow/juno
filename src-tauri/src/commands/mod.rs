@@ -1,15 +1,12 @@
 // Main module for all Tauri commands, broken down by category.
 
+use crate::constants::events;
 use crate::state::AppState;
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 use tauri::{Emitter, State};
-use crate::constants::events;
-
 
 // Declare the submodules
 pub mod accessibility;
-pub mod registry;
-pub mod safari_tools;
 pub mod app_url;
 pub mod autostart;
 pub mod computer;
@@ -17,6 +14,8 @@ pub mod core;
 pub mod debug_utils;
 pub mod dev;
 pub mod dictation;
+pub mod registry;
+pub mod safari_tools;
 // Removed deprecated dictation_reset module
 pub mod agent_continuation;
 pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
@@ -36,18 +35,18 @@ pub mod filesystem;
 pub mod keyboard;
 pub mod mcp;
 pub mod memory;
-pub mod persistent_memory;
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
-pub mod scheduled_tasks; // User-facing scheduled automations (LAC-1431)
 pub mod onboarding;
 pub mod onboarding_analytics;
 pub mod onboarding_guidance;
 pub mod orchestrator;
 pub mod permissions;
+pub mod persistent_memory;
 pub mod providers;
-// pub mod self_improvement; // TODO: Fix module not found
+pub mod scheduled_tasks; // User-facing scheduled automations (LAC-1431)
+                         // pub mod self_improvement; // TODO: Fix module not found
 
 pub mod settings;
 pub mod shell;
@@ -68,17 +67,17 @@ pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
 pub use self::accessibility::{
-    accessibility_scan, accessibility_click, test_accessibility_permissions,
-    get_accessibility_tool_definitions, execute_accessibility_tool
-};
-pub use self::safari_tools::{
-    safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
-    safari_get_url, safari_navigate, safari_list_clickable_elements,
-    safari_execute_javascript, safari_clear_cache, execute_safari_tool
+    accessibility_click, accessibility_scan, execute_accessibility_tool,
+    get_accessibility_tool_definitions, test_accessibility_permissions,
 };
 pub use self::autostart::*;
 pub use self::computer::*;
 pub use self::core::*;
+pub use self::safari_tools::{
+    execute_safari_tool, safari_clear_cache, safari_click_element, safari_execute_javascript,
+    safari_extract_dom, safari_get_url, safari_is_active, safari_list_clickable_elements,
+    safari_navigate, safari_type_text,
+};
 // Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
 // Removed deprecated dictation_reset exports
@@ -86,8 +85,8 @@ pub use self::agent_sessions::*;
 pub use self::always_listening::*;
 pub use self::cloud::*;
 pub use self::cloud_test::*;
-pub use self::config_file::*;
 pub use self::collaborative_ai_commands::*;
+pub use self::config_file::*;
 pub use self::debug_tools::*; // Re-export debug tool commands
 pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
@@ -98,12 +97,12 @@ pub use self::dictation_state_manager::{
 // are not publicly re-exported as they don't have pub visibility
 // Exports from main branch - new features
 pub use self::enhanced_visual_reasoning_commands::{
-    VisualReasoningState, VisualAnalysisRequest, SceneTypeInfo, TestResult, initialize_visual_reasoning_state
+    initialize_visual_reasoning_state, SceneTypeInfo, TestResult, VisualAnalysisRequest,
+    VisualReasoningState,
 };
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
 // Floating bar functionality fully migrated to ui_commands.rs - no longer needed
-pub use self::ui_commands::*; // Re-export consolidated UI API commands
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;
@@ -112,7 +111,8 @@ pub use self::onboarding_analytics::*;
 pub use self::onboarding_guidance::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
-// pub use self::self_improvement::*; // TODO: Fix module not found
+pub use self::ui_commands::*; // Re-export consolidated UI API commands
+                              // pub use self::self_improvement::*; // TODO: Fix module not found
 
 pub use self::settings::*;
 pub use self::shell::*;
@@ -128,12 +128,25 @@ pub use self::whisper_model::{
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
-    get_enabled_tools, get_registered_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
-    is_tool_enabled, reset_tool_configuration, set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
-    test_tool_config, test_tool_config_command,
     // Tool approval commands
-    approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_pending_tool_approvals,
-    get_tool_approval_required, set_tool_approval_required,
+    approve_tool_execution,
+    clear_pending_tool_approvals,
+    deny_tool_execution,
+    get_enabled_tools,
+    get_pending_tool_approvals,
+    get_registered_tools,
+    get_tool_approval_required,
+    get_tool_config,
+    get_tool_configuration_summary,
+    get_tool_configurations,
+    is_tool_enabled,
+    reset_tool_configuration,
+    set_tool_approval_required,
+    set_tool_category_enabled,
+    set_tool_enabled,
+    test_dynamic_tool_categorization,
+    test_tool_config,
+    test_tool_config_command,
 };
 
 // Shared helper function for sending notifications from dev tools

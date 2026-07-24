@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 pub mod headless;
 pub mod runner;
 
-
-
 // Default constants
 const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_MAX_ITERATIONS: u32 = 10;
@@ -26,7 +24,13 @@ pub struct Cli {
     pub verbose: bool,
 
     /// Global quiet flag to suppress non-essential output
-    #[arg(short, long, global = true, help = "Suppress non-essential output", conflicts_with = "verbose")]
+    #[arg(
+        short,
+        long,
+        global = true,
+        help = "Suppress non-essential output",
+        conflicts_with = "verbose"
+    )]
     pub quiet: bool,
 
     /// Output format for results
@@ -125,7 +129,7 @@ pub enum Commands {
     },
 
     /// MCP management
-    #[command(about = "Manage MCP servers")] 
+    #[command(about = "Manage MCP servers")]
     Mcp {
         #[command(subcommand)]
         command: McpCommands,
@@ -187,7 +191,12 @@ pub enum VoiceCommands {
     #[command(about = "Start voice recording session")]
     Record {
         /// Duration in seconds (0 for manual stop)
-        #[arg(short, long, default_value_t = 0, help = "Recording duration in seconds")]
+        #[arg(
+            short,
+            long,
+            default_value_t = 0,
+            help = "Recording duration in seconds"
+        )]
         duration: u32,
 
         /// Output file path
@@ -658,8 +667,6 @@ pub enum VerbosityLevel {
     Trace,
 }
 
-
-
 // Utility functions for CLI
 impl Cli {
     /// Get the effective verbosity level based on flags
@@ -800,16 +807,28 @@ mod tests {
     fn test_parse_verbose_flags() {
         let verbose_args = vec!["juno", "--verbose", "query", "test"];
         let cli_verbose = Cli::parse_from(verbose_args);
-        assert!(matches!(cli_verbose.get_verbosity_level(), VerbosityLevel::Verbose));
+        assert!(matches!(
+            cli_verbose.get_verbosity_level(),
+            VerbosityLevel::Verbose
+        ));
 
         let quiet_args = vec!["juno", "--quiet", "query", "test"];
         let cli_quiet = Cli::parse_from(quiet_args);
-        assert!(matches!(cli_quiet.get_verbosity_level(), VerbosityLevel::Quiet));
+        assert!(matches!(
+            cli_quiet.get_verbosity_level(),
+            VerbosityLevel::Quiet
+        ));
     }
 
     #[test]
     fn test_parse_legacy_tts_args() {
-        let args = vec!["juno", "--tts-provider", "system", "--tts-text", "Hello world"];
+        let args = vec![
+            "juno",
+            "--tts-provider",
+            "system",
+            "--tts-text",
+            "Hello world",
+        ];
         let cli = Cli::parse_from(args);
 
         assert_eq!(cli.tts_provider, Some("system".to_string()));
@@ -819,10 +838,23 @@ mod tests {
 
     #[test]
     fn test_parse_voice_record_command() {
-        let args = vec!["juno", "voice", "record", "--duration", "10", "--format", "mp3"];
+        let args = vec![
+            "juno",
+            "voice",
+            "record",
+            "--duration",
+            "10",
+            "--format",
+            "mp3",
+        ];
         let cli = Cli::parse_from(args);
 
-        if let Some(Commands::Voice { command: VoiceCommands::Record { duration, format, .. } }) = cli.command {
+        if let Some(Commands::Voice {
+            command: VoiceCommands::Record {
+                duration, format, ..
+            },
+        }) = cli.command
+        {
             assert_eq!(duration, 10);
             assert!(matches!(format, AudioFormat::Mp3));
         } else {
@@ -835,7 +867,10 @@ mod tests {
         let args = vec!["juno", "agent", "status"];
         let cli = Cli::parse_from(args);
 
-        if let Some(Commands::Agent { command: AgentCommands::Status }) = cli.command {
+        if let Some(Commands::Agent {
+            command: AgentCommands::Status,
+        }) = cli.command
+        {
             // Success
         } else {
             panic!("Expected Agent Status command");
@@ -847,7 +882,10 @@ mod tests {
         let args = vec!["juno", "config", "show", "providers"];
         let cli = Cli::parse_from(args);
 
-        if let Some(Commands::Config { command: ConfigCommands::Show { section, .. } }) = cli.command {
+        if let Some(Commands::Config {
+            command: ConfigCommands::Show { section, .. },
+        }) = cli.command
+        {
             assert_eq!(section, Some("providers".to_string()));
         } else {
             panic!("Expected Config Show command");
@@ -859,7 +897,12 @@ mod tests {
         let args = vec!["juno", "batch", "commands.txt", "--continue-on-error"];
         let cli = Cli::parse_from(args);
 
-        if let Some(Commands::Batch { file, continue_on_error, .. }) = cli.command {
+        if let Some(Commands::Batch {
+            file,
+            continue_on_error,
+            ..
+        }) = cli.command
+        {
             assert_eq!(file, "commands.txt");
             assert!(continue_on_error);
         } else {
