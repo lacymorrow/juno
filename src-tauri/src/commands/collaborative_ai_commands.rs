@@ -441,6 +441,6 @@ mod tests {
         };
 
         let time = estimate_design_time(&simple_request);
-        assert!(time >= 0.5 && time <= 168.0, "Design time should be within reasonable bounds");
+        assert!((0.5..=168.0).contains(&time), "Design time should be within reasonable bounds");
     }
 }

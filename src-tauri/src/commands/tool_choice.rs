@@ -404,20 +404,61 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_config_validation() {
-        let mut config = ToolChoiceConfig::default();
+    #[tokio::test]
+    async fn test_config_validation() {
+        let valid = ToolChoiceConfig {
+            confidence_threshold: 0.7,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_tool_choice_config(valid).await,
+            Ok(vec![]),
+            "a threshold inside 0.0..=1.0 with a valid mode should raise nothing"
+        );
 
-        // Valid config should have no errors
-        config.confidence_threshold = 0.7;
-        // In a real test, we'd call validate_tool_choice_config
+        // Above the range.
+        let too_high = ToolChoiceConfig {
+            confidence_threshold: 1.5,
+            ..Default::default()
+        };
+        let errors = validate_tool_choice_config(too_high)
+            .await
+            .expect("validation itself should succeed");
+        assert!(
+            errors.iter().any(|e| e.contains("between 0.0 and 1.0")),
+            "1.5 should be rejected, got {:?}",
+            errors
+        );
 
-        // Invalid confidence threshold
-        config.confidence_threshold = 1.5;
-        // Should produce error
+        // Below the range. Also trips the separate "may cause false positives"
+        // advisory at <0.1, so assert on the bound error specifically.
+        let negative = ToolChoiceConfig {
+            confidence_threshold: -0.1,
+            ..Default::default()
+        };
+        let errors = validate_tool_choice_config(negative)
+            .await
+            .expect("validation itself should succeed");
+        assert!(
+            errors.iter().any(|e| e.contains("between 0.0 and 1.0")),
+            "-0.1 should be rejected, got {:?}",
+            errors
+        );
 
-        config.confidence_threshold = -0.1;
-        // Should produce error
+        // An unknown mode should be named in the error to be actionable.
+        let bad_mode = ToolChoiceConfig {
+            mode: "telepathy".to_string(),
+            confidence_threshold: 0.7,
+            ..Default::default()
+        };
+        let errors = validate_tool_choice_config(bad_mode)
+            .await
+            .expect("validation itself should succeed");
+        assert!(
+            errors.iter().any(|e| e.contains("telepathy")),
+            "the offending mode should appear in the error, got {:?}",
+            errors
+        );
     }
 
     #[test]

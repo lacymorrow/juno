@@ -1067,7 +1067,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_test;
 
     #[test]
     fn test_focused_element_info_placeholder() {
@@ -1153,11 +1152,11 @@ mod tests {
             tts_text: None,
         };
 
-        let result = runner::handle_non_desktop_cli_commands(&cli);
-        // Should return a boolean, not crash/exit
-        assert!(result == true || result == false);
-
-        println!("✅ CLI runner uses proper error handling, no process exits");
+        // The point of this test is that the call *returns*. Earlier versions
+        // called `std::process::exit()` on an unhandled CLI command, which would
+        // kill the test runner itself. Either boolean is a valid result; only
+        // reaching the next line matters.
+        let _ = runner::handle_non_desktop_cli_commands(&cli);
     }
 
     #[test]

@@ -248,7 +248,7 @@ mod tests {
         let state = AgentState::Failed("Test error".to_string());
         match state {
             AgentState::Failed(msg) => assert_eq!(msg, "Test error"),
-            _ => assert!(false, "Expected Failed state"),
+            other => panic!("Expected Failed state, got {:?}", other),
         }
     }
 
@@ -281,19 +281,19 @@ mod tests {
                 assert_eq!(calls.len(), 1);
                 assert_eq!(calls[0], tool_call);
             }
-            _ => assert!(false, "Expected ExecuteTool action"),
+            other => panic!("Expected ExecuteTool action, got {:?}", other),
         }
 
         let action = AgentAction::RespondToUser("Hello".to_string());
         match action {
             AgentAction::RespondToUser(msg) => assert_eq!(msg, "Hello"),
-            _ => assert!(false, "Expected RespondToUser action"),
+            other => panic!("Expected RespondToUser action, got {:?}", other),
         }
 
         let action = AgentAction::Finish("Done".to_string());
         match action {
             AgentAction::Finish(msg) => assert_eq!(msg, "Done"),
-            _ => assert!(false, "Expected Finish action"),
+            other => panic!("Expected Finish action, got {:?}", other),
         }
 
         let action = AgentAction::Finish("Task completed".to_string());
@@ -301,14 +301,14 @@ mod tests {
             AgentAction::Finish(msg) => {
                 assert_eq!(msg, "Task completed");
             }
-            _ => assert!(false, "Expected Finish action"),
+            other => panic!("Expected Finish action, got {:?}", other),
         }
 
         let error = AgentError::MaxStepsReached;
         let action = AgentAction::Error(error.clone());
         match action {
             AgentAction::Error(e) => assert_eq!(e, error),
-            _ => assert!(false, "Expected Error action"),
+            other => panic!("Expected Error action, got {:?}", other),
         }
     }
 

@@ -192,7 +192,7 @@ mod tests {
     fn test_autostart_setting_defaults() {
         // Test that autostart settings have proper defaults
         let default_settings = AppSettings::default();
-        assert_eq!(default_settings.autostart_enabled, false);
+        assert!(!default_settings.autostart_enabled);
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
             ..AppSettings::default()
         };
 
-        assert_eq!(settings.autostart_enabled, true);
+        assert!(settings.autostart_enabled);
     }
 
     #[test]
@@ -216,8 +216,8 @@ mod tests {
         let after_toggle_enabled = !enabled;
         let after_toggle_disabled = !disabled;
 
-        assert_eq!(after_toggle_enabled, false);
-        assert_eq!(after_toggle_disabled, true);
+        assert!(!after_toggle_enabled);
+        assert!(after_toggle_disabled);
     }
 
     #[test]

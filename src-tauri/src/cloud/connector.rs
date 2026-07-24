@@ -1549,11 +1549,10 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             match success_data.get("success") {
                 Some(success_value) => {
                     match success_value.as_bool() {
-                        Some(true) => {
-                            // This is the expected path
-                            assert!(true);
-                        }
-                        _ => panic!("Should have matched true case"),
+                        // Expected path. The other arms panic, so arriving here
+                        // is itself the assertion.
+                        Some(true) => {}
+                        other => panic!("expected success=true, got {:?}", other),
                     }
                 }
                 None => panic!("Should have success field"),
@@ -1607,8 +1606,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             match success_data.get("success") {
                 Some(success_value) => {
                     match success_value.as_bool() {
-                        Some(true) => assert!(true), // Expected path
-                        _ => panic!("Should have matched true case"),
+                        // Expected path; the other arm panics.
+                        Some(true) => {}
+                        other => panic!("expected success=true, got {:?}", other),
                     }
                 }
                 None => panic!("Should have success field"),

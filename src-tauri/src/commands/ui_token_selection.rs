@@ -350,8 +350,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_benchmark_summary_calculation() {
-        let benchmark_results = vec![
-            BenchmarkResult {
+        let benchmark_results = [BenchmarkResult {
                 test_name: "Test 1".to_string(),
                 timestamp: 0,
                 original_tokens: 1000,
@@ -372,8 +371,7 @@ mod tests {
                 memory_usage_mb: 75.0,
                 display_resolution: (3840, 2160),
                 meets_target: true,
-            },
-        ];
+            }];
 
         let total_scenarios = benchmark_results.len();
         let scenarios_passed = benchmark_results.iter().filter(|r| r.meets_target).count();
