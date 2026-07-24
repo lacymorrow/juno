@@ -320,22 +320,24 @@ impl AgentSessionRegistry {
     }
 
     pub async fn remove(&self, id: &AgentSessionId) {
-        // Capture the next candidate before releasing the sessions lock so we
-        // don't need to re-acquire it inside the focused critical section.
         let mut sessions = self.sessions.lock().await;
         let removed = sessions.remove(id);
-        let next_id = sessions.keys().next().cloned();
+        // Reassign focus while still holding the sessions lock so a
+        // concurrent remove() cannot delete the replacement candidate
+        // between our map read and the focus write. `focused` is a std
+        // mutex held only for this block with no await inside.
+        {
+            let mut focused = self.focused.lock().unwrap_or_else(|e| e.into_inner());
+            if focused.as_ref() == Some(id) {
+                *focused = sessions.keys().next().cloned();
+            }
+        }
         drop(sessions);
 
         if let Some(session) = removed {
             debug!("Removed agent session {} from registry", id);
             let mut colors = self.colors.lock().unwrap_or_else(|e| e.into_inner());
             colors.free(session.color_slot());
-        }
-
-        let mut focused = self.focused.lock().unwrap_or_else(|e| e.into_inner());
-        if focused.as_ref() == Some(id) {
-            *focused = next_id;
         }
     }
 
