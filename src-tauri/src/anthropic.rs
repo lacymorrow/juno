@@ -961,7 +961,8 @@ async fn execute_agent_internal(
                 brain,
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
-            );
+            )
+            .with_session_id(session_handle.as_ref().map(|h| h.session().id().clone()));
             info!("✅ Single agent runner created with direct tools (no delegation capabilities)");
 
             info!("🚀 Starting single agent run...");
@@ -1254,7 +1255,8 @@ async fn execute_agent_internal(
                 orchestrator_brain,
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
-            );
+            )
+            .with_session_id(session_handle.as_ref().map(|h| h.session().id().clone()));
             info!("✅ Orchestrator runner created with delegation tools only");
 
             info!("🚀 Starting multi-agent orchestrator run...");

@@ -30,6 +30,10 @@ where
     max_steps: u32,
     current_step: u32,
     app_handle: Arc<AppHandle>, // Added AppHandle for logging
+    /// Parallel-session registry row this run belongs to, when session
+    /// tracking is active. Lets the approval wait surface `NeedsInput` in
+    /// the switcher UI and notify for background sessions (LAC-1432).
+    session_id: Option<crate::agents::AgentSessionId>,
 }
 
 impl<M, T> DefaultAgentRunner<M, T>
@@ -56,6 +60,7 @@ where
             max_steps,
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
+            session_id: None,
         }
     }
 
@@ -76,7 +81,16 @@ where
             max_steps,
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
+            session_id: None,
         }
+    }
+
+    /// Associate this runner with a parallel-session registry row so the
+    /// tool-approval wait can flip the session to `NeedsInput` and notify
+    /// the user when the session is running in the background (LAC-1432).
+    pub fn with_session_id(mut self, session_id: Option<crate::agents::AgentSessionId>) -> Self {
+        self.session_id = session_id;
+        self
     }
 
     /// Filter tools based on brain type to prevent access to inappropriate tools
@@ -523,6 +537,11 @@ where
             max_risk
         );
 
+        // Surface the wait in the parallel-session registry: the switcher
+        // row flips to "Needs input" and a background (unfocused) session
+        // fires a notification so the user knows to come look (LAC-1432).
+        let marked_needs_input = self.mark_session_needs_input(&batch_description).await;
+
         // Poll for up to timeout_seconds at 50 ms intervals.
         let poll_iterations = (approval_request.timeout_seconds * 1000 / 50) as i64;
         let mut remaining = poll_iterations;
@@ -532,6 +551,11 @@ where
             if *cancel_rx.borrow() {
                 log::info!("Cancellation detected during approval wait");
                 app_state.remove_tool_approval(&batch_id).await;
+                if marked_needs_input {
+                    // Guarded restore: no-ops when the cancel already moved
+                    // the session to Cancelling via the registry.
+                    self.clear_session_needs_input().await;
+                }
                 return Err(AgentError::Terminated);
             }
 
@@ -553,6 +577,9 @@ where
         }
 
         app_state.remove_tool_approval(&batch_id).await;
+        if marked_needs_input {
+            self.clear_session_needs_input().await;
+        }
 
         if !approved {
             let reason = if remaining <= 0 {
@@ -576,6 +603,72 @@ where
         }
 
         Ok(approved)
+    }
+
+    /// Flip this runner's session row to `NeedsInput` while a tool-approval
+    /// prompt is pending. Emits the discrete needs-input lifecycle event,
+    /// rebroadcasts the session list for the switcher UI, and — when the
+    /// session is unfocused (running in the background) — sends a
+    /// notification so the user learns an agent is waiting on them
+    /// (LAC-1432 criterion 5b). Returns whether the transition happened;
+    /// the caller must call `clear_session_needs_input` once the wait
+    /// resolves.
+    async fn mark_session_needs_input(&self, description: &str) -> bool {
+        let Some(session_id) = self.session_id.as_ref() else {
+            return false;
+        };
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let registry = app_state.agent_sessions();
+        let Some(snapshot) = registry.begin_needs_input(session_id).await else {
+            return false;
+        };
+        let was_focused = snapshot.focused;
+        let agent_name = snapshot.agent_name.clone();
+
+        if let Err(e) = self.app_handle.emit(
+            crate::constants::events::agent_sessions::NEEDS_INPUT,
+            &snapshot,
+        ) {
+            log::error!("Failed to emit agent-session-needs-input: {}", e);
+        }
+        crate::agents::broadcast_sessions_updated(self.app_handle.as_ref(), &registry).await;
+
+        // The focused session's approval dialog is already on screen;
+        // notifying for it would be noise (same gate as terminal-state
+        // notifications in anthropic.rs).
+        if !was_focused && !crate::cli::headless::is_headless_mode() {
+            let data = crate::commands::notifications::NotificationData {
+                title: format!("{} — Needs input", agent_name),
+                message: description.chars().take(140).collect::<String>(),
+                level: "warning".to_string(),
+                important: Some(true),
+                timeout: None,
+            };
+            if let Err(e) = crate::commands::notifications::send_notification(
+                self.app_handle.as_ref().clone(),
+                app_state.clone(),
+                data,
+            )
+            .await
+            {
+                log::warn!("Failed to send needs-input notification: {}", e);
+            }
+        }
+        true
+    }
+
+    /// Restore the session to `Running` after the approval wait resolves.
+    /// The registry guards the transition, so a cancellation that landed
+    /// mid-wait (status `Cancelling`) is never overwritten.
+    async fn clear_session_needs_input(&self) {
+        let Some(session_id) = self.session_id.as_ref() else {
+            return;
+        };
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let registry = app_state.agent_sessions();
+        if registry.end_needs_input(session_id).await {
+            crate::agents::broadcast_sessions_updated(self.app_handle.as_ref(), &registry).await;
+        }
     }
 
     /// Add tool result to memory with proper error handling

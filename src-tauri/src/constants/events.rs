@@ -55,7 +55,7 @@ pub mod agent_sessions {
     /// A session failed with an error. Payload: AgentSessionInfo snapshot.
     pub const FAILED: &str = "agent-session-failed";
     /// A session is blocked waiting on user input. Payload: AgentSessionInfo
-    /// snapshot. Reserved: no backend path triggers this yet.
+    /// snapshot. Fired while a risky tool batch is pending user approval.
     pub const NEEDS_INPUT: &str = "agent-session-needs-input";
 }
 
