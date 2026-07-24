@@ -50,7 +50,9 @@ pub mod url_protocols {
     /// Check if URL uses a web protocol that should be handled by the browser
     pub fn is_web_protocol(url: &str) -> bool {
         let url_lower = url.to_lowercase();
-        WEB_PROTOCOLS.iter().any(|protocol| url_lower.starts_with(protocol))
+        WEB_PROTOCOLS
+            .iter()
+            .any(|protocol| url_lower.starts_with(protocol))
     }
 
     /// Check if URL has a protocol scheme (contains ':' after the scheme part)

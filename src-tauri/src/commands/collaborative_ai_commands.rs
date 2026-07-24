@@ -1,14 +1,13 @@
-use tauri::State;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tauri::State;
+use tokio::sync::RwLock;
 
 use crate::agent::tools::collaborative_ai::{
-    CollaborativeAIDesigner, CollaborativeAIConfig, SystemRequirements, ComplexityLevel,
-    WorkflowDesignResult, WorkflowExecutionResult, DesignCapabilities, DesignStatistics,
-    PerformanceRequirements, ResourceRequirements
+    CollaborativeAIConfig, CollaborativeAIDesigner, ComplexityLevel, DesignCapabilities,
+    DesignStatistics, PerformanceRequirements, ResourceRequirements, SystemRequirements,
+    WorkflowDesignResult, WorkflowExecutionResult,
 };
-
 
 /// Global state for the Collaborative AI Designer
 pub struct CollaborativeAIState {
@@ -96,8 +95,10 @@ pub async fn design_collaborative_ai_system(
 
     match designer.design_collaborative_system(&requirements).await {
         Ok(result) => {
-            tracing::info!("Collaborative AI system designed successfully with {:.1}% estimated success rate",
-                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32);
+            tracing::info!(
+                "Collaborative AI system designed successfully with {:.1}% estimated success rate",
+                result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32
+            );
             Ok(result)
         }
         Err(e) => {
@@ -119,8 +120,10 @@ pub async fn execute_collaborative_workflow(
 
     match designer.execute_workflow(&workflow).await {
         Ok(result) => {
-            tracing::info!("Workflow execution completed with {:.1}% success rate",
-                          result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32);
+            tracing::info!(
+                "Workflow execution completed with {:.1}% success rate",
+                result.success_rate * crate::constants::text::ratios::PERCENTAGE_MULTIPLIER as f32
+            );
             Ok(result)
         }
         Err(e) => {
@@ -199,7 +202,9 @@ pub async fn validate_collaborative_ai_request(
     // Validate description
     if request.description.trim().is_empty() {
         errors.push("Description cannot be empty".to_string());
-    } else if request.description.len() < crate::constants::text::validation::MIN_REQUEST_DESCRIPTION_LENGTH {
+    } else if request.description.len()
+        < crate::constants::text::validation::MIN_REQUEST_DESCRIPTION_LENGTH
+    {
         warnings.push("Description is very short, consider adding more details".to_string());
     }
 
@@ -213,7 +218,8 @@ pub async fn validate_collaborative_ai_request(
     // Validate timeline
     if request.timeline_hours == 0 {
         errors.push("Timeline must be greater than 0 hours".to_string());
-    } else if request.timeline_hours > 8760 { // 1 year
+    } else if request.timeline_hours > 8760 {
+        // 1 year
         warnings.push("Very long timeline specified".to_string());
     }
 
@@ -222,17 +228,25 @@ pub async fn validate_collaborative_ai_request(
         errors.push("Max response time must be greater than 0".to_string());
     }
 
-    if request.performance_requirements.availability_percent < crate::constants::text::ratios::MIN_PERCENTAGE as f32 ||
-       request.performance_requirements.availability_percent > crate::constants::text::ratios::MAX_PERCENTAGE as f32 {
-        errors.push(format!("Availability percent must be between {} and {}",
-                           crate::constants::text::ratios::MIN_PERCENTAGE,
-                           crate::constants::text::ratios::MAX_PERCENTAGE));
+    if request.performance_requirements.availability_percent
+        < crate::constants::text::ratios::MIN_PERCENTAGE as f32
+        || request.performance_requirements.availability_percent
+            > crate::constants::text::ratios::MAX_PERCENTAGE as f32
+    {
+        errors.push(format!(
+            "Availability percent must be between {} and {}",
+            crate::constants::text::ratios::MIN_PERCENTAGE,
+            crate::constants::text::ratios::MAX_PERCENTAGE
+        ));
     }
 
     // Validate complexity level
     let valid_complexity_levels = ["simple", "moderate", "complex", "expert"];
     if !valid_complexity_levels.contains(&request.complexity_level.to_lowercase().as_str()) {
-        errors.push("Invalid complexity level. Must be one of: simple, moderate, complex, expert".to_string());
+        errors.push(
+            "Invalid complexity level. Must be one of: simple, moderate, complex, expert"
+                .to_string(),
+        );
     }
 
     let is_valid = errors.is_empty();
@@ -286,7 +300,8 @@ fn estimate_request_complexity(request: &CollaborativeAIRequest) -> f32 {
         _ => complexity *= 1.0,
     }
 
-    complexity.min(crate::constants::text::validation::MAX_COLLABORATIVE_AI_GOALS as f32) // Cap at 10.0
+    complexity.min(crate::constants::text::validation::MAX_COLLABORATIVE_AI_GOALS as f32)
+    // Cap at 10.0
 }
 
 fn estimate_design_time(request: &CollaborativeAIRequest) -> f32 {
@@ -321,21 +336,25 @@ pub async fn get_complexity_levels() -> Result<Vec<ComplexityLevelInfo>, String>
         ComplexityLevelInfo {
             level: "moderate".to_string(),
             name: "Moderate".to_string(),
-            description: "Multi-component system with some coordination and decision-making".to_string(),
+            description: "Multi-component system with some coordination and decision-making"
+                .to_string(),
             estimated_time_hours: "8-24".to_string(),
             max_agents: 5,
         },
         ComplexityLevelInfo {
             level: "complex".to_string(),
             name: "Complex".to_string(),
-            description: "Advanced system with multiple specialized agents and complex workflows".to_string(),
+            description: "Advanced system with multiple specialized agents and complex workflows"
+                .to_string(),
             estimated_time_hours: "24-72".to_string(),
             max_agents: 8,
         },
         ComplexityLevelInfo {
             level: "expert".to_string(),
             name: "Expert".to_string(),
-            description: "Highly sophisticated system with advanced coordination and adaptive behavior".to_string(),
+            description:
+                "Highly sophisticated system with advanced coordination and adaptive behavior"
+                    .to_string(),
             estimated_time_hours: "72-168".to_string(),
             max_agents: 12,
         },
@@ -394,11 +413,19 @@ mod tests {
         };
 
         let complexity = estimate_request_complexity(&simple_request);
-        assert!(complexity < 3.0, "Simple request should have low complexity");
+        assert!(
+            complexity < 3.0,
+            "Simple request should have low complexity"
+        );
 
         let complex_request = CollaborativeAIRequest {
             description: "Complex multi-agent system".to_string(),
-            goals: vec!["Goal 1".to_string(), "Goal 2".to_string(), "Goal 3".to_string(), "Goal 4".to_string()],
+            goals: vec![
+                "Goal 1".to_string(),
+                "Goal 2".to_string(),
+                "Goal 3".to_string(),
+                "Goal 4".to_string(),
+            ],
             constraints: vec!["Constraint 1".to_string(), "Constraint 2".to_string()],
             preferred_technologies: vec!["AI".to_string(), "ML".to_string(), "NLP".to_string()],
             complexity_level: "expert".to_string(),
@@ -416,7 +443,10 @@ mod tests {
         };
 
         let complex_complexity = estimate_request_complexity(&complex_request);
-        assert!(complex_complexity > complexity, "Complex request should have higher complexity");
+        assert!(
+            complex_complexity > complexity,
+            "Complex request should have higher complexity"
+        );
     }
 
     #[test]
@@ -441,6 +471,9 @@ mod tests {
         };
 
         let time = estimate_design_time(&simple_request);
-        assert!((0.5..=168.0).contains(&time), "Design time should be within reasonable bounds");
+        assert!(
+            (0.5..=168.0).contains(&time),
+            "Design time should be within reasonable bounds"
+        );
     }
 }

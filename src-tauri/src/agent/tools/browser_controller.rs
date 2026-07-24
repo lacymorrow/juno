@@ -14,7 +14,12 @@ use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
 
 use crate::agent::core::{AgentError, ToolResult};
-use crate::constants::{browser::{system_url_commands, url_protocols}, chrome_debug_urls, files::shell_commands, timeouts};
+use crate::constants::{
+    browser::{system_url_commands, url_protocols},
+    chrome_debug_urls,
+    files::shell_commands,
+    timeouts,
+};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -93,9 +98,10 @@ impl BrowserController {
     /// Returns `Value::Null` when the script yields nothing, so callers can treat
     /// "no result" and "null result" identically (matching the previous behavior).
     async fn eval_json(page: &Page, js: &str) -> ControllerResult<Value> {
-        let result = page.evaluate_function(js).await.map_err(|e| {
-            AgentError::ToolError(format!("JavaScript evaluation failed: {}", e))
-        })?;
+        let result = page
+            .evaluate_function(js)
+            .await
+            .map_err(|e| AgentError::ToolError(format!("JavaScript evaluation failed: {}", e)))?;
         Ok(result.value().cloned().unwrap_or(Value::Null))
     }
 
@@ -278,9 +284,7 @@ impl BrowserController {
                 "--remote-debugging-port=9222",
             ])
             .build()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to build browser config: {}", e))
-            })?;
+            .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
 
         match Browser::launch(config).await {
             Ok((browser, handler)) => {
@@ -340,9 +344,7 @@ impl BrowserController {
                 "--remote-debugging-port=9223",
             ])
             .build()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to build browser config: {}", e))
-            })?;
+            .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
 
         match Browser::launch(config).await {
             Ok((browser, handler)) => {
@@ -631,7 +633,7 @@ impl BrowserController {
                         last_error.unwrap_or_else(|| "Unknown error".to_string())
                     )));
                 }
-                Some(page) => page
+                Some(page) => page,
             }
         };
 
@@ -955,7 +957,10 @@ impl BrowserController {
 
         // Check if this URL should be handled by the system instead of the browser
         if url_protocols::should_use_system_handler(url) {
-            log::info!("URL contains custom protocol or is not a web URL, opening with system handler: {}", url);
+            log::info!(
+                "URL contains custom protocol or is not a web URL, opening with system handler: {}",
+                url
+            );
 
             // Open with system's default handler
             Self::open_url_with_system_handler(url).await?;
@@ -1631,46 +1636,46 @@ impl Drop for BrowserController {
             handle.spawn(async move {
                 log::info!("BrowserController dropped, scheduling cleanup...");
 
-            // Close the page if it exists
-            {
-                let mut page_guard = page.lock().await;
-                if let Some(page) = page_guard.take() {
-                    if !owns_page.load(Ordering::SeqCst) {
-                        log::info!("Adopted tab: leaving it open for the user.");
-                    } else if let Err(e) = page.close().await {
-                        log::error!("Failed to close browser page in Drop: {}", e);
+                // Close the page if it exists
+                {
+                    let mut page_guard = page.lock().await;
+                    if let Some(page) = page_guard.take() {
+                        if !owns_page.load(Ordering::SeqCst) {
+                            log::info!("Adopted tab: leaving it open for the user.");
+                        } else if let Err(e) = page.close().await {
+                            log::error!("Failed to close browser page in Drop: {}", e);
+                        }
                     }
                 }
-            }
 
-            // Close the browser
-            if attached_to_user_browser {
-                log::info!("Attached session: leaving the user's browser running.");
-            } else {
-                let mut browser = browser.lock().await;
-                if let Err(e) = browser.close().await {
-                    log::error!("Failed to close browser in Drop: {}", e);
-                }
-            }
-
-            // Stop the CDP event pump
-            {
-                let mut task_guard = handler_task.lock().await;
-                if let Some(task) = task_guard.take() {
-                    task.abort();
-                }
-            }
-
-            // Clean up temporary profile if needed
-            if connection_method.starts_with("TempProfile:") {
-                if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {
-                    if !temp_path.is_empty() {
-                        BrowserController::remove_temp_profile_with_retry(temp_path).await;
+                // Close the browser
+                if attached_to_user_browser {
+                    log::info!("Attached session: leaving the user's browser running.");
+                } else {
+                    let mut browser = browser.lock().await;
+                    if let Err(e) = browser.close().await {
+                        log::error!("Failed to close browser in Drop: {}", e);
                     }
                 }
-            }
-            
-            log::info!("BrowserController cleanup completed");
+
+                // Stop the CDP event pump
+                {
+                    let mut task_guard = handler_task.lock().await;
+                    if let Some(task) = task_guard.take() {
+                        task.abort();
+                    }
+                }
+
+                // Clean up temporary profile if needed
+                if connection_method.starts_with("TempProfile:") {
+                    if let Some(temp_path) = connection_method.strip_prefix("TempProfile:") {
+                        if !temp_path.is_empty() {
+                            BrowserController::remove_temp_profile_with_retry(temp_path).await;
+                        }
+                    }
+                }
+
+                log::info!("BrowserController cleanup completed");
             });
         } else {
             log::warn!("BrowserController dropped outside Tokio runtime - cleanup skipped");

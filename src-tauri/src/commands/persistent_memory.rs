@@ -53,9 +53,7 @@ fn parse_category(s: &str) -> Result<MemoryCategory, String> {
 
 /// List all persistent memory entries
 #[tauri::command]
-pub async fn get_persistent_memory(
-    app_handle: AppHandle,
-) -> Result<Vec<MemoryEntryDto>, String> {
+pub async fn get_persistent_memory(app_handle: AppHandle) -> Result<Vec<MemoryEntryDto>, String> {
     let store = PersistentMemoryStore::new(app_handle);
     let entries = store.load_entries()?;
     Ok(entries.into_iter().map(MemoryEntryDto::from).collect())
@@ -99,28 +97,21 @@ pub async fn update_persistent_memory(
 
 /// Delete a specific memory entry by ID
 #[tauri::command]
-pub async fn delete_persistent_memory(
-    app_handle: AppHandle,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_persistent_memory(app_handle: AppHandle, id: String) -> Result<(), String> {
     let store = PersistentMemoryStore::new(app_handle);
     store.delete_entry(&id)
 }
 
 /// Clear all persistent memory entries
 #[tauri::command]
-pub async fn clear_persistent_memory(
-    app_handle: AppHandle,
-) -> Result<(), String> {
+pub async fn clear_persistent_memory(app_handle: AppHandle) -> Result<(), String> {
     let store = PersistentMemoryStore::new(app_handle);
     store.clear_all()
 }
 
 /// Preview what memory block will be injected into the next system prompt
 #[tauri::command]
-pub async fn preview_memory_injection(
-    app_handle: AppHandle,
-) -> Result<Option<String>, String> {
+pub async fn preview_memory_injection(app_handle: AppHandle) -> Result<Option<String>, String> {
     let store = PersistentMemoryStore::new(app_handle);
     match store.build_injection_block()? {
         Some((block, _)) => Ok(Some(block)),

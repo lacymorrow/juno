@@ -16,8 +16,8 @@ use uuid::Uuid;
 use super::types::{
     CloudCommand, CloudError, DeviceResponse, DeviceStatus, MessageType, WebSocketMessage,
 };
-use crate::constants::{api, permissions};
 use crate::constants::events;
+use crate::constants::{api, permissions};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -1155,7 +1155,11 @@ impl ProductionCloudConnector {
             if matches!(*state, ConnectorState::Ready) {
                 drop(state);
 
-                if self.command_tx.send(ConnectorMessage::UpdateStatus).is_err() {
+                if self
+                    .command_tx
+                    .send(ConnectorMessage::UpdateStatus)
+                    .is_err()
+                {
                     warn!("Failed to queue status update");
                 }
             }
@@ -1284,7 +1288,10 @@ impl ProductionCloudConnector {
             ConnectorState::Reconnecting(_) => "reconnecting",
         };
 
-        if let Err(e) = self.app_handle.emit(events::cloud::CONNECTOR_STATE, state_str) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::cloud::CONNECTOR_STATE, state_str)
+        {
             error!("Failed to emit cloud connector state: {}", e);
         }
 

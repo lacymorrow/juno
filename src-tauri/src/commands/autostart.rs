@@ -1,6 +1,6 @@
+use crate::settings::manager::SettingsManager;
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
-use crate::settings::manager::SettingsManager;
 
 /// Enable autostart and save to centralized settings
 #[tauri::command]
@@ -52,7 +52,11 @@ pub async fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
             // Sync with centralized settings if there's a mismatch
             if let Ok(saved_enabled) = get_autostart_from_centralized_settings(&app).await {
                 if saved_enabled != enabled {
-                    log::info!("Syncing autostart state: system={}, saved={}", enabled, saved_enabled);
+                    log::info!(
+                        "Syncing autostart state: system={}, saved={}",
+                        enabled,
+                        saved_enabled
+                    );
                     save_autostart_to_centralized_settings(app.clone(), enabled).await?;
                 }
             }
@@ -68,7 +72,7 @@ pub async fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
                     log::debug!("Using saved autostart setting: {}", saved_setting);
                     Ok(saved_setting)
                 }
-                Err(_) => Ok(false) // Default to disabled if we can't determine the state
+                Err(_) => Ok(false), // Default to disabled if we can't determine the state
             }
         }
     }
@@ -87,14 +91,22 @@ pub async fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
 }
 
 /// Helper function to save autostart setting to centralized settings
-async fn save_autostart_to_centralized_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
+async fn save_autostart_to_centralized_settings(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    settings_manager.set_autostart_enabled(enabled).await
+    settings_manager
+        .set_autostart_enabled(enabled)
+        .await
         .map_err(|e| format!("Failed to save autostart setting: {}", e))?;
 
-    log::debug!("Autostart setting saved to centralized settings: {}", enabled);
+    log::debug!(
+        "Autostart setting saved to centralized settings: {}",
+        enabled
+    );
     Ok(())
 }
 
@@ -103,7 +115,9 @@ async fn get_autostart_from_centralized_settings(app: &AppHandle) -> Result<bool
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    settings_manager.get_autostart_enabled().await
+    settings_manager
+        .get_autostart_enabled()
+        .await
         .map_err(|e| format!("Failed to get autostart setting: {}", e))
 }
 
@@ -120,7 +134,10 @@ pub fn init_autostart(app: &AppHandle) -> Result<(), String> {
         let settings_manager = match SettingsManager::new(app_handle.clone()) {
             Ok(manager) => manager,
             Err(e) => {
-                log::warn!("Failed to create settings manager for autostart init: {}", e);
+                log::warn!(
+                    "Failed to create settings manager for autostart init: {}",
+                    e
+                );
                 return;
             }
         };
@@ -137,8 +154,16 @@ pub fn init_autostart(app: &AppHandle) -> Result<(), String> {
                                 } else {
                                     log::info!("Autostart enabled on startup");
                                     // Update centralized settings to reflect the change
-                                    if let Err(err) = save_autostart_to_centralized_settings(app_handle.clone(), true).await {
-                                        log::warn!("Failed to save autostart state after enabling: {}", err);
+                                    if let Err(err) = save_autostart_to_centralized_settings(
+                                        app_handle.clone(),
+                                        true,
+                                    )
+                                    .await
+                                    {
+                                        log::warn!(
+                                            "Failed to save autostart state after enabling: {}",
+                                            err
+                                        );
                                     }
                                 }
                             }
@@ -148,8 +173,16 @@ pub fn init_autostart(app: &AppHandle) -> Result<(), String> {
                                 } else {
                                     log::info!("Autostart disabled on startup");
                                     // Update centralized settings to reflect the change
-                                    if let Err(err) = save_autostart_to_centralized_settings(app_handle.clone(), false).await {
-                                        log::warn!("Failed to save autostart state after disabling: {}", err);
+                                    if let Err(err) = save_autostart_to_centralized_settings(
+                                        app_handle.clone(),
+                                        false,
+                                    )
+                                    .await
+                                    {
+                                        log::warn!(
+                                            "Failed to save autostart state after disabling: {}",
+                                            err
+                                        );
                                     }
                                 }
                             }
@@ -164,7 +197,10 @@ pub fn init_autostart(app: &AppHandle) -> Result<(), String> {
                 }
             }
             Err(err) => {
-                log::warn!("Failed to load autostart setting from centralized settings: {}", err);
+                log::warn!(
+                    "Failed to load autostart setting from centralized settings: {}",
+                    err
+                );
             }
         }
     });
@@ -180,7 +216,10 @@ pub async fn load_autostart_from_centralized_settings(app: &AppHandle) -> Result
 
 /// Public helper function to save autostart setting to centralized settings
 /// Used by state management and other modules
-pub async fn save_autostart_to_centralized_settings_helper(app: AppHandle, enabled: bool) -> Result<(), String> {
+pub async fn save_autostart_to_centralized_settings_helper(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
     save_autostart_to_centralized_settings(app, enabled).await
 }
 

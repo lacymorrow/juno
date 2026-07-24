@@ -1,14 +1,16 @@
-use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
-use super::display::{adjust_coordinates_for_display, get_displays_debug_info, get_pid_at_screen_point};
+use super::display::{
+    adjust_coordinates_for_display, get_displays_debug_info, get_pid_at_screen_point,
+};
 use super::element::MacOSUIElement;
 use super::ffi;
-use super::wrappers::ThreadSafeAXUIElement;
 use super::memory_safety::get_pooled_event_source;
+use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use core_foundation::base::{TCFType, CFTypeRef};
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::{AXUIElementRef, AXUIElementSetAttributeValue};
+use core_foundation::base::{CFTypeRef, TCFType};
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
@@ -18,21 +20,21 @@ use foreign_types::ForeignType;
 use std::collections::HashMap;
 use std::os::raw::c_void;
 use std::sync::OnceLock;
-use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
+use tracing::{debug, warn};
 // Removed objc imports - now using arboard for clipboard
 use arboard::Clipboard;
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
-const KEYCODE_A: CGKeyCode = 0;    // 'A' key
+const KEYCODE_A: CGKeyCode = 0; // 'A' key
 
 // Timing constants for UI automation delays (milliseconds)
-const MOUSE_EVENT_DELAY_MS: u64 = 50;   // Delay between mouse events (move, down, up)
-const KEY_EVENT_DELAY_MS: u64 = 50;     // Delay between key press/release events
-const MOUSE_MOVE_STEP_DELAY_MS: u64 = 20;  // Delay between mouse move interpolation steps
-const DRAG_HOLD_DELAY_MS: u64 = 100;    // Delay to hold before/after drag operations
+const MOUSE_EVENT_DELAY_MS: u64 = 50; // Delay between mouse events (move, down, up)
+const KEY_EVENT_DELAY_MS: u64 = 50; // Delay between key press/release events
+const MOUSE_MOVE_STEP_DELAY_MS: u64 = 20; // Delay between mouse move interpolation steps
+const DRAG_HOLD_DELAY_MS: u64 = 100; // Delay to hold before/after drag operations
 const APP_ACTIVATION_DELAY_MS: u64 = 100; // Delay after app activation
 
 /// Helper function to create multi-monitor aware CGPoint
@@ -42,7 +44,10 @@ fn create_adjusted_point(x: f64, y: f64) -> Result<CGPoint, AutomationError> {
 
     // Log coordinate adjustment for debugging multi-monitor issues
     if x != adjusted_x || y != adjusted_y {
-        debug!("Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})", x, y, adjusted_x, adjusted_y);
+        debug!(
+            "Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})",
+            x, y, adjusted_x, adjusted_y
+        );
         tracing::trace!("Display info: {}", get_displays_debug_info());
     }
 
@@ -85,24 +90,20 @@ impl NativeClipboard {
 pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement> {
     let attr = AXAttribute::new(&CFString::new("AXTopLevelUIElement"));
     match element.element.0.attribute(&attr) {
-        Ok(value) => {
-            value.downcast::<AXUIElement>().map(|app| MacOSUIElement {
-                    element: ThreadSafeAXUIElement::new(app),
-                    use_background_apps: element.use_background_apps,
-                    activate_app: element.activate_app,
-                    cached_role: String::new(),
-                    cached_label: None,
-                    cached_description: None,
-                    cached_value: None,
-                })
-        }
+        Ok(value) => value.downcast::<AXUIElement>().map(|app| MacOSUIElement {
+            element: ThreadSafeAXUIElement::new(app),
+            use_background_apps: element.use_background_apps,
+            activate_app: element.activate_app,
+            cached_role: String::new(),
+            cached_label: None,
+            cached_description: None,
+            cached_value: None,
+        }),
         Err(_) => None,
     }
 }
 
-pub(crate) fn click_with_method(
-    element: &MacOSUIElement,
-) -> Result<ClickResult, AutomationError> {
+pub(crate) fn click_with_method(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
     click_auto(element)
 }
 
@@ -182,8 +183,9 @@ pub(crate) fn click_mouse_simulation(
             let center_x = x + width / 2.0;
             let center_y = y + height / 2.0;
             let point = CGPoint::new(center_x, center_y);
-            let source =
-                get_pooled_event_source().map_err(|e| AutomationError::PlatformError(format!("Failed to create event source: {}", e)))?;
+            let source = get_pooled_event_source().map_err(|e| {
+                AutomationError::PlatformError(format!("Failed to create event source: {}", e))
+            })?;
 
             let mouse_move = CGEvent::new_mouse_event(
                 source.clone(),
@@ -257,7 +259,11 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
                 let attr_str = CFString::new("AXFocusedUIElement");
                 let attr_str_ref = attr_str.as_concrete_TypeRef();
                 let elem_ref = element.element.0.as_concrete_TypeRef() as CFTypeRef;
-                let result = AXUIElementSetAttributeValue(app_ref as AXUIElementRef, attr_str_ref as CFStringRef, elem_ref);
+                let result = AXUIElementSetAttributeValue(
+                    app_ref as AXUIElementRef,
+                    attr_str_ref as CFStringRef,
+                    elem_ref,
+                );
                 if result == 0 {
                     debug!("Successfully set focus to element via AXFocusedUIElement");
                     return Ok(());
@@ -271,7 +277,6 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
     debug!("Raise action failed or app not found, attempting focus via click");
     click_auto(element).map(|_result| {
         debug!("Focus achieved via click method: {}", _result.method);
-        
     })
 }
 
@@ -281,22 +286,30 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
     // 1. Create an event source.
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for cursor position".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError(
+            "Failed to create event source for cursor position".to_string(),
+        )
+    })?;
 
     // 2. Create a null mouse event (MouseMoved seems appropriate) using the source.
     //    The specific type and point might not matter if we only need location.
     let event = CGEvent::new_mouse_event(
         source,
         CGEventType::MouseMoved, // Or any other type?
-        CGPoint::new(0.0, 0.0), // Dummy point
-        CGMouseButton::Left, // Dummy button
+        CGPoint::new(0.0, 0.0),  // Dummy point
+        CGMouseButton::Left,     // Dummy button
     )
-    .map_err(|_| AutomationError::PlatformError("Failed to create CGEvent for cursor position".to_string()))?;
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create CGEvent for cursor position".to_string())
+    })?;
 
     // 3. Get the location from the created event.
     let location = event.location();
-    debug!("Retrieved cursor position: ({}, {})", location.x, location.y);
+    debug!(
+        "Retrieved cursor position: ({}, {})",
+        location.x, location.y
+    );
     Ok((location.x, location.y))
 }
 
@@ -306,11 +319,15 @@ pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
 pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
     debug!("Moving mouse to ({}, {}) [adjusted]", point.x, point.y);
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse move".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for mouse move".to_string())
+    })?;
 
-    let event = CGEvent::new_mouse_event(source, CGEventType::MouseMoved, point, CGMouseButton::Left) // Button doesn't matter for move
-        .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+    let event =
+        CGEvent::new_mouse_event(source, CGEventType::MouseMoved, point, CGMouseButton::Left) // Button doesn't matter for move
+            .map_err(|_| {
+                AutomationError::PlatformError("Failed to create mouse move event".to_string())
+            })?;
 
     event.post(CGEventTapLocation::HID);
     // Optional: Add a small delay after moving
@@ -319,12 +336,20 @@ pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Press down the left mouse button at specified coordinates.
-pub(crate) fn left_mouse_down(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
-    debug!("Mouse down at ({}, {}) with modifiers: {:?}", x, y, modifiers);
+pub(crate) fn left_mouse_down(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<(), AutomationError> {
+    debug!(
+        "Mouse down at ({}, {}) with modifiers: {:?}",
+        x, y, modifiers
+    );
 
     // Create an event source for user input
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse down".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for mouse down".to_string())
+    })?;
 
     // First, move the cursor to the target position (with multi-monitor support)
     let point = create_adjusted_point(x, y)?;
@@ -370,24 +395,27 @@ pub(crate) fn left_mouse_down(x: f64, y: f64, modifiers: Option<CGEventFlags>) -
 }
 
 /// Release the left mouse button at specified coordinates.
-pub(crate) fn left_mouse_up(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
+pub(crate) fn left_mouse_up(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<(), AutomationError> {
     debug!("Mouse up at ({}, {}) with modifiers: {:?}", x, y, modifiers);
 
     // Create an event source for user input
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse up".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for mouse up".to_string())
+    })?;
 
     // Create the point for the current position (with multi-monitor support)
     let point = create_adjusted_point(x, y)?;
 
     // Create the mouse up event
-    let mouse_up = CGEvent::new_mouse_event(
-        source,
-        CGEventType::LeftMouseUp,
-        point,
-        CGMouseButton::Left,
-    )
-    .map_err(|_| AutomationError::PlatformError("Failed to create mouse up event".to_string()))?;
+    let mouse_up =
+        CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+            .map_err(|_| {
+                AutomationError::PlatformError("Failed to create mouse up event".to_string())
+            })?;
 
     // Apply modifiers if provided
     if let Some(flags) = modifiers {
@@ -404,8 +432,15 @@ pub(crate) fn left_mouse_up(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> 
 
 /// Simulate a standard left click (down + up) at specified coordinates.
 /// Optionally apply modifier keys to the click.
-pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
-    debug!("Left click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
+pub(crate) fn left_click(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<(), AutomationError> {
+    debug!(
+        "Left click at ({}, {}) with modifiers: {:?}",
+        x, y, modifiers
+    );
 
     // Use our improved left_mouse_down and left_mouse_up functions
     left_mouse_down(x, y, modifiers)?;
@@ -424,20 +459,38 @@ pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Res
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
-    debug!("Performing right click at ({}, {}) [adjusted]", point.x, point.y);
+    debug!(
+        "Performing right click at ({}, {}) [adjusted]",
+        point.x, point.y
+    );
     mouse_move(x, y)?; // Ensure cursor is at the correct position
     thread::sleep(Duration::from_millis(MOUSE_MOVE_STEP_DELAY_MS));
 
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for right click".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for right click".to_string())
+    })?;
 
-    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::RightMouseDown, point, CGMouseButton::Right)
-        .map_err(|_| AutomationError::PlatformError("Failed to create right mouse down event".to_string()))?;
+    let down_event = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::RightMouseDown,
+        point,
+        CGMouseButton::Right,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create right mouse down event".to_string())
+    })?;
     down_event.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let up_event = CGEvent::new_mouse_event(source, CGEventType::RightMouseUp, point, CGMouseButton::Right)
-        .map_err(|_| AutomationError::PlatformError("Failed to create right mouse up event".to_string()))?;
+    let up_event = CGEvent::new_mouse_event(
+        source,
+        CGEventType::RightMouseUp,
+        point,
+        CGMouseButton::Right,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create right mouse up event".to_string())
+    })?;
     up_event.post(CGEventTapLocation::HID);
     Ok(())
 }
@@ -446,20 +499,38 @@ pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
-    debug!("Performing middle click at ({}, {}) [adjusted]", point.x, point.y);
+    debug!(
+        "Performing middle click at ({}, {}) [adjusted]",
+        point.x, point.y
+    );
     mouse_move(x, y)?; // Ensure cursor is at the correct position
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for middle click".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for middle click".to_string())
+    })?;
 
-    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::OtherMouseDown, point, CGMouseButton::Center)
-        .map_err(|_| AutomationError::PlatformError("Failed to create middle mouse down event".to_string()))?;
+    let down_event = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::OtherMouseDown,
+        point,
+        CGMouseButton::Center,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create middle mouse down event".to_string())
+    })?;
     down_event.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let up_event = CGEvent::new_mouse_event(source, CGEventType::OtherMouseUp, point, CGMouseButton::Center)
-        .map_err(|_| AutomationError::PlatformError("Failed to create middle mouse up event".to_string()))?;
+    let up_event = CGEvent::new_mouse_event(
+        source,
+        CGEventType::OtherMouseUp,
+        point,
+        CGMouseButton::Center,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create middle mouse up event".to_string())
+    })?;
     up_event.post(CGEventTapLocation::HID);
     Ok(())
 }
@@ -468,37 +539,67 @@ pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
 #[allow(dead_code)]
 pub(crate) fn double_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = create_adjusted_point(x, y)?;
-    debug!("Performing double click at ({}, {}) [adjusted]", point.x, point.y);
+    debug!(
+        "Performing double click at ({}, {}) [adjusted]",
+        point.x, point.y
+    );
     mouse_move(x, y)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for double click".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for double click".to_string())
+    })?;
 
     // First click (down)
-    let down1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create double click down1 event".to_string()))?;
+    let down1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create double click down1 event".to_string())
+    })?;
     down1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
     down1.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // First click (up)
-    let up1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create double click up1 event".to_string()))?;
+    let up1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create double click up1 event".to_string())
+    })?;
     up1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
     up1.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50)); // Double click interval
 
     // Second click (down)
-    let down2 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create double click down2 event".to_string()))?;
+    let down2 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create double click down2 event".to_string())
+    })?;
     down2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
     down2.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Second click (up)
-    let up2 = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create double click up2 event".to_string()))?;
+    let up2 =
+        CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+            .map_err(|_| {
+                AutomationError::PlatformError(
+                    "Failed to create double click up2 event".to_string(),
+                )
+            })?;
     up2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
     up2.post(CGEventTapLocation::HID);
 
@@ -516,47 +617,88 @@ pub(crate) fn triple_click(x: f64, y: f64) -> Result<(), AutomationError> {
     mouse_move(x, y)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for triple click".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for triple click".to_string())
+    })?;
 
     // First click (down)
-    let down1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click down1 event".to_string()))?;
+    let down1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create triple click down1 event".to_string())
+    })?;
     down1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
     down1.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // First click (up)
-    let up1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click up1 event".to_string()))?;
+    let up1 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create triple click up1 event".to_string())
+    })?;
     up1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
     up1.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Second click (down)
-    let down2 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click down2 event".to_string()))?;
+    let down2 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create triple click down2 event".to_string())
+    })?;
     down2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
     down2.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Second click (up)
-    let up2 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click up2 event".to_string()))?;
+    let up2 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create triple click up2 event".to_string())
+    })?;
     up2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
     up2.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Third click (down)
-    let down3 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click down3 event".to_string()))?;
+    let down3 = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create triple click down3 event".to_string())
+    })?;
     down3.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 3);
     down3.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Third click (up)
-    let up3 = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create triple click up3 event".to_string()))?;
+    let up3 =
+        CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+            .map_err(|_| {
+                AutomationError::PlatformError(
+                    "Failed to create triple click up3 event".to_string(),
+                )
+            })?;
     up3.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 3);
     up3.post(CGEventTapLocation::HID);
 
@@ -578,28 +720,44 @@ pub(crate) fn left_click_drag(
         start_x, start_y, end_x, end_y
     );
 
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for drag".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for drag".to_string())
+    })?;
 
     // 1. Move to start position
     mouse_move(start_x, start_y)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
 
     // 2. Press left button down
-    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, start_point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create drag down event".to_string()))?;
+    let down_event = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        start_point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create drag down event".to_string()))?;
     down_event.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS)); // Hold briefly before dragging
 
     // 3. Move to end position (drag event)
-    let drag_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, end_point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create drag move event".to_string()))?;
+    let drag_event = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDragged,
+        end_point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create drag move event".to_string()))?;
     drag_event.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(100)); // Pause at end position
 
     // 4. Release left button
-    let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, end_point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create drag up event".to_string()))?;
+    let up_event = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        end_point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create drag up event".to_string()))?;
     up_event.post(CGEventTapLocation::HID);
 
     Ok(())
@@ -614,7 +772,7 @@ impl ClipboardGuard {
     fn new() -> Result<Self, AutomationError> {
         let original_content = match NativeClipboard::new() {
             Ok(clipboard) => clipboard.read().ok(), // Ignore read errors, proceed without restore maybe? Or error out? Let's ignore for now.
-            Err(_) => None, // Ignore errors getting clipboard instance
+            Err(_) => None,                         // Ignore errors getting clipboard instance
         };
         Ok(Self { original_content })
     }
@@ -630,7 +788,7 @@ impl Drop for ClipboardGuard {
                     } else {
                         debug!("Successfully restored clipboard content.");
                     }
-                },
+                }
                 Err(e) => {
                     warn!("Failed to get clipboard instance for restoring: {:?}", e);
                 }
@@ -650,12 +808,12 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
             warn!("Focus failed before typing, attempting anyway: {:?}", e);
             // Attempting to click as a fallback focus mechanism
             if let Err(click_err) = click_auto(element) {
-                 warn!("Fallback click also failed: {:?}", click_err);
-                 // Decide if we should proceed or error out here.
-                 // Let's proceed cautiously, AXValue might still work if focus is weird.
+                warn!("Fallback click also failed: {:?}", click_err);
+                // Decide if we should proceed or error out here.
+                // Let's proceed cautiously, AXValue might still work if focus is weird.
             } else {
-                 // Add a small delay after fallback click before trying to type
-                 thread::sleep(Duration::from_millis(APP_ACTIVATION_DELAY_MS));
+                // Add a small delay after fallback click before trying to type
+                thread::sleep(Duration::from_millis(APP_ACTIVATION_DELAY_MS));
             }
         }
     }
@@ -667,14 +825,21 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
         let attr_str = CFString::new("AXValue");
         let attr_str_ref = attr_str.as_concrete_TypeRef();
         let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
-        let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
+        let result = AXUIElementSetAttributeValue(
+            element_ref as AXUIElementRef,
+            attr_str_ref as CFStringRef,
+            value_ref,
+        );
 
         if result == 0 {
             debug!("Successfully set text value via AXValue");
             return Ok(());
         } else {
             let error = accessibility::Error::Ax(result);
-            debug!("Failed to set text via AXValue: {:?}. Falling back to clipboard paste.", error);
+            debug!(
+                "Failed to set text via AXValue: {:?}. Falling back to clipboard paste.",
+                error
+            );
         }
     }
 
@@ -705,22 +870,25 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     thread::sleep(Duration::from_millis(100));
 
     // Simulate Cmd+V
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for paste".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for paste".to_string())
+    })?;
 
     let key_code_v = KEY_V; // Assuming KEY_V is defined in constants
     let cmd_flag = MODIFIER_COMMAND; // Assuming MODIFIER_COMMAND is defined
 
     // Press Cmd+V
-    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for paste".to_string()))?;
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key down event for paste".to_string())
+    })?;
     key_down.set_flags(cmd_flag);
     key_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
     // Release Cmd+V
-    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for paste".to_string()))?;
+    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key up event for paste".to_string())
+    })?;
     key_up.set_flags(cmd_flag);
     key_up.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
@@ -743,39 +911,50 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     // Set clipboard
     match NativeClipboard::new() {
         Ok(mut clipboard) => {
-             if let Err(e) = clipboard.write(text.to_string()) {
+            if let Err(e) = clipboard.write(text.to_string()) {
                 return Err(AutomationError::PlatformError(format!(
                     "Failed to write to clipboard before global paste: {:?}",
                     e
                 )));
             }
-             debug!("Successfully set clipboard content for global paste.");
-        },
-        Err(e) => return Err(AutomationError::PlatformError(format!(
-            "Failed to access clipboard before global paste: {:?}",
-            e
-        )))
+            debug!("Successfully set clipboard content for global paste.");
+        }
+        Err(e) => {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to access clipboard before global paste: {:?}",
+                e
+            )))
+        }
     }
 
     // Give clipboard time to process
     thread::sleep(Duration::from_millis(100));
 
     // Simulate Cmd+V
-    let source = get_pooled_event_source().map_err(|e| AutomationError::PlatformError(format!("Failed to create event source for global paste: {}", e)))?;
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!(
+            "Failed to create event source for global paste: {}",
+            e
+        ))
+    })?;
 
     let key_code_v = KEY_V;
     let cmd_flag = MODIFIER_COMMAND;
 
     // Press Cmd+V
-    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for global paste".to_string()))?;
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
+        AutomationError::PlatformError(
+            "Failed to create key down event for global paste".to_string(),
+        )
+    })?;
     key_down.set_flags(cmd_flag);
     key_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
     // Release Cmd+V
-    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for global paste".to_string()))?;
+    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key up event for global paste".to_string())
+    })?;
     key_up.set_flags(cmd_flag);
     key_up.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
@@ -845,9 +1024,9 @@ pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
 
     // If not in predefined map, check if it's a single alphanumeric character
     if key_lower.len() == 1 {
-        let c = key_lower.chars().next().ok_or_else(|| AutomationError::InvalidArgument(
-            format!("Failed to parse key: {}", key)
-        ))?;
+        let c = key_lower.chars().next().ok_or_else(|| {
+            AutomationError::InvalidArgument(format!("Failed to parse key: {}", key))
+        })?;
 
         // Handle alphabetic keys (a-z)
         if c.is_ascii_alphabetic() {
@@ -880,7 +1059,12 @@ pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
                 'x' => 7,
                 'y' => 16,
                 'z' => 6,
-                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported character: {}", c))),
+                _ => {
+                    return Err(AutomationError::InvalidArgument(format!(
+                        "Unsupported character: {}",
+                        c
+                    )))
+                }
             };
             return Ok(vk);
         }
@@ -899,14 +1083,22 @@ pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
                 '7' => 26,
                 '8' => 28,
                 '9' => 25,
-                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported digit: {}", c))),
+                _ => {
+                    return Err(AutomationError::InvalidArgument(format!(
+                        "Unsupported digit: {}",
+                        c
+                    )))
+                }
             };
             return Ok(vk);
         }
     }
 
     // If we get here, the key wasn't recognized
-    Err(AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
+    Err(AutomationError::InvalidArgument(format!(
+        "Unknown key: {}",
+        key
+    )))
 }
 
 pub(crate) fn parse_key_combination(
@@ -991,7 +1183,11 @@ pub(crate) fn set_value(element: &MacOSUIElement, value: &str) -> Result<(), Aut
         let attr_str = CFString::new("AXValue");
         let attr_str_ref = attr_str.as_concrete_TypeRef();
         let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
-        let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
+        let result = AXUIElementSetAttributeValue(
+            element_ref as AXUIElementRef,
+            attr_str_ref as CFStringRef,
+            value_ref,
+        );
         if result != 0 {
             let error = accessibility::Error::Ax(result);
             debug!("Failed to set value via AXValue: {:?}", error);
@@ -1036,15 +1232,19 @@ pub(crate) fn scroll(
         source.clone(), // Clone here to avoid move
         CGEventType::MouseMoved,
         CGPoint::new(center_x, center_y),
-        CGMouseButton::Left
-    ).map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
 
     move_event.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Create a scroll event manually since new_scroll_wheel_event is not available
-    let scroll_event = CGEvent::new(source.clone()) // Clone source again here
-        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+    let scroll_event =
+        CGEvent::new(source.clone()) // Clone source again here
+            .map_err(|_| {
+                AutomationError::PlatformError("Failed to create scroll event".to_string())
+            })?;
 
     // Constants for scroll wheel event field IDs
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
@@ -1081,7 +1281,10 @@ pub(crate) fn select_text(element: &MacOSUIElement) -> Result<(), AutomationErro
             return Ok(());
         }
         Err(e) => {
-            debug!("AXSelectText action failed: {:?}, trying alternative methods", e);
+            debug!(
+                "AXSelectText action failed: {:?}, trying alternative methods",
+                e
+            );
         }
     }
 
@@ -1089,27 +1292,33 @@ pub(crate) fn select_text(element: &MacOSUIElement) -> Result<(), AutomationErro
     debug!("Attempting to select all text with Command+A shortcut");
 
     // Create event source
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for select_text".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for select_text".to_string())
+    })?;
 
     // Key codes for Command+A
-    let cmd_down = CGEvent::new_keyboard_event(source.clone(), KEYCODE_CMD, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create command key down event".to_string()))?;
+    let cmd_down =
+        CGEvent::new_keyboard_event(source.clone(), KEYCODE_CMD, true).map_err(|_| {
+            AutomationError::PlatformError("Failed to create command key down event".to_string())
+        })?;
     cmd_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
-    let a_down = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create 'A' key down event".to_string()))?;
+    let a_down = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, true).map_err(|_| {
+        AutomationError::PlatformError("Failed to create 'A' key down event".to_string())
+    })?;
     a_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
-    let a_up = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, false)
-        .map_err(|_| AutomationError::PlatformError("Failed to create 'A' key up event".to_string()))?;
+    let a_up = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, false).map_err(|_| {
+        AutomationError::PlatformError("Failed to create 'A' key up event".to_string())
+    })?;
     a_up.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
 
-    let cmd_up = CGEvent::new_keyboard_event(source, KEYCODE_CMD, false)
-        .map_err(|_| AutomationError::PlatformError("Failed to create command key up event".to_string()))?;
+    let cmd_up = CGEvent::new_keyboard_event(source, KEYCODE_CMD, false).map_err(|_| {
+        AutomationError::PlatformError("Failed to create command key up event".to_string())
+    })?;
     cmd_up.post(CGEventTapLocation::HID);
 
     debug!("Successfully simulated Command+A for text selection");
@@ -1164,16 +1373,25 @@ pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> 
 
 /// Holds down a specified modifier key.
 /// If duration_ms is provided, the key will be released after that duration.
-pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags, duration_ms: Option<u64>) -> Result<(), AutomationError> {
-    debug!("Holding key code {} with flags {:?} for {:?}ms", key_code, flags, duration_ms);
+pub(crate) fn hold_key(
+    key_code: CGKeyCode,
+    flags: CGEventFlags,
+    duration_ms: Option<u64>,
+) -> Result<(), AutomationError> {
+    debug!(
+        "Holding key code {} with flags {:?} for {:?}ms",
+        key_code, flags, duration_ms
+    );
 
     // Create an event source for user input
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for key hold".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for key hold".to_string())
+    })?;
 
     // Create the key down event
-    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key down event".to_string())
+    })?;
 
     // Set modifier flags
     key_down.set_flags(flags);
@@ -1206,13 +1424,14 @@ pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags, duration_ms: Op
 #[allow(dead_code)]
 pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), AutomationError> {
     debug!("Releasing key: code={}, flags={:?}", key_code, flags);
-    let source = get_pooled_event_source().map_err(|_|
+    let source = get_pooled_event_source().map_err(|_| {
         AutomationError::PlatformError("Failed to create event source for release_key".to_string())
-    )?;
+    })?;
 
     // Create keyboard event for key up
-    let key_up = CGEvent::new_keyboard_event(source, key_code, false)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for release_key".to_string()))?;
+    let key_up = CGEvent::new_keyboard_event(source, key_code, false).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key up event for release_key".to_string())
+    })?;
 
     // Set the flags for the key up event (usually should have the modifier flag being released)
     key_up.set_flags(flags);
@@ -1221,14 +1440,21 @@ pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<()
     Ok(())
 }
 
-pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEventFlags) -> Result<(), AutomationError> {
-    debug!("Pressing key: {} with modifiers: {:?}", key_code, modifier_flags);
+pub(crate) fn press_key_with_modifier(
+    key_code: CGKeyCode,
+    modifier_flags: CGEventFlags,
+) -> Result<(), AutomationError> {
+    debug!(
+        "Pressing key: {} with modifiers: {:?}",
+        key_code, modifier_flags
+    );
     let source = get_pooled_event_source()
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
     // Key down event with modifier flags
-    let event_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+    let event_down = CGEvent::new_keyboard_event(source.clone(), key_code, true).map_err(|_| {
+        AutomationError::PlatformError("Failed to create key down event".to_string())
+    })?;
     event_down.set_flags(modifier_flags);
     event_down.post(CGEventTapLocation::HID);
     thread::sleep(Duration::from_millis(50));
@@ -1255,7 +1481,10 @@ fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), 
         let modifier_flags = modifier_flags_opt.unwrap_or_else(CGEventFlags::empty);
         // Simulate key down
         // Simulate key up
-        debug!("Simulating press for key: {} with flags: {:?}", key_code, modifier_flags);
+        debug!(
+            "Simulating press for key: {} with flags: {:?}",
+            key_code, modifier_flags
+        );
     }
     Ok(())
 }
@@ -1271,7 +1500,8 @@ fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), Auto
         Ok(cf) => cf,
         Err(e) => {
             return Err(AutomationError::PlatformError(format!(
-                "Failed to get position attribute: {:?}", e
+                "Failed to get position attribute: {:?}",
+                e
             )));
         }
     };
@@ -1282,7 +1512,8 @@ fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), Auto
         Ok(cf) => cf,
         Err(e) => {
             return Err(AutomationError::PlatformError(format!(
-                "Failed to get size attribute: {:?}", e
+                "Failed to get size attribute: {:?}",
+                e
             )));
         }
     };
@@ -1301,7 +1532,10 @@ fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), Auto
     // Simple position string parser to extract values from the debug output
     if position_str.contains("x") && position_str.contains("y") {
         // Try to extract numeric values from string
-        for part in position_str.split([',', ' ', ':', ')', '(']).collect::<Vec<&str>>() {
+        for part in position_str
+            .split([',', ' ', ':', ')', '('])
+            .collect::<Vec<&str>>()
+        {
             if let Ok(value) = part.trim().parse::<f64>() {
                 if x == 0.0 {
                     x = value;
@@ -1319,7 +1553,10 @@ fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), Auto
     // Simple size string parser to extract values from the debug output
     if size_str.contains("w") && size_str.contains("h") {
         // Try to extract numeric values from string
-        for part in size_str.split([',', ' ', ':', ')', '(']).collect::<Vec<&str>>() {
+        for part in size_str
+            .split([',', ' ', ':', ')', '('])
+            .collect::<Vec<&str>>()
+        {
             if let Ok(value) = part.trim().parse::<f64>() {
                 if width == 0.0 {
                     width = value;
@@ -1333,20 +1570,26 @@ fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), Auto
 
     // Check that we got valid values
     if width <= 0.0 || height <= 0.0 {
-        return Err(AutomationError::PlatformError(
-            format!("Invalid element dimensions: {}x{}", width, height)
-        ));
+        return Err(AutomationError::PlatformError(format!(
+            "Invalid element dimensions: {}x{}",
+            width, height
+        )));
     }
 
     Ok((x, y, width, height))
 }
 
-pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Result<(), AutomationError> {
+pub fn scroll_element(
+    element: &AXUIElement,
+    direction: &str,
+    amount: f64,
+) -> Result<(), AutomationError> {
     let element_frame = match get_element_frame(element) {
         Ok(frame) => frame,
         Err(e) => {
             return Err(AutomationError::PlatformError(format!(
-                "Failed to get element frame for scrolling: {}", e
+                "Failed to get element frame for scrolling: {}",
+                e
             )))
         }
     };
@@ -1356,7 +1599,12 @@ pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Re
     let center_y = element_frame.1 + element_frame.3 / 2.0;
 
     // Create event source
-    let source = get_pooled_event_source().map_err(|e| AutomationError::PlatformError(format!("Failed to create event source for scrolling: {}", e)))?;
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!(
+            "Failed to create event source for scrolling: {}",
+            e
+        ))
+    })?;
 
     // Normalize direction and calculate scroll values
     let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
@@ -1377,16 +1625,16 @@ pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Re
         source.clone(), // Clone here to avoid move
         CGEventType::MouseMoved,
         CGPoint::new(center_x, center_y),
-        CGMouseButton::Left
-    ).map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
 
     move_event.post(CGEventTapLocation::HID);
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Create a scroll event manually since new_scroll_wheel_event is not available
-    let scroll_event = CGEvent::new(source.clone()).map_err(|_| {
-        AutomationError::PlatformError("Failed to create scroll event".to_string())
-    })?;
+    let scroll_event = CGEvent::new(source.clone())
+        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
 
     // Constants for scroll wheel event field IDs
     const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
@@ -1418,13 +1666,17 @@ pub(crate) fn scroll_with_modifiers(
     y: f64,
     direction: &str,
     amount: f64,
-    modifiers: Option<CGEventFlags>
+    modifiers: Option<CGEventFlags>,
 ) -> Result<(), AutomationError> {
-    debug!("scrolling {} by {} at ({}, {}) with modifiers: {:?}", direction, amount, x, y, modifiers);
+    debug!(
+        "scrolling {} by {} at ({}, {}) with modifiers: {:?}",
+        direction, amount, x, y, modifiers
+    );
 
     // Create an event source for user input
-    let source = get_pooled_event_source()
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for scrolling".to_string()))?;
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for scrolling".to_string())
+    })?;
 
     // Move the cursor to the target position first
     let point = CGPoint::new(x, y);
@@ -1435,7 +1687,9 @@ pub(crate) fn scroll_with_modifiers(
         CGMouseButton::Left,
     )
     .map_err(|_| {
-        AutomationError::PlatformError("Failed to create mouse move event for scrolling".to_string())
+        AutomationError::PlatformError(
+            "Failed to create mouse move event for scrolling".to_string(),
+        )
     })?;
 
     // Apply modifiers if any are specified
@@ -1455,9 +1709,9 @@ pub(crate) fn scroll_with_modifiers(
 
     // Determine which axes to use for scrolling based on direction
     let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
-        "up" => (0, -scroll_units), // Negative for up
-        "down" => (0, scroll_units), // Positive for down
-        "left" => (scroll_units, 0), // Positive for left (wheel axis)
+        "up" => (0, -scroll_units),    // Negative for up
+        "down" => (0, scroll_units),   // Positive for down
+        "left" => (scroll_units, 0),   // Positive for left (wheel axis)
         "right" => (-scroll_units, 0), // Negative for right (wheel axis)
         _ => {
             return Err(AutomationError::InvalidArgument(format!(
@@ -1507,13 +1761,14 @@ pub(crate) fn post_mouse_event(
     location: CGPoint,
     button: CGMouseButton,
     modifiers: Option<CGEventFlags>,
-    click_state: Option<i64>
+    click_state: Option<i64>,
 ) -> Result<(), AutomationError> {
-    let source = get_pooled_event_source().map_err(|e| AutomationError::PlatformError(format!("Failed to create event source: {}", e)))?;
-
-    let event = CGEvent::new_mouse_event(source, event_type, location, button).map_err(|_| {
-        AutomationError::PlatformError("Failed to create mouse event".to_string())
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!("Failed to create event source: {}", e))
     })?;
+
+    let event = CGEvent::new_mouse_event(source, event_type, location, button)
+        .map_err(|_| AutomationError::PlatformError("Failed to create mouse event".to_string()))?;
 
     // Apply modifiers if provided
     if let Some(flags) = modifiers {
@@ -1590,7 +1845,9 @@ fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
                 return None;
             }
             debug!("SkyLight SLPSPostEventRecordTo loaded — focus-without-raise available");
-            Some(std::mem::transmute::<*mut c_void, SLPSPostEventRecordToFn>(sym))
+            Some(std::mem::transmute::<*mut c_void, SLPSPostEventRecordToFn>(
+                sym,
+            ))
         }
     })
 }
@@ -1659,7 +1916,10 @@ pub(crate) fn activate_without_raise(pid: i32) -> bool {
             // Passing a null event body redirects input focus without injecting an event.
             let result = unsafe { slps_fn(&mut psn, std::ptr::null_mut()) };
             if result == 0 {
-                debug!("SLPSPostEventRecordTo: redirected input focus to PID {}", pid);
+                debug!(
+                    "SLPSPostEventRecordTo: redirected input focus to PID {}",
+                    pid
+                );
                 return true;
             }
             debug!(
@@ -1797,12 +2057,30 @@ pub(crate) fn left_click_no_warp(
     y: f64,
     modifiers: Option<CGEventFlags>,
 ) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, None)
+    left_click_no_warp_inner(
+        x,
+        y,
+        CGEventType::LeftMouseDown,
+        CGEventType::LeftMouseUp,
+        CGMouseButton::Left,
+        modifiers,
+        1,
+        None,
+    )
 }
 
 /// Perform a right click at screen coordinates without warping the system cursor.
 pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, AutomationError> {
-    left_click_no_warp_inner(x, y, CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right, None, 1, None)
+    left_click_no_warp_inner(
+        x,
+        y,
+        CGEventType::RightMouseDown,
+        CGEventType::RightMouseUp,
+        CGMouseButton::Right,
+        None,
+        1,
+        None,
+    )
 }
 
 /// Perform a double click at screen coordinates without warping the system cursor.
@@ -1814,10 +2092,28 @@ pub(crate) fn double_click_no_warp(
     // Resolve the target PID once — get_pid_at_screen_point calls CGWindowListCopyWindowInfo
     // which is an expensive kernel syscall; no need to repeat it for both click steps.
     let pid = get_pid_at_screen_point(x, y);
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 1, pid)?;
+    left_click_no_warp_inner(
+        x,
+        y,
+        CGEventType::LeftMouseDown,
+        CGEventType::LeftMouseUp,
+        CGMouseButton::Left,
+        modifiers,
+        1,
+        pid,
+    )?;
     thread::sleep(Duration::from_millis(50));
     // Second click with click-state=2
-    left_click_no_warp_inner(x, y, CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left, modifiers, 2, pid)
+    left_click_no_warp_inner(
+        x,
+        y,
+        CGEventType::LeftMouseDown,
+        CGEventType::LeftMouseUp,
+        CGMouseButton::Left,
+        modifiers,
+        2,
+        pid,
+    )
 }
 
 #[allow(clippy::too_many_arguments)] // PID is passed pre-resolved to avoid double-syscall in double_click_no_warp
@@ -1848,8 +2144,18 @@ fn left_click_no_warp_inner(
             let primer_pt = CGPoint::new(-1.0, -1.0);
             if let Ok(src) = get_pooled_event_source() {
                 if let (Ok(pd), Ok(pu)) = (
-                    CGEvent::new_mouse_event(src.clone(), CGEventType::LeftMouseDown, primer_pt, CGMouseButton::Left),
-                    CGEvent::new_mouse_event(src, CGEventType::LeftMouseUp, primer_pt, CGMouseButton::Left),
+                    CGEvent::new_mouse_event(
+                        src.clone(),
+                        CGEventType::LeftMouseDown,
+                        primer_pt,
+                        CGMouseButton::Left,
+                    ),
+                    CGEvent::new_mouse_event(
+                        src,
+                        CGEventType::LeftMouseUp,
+                        primer_pt,
+                        CGMouseButton::Left,
+                    ),
                 ) {
                     post_cg_event_to_pid(pid, &pd);
                     // Brief delay so Chromium's run-loop processes MouseDown before
@@ -1866,18 +2172,27 @@ fn left_click_no_warp_inner(
             let src = get_pooled_event_source().map_err(|e| {
                 AutomationError::PlatformError(format!("Event source error: {}", e))
             })?;
-            let down = CGEvent::new_mouse_event(src.clone(), down_type, point, button)
-                .map_err(|_| AutomationError::PlatformError("Failed to create mouse-down".to_string()))?;
-            let up = CGEvent::new_mouse_event(src, up_type, point, button)
-                .map_err(|_| AutomationError::PlatformError("Failed to create mouse-up".to_string()))?;
+            let down =
+                CGEvent::new_mouse_event(src.clone(), down_type, point, button).map_err(|_| {
+                    AutomationError::PlatformError("Failed to create mouse-down".to_string())
+                })?;
+            let up = CGEvent::new_mouse_event(src, up_type, point, button).map_err(|_| {
+                AutomationError::PlatformError("Failed to create mouse-up".to_string())
+            })?;
 
             if let Some(flags) = modifiers {
                 down.set_flags(flags);
                 up.set_flags(flags);
             }
             if click_state > 1 {
-                down.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
-                up.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+                down.set_integer_value_field(
+                    core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+                    click_state,
+                );
+                up.set_integer_value_field(
+                    core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
+                    click_state,
+                );
             }
 
             post_cg_event_to_pid(pid, &down);
@@ -1896,7 +2211,10 @@ fn left_click_no_warp_inner(
             return Ok(method);
         }
 
-        debug!("Process-targeted click failed for PID {}, falling back to HID", pid);
+        debug!(
+            "Process-targeted click failed for PID {}, falling back to HID",
+            pid
+        );
     } else {
         debug!(
             "No-warp click: no window PID found at ({:.0}, {:.0}), using HID",

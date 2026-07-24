@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use super::base_agent::{AgentStatus, AgentType, SpecializedAgent, Task, TaskResult};
 use crate::agent::core::AgentError;
-use super::base_agent::{SpecializedAgent, AgentType, Task, TaskResult, AgentStatus};
 
 /// Registry for all specialized agents in the system
 pub struct AgentRegistry {
@@ -165,7 +165,8 @@ impl AgentFactory {
         // Create and register default agents
         // Browser agent needs app_handle
         if let Some(ref app_handle) = self.app_handle {
-            let browser_agent = Arc::new(super::browser_agent::BrowserAgent::new(app_handle.clone())?);
+            let browser_agent =
+                Arc::new(super::browser_agent::BrowserAgent::new(app_handle.clone())?);
             self.registry.register_agent(browser_agent).await?;
         } else {
             tracing::warn!("Cannot initialize BrowserAgent: no app_handle provided");
@@ -173,7 +174,8 @@ impl AgentFactory {
 
         // Desktop agent needs app_handle
         if let Some(ref app_handle) = self.app_handle {
-            let desktop_agent = Arc::new(super::desktop_agent::DesktopAgent::new(app_handle.clone())?);
+            let desktop_agent =
+                Arc::new(super::desktop_agent::DesktopAgent::new(app_handle.clone())?);
             self.registry.register_agent(desktop_agent).await?;
         } else {
             tracing::warn!("Cannot initialize DesktopAgent: no app_handle provided");
@@ -193,10 +195,16 @@ impl AgentFactory {
 
     /// Execute a task using the best available agent
     pub async fn execute_task(&self, task: Task) -> Result<TaskResult, AgentError> {
-        let agent = self.registry.find_best_agent_for_task(&task).await
-            .ok_or_else(|| AgentError::Other(format!(
-                "No suitable agent found for task: {}", task.description
-            )))?;
+        let agent = self
+            .registry
+            .find_best_agent_for_task(&task)
+            .await
+            .ok_or_else(|| {
+                AgentError::Other(format!(
+                    "No suitable agent found for task: {}",
+                    task.description
+                ))
+            })?;
 
         agent.handle_task(task).await
     }
@@ -212,7 +220,10 @@ impl AgentFactory {
     }
 
     /// Create an orchestrator with custom configuration
-    pub fn create_orchestrator_with_config(&self, config: super::orchestrator::OrchestratorConfig) -> super::orchestrator::Orchestrator {
+    pub fn create_orchestrator_with_config(
+        &self,
+        config: super::orchestrator::OrchestratorConfig,
+    ) -> super::orchestrator::Orchestrator {
         super::orchestrator::Orchestrator::with_config(self.registry.clone(), config)
     }
 }

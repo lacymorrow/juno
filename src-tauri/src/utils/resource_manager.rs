@@ -1,11 +1,11 @@
 //! Resource management utilities for preventing resource leaks
 //! Provides RAII patterns and lifecycle management for expensive resources
 
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{info, warn, error, debug};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, error, info, warn};
 
 /// Resource wrapper that ensures cleanup on drop
 pub struct ManagedResource<T> {
@@ -82,10 +82,10 @@ impl<T: Send + 'static> ResourcePool<T> {
         cleanup: impl FnOnce(T) + Send + 'static,
     ) -> Result<(), T> {
         let mut pool = self.resources.lock().await;
-        
+
         // Clean up old resources
         pool.retain(|r| r.age() < self.max_age);
-        
+
         if pool.len() >= self.max_size {
             warn!("Resource pool {} is full, rejecting resource", self.name);
             return Err(resource);
@@ -96,7 +96,7 @@ impl<T: Send + 'static> ResourcePool<T> {
             format!("{}_resource_{}", self.name, pool.len()),
             cleanup,
         );
-        
+
         pool.push(managed);
         info!("Added resource to pool {}, size: {}", self.name, pool.len());
         Ok(())
@@ -105,12 +105,16 @@ impl<T: Send + 'static> ResourcePool<T> {
     /// Get a resource from the pool
     pub async fn get(&self) -> Option<T> {
         let mut pool = self.resources.lock().await;
-        
+
         // Clean up old resources first
         pool.retain(|r| r.age() < self.max_age);
-        
+
         if let Some(managed) = pool.pop() {
-            info!("Retrieved resource from pool {}, remaining: {}", self.name, pool.len());
+            info!(
+                "Retrieved resource from pool {}, remaining: {}",
+                self.name,
+                pool.len()
+            );
             Some(managed.take())
         } else {
             debug!("No resources available in pool {}", self.name);
@@ -136,7 +140,9 @@ impl<T: Send + 'static> ResourcePool<T> {
 /// Manager for browser controller lifecycle
 pub struct BrowserControllerManager {
     pool: ResourcePool<Arc<crate::agent::tools::browser_controller::BrowserController>>,
-    active_controllers: Arc<RwLock<HashMap<String, Arc<crate::agent::tools::browser_controller::BrowserController>>>>,
+    active_controllers: Arc<
+        RwLock<HashMap<String, Arc<crate::agent::tools::browser_controller::BrowserController>>>,
+    >,
 }
 
 #[allow(clippy::new_without_default)]
@@ -145,7 +151,7 @@ impl BrowserControllerManager {
         Self {
             pool: ResourcePool::new(
                 "browser_controllers".to_string(),
-                3, // Keep max 3 idle browsers
+                3,                        // Keep max 3 idle browsers
                 Duration::from_secs(300), // 5 minute max idle time
             ),
             active_controllers: Arc::new(RwLock::new(HashMap::new())),
@@ -179,11 +185,11 @@ impl BrowserControllerManager {
         let controller = crate::agent::tools::browser_controller::BrowserController::new()
             .await
             .map_err(|e| format!("Failed to create browser controller: {}", e))?;
-        
+
         let controller = Arc::new(controller);
         let mut active = self.active_controllers.write().await;
         active.insert(id, controller.clone());
-        
+
         Ok(controller)
     }
 
@@ -196,14 +202,14 @@ impl BrowserControllerManager {
 
         if let Some(controller) = controller {
             let _controller_clone = controller.clone();
-            
+
             // Try to add to pool for reuse
             let result = self.pool.add(
                 controller,
                 move |ctrl| {
                     // Cleanup function that runs when controller is dropped from pool
                     let ctrl_clone = ctrl.clone();
-                    
+
                     // Check if we're in a Tokio runtime before spawning
                     if let Ok(handle) = tokio::runtime::Handle::try_current() {
                         handle.spawn(async move {
@@ -225,7 +231,10 @@ impl BrowserControllerManager {
                 }
                 Err(controller) => {
                     // Pool was full, cleanup immediately
-                    warn!("Pool full, cleaning up browser controller immediately: {}", id);
+                    warn!(
+                        "Pool full, cleaning up browser controller immediately: {}",
+                        id
+                    );
                     if let Err(e) = controller.cleanup().await {
                         error!("Failed to cleanup browser controller: {}", e);
                     }
@@ -241,7 +250,7 @@ impl BrowserControllerManager {
     /// Cleanup all browser controllers
     pub async fn cleanup_all(&self) {
         info!("Cleaning up all browser controllers");
-        
+
         // Clear active controllers
         let active_controllers: Vec<_> = {
             let mut active = self.active_controllers.write().await;
@@ -270,7 +279,7 @@ pub struct AutoreleasePool {
 impl AutoreleasePool {
     pub fn new() -> Self {
         use objc::{class, msg_send, sel, sel_impl};
-        
+
         unsafe {
             let pool: *mut objc::runtime::Object = msg_send![class!(NSAutoreleasePool), new];
             Self { pool }
@@ -282,7 +291,7 @@ impl AutoreleasePool {
 impl Drop for AutoreleasePool {
     fn drop(&mut self) {
         use objc::{msg_send, sel, sel_impl};
-        
+
         unsafe {
             let _: () = msg_send![self.pool, drain];
         }
@@ -358,13 +367,13 @@ impl ResourceManager {
     /// Perform full cleanup of all managed resources
     pub async fn cleanup_all(&self) {
         info!("Performing full resource cleanup");
-        
+
         // Cleanup browsers
         self.browser_manager.cleanup_all().await;
-        
+
         // Cleanup temp files
         self.cleanup_temp_files().await;
-        
+
         info!("Resource cleanup completed");
     }
 }
@@ -377,24 +386,20 @@ mod tests {
     async fn test_managed_resource_cleanup() {
         let cleanup_called = Arc::new(Mutex::new(false));
         let cleanup_called_clone = cleanup_called.clone();
-        
+
         {
-            let _resource = ManagedResource::new(
-                42,
-                "test_resource".to_string(),
-                move |_val| {
-                    let cleanup_called = cleanup_called_clone.clone();
-                    tokio::spawn(async move {
-                        let mut called = cleanup_called.lock().await;
-                        *called = true;
-                    });
-                },
-            );
+            let _resource = ManagedResource::new(42, "test_resource".to_string(), move |_val| {
+                let cleanup_called = cleanup_called_clone.clone();
+                tokio::spawn(async move {
+                    let mut called = cleanup_called.lock().await;
+                    *called = true;
+                });
+            });
         } // Resource dropped here
-        
+
         // Give async cleanup time to run
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         let called = cleanup_called.lock().await;
         assert!(*called, "Cleanup should have been called");
     }
@@ -402,14 +407,14 @@ mod tests {
     #[tokio::test]
     async fn test_resource_pool() {
         let pool = ResourcePool::new("test_pool".to_string(), 2, Duration::from_secs(60));
-        
+
         // Add resources
         assert!(pool.add(1, |_| {}).await.is_ok());
         assert!(pool.add(2, |_| {}).await.is_ok());
         assert!(pool.add(3, |_| {}).await.is_err()); // Pool full
-        
+
         assert_eq!(pool.size().await, 2);
-        
+
         // Get resources
         assert_eq!(pool.get().await, Some(2));
         assert_eq!(pool.get().await, Some(1));

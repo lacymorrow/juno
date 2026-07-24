@@ -7,8 +7,8 @@ use crate::agent::intelligence::{
     ToolChoiceIntelligence,
 };
 use crate::agent::providers::anthropic::ToolChoice;
-use crate::state::AppState;
 use crate::constants::events;
+use crate::state::AppState;
 
 /// Configuration for tool choice intelligence system
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::engine::SttProvider;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceTranscriptionConfig {

@@ -1,4 +1,4 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use tracing::{error, info};
 
@@ -21,7 +21,11 @@ static KOKORO_MODEL: OnceLock<StdMutex<Option<Box<dyn any_tts::TtsModel>>>> = On
 /// WAV bytes work fine in the .m4a temp file that play_base64_audio_with_tracking
 /// creates.
 pub async fn invoke_kokoro_tts(text: String, voice: String) -> Result<String, String> {
-    info!("[Kokoro] TTS requested: {} chars, voice: {}", text.chars().count(), voice);
+    info!(
+        "[Kokoro] TTS requested: {} chars, voice: {}",
+        text.chars().count(),
+        voice
+    );
 
     if crate::tts::is_tts_stop_requested() {
         info!("[Kokoro] Stop requested before start, aborting");
@@ -48,8 +52,8 @@ pub async fn invoke_kokoro_tts(text: String, voice: String) -> Result<String, St
                 info!(
                     "[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)"
                 );
-                let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro)
-                    .with_preferred_runtime(); // Metal → CPU auto-selection
+                let config =
+                    any_tts::TtsConfig::new(any_tts::ModelType::Kokoro).with_preferred_runtime(); // Metal → CPU auto-selection
 
                 match any_tts::load_model(config) {
                     Ok(model) => {

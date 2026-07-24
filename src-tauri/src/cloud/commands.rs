@@ -1,26 +1,28 @@
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
-use tauri::{AppHandle, Manager};
-use tracing::{info, warn, error, debug};
-use base64::{Engine as _, engine::general_purpose};
-use std::collections::HashMap;
 use serde_json;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Manager};
+use tokio::sync::Mutex as TokioMutex;
+use tracing::{debug, error, info, warn};
 use uuid;
 
-use super::types::{
-    CloudError, CloudCommand, CloudCommandType, DeviceResponse, ResponseStatus, ResponseData,
-};
 use super::security::CloudSecurity;
-use crate::state::AppState;
-use crate::constants::permissions;
-use crate::constants::errors::templates;
+use super::types::{
+    CloudCommand, CloudCommandType, CloudError, DeviceResponse, ResponseData, ResponseStatus,
+};
 use crate::commands::shell::BashResult;
+use crate::constants::errors::templates;
+use crate::constants::permissions;
+use crate::state::AppState;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Remote command that can be executed on the device
@@ -59,11 +61,18 @@ impl CloudCommandProcessor {
     }
 
     /// Process incoming cloud command
-    pub async fn process_command(&self, command: CloudCommand) -> Result<DeviceResponse, CloudError> {
+    pub async fn process_command(
+        &self,
+        command: CloudCommand,
+    ) -> Result<DeviceResponse, CloudError> {
         let command_id = command.id.clone();
         let command_for_audit = command.clone();
 
-        info!("Processing cloud command: {} ({})", command_id, self.command_type_to_string(&command.command_type));
+        info!(
+            "Processing cloud command: {} ({})",
+            command_id,
+            self.command_type_to_string(&command.command_type)
+        );
 
         // Validate command security
         {
@@ -83,87 +92,165 @@ impl CloudCommandProcessor {
             CloudCommandType::TextQuery => {
                 let execution_result = self.execute_text_query(&command).await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|data| ResponseData {
-                    text: Some(data),
-                    audio_base64: None,
-                    screenshot_data: None,
-                    agent_state: Some("completed".to_string()),
-                    progress: Some(1.0),
-                    metadata: None,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("Text query failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|data| ResponseData {
+                        text: Some(data),
+                        audio_base64: None,
+                        screenshot_data: None,
+                        agent_state: Some("completed".to_string()),
+                        progress: Some(1.0),
+                        metadata: None,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed("Text query failed".to_string()))
+                    },
+                    response_data,
+                )
+            }
             CloudCommandType::VoiceQuery => {
                 let execution_result = self.execute_voice_query(&command).await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|data| ResponseData {
-                    text: Some(data),
-                    audio_base64: None,
-                    screenshot_data: None,
-                    agent_state: Some("completed".to_string()),
-                    progress: Some(1.0),
-                    metadata: None,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("Voice query failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|data| ResponseData {
+                        text: Some(data),
+                        audio_base64: None,
+                        screenshot_data: None,
+                        agent_state: Some("completed".to_string()),
+                        progress: Some(1.0),
+                        metadata: None,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed(
+                            "Voice query failed".to_string(),
+                        ))
+                    },
+                    response_data,
+                )
+            }
             CloudCommandType::Screenshot => {
                 let execution_result = self.execute_screenshot_command().await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|command_result| ResponseData {
-                    text: command_result.data,
-                    audio_base64: None,
-                    screenshot_data: command_result.screenshot_data,
-                    agent_state: Some("completed".to_string()),
-                    progress: Some(1.0),
-                    metadata: command_result.metadata,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("Screenshot failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|command_result| ResponseData {
+                        text: command_result.data,
+                        audio_base64: None,
+                        screenshot_data: command_result.screenshot_data,
+                        agent_state: Some("completed".to_string()),
+                        progress: Some(1.0),
+                        metadata: command_result.metadata,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed("Screenshot failed".to_string()))
+                    },
+                    response_data,
+                )
+            }
             CloudCommandType::SystemCommand => {
                 let execution_result = self.execute_system_command(command).await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|r| ResponseData {
-                    text: r.data,
-                    audio_base64: None,
-                    screenshot_data: r.screenshot_data,
-                    agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
-                    progress: Some(if r.success { 1.0 } else { 0.0 }),
-                    metadata: r.metadata,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("System command failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|r| ResponseData {
+                        text: r.data,
+                        audio_base64: None,
+                        screenshot_data: r.screenshot_data,
+                        agent_state: Some(if r.success {
+                            "completed".to_string()
+                        } else {
+                            "error".to_string()
+                        }),
+                        progress: Some(if r.success { 1.0 } else { 0.0 }),
+                        metadata: r.metadata,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed(
+                            "System command failed".to_string(),
+                        ))
+                    },
+                    response_data,
+                )
+            }
             CloudCommandType::StatusRequest => {
                 let execution_result = self.execute_status_request().await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|r| ResponseData {
-                    text: r.data,
-                    audio_base64: None,
-                    screenshot_data: r.screenshot_data,
-                    agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
-                    progress: Some(if r.success { 1.0 } else { 0.0 }),
-                    metadata: r.metadata,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("Status request failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|r| ResponseData {
+                        text: r.data,
+                        audio_base64: None,
+                        screenshot_data: r.screenshot_data,
+                        agent_state: Some(if r.success {
+                            "completed".to_string()
+                        } else {
+                            "error".to_string()
+                        }),
+                        progress: Some(if r.success { 1.0 } else { 0.0 }),
+                        metadata: r.metadata,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed(
+                            "Status request failed".to_string(),
+                        ))
+                    },
+                    response_data,
+                )
+            }
             CloudCommandType::ConfigUpdate => {
                 let execution_result = self.execute_config_update(&command).await;
                 let success = execution_result.is_ok();
-                let response_data = execution_result.map(|r| ResponseData {
-                    text: r.data,
-                    audio_base64: None,
-                    screenshot_data: r.screenshot_data,
-                    agent_state: Some(if r.success { "completed".to_string() } else { "error".to_string() }),
-                    progress: Some(if r.success { 1.0 } else { 0.0 }),
-                    metadata: r.metadata,
-                }).map_err(|e| e.clone());
-                (if success { Ok(()) } else { Err(CloudError::ExecutionFailed("Config update failed".to_string())) }, response_data)
-            },
+                let response_data = execution_result
+                    .map(|r| ResponseData {
+                        text: r.data,
+                        audio_base64: None,
+                        screenshot_data: r.screenshot_data,
+                        agent_state: Some(if r.success {
+                            "completed".to_string()
+                        } else {
+                            "error".to_string()
+                        }),
+                        progress: Some(if r.success { 1.0 } else { 0.0 }),
+                        metadata: r.metadata,
+                    })
+                    .map_err(|e| e.clone());
+                (
+                    if success {
+                        Ok(())
+                    } else {
+                        Err(CloudError::ExecutionFailed(
+                            "Config update failed".to_string(),
+                        ))
+                    },
+                    response_data,
+                )
+            }
         };
 
         // Create command response
         let response = DeviceResponse {
             command_id: command_id.clone(),
-            status: if response_data.is_ok() { ResponseStatus::Success } else { ResponseStatus::Error },
+            status: if response_data.is_ok() {
+                ResponseStatus::Success
+            } else {
+                ResponseStatus::Error
+            },
             data: response_data.clone().unwrap_or_else(|_| ResponseData {
                 text: None,
                 audio_base64: None,
@@ -176,17 +263,25 @@ impl CloudCommandProcessor {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_else(|_| Duration::from_secs(0))
                 .as_secs(),
-            error: if let Err(e) = &response_data { Some(e.to_string()) } else { None },
+            error: if let Err(e) = &response_data {
+                Some(e.to_string())
+            } else {
+                None
+            },
         };
 
         // Create audit log entry
         {
             let security = self.security.lock().await;
-            let audit_entry = security.create_audit_log(&command_for_audit, &result.map_err(|e| e.clone()));
+            let audit_entry =
+                security.create_audit_log(&command_for_audit, &result.map_err(|e| e.clone()));
             debug!("Audit log: {:?}", audit_entry);
         }
 
-        info!("Command {} completed with status: {:?}", command_id, response.status);
+        info!(
+            "Command {} completed with status: {:?}",
+            command_id, response.status
+        );
         Ok(response)
     }
 
@@ -202,7 +297,7 @@ impl CloudCommandProcessor {
                     metadata: None,
                     screenshot_data: None,
                 })
-            },
+            }
             CloudCommandType::VoiceQuery => {
                 let result = self.execute_voice_query(&command).await?;
                 Ok(CommandResult {
@@ -212,7 +307,7 @@ impl CloudCommandProcessor {
                     metadata: None,
                     screenshot_data: None,
                 })
-            },
+            }
             CloudCommandType::SystemCommand => self.execute_system_command(command).await,
             CloudCommandType::StatusRequest => self.execute_status_request().await,
             CloudCommandType::Screenshot => self.execute_screenshot_command().await,
@@ -222,8 +317,10 @@ impl CloudCommandProcessor {
 
     /// Execute text query command
     async fn execute_text_query(&self, command: &CloudCommand) -> Result<String, CloudError> {
-        let query = command.payload.query.as_ref()
-            .ok_or_else(|| CloudError::ValidationFailed("Missing query parameter".to_string()))?;
+        let query =
+            command.payload.query.as_ref().ok_or_else(|| {
+                CloudError::ValidationFailed("Missing query parameter".to_string())
+            })?;
 
         info!("Executing text query: {}", query);
 
@@ -234,21 +331,35 @@ impl CloudCommandProcessor {
 
     /// Execute voice query command
     async fn execute_voice_query(&self, command: &CloudCommand) -> Result<String, CloudError> {
-        let audio_base64 = command.payload.audio_base64.as_ref()
+        let audio_base64 = command
+            .payload
+            .audio_base64
+            .as_ref()
             .ok_or_else(|| CloudError::ValidationFailed("Missing audio data".to_string()))?;
 
-        info!("Executing voice query with {} bytes of audio data", audio_base64.len());
+        info!(
+            "Executing voice query with {} bytes of audio data",
+            audio_base64.len()
+        );
 
         // Decode audio and process
-        let audio_data = general_purpose::STANDARD.decode(audio_base64)
+        let audio_data = general_purpose::STANDARD
+            .decode(audio_base64)
             .map_err(|e| CloudError::ValidationFailed(format!("Invalid audio data: {}", e)))?;
 
         // Generous audio data size validation (allow very large files in maximally permissive mode)
-        if audio_data.len() > 200 * 1024 * 1024 { // 200MB limit (increased from 50MB)
-            log::warn!("⚠️ Very large audio file ({} MB), but allowing in maximally permissive mode", audio_data.len() / (1024 * 1024));
+        if audio_data.len() > 200 * 1024 * 1024 {
+            // 200MB limit (increased from 50MB)
+            log::warn!(
+                "⚠️ Very large audio file ({} MB), but allowing in maximally permissive mode",
+                audio_data.len() / (1024 * 1024)
+            );
         }
 
-        info!("Decoded {} bytes of audio data for transcription", audio_data.len());
+        info!(
+            "Decoded {} bytes of audio data for transcription",
+            audio_data.len()
+        );
 
         // Create temporary file for audio processing
         let temp_dir = std::env::temp_dir();
@@ -258,8 +369,13 @@ impl CloudCommandProcessor {
         // Write raw audio data to temporary WAV file
         // Note: We assume the audio data is already in WAV format
         // In production, you might want to add format detection and conversion
-        std::fs::write(&temp_audio_path, &audio_data)
-            .map_err(|e| CloudError::ExecutionFailed(format_error(templates::FAILED_TO_WRITE, "temp audio file", e)))?;
+        std::fs::write(&temp_audio_path, &audio_data).map_err(|e| {
+            CloudError::ExecutionFailed(format_error(
+                templates::FAILED_TO_WRITE,
+                "temp audio file",
+                e,
+            ))
+        })?;
 
         let temp_audio_path_str = temp_audio_path.to_string_lossy().to_string();
         info!("Created temporary audio file: {}", temp_audio_path_str);
@@ -274,27 +390,43 @@ impl CloudCommandProcessor {
                 error!("Voice transcription failed: {}", e);
                 // Clean up temp file
                 let _ = std::fs::remove_file(&temp_audio_path);
-                return Err(CloudError::ExecutionFailed(format!("Voice transcription failed: {}", e)));
+                return Err(CloudError::ExecutionFailed(format!(
+                    "Voice transcription failed: {}",
+                    e
+                )));
             }
         };
 
         // Clean up temporary file
         if let Err(e) = std::fs::remove_file(&temp_audio_path) {
-            warn!("{}", format_error(templates::FAILED_TO_CLEANUP, "temporary audio file", e));
+            warn!(
+                "{}",
+                format_error(templates::FAILED_TO_CLEANUP, "temporary audio file", e)
+            );
         }
 
         // If transcription is empty or just whitespace, return an error
         let trimmed_transcription = transcription_result.trim();
         if trimmed_transcription.is_empty() {
-            return Err(CloudError::ExecutionFailed("No speech detected in audio".to_string()));
+            return Err(CloudError::ExecutionFailed(
+                "No speech detected in audio".to_string(),
+            ));
         }
 
-        info!("Submitting transcribed query to orchestrator: '{}'", trimmed_transcription);
+        info!(
+            "Submitting transcribed query to orchestrator: '{}'",
+            trimmed_transcription
+        );
 
         // Submit the transcribed text to the orchestrator as a text query
-        let orchestrator_response = self.submit_query_to_orchestrator(trimmed_transcription, "cloud_voice").await?;
+        let orchestrator_response = self
+            .submit_query_to_orchestrator(trimmed_transcription, "cloud_voice")
+            .await?;
 
-        Ok(format!("Voice query transcribed: '{}' -> {}", trimmed_transcription, orchestrator_response))
+        Ok(format!(
+            "Voice query transcribed: '{}' -> {}",
+            trimmed_transcription, orchestrator_response
+        ))
     }
 
     /// Transcribe audio file using the voice transcription infrastructure
@@ -302,9 +434,11 @@ impl CloudCommandProcessor {
         info!("Attempting to transcribe audio file: {}", audio_path);
 
         // Check if the voice transcription plugin is available
-        if let Some(voice_controller_state) = self.app_handle.try_state::<
-            std::sync::Arc<tokio::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>>
-        >() {
+        if let Some(voice_controller_state) =
+            self.app_handle.try_state::<std::sync::Arc<
+                tokio::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>,
+            >>()
+        {
             let voice_controller = voice_controller_state.lock().await;
 
             match voice_controller.transcribe_audio_file(audio_path) {
@@ -314,7 +448,10 @@ impl CloudCommandProcessor {
                 }
                 Err(e) => {
                     error!("Audio file transcription failed: {}", e);
-                    Err(CloudError::ExecutionFailed(format!("Transcription error: {}", e)))
+                    Err(CloudError::ExecutionFailed(format!(
+                        "Transcription error: {}",
+                        e
+                    )))
                 }
             }
         } else {
@@ -325,26 +462,38 @@ impl CloudCommandProcessor {
                 audio_path.to_string(),
                 self.app_handle.clone(),
                 // We need to get the controller state from the plugin
-                self.app_handle.state::<std::sync::Arc<std::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>>>()
-            ).await {
+                self.app_handle.state::<std::sync::Arc<
+                    std::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>,
+                >>(),
+            )
+            .await
+            {
                 Ok(transcription) => {
                     info!("Plugin transcription successful: '{}'", transcription);
                     Ok(transcription)
                 }
                 Err(e) => {
                     error!("Plugin transcription failed: {}", e);
-                    Err(CloudError::ExecutionFailed(format!("Plugin transcription error: {}", e)))
+                    Err(CloudError::ExecutionFailed(format!(
+                        "Plugin transcription error: {}",
+                        e
+                    )))
                 }
             }
         }
     }
 
     /// Execute system command
-    async fn execute_system_command(&self, command: CloudCommand) -> Result<CommandResult, CloudError> {
+    async fn execute_system_command(
+        &self,
+        command: CloudCommand,
+    ) -> Result<CommandResult, CloudError> {
         info!("Executing system command: {}", command.id);
 
         // Extract action from parameters
-        let action = command.payload.parameters
+        let action = command
+            .payload
+            .parameters
             .as_ref()
             .and_then(|params| params.get("action"))
             .map(|s| s.as_str())
@@ -354,55 +503,68 @@ impl CloudCommandProcessor {
             "screenshot" => {
                 info!("Taking screenshot for remote command");
                 self.execute_screenshot_command().await
-            },
+            }
             "click" => {
-                let x = command.payload.parameters
+                let x = command
+                    .payload
+                    .parameters
                     .as_ref()
                     .and_then(|params| params.get("x"))
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
-                let y = command.payload.parameters
+                let y = command
+                    .payload
+                    .parameters
                     .as_ref()
                     .and_then(|params| params.get("y"))
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
                 info!("Executing click at ({}, {})", x, y);
                 self.execute_click_command(x, y).await
-            },
+            }
             "type" => {
-                let text = command.payload.parameters
+                let text = command
+                    .payload
+                    .parameters
                     .as_ref()
                     .and_then(|params| params.get("text"))
                     .map(|s| s.as_str())
                     .unwrap_or("");
                 info!("Executing type command: {}", text);
                 self.execute_type_command(text).await
-            },
+            }
             "key" => {
-                let key = command.payload.parameters
+                let key = command
+                    .payload
+                    .parameters
                     .as_ref()
                     .and_then(|params| params.get("key"))
                     .map(|s| s.as_str())
                     .unwrap_or("");
                 info!("Executing key press: {}", key);
                 self.execute_key_command(key).await
-            },
+            }
             "execute" => {
-                let shell_command = command.payload.parameters
+                let shell_command = command
+                    .payload
+                    .parameters
                     .as_ref()
                     .and_then(|params| params.get("command"))
                     .map(|s| s.as_str())
                     .unwrap_or("");
                 info!("Executing shell command: {}", shell_command);
                 self.execute_shell_command(shell_command).await
-            },
+            }
             "status" => {
                 info!("Getting system status");
                 self.execute_status_request().await
-            },
+            }
             _ => {
                 warn!("Unknown system command action: {}", action);
-                Err(CloudError::InvalidCommand(format!("Unknown action: {}", action)))
+                Err(CloudError::InvalidCommand(format!(
+                    "Unknown action: {}",
+                    action
+                )))
             }
         }
     }
@@ -414,22 +576,28 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing mouse click functionality
-        match crate::commands::mouse::left_click(self.app_handle.clone(), app_state, x, y, None).await {
-            Ok(_) => {
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(format!("Clicked at coordinates ({}, {})", x, y)),
-                    error: None,
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("coordinates".to_string(), serde_json::json!({"x": x, "y": y}));
-                        metadata
-                    }),
-                    screenshot_data: None,
-                })
-            },
+        match crate::commands::mouse::left_click(self.app_handle.clone(), app_state, x, y, None)
+            .await
+        {
+            Ok(_) => Ok(CommandResult {
+                success: true,
+                data: Some(format!("Clicked at coordinates ({}, {})", x, y)),
+                error: None,
+                metadata: Some({
+                    let mut metadata = HashMap::new();
+                    metadata.insert(
+                        "coordinates".to_string(),
+                        serde_json::json!({"x": x, "y": y}),
+                    );
+                    metadata
+                }),
+                screenshot_data: None,
+            }),
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "click command", &e));
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EXECUTE, "click command", &e)
+                );
                 Err(CloudError::ExecutionFailed(format!("Click failed: {}", e)))
             }
         }
@@ -442,23 +610,30 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing text typing functionality
-        match crate::commands::keyboard::global_type_text(text.to_string(), self.app_handle.clone(), app_state).await {
-            Ok(_) => {
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(format!("Typed text: {}", text)),
-                    error: None,
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("text".to_string(), serde_json::json!(text));
-                        metadata.insert("length".to_string(), serde_json::json!(text.len()));
-                        metadata
-                    }),
-                    screenshot_data: None,
-                })
-            },
+        match crate::commands::keyboard::global_type_text(
+            text.to_string(),
+            self.app_handle.clone(),
+            app_state,
+        )
+        .await
+        {
+            Ok(_) => Ok(CommandResult {
+                success: true,
+                data: Some(format!("Typed text: {}", text)),
+                error: None,
+                metadata: Some({
+                    let mut metadata = HashMap::new();
+                    metadata.insert("text".to_string(), serde_json::json!(text));
+                    metadata.insert("length".to_string(), serde_json::json!(text.len()));
+                    metadata
+                }),
+                screenshot_data: None,
+            }),
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "type command", &e));
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EXECUTE, "type command", &e)
+                );
                 Err(CloudError::ExecutionFailed(format!("Type failed: {}", e)))
             }
         }
@@ -471,23 +646,34 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing key press functionality
-        match crate::commands::keyboard::press_key(key.to_string(), None, self.app_handle.clone(), app_state).await {
-            Ok(_) => {
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(format!("Pressed key: {}", key)),
-                    error: None,
-                    metadata: Some({
-                        let mut metadata = HashMap::new();
-                        metadata.insert("key".to_string(), serde_json::json!(key));
-                        metadata
-                    }),
-                    screenshot_data: None,
-                })
-            },
+        match crate::commands::keyboard::press_key(
+            key.to_string(),
+            None,
+            self.app_handle.clone(),
+            app_state,
+        )
+        .await
+        {
+            Ok(_) => Ok(CommandResult {
+                success: true,
+                data: Some(format!("Pressed key: {}", key)),
+                error: None,
+                metadata: Some({
+                    let mut metadata = HashMap::new();
+                    metadata.insert("key".to_string(), serde_json::json!(key));
+                    metadata
+                }),
+                screenshot_data: None,
+            }),
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "key press command", &e));
-                Err(CloudError::ExecutionFailed(format!("Key press failed: {}", e)))
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EXECUTE, "key press command", &e)
+                );
+                Err(CloudError::ExecutionFailed(format!(
+                    "Key press failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -499,7 +685,16 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing shell command functionality
-        match crate::commands::shell::bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None, Some(true)).await {
+        match crate::commands::shell::bash_command(
+            self.app_handle.clone(),
+            app_state,
+            command.to_string(),
+            None,
+            None,
+            Some(true),
+        )
+        .await
+        {
             Ok(bash_result) => {
                 let output = bash_result.get_output();
 
@@ -513,21 +708,38 @@ impl CloudCommandProcessor {
                 Ok(CommandResult {
                     success: command_success,
                     data: Some(output.clone()),
-                    error: if command_success { None } else { Some("Command execution failed".to_string()) },
+                    error: if command_success {
+                        None
+                    } else {
+                        Some("Command execution failed".to_string())
+                    },
                     metadata: Some({
                         let mut metadata = HashMap::new();
                         metadata.insert("command".to_string(), serde_json::json!(command));
-                        metadata.insert("output_length".to_string(), serde_json::json!(output.len()));
-                        metadata.insert("is_restart".to_string(), serde_json::json!(bash_result.is_restart()));
-                        metadata.insert("command_success".to_string(), serde_json::json!(command_success));
+                        metadata
+                            .insert("output_length".to_string(), serde_json::json!(output.len()));
+                        metadata.insert(
+                            "is_restart".to_string(),
+                            serde_json::json!(bash_result.is_restart()),
+                        );
+                        metadata.insert(
+                            "command_success".to_string(),
+                            serde_json::json!(command_success),
+                        );
                         metadata
                     }),
                     screenshot_data: None,
                 })
-            },
+            }
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_EXECUTE, "shell command", &e));
-                Err(CloudError::ExecutionFailed(format!("Shell command failed: {}", e)))
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EXECUTE, "shell command", &e)
+                );
+                Err(CloudError::ExecutionFailed(format!(
+                    "Shell command failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -550,10 +762,16 @@ impl CloudCommandProcessor {
 
         // Use existing screenshot functionality
         let state = self.app_handle.state::<AppState>();
-        match crate::commands::core::capture_screenshot_command(self.app_handle.clone(), state).await {
+        match crate::commands::core::capture_screenshot_command(self.app_handle.clone(), state)
+            .await
+        {
             Ok(screenshot_result) => {
-                let screenshot_json = serde_json::to_value(&screenshot_result)
-                    .map_err(|e| CloudError::SerializationError(format!("Failed to serialize screenshot result: {}", e)))?;
+                let screenshot_json = serde_json::to_value(&screenshot_result).map_err(|e| {
+                    CloudError::SerializationError(format!(
+                        "Failed to serialize screenshot result: {}",
+                        e
+                    ))
+                })?;
                 Ok(CommandResult {
                     success: true,
                     data: None,
@@ -561,16 +779,25 @@ impl CloudCommandProcessor {
                     metadata: None,
                     screenshot_data: Some(screenshot_json),
                 })
-            },
+            }
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_CAPTURE, "screenshot", &e));
-                Err(CloudError::ExecutionFailed(format!("Screenshot failed: {}", e)))
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_CAPTURE, "screenshot", &e)
+                );
+                Err(CloudError::ExecutionFailed(format!(
+                    "Screenshot failed: {}",
+                    e
+                )))
             }
         }
     }
 
     /// Execute configuration update
-    async fn execute_config_update(&self, command: &CloudCommand) -> Result<CommandResult, CloudError> {
+    async fn execute_config_update(
+        &self,
+        command: &CloudCommand,
+    ) -> Result<CommandResult, CloudError> {
         info!("Executing config update");
 
         if let Some(config) = &command.payload.config {
@@ -585,7 +812,9 @@ impl CloudCommandProcessor {
                 screenshot_data: None,
             })
         } else {
-            Err(CloudError::ValidationFailed("Missing configuration data".to_string()))
+            Err(CloudError::ValidationFailed(
+                "Missing configuration data".to_string(),
+            ))
         }
     }
 
@@ -613,7 +842,7 @@ impl CloudCommandProcessor {
         let required_permissions = vec![
             permissions::types::ACCESSIBILITY,
             permissions::types::SCREEN_RECORDING,
-            permissions::types::MICROPHONE
+            permissions::types::MICROPHONE,
         ];
 
         let permissions = serde_json::json!({
@@ -651,19 +880,34 @@ impl CloudCommandProcessor {
     }
 
     /// Submit query to the orchestrator agent
-    async fn submit_query_to_orchestrator(&self, query: &str, source: &str) -> Result<String, CloudError> {
+    async fn submit_query_to_orchestrator(
+        &self,
+        query: &str,
+        source: &str,
+    ) -> Result<String, CloudError> {
         let app_state = self.app_handle.state::<AppState>();
 
-        match crate::anthropic::submit_query(query.to_string(), app_state, self.app_handle.clone()).await {
+        match crate::anthropic::submit_query(query.to_string(), app_state, self.app_handle.clone())
+            .await
+        {
             Ok(()) => {
                 // The submit_query function handles the response via events
                 // For cloud response, we return a success message
-                Ok(format!("Query '{}' submitted successfully from {}",
-                    query.chars().take(50).collect::<String>(), source))
-            },
+                Ok(format!(
+                    "Query '{}' submitted successfully from {}",
+                    query.chars().take(50).collect::<String>(),
+                    source
+                ))
+            }
             Err(e) => {
-                error!("{}", format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", &e));
-                Err(CloudError::ExecutionFailed(format!("Query submission failed: {}", e)))
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_SUBMIT, "query to orchestrator", &e)
+                );
+                Err(CloudError::ExecutionFailed(format!(
+                    "Query submission failed: {}",
+                    e
+                )))
             }
         }
     }

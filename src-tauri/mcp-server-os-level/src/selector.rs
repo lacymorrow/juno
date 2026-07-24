@@ -1,6 +1,6 @@
+use crate::AutomationError;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use crate::AutomationError;
 
 /// Represents ways to locate a UI element
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -49,7 +49,9 @@ impl From<&str> for Selector {
             }
             _ if s.starts_with('#') => Selector::Id(s.strip_prefix('#').unwrap_or(s).to_string()),
             _ if s.starts_with('/') => Selector::Path(s.to_string()),
-            _ if s.starts_with("text:") => Selector::Text(s.strip_prefix("text:").unwrap_or(s).to_string()),
+            _ if s.starts_with("text:") => {
+                Selector::Text(s.strip_prefix("text:").unwrap_or(s).to_string())
+            }
             _ => Selector::Name(s.to_string()),
         }
     }

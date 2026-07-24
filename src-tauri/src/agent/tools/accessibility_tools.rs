@@ -41,9 +41,12 @@ impl AccessibilityTools {
         }
     }
 
-        /// Initialize the desktop accessibility system if not already done
+    /// Initialize the desktop accessibility system if not already done
     pub fn ensure_engine_initialized(&self) -> Result<(), String> {
-        let mut desktop_guard = self.desktop.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut desktop_guard = self
+            .desktop
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
 
         if desktop_guard.is_none() {
             debug!("Initializing Desktop accessibility system");
@@ -61,17 +64,21 @@ impl AccessibilityTools {
         Ok(())
     }
 
-        /// Scan the frontmost application for clickable UI elements
+    /// Scan the frontmost application for clickable UI elements
     pub fn scan_frontmost_application(&self) -> Result<Vec<AccessibilityElement>, String> {
         self.ensure_engine_initialized()?;
 
-        let desktop_guard = self.desktop.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let desktop_guard = self
+            .desktop
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
         let desktop = desktop_guard.as_ref().ok_or("Desktop not initialized")?;
 
         debug!("Scanning frontmost application for accessibility elements");
 
         // Get all applications and find the frontmost one
-        let applications = desktop.applications()
+        let applications = desktop
+            .applications()
             .map_err(|e| format!("Failed to get applications: {}", e))?;
 
         if applications.is_empty() {
@@ -82,15 +89,24 @@ impl AccessibilityTools {
         let app = &applications[0];
 
         // Get all child elements from the application using locator
-        let locator = app.locator("*").map_err(|e| format!("Failed to create locator: {}", e))?;
-        let all_elements = locator.all()
+        let locator = app
+            .locator("*")
+            .map_err(|e| format!("Failed to create locator: {}", e))?;
+        let all_elements = locator
+            .all()
             .map_err(|e| format!("Failed to find elements: {}", e))?;
 
         debug!("Found {} total elements", all_elements.len());
 
         let mut accessibility_elements = Vec::new();
-        let mut element_cache = self.element_cache.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let mut next_id = self.next_id.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut element_cache = self
+            .element_cache
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let mut next_id = self
+            .next_id
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
 
         // Clear previous cache
         element_cache.clear();
@@ -133,8 +149,20 @@ impl AccessibilityTools {
             let accessibility_element = AccessibilityElement {
                 id,
                 role: role.clone(),
-                title: if title.is_empty() { description.clone() } else { title.clone() },
-                description: format!("{}: {}", role, if title.is_empty() { &description } else { &title }),
+                title: if title.is_empty() {
+                    description.clone()
+                } else {
+                    title.clone()
+                },
+                description: format!(
+                    "{}: {}",
+                    role,
+                    if title.is_empty() {
+                        &description
+                    } else {
+                        &title
+                    }
+                ),
                 position: Some((x, y)),
                 size: Some((width, height)),
                 is_clickable: true,
@@ -144,13 +172,19 @@ impl AccessibilityTools {
             accessibility_elements.push(accessibility_element);
         }
 
-        info!("Processed {} clickable accessibility elements", accessibility_elements.len());
+        info!(
+            "Processed {} clickable accessibility elements",
+            accessibility_elements.len()
+        );
         Ok(accessibility_elements)
     }
 
-        /// Click an element by its ID
+    /// Click an element by its ID
     pub fn click_element_by_id(&self, element_id: u32) -> Result<bool, String> {
-        let element_cache = self.element_cache.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let element_cache = self
+            .element_cache
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
 
         if let Some(element) = element_cache.get(&element_id) {
             debug!("Clicking accessibility element with ID: {}", element_id);
@@ -166,17 +200,31 @@ impl AccessibilityTools {
                 }
             }
         } else {
-            Err(format!("Element with ID {} not found. Run accessibility_scan first.", element_id))
+            Err(format!(
+                "Element with ID {} not found. Run accessibility_scan first.",
+                element_id
+            ))
         }
     }
 
     /// Check if a role is typically clickable
     fn is_clickable_role(role: &str) -> bool {
-        matches!(role.to_lowercase().as_str(),
-            "button" | "link" | "textfield" | "textarea" |
-            "checkbox" | "radiobutton" | "popupbutton" |
-            "combobox" | "tab" | "menuitem" | "image" |
-            "cell" | "searchfield" | "statictext"
+        matches!(
+            role.to_lowercase().as_str(),
+            "button"
+                | "link"
+                | "textfield"
+                | "textarea"
+                | "checkbox"
+                | "radiobutton"
+                | "popupbutton"
+                | "combobox"
+                | "tab"
+                | "menuitem"
+                | "image"
+                | "cell"
+                | "searchfield"
+                | "statictext"
         )
     }
 
@@ -205,12 +253,17 @@ impl AccessibilityTools {
                     },
                     "required": ["element_id"]
                 }
-            })
+            }),
         ]
     }
 
     /// Execute a tool by name
-    pub async fn execute_tool(&self, tool_name: &str, parameters: &Value, _app_handle: &AppHandle) -> Result<Value, String> {
+    pub async fn execute_tool(
+        &self,
+        tool_name: &str,
+        parameters: &Value,
+        _app_handle: &AppHandle,
+    ) -> Result<Value, String> {
         match tool_name {
             "accessibility_scan" => {
                 let elements = self.scan_frontmost_application()?;
@@ -220,11 +273,13 @@ impl AccessibilityTools {
                     "count": elements.len(),
                     "message": format!("Found {} clickable elements in frontmost application", elements.len())
                 }))
-            },
+            }
             "accessibility_click" => {
-                let element_id = parameters.get("element_id")
+                let element_id = parameters
+                    .get("element_id")
                     .and_then(|v| v.as_u64())
-                    .ok_or("Missing or invalid element_id parameter")? as u32;
+                    .ok_or("Missing or invalid element_id parameter")?
+                    as u32;
 
                 let success = self.click_element_by_id(element_id)?;
                 Ok(json!({
@@ -236,7 +291,7 @@ impl AccessibilityTools {
                         "Failed to click element"
                     }
                 }))
-            },
+            }
             _ => Err(format!("Unknown accessibility tool: {}", tool_name)),
         }
     }

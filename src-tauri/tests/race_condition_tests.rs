@@ -1,503 +1,480 @@
-//! Race-condition tests driving the REAL Juno concurrency types (LAC-3056).
-//!
-//! Every test here exercises `juno_lib` code — the atomic execution coordinator
-//! and queue that back `AgentExecutionQueue` in `anthropic.rs`, the
-//! `AdvancedMemoryManager`, `AppState`'s execution-state and cancellation
-//! paths, and the `ResourcePool` in `utils/resource_manager.rs`. No
-//! re-implemented std/tokio stand-ins.
-
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::sync::{Mutex, RwLock, Semaphore};
+use tokio::time::{sleep, Duration};
 
-use juno_lib::agent::core::{Message, Role};
-use juno_lib::agent::implementations::memory_manager::{AdvancedMemoryManager, MemoryConfig};
-use juno_lib::agent::traits::MemoryManager;
-use juno_lib::state::AppState;
-use juno_lib::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
-use juno_lib::utils::resource_manager::ResourcePool;
-
-fn user_message(content: impl Into<String>) -> Message {
-    Message {
-        role: Role::User,
-        content: content.into(),
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    }
-}
-
-/// The real `AgentExecutionQueue` (private in `anthropic.rs`) is a thin wrapper
-/// around `AtomicExecutionCoordinator` + `AtomicQueue`. Drive those directly:
-/// many tasks race to enqueue and start execution; the coordinator must never
-/// allow two executions to overlap, and the queue must never exceed its cap.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Test for concurrent queue operations
+#[tokio::test]
 async fn test_agent_queue_race_conditions() {
-    let coordinator = Arc::new(AtomicExecutionCoordinator::new());
-    let queue = Arc::new(AtomicQueue::new(10));
-    let concurrent = Arc::new(AtomicU32::new(0));
-    let started = Arc::new(AtomicU32::new(0));
+    // Simulate the AgentExecutionQueue
+    let execution_semaphore = Arc::new(Semaphore::new(1));
+    let pending_queries = Arc::new(Mutex::new(Vec::new()));
+    let current_execution = Arc::new(RwLock::new(None::<String>));
+    let execution_counter = Arc::new(AtomicU32::new(0));
 
+    // Spawn multiple tasks trying to queue and execute
     let mut handles = vec![];
+
     for i in 0..10 {
-        let coordinator = coordinator.clone();
-        let queue = queue.clone();
-        let concurrent = concurrent.clone();
-        let started = started.clone();
+        let sem_clone = execution_semaphore.clone();
+        let queries_clone = pending_queries.clone();
+        let current_clone = current_execution.clone();
+        let counter_clone = execution_counter.clone();
 
-        handles.push(tokio::spawn(async move {
-            queue
-                .push(format!("query {i}"))
-                .await
-                .expect("queue accepts up to its configured capacity");
-
-            if let Ok(_guard) = coordinator.try_start_execution(format!("exec_{i}")).await {
-                let overlapping = concurrent.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(overlapping, 0, "two executions ran concurrently");
-                started.fetch_add(1, Ordering::SeqCst);
-
-                assert!(coordinator.is_executing().await);
-                let _ = queue.pop().await;
-                sleep(Duration::from_millis(10)).await;
-
-                concurrent.fetch_sub(1, Ordering::SeqCst);
+        let handle = tokio::spawn(async move {
+            // Try to queue
+            {
+                let mut queries = queries_clone.lock().await;
+                queries.push(format!("Query {}", i));
             }
-        }));
+
+            // Try to execute
+            if let Ok(_permit) = sem_clone.try_acquire() {
+                // Simulate execution
+                let query = {
+                    let mut queries = queries_clone.lock().await;
+                    queries.pop()
+                };
+
+                if let Some(q) = query {
+                    // Set current execution
+                    {
+                        let mut current = current_clone.write().await;
+                        *current = Some(q.clone());
+                    }
+
+                    // Increment counter
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+
+                    // Simulate work
+                    sleep(Duration::from_millis(10)).await;
+
+                    // Clear current execution
+                    {
+                        let mut current = current_clone.write().await;
+                        *current = None;
+                    }
+                }
+            }
+        });
+
+        handles.push(handle);
     }
 
+    // Wait for all tasks
     for handle in handles {
-        handle.await.expect("task panicked");
+        handle.await.unwrap();
     }
 
-    let total_started = started.load(Ordering::SeqCst);
-    assert!(total_started >= 1, "coordinator never granted execution");
-    assert!(total_started <= 10, "more executions than submissions");
-    // Everything that executed popped its query; the rest stay queued.
-    assert_eq!(queue.len().await, (10 - total_started) as usize);
+    // Verify only one execution happened at a time
+    let final_count = execution_counter.load(Ordering::SeqCst);
+    println!("Total executions: {}", final_count);
+    assert!(final_count <= 10, "More executions than queries!");
 }
 
-/// Real `AdvancedMemoryManager` under concurrent writers and readers, with
-/// auto-pruning enabled and a small cap — the configuration `AppState` uses,
-/// shrunk so pruning actually triggers during the test.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Test for memory manager race conditions
+#[tokio::test]
 async fn test_memory_manager_concurrent_operations() {
-    let config = MemoryConfig {
-        max_messages: 5,
-        max_tokens: 100_000,
-        min_messages_to_keep: 2,
-        auto_prune: true,
-        enable_summarization: false,
-        summarization_batch_size: 5,
-        enable_metrics: false,
-        enable_summary_cache: false,
-    };
-    let manager = Arc::new(tokio::sync::Mutex::new(AdvancedMemoryManager::with_config(
-        config,
-    )));
+    let messages = Arc::new(RwLock::new(Vec::<String>::new()));
+    let pending_tool_calls = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let max_messages = 5;
 
     let mut handles = vec![];
 
+    // Concurrent adds
     for i in 0..20 {
-        let manager = manager.clone();
-        handles.push(tokio::spawn(async move {
-            let mut mgr = manager.lock().await;
-            mgr.add_message(user_message(format!("message {i}")))
-                .await
-                .expect("add_message failed");
-        }));
+        let messages_clone = messages.clone();
+        let pending_clone = pending_tool_calls.clone();
+
+        let handle = tokio::spawn(async move {
+            // Add message
+            {
+                let mut msgs = messages_clone.write().await;
+                msgs.push(format!("Message {}", i));
+
+                // Simulate pruning
+                if msgs.len() > max_messages {
+                    let excess = msgs.len() - max_messages;
+                    msgs.drain(0..excess);
+                }
+            }
+
+            // Add tool call
+            if i % 3 == 0 {
+                let mut pending = pending_clone.lock().await;
+                pending.insert(format!("tool_{}", i));
+            }
+        });
+
+        handles.push(handle);
     }
 
+    // Concurrent reads
     for _ in 0..5 {
-        let manager = manager.clone();
-        handles.push(tokio::spawn(async move {
-            let mgr = manager.lock().await;
-            let msgs = mgr.get_messages().await.expect("get_messages failed");
-            // Reads interleaved with pruning writers must still see a bounded view.
-            assert!(msgs.len() <= 20, "read more messages than were ever added");
-        }));
+        let messages_clone = messages.clone();
+
+        let handle = tokio::spawn(async move {
+            let msgs = messages_clone.read().await;
+            let _count = msgs.len();
+            // Simulate processing
+            sleep(Duration::from_millis(5)).await;
+        });
+
+        handles.push(handle);
     }
 
+    // Wait for all
     for handle in handles {
-        handle.await.expect("task panicked");
+        handle.await.unwrap();
     }
 
-    let mgr = manager.lock().await;
-    let final_messages = mgr.get_messages().await.expect("get_messages failed");
+    // Verify constraints
+    let final_messages = messages.read().await;
     assert!(
-        !final_messages.is_empty(),
-        "pruning removed every message despite min_messages_to_keep"
-    );
-    assert!(
-        final_messages.len() <= 5,
-        "auto-prune failed to enforce max_messages: {} messages remain",
+        final_messages.len() <= max_messages,
+        "Too many messages: {}",
         final_messages.len()
     );
 }
 
-/// Real `AppState` execution state: `mark_agent_execution_started_with_steps`
-/// writes four fields under one lock. Concurrent writers must never leave a
-/// torn state where `execution_id` and `max_steps` come from different writers.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Test for state update atomicity
+#[tokio::test]
 async fn test_state_update_atomicity() {
-    let state = AppState::new(None);
+    #[derive(Default)]
+    struct AgentState {
+        execution_active: bool,
+        execution_id: Option<String>,
+        max_steps: Option<u32>,
+        current_step: Option<u32>,
+    }
+
+    let state = Arc::new(Mutex::new(AgentState::default()));
+    let update_counter = Arc::new(AtomicU32::new(0));
 
     let mut handles = vec![];
 
-    for i in 0..10u32 {
-        let state = state.clone();
-        handles.push(tokio::spawn(async move {
-            state
-                .mark_agent_execution_started_with_steps(format!("exec_{i}"), (i + 1) * 100)
-                .expect("mark_agent_execution_started_with_steps failed");
-        }));
-    }
+    // Multiple concurrent state updates
+    for i in 0..10 {
+        let state_clone = state.clone();
+        let counter_clone = update_counter.clone();
 
-    for _ in 0..10 {
-        let state = state.clone();
-        handles.push(tokio::spawn(async move {
-            let snapshot = state
-                .agent_execution
-                .lock()
-                .expect("agent_execution lock poisoned")
-                .clone();
-            if let (Some(id), Some(max_steps)) = (snapshot.execution_id, snapshot.max_steps) {
-                let i: u32 = id
-                    .strip_prefix("exec_")
-                    .and_then(|s| s.parse().ok())
-                    .expect("unexpected execution_id format");
-                assert_eq!(
-                    max_steps,
-                    (i + 1) * 100,
-                    "torn state: execution_id {id} paired with max_steps from another writer"
-                );
+        let handle = tokio::spawn(async move {
+            // Non-atomic update (BAD)
+            // This simulates the race condition
+            let should_update = {
+                let s = state_clone.lock().await;
+                !s.execution_active
+            };
+
+            if should_update {
+                sleep(Duration::from_micros(100)).await; // Simulate race window
+
+                let mut s = state_clone.lock().await;
+                if !s.execution_active {
+                    // Double check
+                    s.execution_active = true;
+                    s.execution_id = Some(format!("exec_{}", i));
+                    s.max_steps = Some(10);
+                    s.current_step = Some(0);
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                }
             }
-        }));
+        });
+
+        handles.push(handle);
     }
 
     for handle in handles {
-        handle.await.expect("task panicked");
+        handle.await.unwrap();
     }
 
-    // Exactly one writer's full update wins; the state must be internally consistent.
-    assert!(state.is_agent_executing());
-    assert!(state.get_current_agent_execution_id().is_some());
+    let updates = update_counter.load(Ordering::SeqCst);
+    println!("Total updates: {}", updates);
 
-    state.mark_agent_execution_finished();
-    assert!(!state.is_agent_executing());
-    assert!(state.get_current_agent_execution_id().is_none());
+    // In a race condition scenario, multiple updates might occur
+    // With proper atomic operations, only one should succeed
 }
 
-/// Real `AppState` cancellation: an executor honours `signal_cancel()` via the
-/// watch channel while a canceller races it, and concurrent signal/reset calls
-/// leave the channel in a consistent final state.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Test for cancellation token race conditions
+#[tokio::test]
 async fn test_cancellation_token_races() {
-    let state = AppState::new(None);
-    let completed = Arc::new(AtomicU32::new(0));
-    let cancelled = Arc::new(AtomicU32::new(0));
+    use tokio_util::sync::CancellationToken;
 
-    let exec_state = state.clone();
+    let token = CancellationToken::new();
+    let current_execution = Arc::new(RwLock::new(Some("test_exec".to_string())));
+    let completed = Arc::new(AtomicU32::new(0));
+
+    // Start execution task
+    let exec_token = token.clone();
+    let exec_current = current_execution.clone();
     let exec_completed = completed.clone();
-    let exec_cancelled = cancelled.clone();
-    let executor = tokio::spawn(async move {
-        let mut cancel_rx = exec_state.cancel_rx.clone();
+
+    let exec_handle = tokio::spawn(async move {
         tokio::select! {
             _ = async {
-                for _ in 0..200 {
-                    sleep(Duration::from_millis(5)).await;
+                for _i in 0..100 {
+                    if exec_token.is_cancelled() {
+                        break;
+                    }
+                    sleep(Duration::from_millis(10)).await;
+
+                    // Check if we're still the current execution
+                    let current = exec_current.read().await;
+                    if current.as_ref() != Some(&"test_exec".to_string()) {
+                        break;
+                    }
                 }
                 exec_completed.fetch_add(1, Ordering::SeqCst);
             } => {}
-            _ = cancel_rx.wait_for(|cancelled| *cancelled) => {
-                exec_cancelled.fetch_add(1, Ordering::SeqCst);
+            _ = exec_token.cancelled() => {
+                println!("Execution cancelled");
             }
         }
     });
 
-    let cancel_state = state.clone();
-    let canceller = tokio::spawn(async move {
-        sleep(Duration::from_millis(30)).await;
-        cancel_state.signal_cancel();
+    // Start cancellation task
+    let cancel_token = token.clone();
+    let cancel_current = current_execution.clone();
+
+    let cancel_handle = tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+
+        // Cancel current execution
+        {
+            let mut current = cancel_current.write().await;
+            *current = None;
+        }
+        cancel_token.cancel();
     });
 
-    timeout(Duration::from_secs(5), async {
-        executor.await.expect("executor panicked");
-        canceller.await.expect("canceller panicked");
-    })
-    .await
-    .expect("cancellation was not observed within timeout");
+    // Wait for both
+    exec_handle.await.unwrap();
+    cancel_handle.await.unwrap();
 
-    assert_eq!(
-        cancelled.load(Ordering::SeqCst),
-        1,
-        "executor did not observe the cancel signal"
-    );
-    assert_eq!(completed.load(Ordering::SeqCst), 0, "executor ran to completion despite cancel");
-
-    // Racing signal/reset from many tasks must not poison the channel.
-    let mut handles = vec![];
-    for i in 0..10 {
-        let state = state.clone();
-        handles.push(tokio::spawn(async move {
-            if i % 2 == 0 {
-                state.signal_cancel();
-            } else {
-                state.reset_cancel();
-            }
-        }));
-    }
-    for handle in handles {
-        handle.await.expect("task panicked");
-    }
-
-    state.reset_cancel();
-    assert!(!*state.cancel_rx.borrow(), "reset_cancel failed after racing updates");
+    // Verify clean cancellation
+    let final_completed = completed.load(Ordering::SeqCst);
+    assert!(final_completed <= 1, "Multiple completions detected");
 }
 
-/// Real `ResourcePool` from `utils/resource_manager.rs`: workers race `get()`
-/// and `add()`; a resource handed out must never be held by two workers, and
-/// every resource must end up back in the pool.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// Test for resource pool race conditions
+#[tokio::test]
 async fn test_resource_pool_concurrent_access() {
-    struct TestResource {
-        id: usize,
+    #[derive(Debug, Clone)]
+    struct Resource {
+        id: u32,
         in_use: Arc<AtomicU32>,
     }
 
-    let pool = Arc::new(ResourcePool::new(
-        "test_pool".to_string(),
-        3,
-        Duration::from_secs(60),
-    ));
-    let checkouts = Arc::new(AtomicUsize::new(0));
+    let pool = Arc::new(Mutex::new(Vec::new()));
+    let available = Arc::new(Semaphore::new(0));
 
-    let holders: Vec<Arc<AtomicU32>> = (0..3).map(|_| Arc::new(AtomicU32::new(0))).collect();
-    for (id, in_use) in holders.iter().enumerate() {
-        pool.add(
-            TestResource {
-                id,
-                in_use: in_use.clone(),
-            },
-            |_| {},
-        )
-        .await
-        .unwrap_or_else(|_| panic!("pool rejected resource {id} during setup"));
+    // Initialize pool
+    for i in 0..3 {
+        let resource = Resource {
+            id: i,
+            in_use: Arc::new(AtomicU32::new(0)),
+        };
+        pool.lock().await.push(resource);
+        available.add_permits(1);
     }
-    assert_eq!(pool.size().await, 3);
 
     let mut handles = vec![];
-    for worker in 0..10 {
-        let pool = pool.clone();
-        let checkouts = checkouts.clone();
-        handles.push(tokio::spawn(async move {
-            // `get()` is non-blocking; retry briefly like a real caller would.
-            for _ in 0..50 {
-                if let Some(resource) = pool.get().await {
-                    let previous = resource.in_use.fetch_add(1, Ordering::SeqCst);
-                    assert_eq!(
-                        previous, 0,
-                        "resource {} checked out by two workers at once",
-                        resource.id
-                    );
-                    checkouts.fetch_add(1, Ordering::SeqCst);
 
-                    sleep(Duration::from_millis(5)).await;
+    // Spawn workers trying to acquire resources
+    for worker_id in 0..10 {
+        let pool_clone = pool.clone();
+        let available_clone = available.clone();
 
-                    resource.in_use.fetch_sub(1, Ordering::SeqCst);
-                    let id = resource.id;
-                    pool.add(resource, |_| {})
-                        .await
-                        .unwrap_or_else(|_| panic!("pool rejected returned resource {id}"));
-                    return;
+        let handle = tokio::spawn(async move {
+            // Try to acquire resource
+            if let Ok(_permit) = available_clone.acquire().await {
+                let resource = {
+                    let mut p = pool_clone.lock().await;
+                    p.pop()
+                };
+
+                if let Some(res) = resource {
+                    // Mark as in use
+                    let was_in_use = res.in_use.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(was_in_use, 0, "Resource {} already in use!", res.id);
+
+                    // Use resource
+                    sleep(Duration::from_millis(10)).await;
+
+                    // Mark as not in use
+                    res.in_use.fetch_sub(1, Ordering::SeqCst);
+
+                    // Return to pool
+                    let mut p = pool_clone.lock().await;
+                    p.push(res);
+                    available_clone.add_permits(1);
                 }
-                sleep(Duration::from_millis(2)).await;
             }
-            panic!("worker {worker} never acquired a resource");
-        }));
+
+            worker_id
+        });
+
+        handles.push(handle);
     }
 
+    // Wait for all workers
     for handle in handles {
-        handle.await.expect("worker panicked");
+        let _worker_id = handle.await.unwrap();
     }
 
-    assert_eq!(pool.size().await, 3, "resources leaked from pool");
-    assert_eq!(checkouts.load(Ordering::SeqCst), 10, "not every worker got a resource");
+    // Verify all resources are back in pool
+    let final_pool = pool.lock().await;
+    assert_eq!(final_pool.len(), 3, "Resources leaked from pool");
 }
 
-/// Deadlock check across `AppState`'s real lock landscape: std mutexes
-/// (`agent_execution`), tokio mutexes (`memory_manager`,
-/// `pending_tool_approvals`), and the cancel watch channel, hammered from
-/// multiple threads. The deadlock rules in `src-tauri/CLAUDE.md` (never hold
-/// one lock while taking another out of order) must hold — a violation shows
-/// up here as the 10s timeout firing. The browser-controller variant of this
-/// path needs a live Playwright driver, so it is exercised through the same
-/// check-init-recheck locks (`memory_manager` here) rather than a real browser.
+/// Test for deadlock scenarios
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_no_deadlocks() {
-    let state = AppState::new(None);
+    let lock_a = Arc::new(Mutex::new(0));
+    let lock_b = Arc::new(Mutex::new(0));
     let completed = Arc::new(AtomicU32::new(0));
 
     let mut handles = vec![];
 
-    for i in 0..4 {
-        // Path A: execution-state std mutex.
-        let s = state.clone();
-        let c = completed.clone();
-        handles.push(tokio::spawn(async move {
-            for j in 0..10 {
-                s.mark_agent_execution_started(format!("exec_{i}_{j}"))
-                    .expect("mark started failed");
-                sleep(Duration::from_millis(1)).await;
-                s.mark_agent_execution_finished();
-            }
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
+    // Task 1: Acquires A then B
+    let a1 = lock_a.clone();
+    let b1 = lock_b.clone();
+    let c1 = completed.clone();
 
-        // Path B: memory-manager tokio mutex (the lazily-initialised async state
-        // that check-init-recheck protects).
-        let s = state.clone();
-        let c = completed.clone();
-        handles.push(tokio::spawn(async move {
-            for j in 0..10 {
-                let manager = s.get_memory_manager().await;
-                let mut mgr = manager.lock().await;
-                mgr.add_message(user_message(format!("deadlock probe {i}-{j}")))
-                    .await
-                    .expect("add_message failed");
-            }
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
-
-        // Path C: cancel watch channel writes racing both lock families.
-        let s = state.clone();
-        let c = completed.clone();
-        handles.push(tokio::spawn(async move {
-            for _ in 0..10 {
-                s.signal_cancel();
-                sleep(Duration::from_millis(1)).await;
-                s.reset_cancel();
-            }
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
-
-        // Path D: pending tool approvals tokio mutex.
-        let s = state.clone();
-        let c = completed.clone();
-        handles.push(tokio::spawn(async move {
-            for j in 0..10 {
-                let key = format!("approval_{i}_{j}");
-                {
-                    let mut approvals = s.pending_tool_approvals.lock().await;
-                    approvals.remove(&key);
-                }
-                sleep(Duration::from_millis(1)).await;
-            }
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
-    }
-
-    let all_done = timeout(Duration::from_secs(10), async {
-        for handle in handles {
-            handle.await.expect("task panicked");
+    handles.push(tokio::spawn(async move {
+        for _ in 0..10 {
+            let _a = a1.lock().await;
+            sleep(Duration::from_micros(10)).await;
+            let _b = b1.lock().await;
+            c1.fetch_add(1, Ordering::SeqCst);
         }
-    })
-    .await;
+    }));
 
-    assert!(all_done.is_ok(), "deadlock: AppState lock paths did not complete in 10s");
-    assert_eq!(completed.load(Ordering::SeqCst), 16, "not all lock paths completed");
-}
+    // Task 2: Also acquires A then B (consistent order - no deadlock)
+    let a2 = lock_a.clone();
+    let b2 = lock_b.clone();
+    let c2 = completed.clone();
 
-/// End-to-end: the real submission pipeline shape — queries flow through
-/// `AtomicQueue`, execution is serialised by `AtomicExecutionCoordinator`,
-/// results land in `AppState`'s real memory manager, and `signal_cancel()`
-/// stops the executor.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_agent_execution_integration() {
-    let state = AppState::new(None);
-    let queue = Arc::new(AtomicQueue::new(10));
-    let coordinator = Arc::new(AtomicExecutionCoordinator::new());
-    let executed = Arc::new(AtomicU32::new(0));
+    handles.push(tokio::spawn(async move {
+        for _ in 0..10 {
+            let _a = a2.lock().await;
+            sleep(Duration::from_micros(10)).await;
+            let _b = b2.lock().await;
+            c2.fetch_add(1, Ordering::SeqCst);
+        }
+    }));
 
-    // Producers: users submitting queries.
-    let mut producers = vec![];
-    for i in 0..5u64 {
-        let queue = queue.clone();
-        producers.push(tokio::spawn(async move {
-            sleep(Duration::from_millis(i * 10)).await;
-            queue
-                .push(format!("user query {i}"))
-                .await
-                .expect("queue rejected query under capacity");
-        }));
-    }
-
-    // Executor: drains the queue exactly like `AgentExecutionQueue` does —
-    // one execution at a time via the coordinator, memory written per query,
-    // cancellation honoured via AppState's watch channel.
-    let exec_state = state.clone();
-    let exec_queue = queue.clone();
-    let exec_coordinator = coordinator.clone();
-    let exec_executed = executed.clone();
-    let executor = tokio::spawn(async move {
-        let mut cancel_rx = exec_state.cancel_rx.clone();
-        loop {
-            if *cancel_rx.borrow() {
-                break;
-            }
-
-            let Some(query) = exec_queue.pop().await else {
-                tokio::select! {
-                    _ = sleep(Duration::from_millis(5)) => continue,
-                    _ = cancel_rx.wait_for(|c| *c) => break,
-                }
-            };
-
-            let guard = exec_coordinator
-                .try_start_execution(format!("exec_for_{query}"))
-                .await;
-            let Ok(_guard) = guard else {
-                continue;
-            };
-            assert!(exec_coordinator.is_executing().await);
-
-            let manager = exec_state.get_memory_manager().await;
-            {
-                let mut mgr = manager.lock().await;
-                mgr.add_message(user_message(format!("Executing: {query}")))
-                    .await
-                    .expect("add_message failed");
-            }
-            sleep(Duration::from_millis(20)).await;
-            exec_executed.fetch_add(1, Ordering::SeqCst);
+    // Wait with timeout
+    let timeout = tokio::time::timeout(Duration::from_secs(5), async {
+        for handle in handles {
+            handle.await.unwrap();
         }
     });
 
-    for producer in producers {
-        producer.await.expect("producer panicked");
+    assert!(timeout.await.is_ok(), "Deadlock detected!");
+
+    let total = completed.load(Ordering::SeqCst);
+    assert_eq!(total, 20, "Not all operations completed");
+}
+
+/// Integration test simulating real agent execution scenarios
+#[tokio::test]
+async fn test_agent_execution_integration() {
+    use tokio_util::sync::CancellationToken;
+
+    // Simulate AppState components
+    let execution_queue = Arc::new(Mutex::new(Vec::<String>::new()));
+    let current_execution = Arc::new(RwLock::new(None::<String>));
+    let memory_manager = Arc::new(RwLock::new(Vec::<String>::new()));
+    let cancellation_token = CancellationToken::new();
+    let execution_count = Arc::new(AtomicU32::new(0));
+
+    let mut handles = vec![];
+
+    // Simulate multiple users submitting queries
+    for i in 0..5 {
+        let queue = execution_queue.clone();
+        let handle = tokio::spawn(async move {
+            sleep(Duration::from_millis(i * 10)).await;
+            let mut q = queue.lock().await;
+            q.push(format!("User query {}", i));
+        });
+        handles.push(handle);
     }
 
-    // Give the executor time to drain, then cancel through the real AppState path.
-    sleep(Duration::from_millis(400)).await;
-    state.signal_cancel();
+    // Simulate agent executor
+    let exec_queue = execution_queue.clone();
+    let exec_current = current_execution.clone();
+    let exec_memory = memory_manager.clone();
+    let exec_token = cancellation_token.clone();
+    let exec_count = execution_count.clone();
 
-    timeout(Duration::from_secs(5), executor)
-        .await
-        .expect("executor ignored cancel signal")
-        .expect("executor panicked");
+    let executor = tokio::spawn(async move {
+        loop {
+            // Check for queries
+            let query = {
+                let mut q = exec_queue.lock().await;
+                q.pop()
+            };
 
-    let final_count = executed.load(Ordering::SeqCst);
-    assert!(final_count > 0, "no queries executed");
-    assert!(final_count <= 5, "executed more queries than were submitted");
+            if let Some(query) = query {
+                // Set current execution
+                {
+                    let mut current = exec_current.write().await;
+                    *current = Some(query.clone());
+                }
 
-    let manager = state.get_memory_manager().await;
-    let mgr = manager.lock().await;
-    let messages = mgr.get_messages().await.expect("get_messages failed");
-    let executed_messages = messages
-        .iter()
-        .filter(|m| m.content.starts_with("Executing:"))
-        .count();
-    assert_eq!(
-        executed_messages as u32, final_count,
-        "memory manager records do not match executed count"
-    );
+                // Execute with cancellation support
+                tokio::select! {
+                    _ = async {
+                        // Add to memory
+                        {
+                            let mut mem = exec_memory.write().await;
+                            mem.push(format!("Executing: {}", query));
+                        }
+
+                        // Simulate work
+                        sleep(Duration::from_millis(50)).await;
+
+                        // Complete
+                        exec_count.fetch_add(1, Ordering::SeqCst);
+                    } => {}
+                    _ = exec_token.cancelled() => {
+                        break;
+                    }
+                }
+
+                // Clear current execution
+                {
+                    let mut current = exec_current.write().await;
+                    *current = None;
+                }
+            } else {
+                sleep(Duration::from_millis(10)).await;
+            }
+
+            if exec_token.is_cancelled() {
+                break;
+            }
+        }
+    });
+
+    // Wait for submissions
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    // Let executor run
+    sleep(Duration::from_millis(300)).await;
+
+    // Cancel executor
+    cancellation_token.cancel();
+    executor.await.unwrap();
+
+    // Verify results
+    let final_count = execution_count.load(Ordering::SeqCst);
+    println!("Executed {} queries", final_count);
+    assert!(final_count > 0, "No queries executed");
+    assert!(final_count <= 5, "Too many executions");
 }

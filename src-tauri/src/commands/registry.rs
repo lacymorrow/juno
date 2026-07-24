@@ -13,12 +13,10 @@ macro_rules! generate_invoke_handler {
             list_apps,
             check_server_status,
             test_system_context,
-
             // === AI AGENT COMMANDS ===
             submit_query,
             submit_orchestrated_query,
             computer,
-
             // === ANTHROPIC COMPUTER USE TOOLS (OFFICIAL API) ===
             // All mouse, keyboard, and screen interaction now handled by:
             // - computer tool (all mouse/keyboard/screen operations)
@@ -34,7 +32,6 @@ macro_rules! generate_invoke_handler {
             get_active_tasks,
             get_agent_capabilities,
             cancel_task,
-
             // === MCP INTEGRATION COMMANDS ===
             get_mcp_tools,
             add_mcp_server,
@@ -53,12 +50,10 @@ macro_rules! generate_invoke_handler {
             restart_mcp_server_with_diagnostics,
             troubleshoot_mcp_issues,
             apply_mcp_quick_fixes,
-
             // === WORKFLOW ORCHESTRATION ===
             get_workflow_templates,
             execute_workflow_template,
             execute_mcp_task,
-
             // === MEMORY MANAGEMENT ===
             get_memory_status,
             clear_conversation_memory,
@@ -80,13 +75,11 @@ macro_rules! generate_invoke_handler {
             get_advanced_memory_metrics,
             force_memory_prune,
             get_tiered_memory_context,
-
             // === PRODUCTION SYSTEM COMMANDS ===
             // Core screenshot and system operations
             capture_screenshot_command,
             capture_window_screenshot_command,
             capture_focused_window_screenshot_command,
-
             // Production mouse operations (minimal set for system functions)
             get_cursor_position,
             get_big_cursor_enabled,
@@ -98,14 +91,12 @@ macro_rules! generate_invoke_handler {
             get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
-
             // Production keyboard operations (minimal set for system functions)
             type_text,
             press_key,
             hold_key,
             release_key,
             global_type_text,
-
             // Production window operations
             scroll_window,
             get_window_list,
@@ -114,29 +105,22 @@ macro_rules! generate_invoke_handler {
             resize_window,
             move_window,
             close_window,
-
             // Production shell operations
             bash_command,
-
             // Element and system operations
             get_focused_element_info,
             click_focused_element,
             find_element_by_selector,
             click_element_by_selector,
             get_selected_text,
-
             // Application management
             open_application,
             open_url,
             get_app_windows,
-
             // System utilities
             wait,
             get_clipboard,
             set_clipboard,
-
-
-
             // === SYSTEM MANAGEMENT ===
             // Permissions and security
             check_accessibility_permission,
@@ -144,13 +128,11 @@ macro_rules! generate_invoke_handler {
             request_accessibility_permission,
             request_screen_recording_permission,
             get_permission_status,
-
             // Error recovery and debugging
             get_error_recovery_status,
             clear_error_recovery_history,
             get_debug_info,
             test_debug_tools,
-
             // Voice and transcription
             transcribe_audio,
             test_voice_recognition,
@@ -158,11 +140,9 @@ macro_rules! generate_invoke_handler {
             set_voice_transcription_enabled,
             get_voice_transcription_settings,
             set_voice_transcription_settings,
-
             // System monitoring
             get_system_stats,
             get_hardware_info,
-
             // === CONFIGURATION COMMANDS ===
             // Settings management
             get_settings,
@@ -170,14 +150,12 @@ macro_rules! generate_invoke_handler {
             reset_settings,
             export_settings,
             import_settings,
-
             // Provider management
             get_providers,
             set_provider,
             get_provider_models,
             set_provider_model,
             test_provider_connection,
-
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
@@ -189,13 +167,11 @@ macro_rules! generate_invoke_handler {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
-
             // Dictation Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
             force_reset_dictation_transcription,
             get_dictation_transcription_status,
-
             // Legacy floating bar commands removed - use new UI API instead
             // UI interactions handled through ui_handle_interaction
 
@@ -203,7 +179,6 @@ macro_rules! generate_invoke_handler {
             list_ai_providers,
             set_ai_provider,
             get_agent_execution_progress,
-
             // Always Listening Commands
             get_always_listening_status,
             set_always_listening_status,
@@ -212,7 +187,6 @@ macro_rules! generate_invoke_handler {
             set_always_listening_sensitivity,
             get_always_listening_wake_words,
             set_always_listening_wake_words,
-
             // Notification Commands
             get_notification_settings,
             set_notification_type,
@@ -232,11 +206,7 @@ macro_rules! generate_invoke_handler {
 /// Command categories for documentation and organization
 pub mod categories {
     /// Core system functionality
-    pub const CORE: &[&str] = &[
-        "list_apps",
-        "check_server_status",
-        "test_system_context"
-    ];
+    pub const CORE: &[&str] = &["list_apps", "check_server_status", "test_system_context"];
 
     /// AI agent commands
     pub const AGENT: &[&str] = &[
@@ -249,7 +219,7 @@ pub mod categories {
         "get_task_history",
         "get_active_tasks",
         "get_agent_capabilities",
-        "cancel_task"
+        "cancel_task",
     ];
 
     /// MCP integration commands (handled by commands/mcp.rs)
@@ -277,7 +247,7 @@ pub mod categories {
     pub const WORKFLOW: &[&str] = &[
         "get_workflow_templates",
         "execute_workflow_template",
-        "execute_mcp_task"
+        "execute_mcp_task",
     ];
 
     /// Memory management commands (handled by commands/memory.rs)
@@ -301,7 +271,7 @@ pub mod categories {
         "update_memory_config",
         "get_advanced_memory_metrics",
         "force_memory_prune",
-        "get_tiered_memory_context"
+        "get_tiered_memory_context",
     ];
 
     /// Mouse interaction commands (minimal set - most operations use computer tool)
@@ -318,15 +288,13 @@ pub mod categories {
         "set_companion_mode",
     ];
 
-
-
     /// Production keyboard commands (minimal set - most operations use computer tool)
     pub const KEYBOARD: &[&str] = &[
         "type_text",
         "press_key",
         "hold_key",
         "release_key",
-        "global_type_text"
+        "global_type_text",
     ];
 
     /// Window management commands (minimal set - scrolling uses computer tool)
@@ -337,7 +305,7 @@ pub mod categories {
         "scroll_window",
         "resize_window",
         "move_window",
-        "close_window"
+        "close_window",
     ];
 
     /// All command categories

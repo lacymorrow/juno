@@ -2,7 +2,7 @@
 //! Replaces osascript calls that require admin privileges with direct native APIs
 
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 #[cfg(target_os = "macos")]
 use std::process::Command;
@@ -81,7 +81,10 @@ impl NativePermissionChecker {
                     Ok(false)
                 }
                 Err(e) => {
-                    warn!("TCC permission request failed: {} — opening System Settings", e);
+                    warn!(
+                        "TCC permission request failed: {} — opening System Settings",
+                        e
+                    );
                     let _ = Command::new("open")
                         .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
                         .status();
@@ -195,7 +198,10 @@ impl NativePermissionChecker {
 
             // Use native API - no Desktop instance needed, instant check
             let granted = check_screen_recording_permission();
-            debug!("Screen recording permission status (native API): {}", granted);
+            debug!(
+                "Screen recording permission status (native API): {}",
+                granted
+            );
             Ok(granted)
         }
 
@@ -225,7 +231,9 @@ impl NativePermissionChecker {
             // If not granted, open System Settings for manual grant
             info!("Opening screen recording privacy settings for manual grant");
             match Command::new("open")
-                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+                .args([
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                ])
                 .status()
             {
                 Ok(status) => {
@@ -257,12 +265,12 @@ impl NativePermissionChecker {
             // The most reliable way to check input monitoring permission is to try
             // using the tauri-plugin-global-shortcut which requires these permissions.
             // If we can successfully test registering a global shortcut, we have permission.
-            
+
             // Alternative approach: Try to check if IOHIDRequestTypeListenEvent is accessible
             // This uses IOKit to check the actual permission state
-            
+
             use std::process::Command;
-            
+
             // First, try using sqlite3 to check TCC database (works without admin on user's own TCC)
             match Command::new("sqlite3")
                 .arg(format!("{}/Library/Application Support/com.apple.TCC/TCC.db", std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string())))
@@ -286,7 +294,7 @@ impl NativePermissionChecker {
                     // sqlite3 not available or failed, try alternative method
                 }
             }
-            
+
             // Alternative: Use a non-destructive System Events query to test input monitoring.
             // IMPORTANT: Do NOT use `key code` — that literally types a character into the
             // focused application.  Instead, ask System Events for the process list, which
@@ -301,7 +309,7 @@ impl NativePermissionChecker {
                          return \"true\"
                      on error
                          return \"false\"
-                     end try"
+                     end try",
                 ])
                 .output()
             {
@@ -309,7 +317,10 @@ impl NativePermissionChecker {
                     if output.status.success() {
                         let result = String::from_utf8_lossy(&output.stdout);
                         let has_permission = result.trim() == "true";
-                        debug!("Input monitoring permission status (AppleScript test): {}", has_permission);
+                        debug!(
+                            "Input monitoring permission status (AppleScript test): {}",
+                            has_permission
+                        );
                         return Ok(has_permission);
                     }
                 }
@@ -317,10 +328,12 @@ impl NativePermissionChecker {
                     // AppleScript test failed
                 }
             }
-            
+
             // If all tests fail or are inconclusive, we assume permission is not granted
             // but we don't fail - we just report false to avoid blocking the app
-            debug!("Unable to definitively check input monitoring permission, assuming not granted");
+            debug!(
+                "Unable to definitively check input monitoring permission, assuming not granted"
+            );
             Ok(false)
         }
 
@@ -338,7 +351,9 @@ impl NativePermissionChecker {
 
             // Open input monitoring settings to let user grant permission manually
             match Command::new("open")
-                .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+                .args([
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+                ])
                 .status()
             {
                 Ok(status) => {
@@ -467,7 +482,7 @@ mod tests {
             "granted desc",
             "denied desc",
             "granted instructions",
-            "denied instructions"
+            "denied instructions",
         );
 
         assert_eq!(status.permission_type, "test");

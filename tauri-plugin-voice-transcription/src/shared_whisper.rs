@@ -1,8 +1,8 @@
-use whisper_rs::{WhisperContext, WhisperContextParameters};
-use std::sync::{Arc, RwLock};
-use std::path::Path;
 use crate::error::{Error, Result};
-use tracing::{info, error, warn, debug};
+use std::path::Path;
+use std::sync::{Arc, RwLock};
+use tracing::{debug, error, info, warn};
+use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 /// Global shared Whisper context — uses RwLock so the model can be swapped at runtime
 static SHARED_WHISPER_CONTEXT: RwLock<Option<Arc<WhisperContext>>> = RwLock::new(None);
@@ -25,8 +25,8 @@ impl SharedWhisperManager {
         }
 
         let context_params = WhisperContextParameters::default();
-        let whisper_context = WhisperContext::new_with_params(model_path, context_params)
-            .map_err(|e| {
+        let whisper_context =
+            WhisperContext::new_with_params(model_path, context_params).map_err(|e| {
                 error!("[SharedWhisper] Failed to create WhisperContext: {:?}", e);
                 Error::Whisper(format!("Failed to create WhisperContext: {:?}", e))
             })?;
@@ -36,14 +36,20 @@ impl SharedWhisperManager {
 
     /// Initialize the shared Whisper context (returns existing if already set)
     pub fn initialize(model_path: &str) -> Result<Arc<WhisperContext>> {
-        info!("[SharedWhisper] Initializing shared Whisper context with model: {}", model_path);
+        info!(
+            "[SharedWhisper] Initializing shared Whisper context with model: {}",
+            model_path
+        );
 
         // Fast path: read lock to check if already initialized
         {
-            let guard = SHARED_WHISPER_CONTEXT.read()
+            let guard = SHARED_WHISPER_CONTEXT
+                .read()
                 .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
             if let Some(existing) = guard.as_ref() {
-                debug!("[SharedWhisper] Shared context already exists, returning existing instance");
+                debug!(
+                    "[SharedWhisper] Shared context already exists, returning existing instance"
+                );
                 return Ok(existing.clone());
             }
         }
@@ -53,7 +59,8 @@ impl SharedWhisperManager {
         debug!("[SharedWhisper] WhisperContext created successfully");
 
         // Write lock to set the global context
-        let mut guard = SHARED_WHISPER_CONTEXT.write()
+        let mut guard = SHARED_WHISPER_CONTEXT
+            .write()
             .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
 
         // Double-check: another thread may have initialized while we were loading
@@ -69,14 +76,18 @@ impl SharedWhisperManager {
 
     /// Reinitialize with a new model path — replaces the existing context
     pub fn reinitialize(model_path: &str) -> Result<Arc<WhisperContext>> {
-        info!("[SharedWhisper] Reinitializing shared Whisper context with model: {}", model_path);
+        info!(
+            "[SharedWhisper] Reinitializing shared Whisper context with model: {}",
+            model_path
+        );
 
         // Create the new context (expensive, done without holding the lock)
         let arc_context = Self::create_context(model_path)?;
         debug!("[SharedWhisper] New WhisperContext created successfully");
 
         // Write lock to replace the global context
-        let mut guard = SHARED_WHISPER_CONTEXT.write()
+        let mut guard = SHARED_WHISPER_CONTEXT
+            .write()
             .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
 
         *guard = Some(arc_context.clone());
@@ -86,21 +97,33 @@ impl SharedWhisperManager {
 
     /// Get the shared Whisper context (must be initialized first)
     pub fn get() -> Result<Arc<WhisperContext>> {
-        let guard = SHARED_WHISPER_CONTEXT.read()
+        let guard = SHARED_WHISPER_CONTEXT
+            .read()
             .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
-        guard.as_ref().cloned()
-            .ok_or_else(|| {
-                error!("[SharedWhisper] Shared Whisper context not initialized - call initialize() first");
-                Error::Whisper("Shared Whisper context not initialized. Call initialize() first.".to_string())
-            })
+        guard.as_ref().cloned().ok_or_else(|| {
+            error!(
+                "[SharedWhisper] Shared Whisper context not initialized - call initialize() first"
+            );
+            Error::Whisper(
+                "Shared Whisper context not initialized. Call initialize() first.".to_string(),
+            )
+        })
     }
 
     /// Check if the shared context is initialized
     pub fn is_initialized() -> bool {
-        let initialized = SHARED_WHISPER_CONTEXT.read()
+        let initialized = SHARED_WHISPER_CONTEXT
+            .read()
             .map(|g| g.is_some())
             .unwrap_or(false);
-        debug!("[SharedWhisper] Initialization status: {}", if initialized { "Initialized" } else { "Not initialized" });
+        debug!(
+            "[SharedWhisper] Initialization status: {}",
+            if initialized {
+                "Initialized"
+            } else {
+                "Not initialized"
+            }
+        );
         initialized
     }
 

@@ -1,8 +1,8 @@
 use crate::errors::AutomationError;
 use crate::selector::Selector;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use serde::Serialize;
 
 use super::{ClickResult, Locator};
 

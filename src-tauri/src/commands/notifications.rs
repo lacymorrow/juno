@@ -1,15 +1,15 @@
+use crate::constants::events;
 use crate::state::AppState;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
-use log::{error, info};
-use crate::constants::events;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
     pub notification_type: String, // "system", "toast", "both", or "disabled"
     pub sound_enabled: bool,
-    pub duration: u32, // Duration in milliseconds for toast notifications
+    pub duration: u32,    // Duration in milliseconds for toast notifications
     pub position: String, // Position for toast notifications
     pub show_icons: bool,
     pub persist_important: bool,
@@ -36,12 +36,24 @@ pub struct SystemNotificationPermission {
 pub async fn get_notification_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<NotificationSettings, String> {
-    let notification_type = state.get_notification_type().map_err(|e| format!("Failed to get notification type: {}", e))?;
-    let sound_enabled = state.get_notification_sound_enabled().map_err(|e| format!("Failed to get sound enabled: {}", e))?;
-    let duration = state.get_notification_duration().map_err(|e| format!("Failed to get duration: {}", e))?;
-    let position = state.get_notification_position().map_err(|e| format!("Failed to get position: {}", e))?;
-    let show_icons = state.get_notification_show_icons().map_err(|e| format!("Failed to get show icons: {}", e))?;
-    let persist_important = state.get_notification_persist_important().map_err(|e| format!("Failed to get persist important: {}", e))?;
+    let notification_type = state
+        .get_notification_type()
+        .map_err(|e| format!("Failed to get notification type: {}", e))?;
+    let sound_enabled = state
+        .get_notification_sound_enabled()
+        .map_err(|e| format!("Failed to get sound enabled: {}", e))?;
+    let duration = state
+        .get_notification_duration()
+        .map_err(|e| format!("Failed to get duration: {}", e))?;
+    let position = state
+        .get_notification_position()
+        .map_err(|e| format!("Failed to get position: {}", e))?;
+    let show_icons = state
+        .get_notification_show_icons()
+        .map_err(|e| format!("Failed to get show icons: {}", e))?;
+    let persist_important = state
+        .get_notification_persist_important()
+        .map_err(|e| format!("Failed to get persist important: {}", e))?;
 
     Ok(NotificationSettings {
         notification_type,
@@ -59,7 +71,9 @@ pub async fn set_notification_type(
     state: tauri::State<'_, AppState>,
     notification_type: String,
 ) -> Result<(), String> {
-    state.set_notification_type(notification_type).map_err(|e| format!("Failed to set notification type: {}", e))?;
+    state
+        .set_notification_type(notification_type)
+        .map_err(|e| format!("Failed to set notification type: {}", e))?;
     Ok(())
 }
 
@@ -69,7 +83,9 @@ pub async fn set_notification_sound_enabled(
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    state.set_notification_sound_enabled(enabled).map_err(|e| format!("Failed to set sound enabled: {}", e))?;
+    state
+        .set_notification_sound_enabled(enabled)
+        .map_err(|e| format!("Failed to set sound enabled: {}", e))?;
     Ok(())
 }
 
@@ -79,7 +95,9 @@ pub async fn set_notification_duration(
     state: tauri::State<'_, AppState>,
     duration: u32,
 ) -> Result<(), String> {
-    state.set_notification_duration(duration).map_err(|e| format!("Failed to set duration: {}", e))?;
+    state
+        .set_notification_duration(duration)
+        .map_err(|e| format!("Failed to set duration: {}", e))?;
     Ok(())
 }
 
@@ -89,7 +107,9 @@ pub async fn set_notification_position(
     state: tauri::State<'_, AppState>,
     position: String,
 ) -> Result<(), String> {
-    state.set_notification_position(position).map_err(|e| format!("Failed to set position: {}", e))?;
+    state
+        .set_notification_position(position)
+        .map_err(|e| format!("Failed to set position: {}", e))?;
     Ok(())
 }
 
@@ -99,7 +119,9 @@ pub async fn set_notification_show_icons(
     state: tauri::State<'_, AppState>,
     show_icons: bool,
 ) -> Result<(), String> {
-    state.set_notification_show_icons(show_icons).map_err(|e| format!("Failed to set show icons: {}", e))?;
+    state
+        .set_notification_show_icons(show_icons)
+        .map_err(|e| format!("Failed to set show icons: {}", e))?;
     Ok(())
 }
 
@@ -109,7 +131,9 @@ pub async fn set_notification_persist_important(
     state: tauri::State<'_, AppState>,
     persist_important: bool,
 ) -> Result<(), String> {
-    state.set_notification_persist_important(persist_important).map_err(|e| format!("Failed to set persist important: {}", e))?;
+    state
+        .set_notification_persist_important(persist_important)
+        .map_err(|e| format!("Failed to set persist important: {}", e))?;
     Ok(())
 }
 
@@ -133,7 +157,7 @@ pub async fn check_notification_permission(
                 denied,
                 default,
             })
-        },
+        }
         Err(e) => {
             error!("Failed to check notification permission: {}", e);
             Err(format!("Failed to check notification permission: {}", e))
@@ -160,7 +184,7 @@ pub async fn request_notification_permission(
                 denied,
                 default,
             })
-        },
+        }
         Err(e) => {
             error!("Failed to request notification permission: {}", e);
             Err(format!("Failed to request notification permission: {}", e))
@@ -187,7 +211,8 @@ pub async fn send_notification(
         let permission = check_notification_permission(app.clone()).await?;
 
         if permission.granted {
-            let notification_result = app.notification()
+            let notification_result = app
+                .notification()
                 .builder()
                 .title(&data.title)
                 .body(&data.message)
@@ -203,7 +228,8 @@ pub async fn send_notification(
 
     // Send toast notification if enabled (emitted to frontend)
     if settings.notification_type == "toast" || settings.notification_type == "both" {
-        app.emit(events::notifications::TOAST, &data).map_err(|e| format!("Failed to emit toast notification: {}", e))?;
+        app.emit(events::notifications::TOAST, &data)
+            .map_err(|e| format!("Failed to emit toast notification: {}", e))?;
         info!("Toast notification emitted successfully");
     }
 

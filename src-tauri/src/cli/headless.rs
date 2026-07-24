@@ -3,17 +3,17 @@
 //! Provides headless execution capabilities for the Juno AI agent,
 //! allowing CLI-driven operations without requiring a frontend UI.
 
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
-use tokio::time::timeout;
-use tracing::info;
-use tauri::{AppHandle, Manager, Listener, EventId};
-use serde_json::{json, Value};
 use crate::agent::providers::factory::BrainFactory;
 use crate::agent::providers::types::Provider;
 use crate::settings::manager::SettingsManager;
+use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, EventId, Listener, Manager};
+use tokio::sync::oneshot;
+use tokio::time::timeout;
+use tracing::info;
 
 use crate::cli::{Cli, OutputFormat};
 use crate::constants::cli;
@@ -30,8 +30,6 @@ pub struct HeadlessRuntime {
     verbosity: u8,
     timeout_duration: Duration,
 }
-
-
 
 /// Result of a headless operation
 #[derive(Debug, Clone)]
@@ -66,7 +64,10 @@ impl HeadlessRuntime {
         let start_time = Instant::now();
 
         if self.verbosity >= 2 {
-            info!("Starting headless execution with timeout: {:?}", self.timeout_duration);
+            info!(
+                "Starting headless execution with timeout: {:?}",
+                self.timeout_duration
+            );
         }
 
         // Check for legacy CLI flags first
@@ -75,7 +76,9 @@ impl HeadlessRuntime {
         } else if let Some(command) = &cli.command {
             self.execute_subcommand(command).await
         } else {
-            return Err(JunoError::ApplicationError("No valid command specified".to_string()));
+            return Err(JunoError::ApplicationError(
+                "No valid command specified".to_string(),
+            ));
         };
 
         let execution_time = start_time.elapsed();
@@ -109,7 +112,9 @@ impl HeadlessRuntime {
     async fn execute_legacy_commands(&self, cli: &Cli) -> Result<HeadlessResult, JunoError> {
         if cli.test_focused_element_ns {
             // TODO(headless-legacy-impl): Replace mock with real focused element test or remove legacy flag
-            tracing::warn!("Using mock implementation for --test-focused-element-ns in headless mode");
+            tracing::warn!(
+                "Using mock implementation for --test-focused-element-ns in headless mode"
+            );
             Ok(HeadlessResult {
                 success: true,
                 output: "Focused element test completed".to_string(),
@@ -136,60 +141,49 @@ impl HeadlessRuntime {
             let text = cli.tts_text.as_deref().unwrap_or("Test speech");
             Ok(HeadlessResult {
                 success: true,
-                output: format!("TTS test completed with provider: {}, text: {}", provider, text),
+                output: format!(
+                    "TTS test completed with provider: {}, text: {}",
+                    provider, text
+                ),
                 error: None,
                 execution_time: Duration::default(),
                 agent_state: Some("Completed".to_string()),
                 screenshot: None,
             })
         } else {
-            Err(JunoError::ApplicationError("No valid legacy command specified".to_string()))
+            Err(JunoError::ApplicationError(
+                "No valid legacy command specified".to_string(),
+            ))
         }
     }
 
     /// Execute a subcommand
-    async fn execute_subcommand(&self, command: &crate::cli::Commands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_subcommand(
+        &self,
+        command: &crate::cli::Commands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::Commands;
 
         match command {
-            Commands::Query { text, .. } => {
-                self.execute_query(text.clone()).await
-            }
-            Commands::Voice { command } => {
-                self.execute_voice_command(command).await
-            }
-            Commands::Dictation { command } => {
-                self.execute_dictation_command(command).await
-            }
-            Commands::Agent { command } => {
-                self.execute_agent_command(command).await
-            }
-            Commands::Config { command } => {
-                self.execute_config_command(command).await
-            }
-            Commands::Mcp { command } => {
-                self.execute_mcp_command(command).await
-            }
-            Commands::System { command } => {
-                self.execute_system_command(command).await
-            }
-            Commands::Batch { file, .. } => {
-                self.execute_batch_mode(Some(file.clone())).await
-            }
-            Commands::Interactive { .. } => {
-                self.execute_interactive_mode().await
-            }
-            Commands::Daemon { command } => {
-                self.execute_daemon_command(command).await
-            }
-            Commands::Test { command } => {
-                self.execute_test_command(command).await
-            }
+            Commands::Query { text, .. } => self.execute_query(text.clone()).await,
+            Commands::Voice { command } => self.execute_voice_command(command).await,
+            Commands::Dictation { command } => self.execute_dictation_command(command).await,
+            Commands::Agent { command } => self.execute_agent_command(command).await,
+            Commands::Config { command } => self.execute_config_command(command).await,
+            Commands::Mcp { command } => self.execute_mcp_command(command).await,
+            Commands::System { command } => self.execute_system_command(command).await,
+            Commands::Batch { file, .. } => self.execute_batch_mode(Some(file.clone())).await,
+            Commands::Interactive { .. } => self.execute_interactive_mode().await,
+            Commands::Daemon { command } => self.execute_daemon_command(command).await,
+            Commands::Test { command } => self.execute_test_command(command).await,
         }
     }
 
     /// Execute voice subcommands
-    async fn execute_voice_command(&self, command: &crate::cli::VoiceCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_voice_command(
+        &self,
+        command: &crate::cli::VoiceCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::VoiceCommands;
         match command {
             VoiceCommands::Transcribe { file, .. } => {
@@ -221,7 +215,10 @@ impl HeadlessRuntime {
     }
 
     /// Execute dictation subcommands
-    async fn execute_dictation_command(&self, command: &crate::cli::DictationCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_dictation_command(
+        &self,
+        command: &crate::cli::DictationCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::DictationCommands;
         match command {
             DictationCommands::Status => {
@@ -258,7 +255,10 @@ impl HeadlessRuntime {
     }
 
     /// Execute agent subcommands
-    async fn execute_agent_command(&self, command: &crate::cli::AgentCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_agent_command(
+        &self,
+        command: &crate::cli::AgentCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::AgentCommands;
         match command {
             AgentCommands::Status => self.execute_status().await,
@@ -277,18 +277,22 @@ impl HeadlessRuntime {
             }
             AgentCommands::Capabilities { detailed, category } => {
                 let state = self.app_handle.state::<AppState>();
-                let tools_value = crate::commands::get_registered_tools(state).await
+                let tools_value = crate::commands::get_registered_tools(state)
+                    .await
                     .unwrap_or_else(|_| Value::Array(vec![]));
 
                 // Optionally filter by category
                 let filtered = if let Some(cat) = category {
                     if let Value::Array(arr) = &tools_value {
-                        let filtered_arr: Vec<&Value> = arr.iter().filter(|t| {
-                            t.get("category")
-                                .and_then(|c| c.as_str())
-                                .map(|c| c.eq_ignore_ascii_case(cat))
-                                .unwrap_or(false)
-                        }).collect();
+                        let filtered_arr: Vec<&Value> = arr
+                            .iter()
+                            .filter(|t| {
+                                t.get("category")
+                                    .and_then(|c| c.as_str())
+                                    .map(|c| c.eq_ignore_ascii_case(cat))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
                         json!(filtered_arr)
                     } else {
                         tools_value
@@ -302,9 +306,14 @@ impl HeadlessRuntime {
                 } else {
                     // Summary: just names
                     if let Value::Array(arr) = &filtered {
-                        let names: Vec<String> = arr.iter().filter_map(|t| {
-                            t.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
-                        }).collect();
+                        let names: Vec<String> = arr
+                            .iter()
+                            .filter_map(|t| {
+                                t.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .collect();
                         json!({"tool_count": names.len(), "tools": names}).to_string()
                     } else {
                         filtered.to_string()
@@ -335,44 +344,59 @@ impl HeadlessRuntime {
                     screenshot: None,
                 })
             }
-            AgentCommands::SelfAwareness { .. } => {
-                Ok(HeadlessResult {
-                    success: true,
-                    output: json!({"self_awareness": "enabled", "mode": "headless"}).to_string(),
-                    error: None,
-                    execution_time: Duration::default(),
-                    agent_state: Some("Completed".to_string()),
-                    screenshot: None,
-                })
-            }
+            AgentCommands::SelfAwareness { .. } => Ok(HeadlessResult {
+                success: true,
+                output: json!({"self_awareness": "enabled", "mode": "headless"}).to_string(),
+                error: None,
+                execution_time: Duration::default(),
+                agent_state: Some("Completed".to_string()),
+                screenshot: None,
+            }),
         }
     }
 
     /// Execute config subcommands
-    async fn execute_config_command(&self, command: &crate::cli::ConfigCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_config_command(
+        &self,
+        command: &crate::cli::ConfigCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::ConfigCommands;
 
         match command {
-            ConfigCommands::Show { section, show_sensitive: _ } => {
+            ConfigCommands::Show {
+                section,
+                show_sensitive: _,
+            } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
-                let all_settings = settings_manager.get_all_settings().await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to get settings: {}", e)))?;
+                let all_settings = settings_manager.get_all_settings().await.map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to get settings: {}", e))
+                })?;
 
                 let output = if let Some(section_name) = section {
                     // Extract a specific section from the serialised settings
-                    let settings_value = serde_json::to_value(&all_settings)
-                        .map_err(|e| JunoError::ApplicationError(format!("Failed to serialize settings: {}", e)))?;
+                    let settings_value = serde_json::to_value(&all_settings).map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to serialize settings: {}", e))
+                    })?;
                     match settings_value.get(section_name) {
                         Some(section_val) => serde_json::to_string_pretty(section_val)
                             .unwrap_or_else(|_| "{}".to_string()),
-                        None => return Err(JunoError::ApplicationError(format!("Unknown config section: {}", section_name))),
+                        None => {
+                            return Err(JunoError::ApplicationError(format!(
+                                "Unknown config section: {}",
+                                section_name
+                            )))
+                        }
                     }
                 } else {
-                    serde_json::to_string_pretty(&all_settings)
-                        .unwrap_or_else(|_| "{}".to_string())
+                    serde_json::to_string_pretty(&all_settings).unwrap_or_else(|_| "{}".to_string())
                 };
 
                 Ok(HeadlessResult {
@@ -387,12 +411,19 @@ impl HeadlessRuntime {
             ConfigCommands::Get { key } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
-                let all_settings = settings_manager.get_all_settings().await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to get settings: {}", e)))?;
-                let settings_value = serde_json::to_value(&all_settings)
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to serialize settings: {}", e)))?;
+                let all_settings = settings_manager.get_all_settings().await.map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to get settings: {}", e))
+                })?;
+                let settings_value = serde_json::to_value(&all_settings).map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to serialize settings: {}", e))
+                })?;
 
                 // Support dotted keys like "agent.trigger_mode"
                 let parts: Vec<&str> = key.split('.').collect();
@@ -400,32 +431,49 @@ impl HeadlessRuntime {
                 for part in &parts {
                     current = match current.get(part) {
                         Some(v) => v,
-                        None => return Err(JunoError::ApplicationError(format!("Config key not found: {}", key))),
+                        None => {
+                            return Err(JunoError::ApplicationError(format!(
+                                "Config key not found: {}",
+                                key
+                            )))
+                        }
                     };
                 }
 
                 Ok(HeadlessResult {
                     success: true,
-                    output: serde_json::to_string_pretty(current).unwrap_or_else(|_| "null".to_string()),
+                    output: serde_json::to_string_pretty(current)
+                        .unwrap_or_else(|_| "null".to_string()),
                     error: None,
                     execution_time: Duration::default(),
                     agent_state: Some("Completed".to_string()),
                     screenshot: None,
                 })
             }
-            ConfigCommands::Set { key, value, no_save } => {
+            ConfigCommands::Set {
+                key,
+                value,
+                no_save,
+            } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
-                let mut all_settings = settings_manager.get_all_settings().await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to get settings: {}", e)))?;
-                let mut settings_value = serde_json::to_value(&all_settings)
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to serialize settings: {}", e)))?;
+                let mut all_settings = settings_manager.get_all_settings().await.map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to get settings: {}", e))
+                })?;
+                let mut settings_value = serde_json::to_value(&all_settings).map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to serialize settings: {}", e))
+                })?;
 
                 // Parse the value as JSON, fall back to string
-                let parsed_value: Value = serde_json::from_str(value)
-                    .unwrap_or(Value::String(value.clone()));
+                let parsed_value: Value =
+                    serde_json::from_str(value).unwrap_or(Value::String(value.clone()));
 
                 // Navigate dotted key and set value
                 let parts: Vec<&str> = key.split('.').collect();
@@ -438,15 +486,23 @@ impl HeadlessRuntime {
                         map.insert(parts[1].to_string(), parsed_value);
                     }
                 } else {
-                    return Err(JunoError::ApplicationError(format!("Config key nesting too deep: {}", key)));
+                    return Err(JunoError::ApplicationError(format!(
+                        "Config key nesting too deep: {}",
+                        key
+                    )));
                 }
 
                 // Deserialise back and save
-                all_settings = serde_json::from_value(settings_value)
-                    .map_err(|e| JunoError::ApplicationError(format!("Invalid settings value: {}", e)))?;
+                all_settings = serde_json::from_value(settings_value).map_err(|e| {
+                    JunoError::ApplicationError(format!("Invalid settings value: {}", e))
+                })?;
                 if !no_save {
-                    settings_manager.save_all_settings(&all_settings).await
-                        .map_err(|e| JunoError::ApplicationError(format!("Failed to save settings: {}", e)))?;
+                    settings_manager
+                        .save_all_settings(&all_settings)
+                        .await
+                        .map_err(|e| {
+                            JunoError::ApplicationError(format!("Failed to save settings: {}", e))
+                        })?;
                 }
 
                 Ok(HeadlessResult {
@@ -461,32 +517,51 @@ impl HeadlessRuntime {
             ConfigCommands::Reset { section, force: _ } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
                 // Reset to defaults by getting default settings and saving them
                 let defaults = crate::settings::AppSettings::default();
                 let to_save = if let Some(section_name) = section {
                     // Merge defaults for the specific section
-                    let mut current = settings_manager.get_all_settings().await
-                        .map_err(|e| JunoError::ApplicationError(format!("Failed to get settings: {}", e)))?;
-                    let defaults_val = serde_json::to_value(&defaults)
-                        .map_err(|e| JunoError::ApplicationError(format!("Serialization error: {}", e)))?;
-                    let mut current_val = serde_json::to_value(&current)
-                        .map_err(|e| JunoError::ApplicationError(format!("Serialization error: {}", e)))?;
-                    if let (Some(default_section), Some(current_section)) = (defaults_val.get(section_name), current_val.get_mut(section_name)) {
+                    let mut current = settings_manager.get_all_settings().await.map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to get settings: {}", e))
+                    })?;
+                    let defaults_val = serde_json::to_value(&defaults).map_err(|e| {
+                        JunoError::ApplicationError(format!("Serialization error: {}", e))
+                    })?;
+                    let mut current_val = serde_json::to_value(&current).map_err(|e| {
+                        JunoError::ApplicationError(format!("Serialization error: {}", e))
+                    })?;
+                    if let (Some(default_section), Some(current_section)) = (
+                        defaults_val.get(section_name),
+                        current_val.get_mut(section_name),
+                    ) {
                         *current_section = default_section.clone();
                     } else {
-                        return Err(JunoError::ApplicationError(format!("Unknown config section: {}", section_name)));
+                        return Err(JunoError::ApplicationError(format!(
+                            "Unknown config section: {}",
+                            section_name
+                        )));
                     }
-                    current = serde_json::from_value(current_val)
-                        .map_err(|e| JunoError::ApplicationError(format!("Deserialization error: {}", e)))?;
+                    current = serde_json::from_value(current_val).map_err(|e| {
+                        JunoError::ApplicationError(format!("Deserialization error: {}", e))
+                    })?;
                     current
                 } else {
                     defaults
                 };
 
-                settings_manager.save_all_settings(&to_save).await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to save settings: {}", e)))?;
+                settings_manager
+                    .save_all_settings(&to_save)
+                    .await
+                    .map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to save settings: {}", e))
+                    })?;
 
                 Ok(HeadlessResult {
                     success: true,
@@ -497,17 +572,28 @@ impl HeadlessRuntime {
                     screenshot: None,
                 })
             }
-            ConfigCommands::Export { file, include_sensitive: _ } => {
+            ConfigCommands::Export {
+                file,
+                include_sensitive: _,
+            } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
-                let all_settings = settings_manager.get_all_settings().await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to get settings: {}", e)))?;
-                let json_str = serde_json::to_string_pretty(&all_settings)
-                    .map_err(|e| JunoError::ApplicationError(format!("Serialization error: {}", e)))?;
-                std::fs::write(file, &json_str)
-                    .map_err(|e| JunoError::FileSystemError(format!("Failed to write config to {}: {}", file, e)))?;
+                let all_settings = settings_manager.get_all_settings().await.map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to get settings: {}", e))
+                })?;
+                let json_str = serde_json::to_string_pretty(&all_settings).map_err(|e| {
+                    JunoError::ApplicationError(format!("Serialization error: {}", e))
+                })?;
+                std::fs::write(file, &json_str).map_err(|e| {
+                    JunoError::FileSystemError(format!("Failed to write config to {}: {}", file, e))
+                })?;
 
                 Ok(HeadlessResult {
                     success: true,
@@ -521,19 +607,34 @@ impl HeadlessRuntime {
             ConfigCommands::Import { file, merge } => {
                 let settings_manager = match SettingsManager::new(self.app_handle.clone()) {
                     Ok(m) => m,
-                    Err(e) => return Err(JunoError::ApplicationError(format!("Failed to create SettingsManager: {}", e))),
+                    Err(e) => {
+                        return Err(JunoError::ApplicationError(format!(
+                            "Failed to create SettingsManager: {}",
+                            e
+                        )))
+                    }
                 };
-                let json_str = std::fs::read_to_string(file)
-                    .map_err(|e| JunoError::FileSystemError(format!("Failed to read config from {}: {}", file, e)))?;
+                let json_str = std::fs::read_to_string(file).map_err(|e| {
+                    JunoError::FileSystemError(format!(
+                        "Failed to read config from {}: {}",
+                        file, e
+                    ))
+                })?;
                 let imported: crate::settings::AppSettings = serde_json::from_str(&json_str)
-                    .map_err(|e| JunoError::ApplicationError(format!("Invalid config file: {}", e)))?;
+                    .map_err(|e| {
+                        JunoError::ApplicationError(format!("Invalid config file: {}", e))
+                    })?;
 
                 if *merge {
                     // Merge is a best-effort overwrite — import wins
                     info!("Merging imported configuration from {}", file);
                 }
-                settings_manager.save_all_settings(&imported).await
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to save settings: {}", e)))?;
+                settings_manager
+                    .save_all_settings(&imported)
+                    .await
+                    .map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to save settings: {}", e))
+                    })?;
 
                 Ok(HeadlessResult {
                     success: true,
@@ -548,12 +649,21 @@ impl HeadlessRuntime {
     }
 
     /// Execute MCP subcommands
-    async fn execute_mcp_command(&self, command: &crate::cli::McpCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_mcp_command(
+        &self,
+        command: &crate::cli::McpCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         match command {
             crate::cli::McpCommands::Serve => {
                 return self.run_mcp_stdio_server().await;
             }
-            crate::cli::McpCommands::AddServer { name, http_url, enabled, auto_start, timeout } => {
+            crate::cli::McpCommands::AddServer {
+                name,
+                http_url,
+                enabled,
+                auto_start,
+                timeout,
+            } => {
                 // Build config and call backend command to persist
                 use crate::agent::tools::MCPServerConfig;
                 let cfg = MCPServerConfig {
@@ -571,7 +681,9 @@ impl HeadlessRuntime {
                 };
 
                 let state = self.app_handle.state::<AppState>();
-                match crate::commands::mcp::add_mcp_server(self.app_handle.clone(), state, cfg).await {
+                match crate::commands::mcp::add_mcp_server(self.app_handle.clone(), state, cfg)
+                    .await
+                {
                     Ok(_) => Ok(HeadlessResult {
                         success: true,
                         output: format!("MCP server '{}' added", name),
@@ -580,7 +692,10 @@ impl HeadlessRuntime {
                         agent_state: Some("Completed".to_string()),
                         screenshot: None,
                     }),
-                    Err(e) => Err(JunoError::ApplicationError(format!("Failed to add MCP server: {}", e))),
+                    Err(e) => Err(JunoError::ApplicationError(format!(
+                        "Failed to add MCP server: {}",
+                        e
+                    ))),
                 }
             }
         }
@@ -591,8 +706,8 @@ impl HeadlessRuntime {
     /// This exposes all computer use tools from `mcp-server-os-level` PLUS the
     /// `query` tool which delegates to the full multi-agent orchestrator.
     async fn run_mcp_stdio_server(&self) -> Result<HeadlessResult, JunoError> {
-        use tokio::io::{AsyncBufReadExt, BufReader};
         use computer_use_ai_sdk::Desktop;
+        use tokio::io::{AsyncBufReadExt, BufReader};
 
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
@@ -711,7 +826,9 @@ impl HeadlessRuntime {
                                 let content = if Self::is_screenshot_result(tool_name, &result) {
                                     Self::extract_image_content(&result)
                                 } else {
-                                    vec![json!({"type":"text","text":serde_json::to_string(&result).unwrap_or_else(|_| "null".into())})]
+                                    vec![
+                                        json!({"type":"text","text":serde_json::to_string(&result).unwrap_or_else(|_| "null".into())}),
+                                    ]
                                 };
                                 json!({"jsonrpc":"2.0","id":id,"result":{"content":content}})
                             }
@@ -724,7 +841,9 @@ impl HeadlessRuntime {
 
                 "ping" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
 
-                _ => json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":format!("Method not found: {method}")}}),
+                _ => {
+                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":format!("Method not found: {method}")}})
+                }
             };
 
             Self::write_jsonrpc_line(&mut stdout, &response).await?;
@@ -740,12 +859,13 @@ impl HeadlessRuntime {
         })
     }
 
-    fn get_or_init_desktop(desktop: &mut Option<computer_use_ai_sdk::Desktop>) -> Result<&computer_use_ai_sdk::Desktop, JunoError> {
+    fn get_or_init_desktop(
+        desktop: &mut Option<computer_use_ai_sdk::Desktop>,
+    ) -> Result<&computer_use_ai_sdk::Desktop, JunoError> {
         if desktop.is_none() {
-            *desktop = Some(
-                computer_use_ai_sdk::Desktop::new(false, true)
-                    .map_err(|e| JunoError::ApplicationError(format!("Failed to initialize Desktop: {e}")))?
-            );
+            *desktop = Some(computer_use_ai_sdk::Desktop::new(false, true).map_err(|e| {
+                JunoError::ApplicationError(format!("Failed to initialize Desktop: {e}"))
+            })?);
         }
         desktop
             .as_ref()
@@ -765,11 +885,16 @@ impl HeadlessRuntime {
             .and_then(|v| v.as_str());
         match b64 {
             Some(data) => vec![json!({"type":"image","data":data,"mimeType":"image/png"})],
-            None => vec![json!({"type":"text","text":serde_json::to_string(result).unwrap_or_else(|_| "null".into())})],
+            None => vec![
+                json!({"type":"text","text":serde_json::to_string(result).unwrap_or_else(|_| "null".into())}),
+            ],
         }
     }
 
-    async fn write_jsonrpc_line(stdout: &mut tokio::io::Stdout, response: &Value) -> Result<(), JunoError> {
+    async fn write_jsonrpc_line(
+        stdout: &mut tokio::io::Stdout,
+        response: &Value,
+    ) -> Result<(), JunoError> {
         use tokio::io::AsyncWriteExt;
         let line = serde_json::to_string(response).unwrap_or_else(|_| "{}".into());
         stdout
@@ -788,15 +913,24 @@ impl HeadlessRuntime {
     }
 
     /// Execute system subcommands
-    async fn execute_system_command(&self, command: &crate::cli::SystemCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_system_command(
+        &self,
+        command: &crate::cli::SystemCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::SystemCommands;
 
         match command {
-            SystemCommands::Info { hardware: _, permissions: _, performance: _ } => {
+            SystemCommands::Info {
+                hardware: _,
+                permissions: _,
+                performance: _,
+            } => {
                 let state = self.app_handle.state::<AppState>();
                 // Check config + env var for API key presence
-                let config = crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
-                let api_key_present = config.resolve_provider(Provider::Anthropic)
+                let config =
+                    crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
+                let api_key_present = config
+                    .resolve_provider(Provider::Anthropic)
                     .and_then(|c| c.api_key)
                     .is_some()
                     || std::env::var("ANTHROPIC_API_KEY").is_ok();
@@ -819,11 +953,16 @@ impl HeadlessRuntime {
                     screenshot: None,
                 })
             }
-            SystemCommands::Health { detailed: _, benchmark: _ } => {
+            SystemCommands::Health {
+                detailed: _,
+                benchmark: _,
+            } => {
                 let state = self.app_handle.state::<AppState>();
                 // Check config + env var for API key presence
-                let config = crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
-                let api_key_present = config.resolve_provider(Provider::Anthropic)
+                let config =
+                    crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
+                let api_key_present = config
+                    .resolve_provider(Provider::Anthropic)
                     .and_then(|c| c.api_key)
                     .is_some()
                     || std::env::var("ANTHROPIC_API_KEY").is_ok();
@@ -876,7 +1015,8 @@ impl HeadlessRuntime {
                 if *show {
                     return Ok(HeadlessResult {
                         success: true,
-                        output: json!({"performance_monitoring": "not available in headless mode"}).to_string(),
+                        output: json!({"performance_monitoring": "not available in headless mode"})
+                            .to_string(),
                         error: None,
                         execution_time: Duration::default(),
                         agent_state: Some("Completed".to_string()),
@@ -885,7 +1025,9 @@ impl HeadlessRuntime {
                 }
                 Ok(HeadlessResult {
                     success: true,
-                    output: json!({"performance_monitoring": "headless mode — use --show or --reset"}).to_string(),
+                    output:
+                        json!({"performance_monitoring": "headless mode — use --show or --reset"})
+                            .to_string(),
                     error: None,
                     execution_time: Duration::default(),
                     agent_state: Some("Completed".to_string()),
@@ -896,7 +1038,10 @@ impl HeadlessRuntime {
     }
 
     /// Execute daemon subcommands
-    async fn execute_daemon_command(&self, command: &crate::cli::DaemonCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_daemon_command(
+        &self,
+        command: &crate::cli::DaemonCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::DaemonCommands;
 
         match command {
@@ -975,22 +1120,29 @@ impl HeadlessRuntime {
     }
 
     /// Execute test subcommands
-    async fn execute_test_command(&self, command: &crate::cli::TestCommands) -> Result<HeadlessResult, JunoError> {
+    async fn execute_test_command(
+        &self,
+        command: &crate::cli::TestCommands,
+    ) -> Result<HeadlessResult, JunoError> {
         use crate::cli::TestCommands;
         match command {
             TestCommands::System { component, .. } if component.as_deref() == Some("tool") => {
                 // Run a minimal tool smoke test using direct commands with managed state
                 let app_handle = self.app_handle.clone();
-                let state = self
-                    .app_handle
-                    .try_state::<AppState>()
-                    .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
+                let state = self.app_handle.try_state::<AppState>().ok_or_else(|| {
+                    JunoError::ApplicationError(
+                        "Application state not available in headless runtime".to_string(),
+                    )
+                })?;
 
                 // Get cursor position (does not require accessibility for read)
-                let cursor_res = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone()).await;
+                let cursor_res =
+                    crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
+                        .await;
 
                 // Short wait
-                let wait_res = crate::commands::core::wait(0.1, app_handle.clone(), state.clone()).await;
+                let wait_res =
+                    crate::commands::core::wait(0.1, app_handle.clone(), state.clone()).await;
 
                 let output = json!({
                     "tool_smoke": {
@@ -1021,16 +1173,49 @@ impl HeadlessRuntime {
                 // Start streaming
                 let message_id = uuid::Uuid::new_v4().to_string();
                 crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
-                crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, "Hello, ".to_string(), Some(message_id.clone()), None);
-                crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, "world".to_string(), Some(message_id.clone()), None);
+                crate::agent::tool_logger::emit_streaming_text_chunk(
+                    &app_handle,
+                    "Hello, ".to_string(),
+                    Some(message_id.clone()),
+                    None,
+                );
+                crate::agent::tool_logger::emit_streaming_text_chunk(
+                    &app_handle,
+                    "world".to_string(),
+                    Some(message_id.clone()),
+                    None,
+                );
 
                 // Emit a synthetic tool call request/result
                 let tool_args = json!({"action":"screenshot","coordinate":[200,100]});
-                crate::agent::tool_logger::log_enhanced_tool_call_request(&app_handle, "computer", tool_args.clone(), Some("Taking a screenshot".to_string()), None).await;
-                crate::agent::tool_logger::log_enhanced_tool_call_result_with_inputs(&app_handle, "computer", Some(tool_args), json!({"success": true}), true, Some("Screenshot captured".to_string()), None, Some(42), None).await;
+                crate::agent::tool_logger::log_enhanced_tool_call_request(
+                    &app_handle,
+                    "computer",
+                    tool_args.clone(),
+                    Some("Taking a screenshot".to_string()),
+                    None,
+                )
+                .await;
+                crate::agent::tool_logger::log_enhanced_tool_call_result_with_inputs(
+                    &app_handle,
+                    "computer",
+                    Some(tool_args),
+                    json!({"success": true}),
+                    true,
+                    Some("Screenshot captured".to_string()),
+                    None,
+                    Some(42),
+                    None,
+                )
+                .await;
 
                 // End streaming
-                crate::agent::tool_logger::emit_stream_end_with_state(&app_handle, message_id.clone(), "Hello, world".to_string(), "Completed".to_string());
+                crate::agent::tool_logger::emit_stream_end_with_state(
+                    &app_handle,
+                    message_id.clone(),
+                    "Hello, world".to_string(),
+                    "Completed".to_string(),
+                );
 
                 let output = json!({
                     "emitted": {
@@ -1081,23 +1266,34 @@ impl HeadlessRuntime {
             ids: Vec<EventId>,
         }
         impl EventListenersGuard {
-            fn new(app_handle: AppHandle) -> Self { Self { app_handle, ids: Vec::new() } }
-            fn push(&mut self, id: EventId) { self.ids.push(id); }
+            fn new(app_handle: AppHandle) -> Self {
+                Self {
+                    app_handle,
+                    ids: Vec::new(),
+                }
+            }
+            fn push(&mut self, id: EventId) {
+                self.ids.push(id);
+            }
             fn cleanup(&mut self) {
                 for id in self.ids.drain(..) {
                     self.app_handle.unlisten(id);
                 }
             }
         }
-        impl Drop for EventListenersGuard { fn drop(&mut self) { self.cleanup(); } }
+        impl Drop for EventListenersGuard {
+            fn drop(&mut self) {
+                self.cleanup();
+            }
+        }
 
         let mut listener_guard = EventListenersGuard::new(self.app_handle.clone());
 
         // TEXT_STREAM listener
         let text_acc_clone = Arc::clone(&accumulated_text);
-        let text_stream_id: EventId = self
-            .app_handle
-            .listen(crate::constants::events::streaming::TEXT_STREAM, move |event| {
+        let text_stream_id: EventId = self.app_handle.listen(
+            crate::constants::events::streaming::TEXT_STREAM,
+            move |event| {
                 if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
                     if let Some(chunk) = payload.get("chunk").and_then(|v| v.as_str()) {
                         if let Ok(mut guard) = text_acc_clone.lock() {
@@ -1105,29 +1301,30 @@ impl HeadlessRuntime {
                         }
                     }
                 }
-            });
+            },
+        );
         listener_guard.push(text_stream_id);
 
         // Capture generic agent events to collect tool calls/results
         let tool_events_clone = Arc::clone(&tool_events);
-        let agent_event_id: EventId = self
-            .app_handle
-            .listen(crate::constants::events::agent::EVENT, move |event| {
-                if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
-                    if let Ok(mut guard) = tool_events_clone.lock() {
-                        guard.push(payload);
+        let agent_event_id: EventId =
+            self.app_handle
+                .listen(crate::constants::events::agent::EVENT, move |event| {
+                    if let Ok(payload) = serde_json::from_str::<Value>(event.payload()) {
+                        if let Ok(mut guard) = tool_events_clone.lock() {
+                            guard.push(payload);
+                        }
                     }
-                }
-            });
+                });
         listener_guard.push(agent_event_id);
 
         // On stream end, produce final JSON and signal completion
         let text_acc_for_end = Arc::clone(&accumulated_text);
         let tool_events_for_end = Arc::clone(&tool_events);
         let done_tx_for_end = Arc::clone(&done_tx);
-        let stream_end_id: EventId = self
-            .app_handle
-            .listen(crate::constants::events::streaming::STREAM_END, move |event| {
+        let stream_end_id: EventId = self.app_handle.listen(
+            crate::constants::events::streaming::STREAM_END,
+            move |event| {
                 let final_text = match serde_json::from_str::<Value>(event.payload()) {
                     Ok(v) => v
                         .get("complete_text")
@@ -1157,18 +1354,21 @@ impl HeadlessRuntime {
                         let _ = tx.send(result_obj);
                     }
                 }
-            });
+            },
+        );
         listener_guard.push(stream_end_id);
 
         // Brief delay to ensure listener registration completes before emissions
         tokio::time::sleep(Duration::from_millis(5)).await;
 
         // Submit the query to the agent
-        let state = self
-            .app_handle
-            .try_state::<AppState>()
-            .ok_or_else(|| JunoError::ApplicationError("Application state not available in headless runtime".to_string()))?;
-        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone()).await
+        let state = self.app_handle.try_state::<AppState>().ok_or_else(|| {
+            JunoError::ApplicationError(
+                "Application state not available in headless runtime".to_string(),
+            )
+        })?;
+        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone())
+            .await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 
         // Wait for result with timeout
@@ -1177,12 +1377,16 @@ impl HeadlessRuntime {
             Ok(Err(_)) => {
                 // Ensure cleanup on channel failure
                 listener_guard.cleanup();
-                return Err(JunoError::ApplicationError("Failed to receive query result".to_string()));
+                return Err(JunoError::ApplicationError(
+                    "Failed to receive query result".to_string(),
+                ));
             }
             Err(_) => {
                 // Timeout - cleanup listeners and surface error
                 listener_guard.cleanup();
-                return Err(JunoError::ApplicationError("Query execution timed out".to_string()));
+                return Err(JunoError::ApplicationError(
+                    "Query execution timed out".to_string(),
+                ));
             }
         };
 
@@ -1209,8 +1413,13 @@ impl HeadlessRuntime {
         }
 
         // Check if voice controller is available
-        let voice_controller = self.app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-            .ok_or_else(|| JunoError::ApplicationError("Voice controller not available".to_string()))?;
+        let voice_controller = self
+            .app_handle
+            .try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>(
+            )
+            .ok_or_else(|| {
+                JunoError::ApplicationError("Voice controller not available".to_string())
+            })?;
 
         // Set up result capture
         let (result_tx, result_rx) = oneshot::channel::<String>();
@@ -1241,9 +1450,12 @@ impl HeadlessRuntime {
 
         // Wait for result with timeout
         let dictation_timeout = Duration::from_secs(voice_timeout);
-        let _result = timeout(dictation_timeout, result_rx).await
+        let _result = timeout(dictation_timeout, result_rx)
+            .await
             .map_err(|_| JunoError::ApplicationError("Dictation timed out".to_string()))?
-            .map_err(|_| JunoError::ApplicationError("Failed to receive dictation result".to_string()))?;
+            .map_err(|_| {
+                JunoError::ApplicationError("Failed to receive dictation result".to_string())
+            })?;
 
         // Parse the dictation result - for headless mode, return mock result
         let transcribed_text = "Mock dictation result for headless mode".to_string();
@@ -1266,7 +1478,10 @@ impl HeadlessRuntime {
     #[allow(dead_code)]
     async fn execute_agent_mode(&self, voice_timeout: u64) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= 2 {
-            info!("Starting agent mode with voice input timeout: {}s", voice_timeout);
+            info!(
+                "Starting agent mode with voice input timeout: {}s",
+                voice_timeout
+            );
         }
 
         // First, get voice input using dictation
@@ -1304,7 +1519,12 @@ impl HeadlessRuntime {
 
         // Active provider + model via SettingsManager -> ProviderConfig
         if let Ok(settings_manager) = SettingsManager::new(self.app_handle.clone()) {
-            if let Ok(config) = crate::agent::providers::config::ProviderConfig::load_from_centralized_settings(&settings_manager).await {
+            if let Ok(config) =
+                crate::agent::providers::config::ProviderConfig::load_from_centralized_settings(
+                    &settings_manager,
+                )
+                .await
+            {
                 provider_id = config.active_provider.clone();
                 if let Some(p) = config
                     .providers
@@ -1315,8 +1535,8 @@ impl HeadlessRuntime {
                         model_id = m.clone();
                     } else {
                         // Fallback to provider default model
-                        let provider_enum = Provider::from_str(&provider_id)
-                            .unwrap_or(Provider::Anthropic);
+                        let provider_enum =
+                            Provider::from_str(&provider_id).unwrap_or(Provider::Anthropic);
                         model_id = provider_enum.default_model().to_string();
                     }
                 }
@@ -1362,13 +1582,23 @@ impl HeadlessRuntime {
 
     /// Execute agent iterations
     #[allow(dead_code)]
-    async fn execute_iterations(&self, iterations: u32, context: Option<String>, max_depth: u32) -> Result<HeadlessResult, JunoError> {
+    async fn execute_iterations(
+        &self,
+        iterations: u32,
+        context: Option<String>,
+        max_depth: u32,
+    ) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= 2 {
-            info!("Starting {} iterations with max depth {}", iterations, max_depth);
+            info!(
+                "Starting {} iterations with max depth {}",
+                iterations, max_depth
+            );
         }
 
         let mut outputs = Vec::new();
-        let mut current_context = context.unwrap_or_else(|| "Analyze the current state and determine the next action".to_string());
+        let mut current_context = context.unwrap_or_else(|| {
+            "Analyze the current state and determine the next action".to_string()
+        });
 
         for i in 0..iterations {
             if self.verbosity >= 1 {
@@ -1382,7 +1612,11 @@ impl HeadlessRuntime {
             // Update context based on previous result for next iteration
             current_context = format!(
                 "Previous iteration result: {}. Continue with the next logical step.",
-                iteration_result.output.chars().take(200).collect::<String>()
+                iteration_result
+                    .output
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             );
 
             // Check for cancellation between iterations
@@ -1405,7 +1639,11 @@ impl HeadlessRuntime {
 
     /// Execute self-call (agent calling itself with new queries)
     #[allow(dead_code)]
-    async fn execute_self_call(&self, context: Option<String>, max_depth: u32) -> Result<HeadlessResult, JunoError> {
+    async fn execute_self_call(
+        &self,
+        context: Option<String>,
+        max_depth: u32,
+    ) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= cli::verbosity::VERBOSE {
             info!("Starting self-call with max depth {}", max_depth);
         }
@@ -1414,7 +1652,9 @@ impl HeadlessRuntime {
             "Analyze the current system state and determine what task you should perform next. Then execute that task by calling yourself with a specific query.".to_string()
         });
 
-        let result = self.execute_recursive_call(initial_query, 0, max_depth).await?;
+        let result = self
+            .execute_recursive_call(initial_query, 0, max_depth)
+            .await?;
 
         Ok(HeadlessResult {
             success: true,
@@ -1428,36 +1668,65 @@ impl HeadlessRuntime {
 
     /// Execute recursive agent calls
     #[allow(dead_code)]
-    fn execute_recursive_call(&self, query: String, current_depth: u32, max_depth: u32) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, JunoError>> + Send + '_>> {
+    fn execute_recursive_call(
+        &self,
+        query: String,
+        current_depth: u32,
+        max_depth: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, JunoError>> + Send + '_>>
+    {
         Box::pin(async move {
-        if current_depth >= max_depth {
-            return Ok(format!("Maximum recursion depth ({}) reached", max_depth));
-        }
-
-        if self.verbosity >= cli::verbosity::VERBOSE {
-            info!("Recursive call depth {}/{}: {}", current_depth + 1, max_depth, query.chars().take(50).collect::<String>());
-        }
-
-        // Execute the current query
-        let result = self.execute_query(query.clone()).await?;
-        let mut output = result.output;
-
-        // Check if the agent wants to make another call
-        // This is a simple heuristic - in practice, you might want more sophisticated parsing
-        if output.to_lowercase().contains("execute query") || output.to_lowercase().contains("call agent") {
-            // Extract the next query from the response (simplified)
-            let next_query = output.lines()
-                .find(|line| line.to_lowercase().contains("query:") || line.to_lowercase().contains("execute:"))
-                .map(|line| line.split(':').skip(1).collect::<Vec<_>>().join(":").trim().to_string())
-                .unwrap_or_else(|| "Continue with the next logical step".to_string());
-
-            if !next_query.is_empty() && next_query != query {
-                let recursive_result = self.execute_recursive_call(next_query, current_depth + 1, max_depth).await?;
-                output = format!("{}\n\n--- Recursive Call Result ---\n{}", output, recursive_result);
+            if current_depth >= max_depth {
+                return Ok(format!("Maximum recursion depth ({}) reached", max_depth));
             }
-        }
 
-        Ok(output)
+            if self.verbosity >= cli::verbosity::VERBOSE {
+                info!(
+                    "Recursive call depth {}/{}: {}",
+                    current_depth + 1,
+                    max_depth,
+                    query.chars().take(50).collect::<String>()
+                );
+            }
+
+            // Execute the current query
+            let result = self.execute_query(query.clone()).await?;
+            let mut output = result.output;
+
+            // Check if the agent wants to make another call
+            // This is a simple heuristic - in practice, you might want more sophisticated parsing
+            if output.to_lowercase().contains("execute query")
+                || output.to_lowercase().contains("call agent")
+            {
+                // Extract the next query from the response (simplified)
+                let next_query = output
+                    .lines()
+                    .find(|line| {
+                        line.to_lowercase().contains("query:")
+                            || line.to_lowercase().contains("execute:")
+                    })
+                    .map(|line| {
+                        line.split(':')
+                            .skip(1)
+                            .collect::<Vec<_>>()
+                            .join(":")
+                            .trim()
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| "Continue with the next logical step".to_string());
+
+                if !next_query.is_empty() && next_query != query {
+                    let recursive_result = self
+                        .execute_recursive_call(next_query, current_depth + 1, max_depth)
+                        .await?;
+                    output = format!(
+                        "{}\n\n--- Recursive Call Result ---\n{}",
+                        output, recursive_result
+                    );
+                }
+            }
+
+            Ok(output)
         })
     }
 
@@ -1482,11 +1751,16 @@ impl HeadlessRuntime {
             let _status_result = self.execute_status().await?;
 
             // Simple daemon logic - could be enhanced with task queue, file watching, etc.
-            if iteration_count.is_multiple_of(10) { // Every 5 minutes, perform a system check
-                let system_query = "Perform a system health check and report any issues or recommendations";
+            if iteration_count.is_multiple_of(10) {
+                // Every 5 minutes, perform a system check
+                let system_query =
+                    "Perform a system health check and report any issues or recommendations";
                 if let Ok(health_result) = self.execute_query(system_query.to_string()).await {
                     if self.verbosity >= cli::verbosity::NORMAL {
-                        println!("🏥 System Health Check: {}", health_result.output.chars().take(100).collect::<String>());
+                        println!(
+                            "🏥 System Health Check: {}",
+                            health_result.output.chars().take(100).collect::<String>()
+                        );
                     }
                 }
             }
@@ -1511,7 +1785,10 @@ impl HeadlessRuntime {
     }
 
     /// Execute batch mode (process multiple commands from file or stdin)
-    pub async fn execute_batch_mode(&self, batch_file: Option<String>) -> Result<HeadlessResult, JunoError> {
+    pub async fn execute_batch_mode(
+        &self,
+        batch_file: Option<String>,
+    ) -> Result<HeadlessResult, JunoError> {
         if self.verbosity >= cli::verbosity::VERBOSE {
             info!("Starting batch mode");
         }
@@ -1519,7 +1796,12 @@ impl HeadlessRuntime {
         let commands = if let Some(file_path) = batch_file {
             // Read commands from file
             std::fs::read_to_string(&file_path)
-                .map_err(|e| JunoError::FileSystemError(format!("Failed to read batch file {}: {}", file_path, e)))?
+                .map_err(|e| {
+                    JunoError::FileSystemError(format!(
+                        "Failed to read batch file {}: {}",
+                        file_path, e
+                    ))
+                })?
                 .lines()
                 .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
                 .map(|line| line.trim().to_string())
@@ -1528,17 +1810,22 @@ impl HeadlessRuntime {
             // Read from stdin
             use std::io::{self, BufRead};
             let stdin = io::stdin();
-            stdin.lock()
+            stdin
+                .lock()
                 .lines()
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| JunoError::ApplicationError(format!("Failed to read from stdin: {}", e)))?
+                .map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to read from stdin: {}", e))
+                })?
                 .into_iter()
                 .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
                 .collect()
         };
 
         if commands.is_empty() {
-            return Err(JunoError::ApplicationError("No commands found in batch input".to_string()));
+            return Err(JunoError::ApplicationError(
+                "No commands found in batch input".to_string(),
+            ));
         }
 
         let mut results = Vec::new();
@@ -1546,7 +1833,12 @@ impl HeadlessRuntime {
 
         for (i, command) in commands.into_iter().enumerate() {
             if self.verbosity >= cli::verbosity::NORMAL {
-                println!("📝 Executing batch command {}/{}: {}", i + 1, total_commands, command.chars().take(50).collect::<String>());
+                println!(
+                    "📝 Executing batch command {}/{}: {}",
+                    i + 1,
+                    total_commands,
+                    command.chars().take(50).collect::<String>()
+                );
             }
 
             match self.execute_query(command.clone()).await {
@@ -1598,7 +1890,9 @@ impl HeadlessRuntime {
         loop {
             // Display prompt
             print!("juno> ");
-            io::stdout().flush().map_err(|e| JunoError::ApplicationError(format!("Failed to flush stdout: {}", e)))?;
+            io::stdout().flush().map_err(|e| {
+                JunoError::ApplicationError(format!("Failed to flush stdout: {}", e))
+            })?;
 
             // Read user input
             let mut input = String::new();
@@ -1618,17 +1912,16 @@ impl HeadlessRuntime {
                             }
                             break;
                         }
-                        ":status" => {
-                            match self.execute_status().await {
-                                Ok(result) => {
-                                    println!("📊 Status: {}", result.output);
-                                    results.push(format!("Command {}: status check", command_count + 1));
-                                }
-                                Err(e) => {
-                                    eprintln!("❌ Status check failed: {}", e);
-                                }
+                        ":status" => match self.execute_status().await {
+                            Ok(result) => {
+                                println!("📊 Status: {}", result.output);
+                                results
+                                    .push(format!("Command {}: status check", command_count + 1));
                             }
-                        }
+                            Err(e) => {
+                                eprintln!("❌ Status check failed: {}", e);
+                            }
+                        },
                         ":voice" => {
                             if self.verbosity >= cli::verbosity::NORMAL {
                                 println!("🎤 Starting voice input...");
@@ -1640,7 +1933,11 @@ impl HeadlessRuntime {
                                     match self.execute_query(result.output.clone()).await {
                                         Ok(agent_result) => {
                                             println!("🤖 Agent: {}", agent_result.output);
-                                            results.push(format!("Command {}: voice query - {}", command_count + 1, result.output.chars().take(50).collect::<String>()));
+                                            results.push(format!(
+                                                "Command {}: voice query - {}",
+                                                command_count + 1,
+                                                result.output.chars().take(50).collect::<String>()
+                                            ));
                                         }
                                         Err(e) => {
                                             eprintln!("❌ Agent query failed: {}", e);
@@ -1662,18 +1959,26 @@ impl HeadlessRuntime {
                             match self.execute_query(input.to_string()).await {
                                 Ok(result) => {
                                     println!("🤖 {}", result.output);
-                                    results.push(format!("Command {}: {}", command_count, input.chars().take(50).collect::<String>()));
+                                    results.push(format!(
+                                        "Command {}: {}",
+                                        command_count,
+                                        input.chars().take(50).collect::<String>()
+                                    ));
                                 }
                                 Err(e) => {
                                     eprintln!("❌ Query failed: {}", e);
-                                    results.push(format!("Command {}: ERROR - {}", command_count, e));
+                                    results
+                                        .push(format!("Command {}: ERROR - {}", command_count, e));
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    return Err(JunoError::ApplicationError(format!("Failed to read input: {}", e)));
+                    return Err(JunoError::ApplicationError(format!(
+                        "Failed to read input: {}",
+                        e
+                    )));
                 }
             }
 
@@ -1705,7 +2010,10 @@ impl HeadlessRuntime {
         match self.output_format {
             OutputFormat::Quiet => {
                 if !result.success {
-                    eprintln!("Error: {}", result.error.as_deref().unwrap_or("Unknown error"));
+                    eprintln!(
+                        "Error: {}",
+                        result.error.as_deref().unwrap_or("Unknown error")
+                    );
                 }
             }
             OutputFormat::Json => {
@@ -1721,7 +2029,10 @@ impl HeadlessRuntime {
                     "agent_state": result.agent_state,
                     "screenshot": result.screenshot
                 });
-                println!("{}", serde_json::to_string_pretty(&json_output).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json_output).unwrap_or_default()
+                );
             }
             OutputFormat::Yaml => {
                 let yaml_output = serde_yaml::to_string(&json!({
@@ -1731,7 +2042,8 @@ impl HeadlessRuntime {
                     "execution_time_ms": result.execution_time.as_millis(),
                     "agent_state": result.agent_state,
                     "screenshot": result.screenshot
-                })).unwrap_or_else(|_| "# Error: Failed to serialize to YAML".to_string());
+                }))
+                .unwrap_or_else(|_| "# Error: Failed to serialize to YAML".to_string());
                 println!("{}", yaml_output);
             }
             OutputFormat::Table => {
@@ -1741,9 +2053,15 @@ impl HeadlessRuntime {
                 println!("│ Status          │ {}                                                           │",
                          if result.success { "✅ Success" } else { "❌ Failed" });
                 if let Some(state) = &result.agent_state {
-                    println!("│ Agent State     │ {:<63} │", state.chars().take(63).collect::<String>());
+                    println!(
+                        "│ Agent State     │ {:<63} │",
+                        state.chars().take(63).collect::<String>()
+                    );
                 }
-                println!("│ Execution Time  │ {:<63} │", format!("{:?}", result.execution_time));
+                println!(
+                    "│ Execution Time  │ {:<63} │",
+                    format!("{:?}", result.execution_time)
+                );
 
                 // Attempt to parse output as JSON for structured display
                 let parsed_json: Result<Value, _> = serde_json::from_str(&result.output);
@@ -1754,24 +2072,42 @@ impl HeadlessRuntime {
                         } else {
                             val.to_string()
                         };
-                        println!("│ {:<15} │ {:<63} │", key.chars().take(15).collect::<String>(), val_str.chars().take(63).collect::<String>());
+                        println!(
+                            "│ {:<15} │ {:<63} │",
+                            key.chars().take(15).collect::<String>(),
+                            val_str.chars().take(63).collect::<String>()
+                        );
                     }
                 } else if !result.output.is_empty() {
                     let output_lines: Vec<&str> = result.output.lines().collect();
                     for (i, line) in output_lines.iter().enumerate() {
                         let field_name = if i == 0 { "Output" } else { "" };
-                        println!("│ {:<15} │ {:<63} │", field_name, line.chars().take(63).collect::<String>());
+                        println!(
+                            "│ {:<15} │ {:<63} │",
+                            field_name,
+                            line.chars().take(63).collect::<String>()
+                        );
                     }
                 }
 
                 if let Some(error) = &result.error {
-                    println!("│ Error           │ {:<63} │", error.chars().take(63).collect::<String>());
+                    println!(
+                        "│ Error           │ {:<63} │",
+                        error.chars().take(63).collect::<String>()
+                    );
                 }
                 println!("└─────────────────┴─────────────────────────────────────────────────────────────────┘");
             }
             OutputFormat::Markdown => {
                 println!("# Agent Result\n");
-                println!("**Status:** {}\n", if result.success { "✅ Success" } else { "❌ Failed" });
+                println!(
+                    "**Status:** {}\n",
+                    if result.success {
+                        "✅ Success"
+                    } else {
+                        "❌ Failed"
+                    }
+                );
                 if let Some(state) = &result.agent_state {
                     println!("**Agent State:** {}\n", state);
                 }
@@ -1795,7 +2131,10 @@ impl HeadlessRuntime {
                         println!("[Execution Time: {:?}]", result.execution_time);
                     }
                 } else {
-                    eprintln!("Error: {}", result.error.as_deref().unwrap_or("Unknown error"));
+                    eprintln!(
+                        "Error: {}",
+                        result.error.as_deref().unwrap_or("Unknown error")
+                    );
                 }
             }
         }
@@ -1812,15 +2151,19 @@ impl HeadlessRuntime {
                     "success": false,
                     "error": error
                 });
-                println!("{}", serde_json::to_string_pretty(&error_result).unwrap_or_else(|_| {
-                    format!("{{\"success\":false,\"error\":\"{}\"}}", error)
-                }));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&error_result).unwrap_or_else(|_| {
+                        format!("{{\"success\":false,\"error\":\"{}\"}}", error)
+                    })
+                );
             }
             OutputFormat::Yaml => {
                 let yaml_output = serde_yaml::to_string(&json!({
                     "success": false,
                     "error": error
-                })).unwrap_or_else(|_| format!("# Error\n# Failed to serialize to YAML: {}", error));
+                }))
+                .unwrap_or_else(|_| format!("# Error\n# Failed to serialize to YAML: {}", error));
                 println!("{}", yaml_output);
             }
             OutputFormat::Table => {
@@ -1828,7 +2171,10 @@ impl HeadlessRuntime {
                 println!("│ Field           │ Value                                                           │");
                 println!("├─────────────────┼─────────────────────────────────────────────────────────────────┤");
                 println!("│ Status          │ ❌ Failed                                                       │");
-                println!("│ Error           │ {:<63} │", error.chars().take(63).collect::<String>());
+                println!(
+                    "│ Error           │ {:<63} │",
+                    error.chars().take(63).collect::<String>()
+                );
                 println!("└─────────────────┴─────────────────────────────────────────────────────────────────┘");
             }
             OutputFormat::Markdown => {

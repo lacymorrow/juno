@@ -235,12 +235,14 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     // First update the mode state, then handle the finished event
     crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
     crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
-    
+
     // Resume always listening mode if it was active before dictation
-    let should_resume_always_listening = app_state.audio_settings.lock()
+    let should_resume_always_listening = app_state
+        .audio_settings
+        .lock()
         .map(|settings| settings.was_always_listening_active_before_dictation)
         .unwrap_or(false);
-    
+
     if should_resume_always_listening {
         info!("[Dictation Mode] Resuming always listening mode");
         if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
@@ -249,10 +251,13 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
         )
         .await
         {
-            warn!("[Dictation Mode] Failed to resume always listening mode: {}", e);
+            warn!(
+                "[Dictation Mode] Failed to resume always listening mode: {}",
+                e
+            );
         }
     }
-    
+
     info!("[Dictation Mode] Completed dictation successfully");
 }
 
@@ -274,9 +279,10 @@ async fn handle_agent_mode_result(
 
                 // Use a different event for agent mode to avoid confusion with dictation mode
                 info!("[Event] Emitting agent-query-ready event for agent processing");
-                if let Err(e) =
-                    app_handle.emit(crate::constants::events::agent::QUERY_READY, transformed_payload)
-                {
+                if let Err(e) = app_handle.emit(
+                    crate::constants::events::agent::QUERY_READY,
+                    transformed_payload,
+                ) {
                     error!("[Event] Failed to emit agent-query-ready event: {}", e);
                 }
             } else {
@@ -291,7 +297,9 @@ async fn handle_agent_mode_result(
                 "[Event] Failed to parse final-result payload as JSON: {}, payload: {}",
                 e, payload_str
             );
-            if let Err(e) = app_handle.emit(crate::constants::events::agent::QUERY_READY, payload_str) {
+            if let Err(e) =
+                app_handle.emit(crate::constants::events::agent::QUERY_READY, payload_str)
+            {
                 error!(
                     "[Event] Failed to emit agent-query-ready event (fallback): {}",
                     e
@@ -305,7 +313,10 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
     // Unregister escape key as dictation is complete
     {
         let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-        if let Err(e) = coordinator.unregister_escape_user(&app_handle, "dictation_events").await {
+        if let Err(e) = coordinator
+            .unregister_escape_user(&app_handle, "dictation_events")
+            .await
+        {
             warn!(
                 "Failed to unregister escape key after dictation: {} - continuing anyway",
                 e
@@ -318,13 +329,15 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
     if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
         warn!("Failed to play voice end sound: {}", e);
     }
-    
+
     // Resume always listening mode if it was active before dictation
     let app_state = app_handle.state::<crate::state::AppState>();
-    let should_resume_always_listening = app_state.audio_settings.lock()
+    let should_resume_always_listening = app_state
+        .audio_settings
+        .lock()
         .map(|settings| settings.was_always_listening_active_before_dictation)
         .unwrap_or(false);
-    
+
     if should_resume_always_listening {
         info!("[Voice Transcription Stopped] Resuming always listening mode");
         if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
@@ -333,7 +346,10 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
         )
         .await
         {
-            warn!("[Voice Transcription Stopped] Failed to resume always listening mode: {}", e);
+            warn!(
+                "[Voice Transcription Stopped] Failed to resume always listening mode: {}",
+                e
+            );
         }
     }
 }
@@ -356,12 +372,12 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
 
     // Pause always listening mode if it's active
     let was_always_listening_active = app_state.get_always_listening_active().unwrap_or(false);
-    
+
     // Store the state so we can restore it later
     if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
         audio_settings.was_always_listening_active_before_dictation = was_always_listening_active;
     }
-    
+
     if was_always_listening_active {
         info!("[Dictation Mode] Pausing always listening mode");
         if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -370,15 +386,17 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
         )
         .await
         {
-            warn!("[Dictation Mode] Failed to pause always listening mode: {}", e);
+            warn!(
+                "[Dictation Mode] Failed to pause always listening mode: {}",
+                e
+            );
         }
     }
 
     // Update floating bar manager to set dictation mode
     let app_handle_for_bar = app_handle.clone();
     tauri::async_runtime::spawn(async move {
-                    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, true)
-            .await;
+        crate::commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, true).await;
     });
 
     // Use the plugin command to start dictation only if controller exists
@@ -401,8 +419,12 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
 
                 // Register escape key to cancel dictation
                 {
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    if let Err(e) = coordinator.register_escape_user(&app_handle, "dictation_events").await {
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    if let Err(e) = coordinator
+                        .register_escape_user(&app_handle, "dictation_events")
+                        .await
+                    {
                         warn!(
                             "Failed to register escape key for dictation: {} - continuing anyway",
                             e
@@ -501,7 +523,10 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     // Unregister escape key handler (was missing)
     {
         let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-        if let Err(e) = coordinator.unregister_escape_user(&app_handle, "dictation_events").await {
+        if let Err(e) = coordinator
+            .unregister_escape_user(&app_handle, "dictation_events")
+            .await
+        {
             warn!(
                 "[Dictation Cancel] Failed to unregister escape key after cancellation: {} - continuing anyway",
                 e
@@ -510,10 +535,12 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     }
 
     // Resume always listening mode if it was active before dictation
-    let should_resume_always_listening = app_state.audio_settings.lock()
+    let should_resume_always_listening = app_state
+        .audio_settings
+        .lock()
         .map(|settings| settings.was_always_listening_active_before_dictation)
         .unwrap_or(false);
-    
+
     if should_resume_always_listening {
         info!("[Dictation Cancel] Resuming always listening mode");
         let app_state_for_listening = app_handle.state::<state::AppState>();
@@ -523,10 +550,13 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
         )
         .await
         {
-            warn!("[Dictation Cancel] Failed to resume always listening mode: {}", e);
+            warn!(
+                "[Dictation Cancel] Failed to resume always listening mode: {}",
+                e
+            );
         }
     }
-    
+
     info!("[Dictation Cancel] Cleanup completed successfully");
 }
 
@@ -557,12 +587,14 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
             e
         );
     }
-    
+
     // Resume always listening mode if it was active before dictation
-    let should_resume_always_listening = app_state.audio_settings.lock()
+    let should_resume_always_listening = app_state
+        .audio_settings
+        .lock()
         .map(|settings| settings.was_always_listening_active_before_dictation)
         .unwrap_or(false);
-    
+
     if should_resume_always_listening {
         info!("[Dictation Stop] Resuming always listening mode");
         let app_state_for_listening = app_handle.state::<state::AppState>();
@@ -572,7 +604,10 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
         )
         .await
         {
-            warn!("[Dictation Stop] Failed to resume always listening mode: {}", e);
+            warn!(
+                "[Dictation Stop] Failed to resume always listening mode: {}",
+                e
+            );
         }
     }
 }

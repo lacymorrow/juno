@@ -79,7 +79,11 @@ async fn test_memory_manager_headless() {
     memory.add_message(msg).await.expect("should add message");
 
     let messages = memory.get_messages().await.expect("should get messages");
-    assert_eq!(messages.len(), initial_count + 1, "should have one more message");
+    assert_eq!(
+        messages.len(),
+        initial_count + 1,
+        "should have one more message"
+    );
     assert_eq!(
         messages.last().expect("should have last").content,
         "Hello from headless test"

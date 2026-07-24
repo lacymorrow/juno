@@ -3,11 +3,11 @@
 //! This module provides debug capabilities that can be conditionally enabled
 //! in production functions, eliminating the need for separate dev_ wrapper functions.
 
-use tauri::{AppHandle, Emitter};
-use tracing::{debug, info, warn};
+use crate::constants::events;
 use serde_json::json;
 use std::time::Instant;
-use crate::constants::events;
+use tauri::{AppHandle, Emitter};
+use tracing::{debug, info, warn};
 
 /// Configuration for debug behavior
 #[derive(Debug, Clone)]
@@ -171,7 +171,10 @@ pub fn validate_debug_input<T>(
         }
         Err(e) => {
             warn!("[DEBUG] ❌ {} validation failed: {}", validation_name, e);
-            Err(format!("Debug validation failed for {}: {}", validation_name, e))
+            Err(format!(
+                "Debug validation failed for {}: {}",
+                validation_name, e
+            ))
         }
     }
 }
@@ -235,8 +238,11 @@ pub mod validators {
 
     /// Validate coordinates are reasonable
     pub fn valid_coordinates(x: f64, y: f64) -> Result<(), String> {
-        if x < crate::constants::mouse::testing::MIN_COORDINATE_VALUE || y < crate::constants::mouse::testing::MIN_COORDINATE_VALUE ||
-           x > crate::constants::mouse::testing::MAX_COORDINATE_VALUE || y > crate::constants::mouse::testing::MAX_COORDINATE_VALUE {
+        if x < crate::constants::mouse::testing::MIN_COORDINATE_VALUE
+            || y < crate::constants::mouse::testing::MIN_COORDINATE_VALUE
+            || x > crate::constants::mouse::testing::MAX_COORDINATE_VALUE
+            || y > crate::constants::mouse::testing::MAX_COORDINATE_VALUE
+        {
             Err(format!("Coordinates ({}, {}) seem unreasonable", x, y))
         } else {
             Ok(())
@@ -265,8 +271,13 @@ pub mod validators {
     pub fn valid_duration_seconds(duration_sec: f64) -> Result<(), String> {
         if duration_sec < 0.0 {
             Err("Duration cannot be negative".to_string())
-        } else if duration_sec > crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS { // 60 seconds max
-            Err(format!("Duration too long (max {} seconds)", crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS))
+        } else if duration_sec > crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS
+        {
+            // 60 seconds max
+            Err(format!(
+                "Duration too long (max {} seconds)",
+                crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS
+            ))
         } else {
             Ok(())
         }

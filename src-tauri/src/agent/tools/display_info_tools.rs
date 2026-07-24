@@ -19,14 +19,14 @@
 //! Used by: Computer use agents, coordinate calculations, display-aware workflows
 //! Registration: Called via `register_display_info_tools()`
 
-use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::core::ToolDefinition;
+use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::utils::coordinates::get_current_standard_resolution;
-use serde_json::{Value, json};
-use tracing::{info, error};
+use serde_json::{json, Value};
+use tracing::{error, info};
 
 #[cfg(target_os = "macos")]
-use computer_use_ai_sdk::platforms::macos::display::{get_main_display, get_active_displays};
+use computer_use_ai_sdk::platforms::macos::display::{get_active_displays, get_main_display};
 
 /// Registers display information tools with the tool provider.
 ///
@@ -63,12 +63,10 @@ pub async fn register_display_info_tools(
         beta_flag: None,
     };
 
-    let get_screen_info_exec = move |_input: Value| {
-        async move {
-            get_screen_info_impl().await
-        }
-    };
-    provider.register_async_tool(get_screen_info_def, get_screen_info_exec).await;
+    let get_screen_info_exec = move |_input: Value| async move { get_screen_info_impl().await };
+    provider
+        .register_async_tool(get_screen_info_def, get_screen_info_exec)
+        .await;
     info!("Registered tool: get_screen_info");
 
     // Tool for getting screen center point
@@ -84,12 +82,10 @@ pub async fn register_display_info_tools(
         beta_flag: None,
     };
 
-    let get_screen_center_exec = move |_input: Value| {
-        async move {
-            get_screen_center_impl().await
-        }
-    };
-    provider.register_async_tool(get_screen_center_def, get_screen_center_exec).await;
+    let get_screen_center_exec = move |_input: Value| async move { get_screen_center_impl().await };
+    provider
+        .register_async_tool(get_screen_center_def, get_screen_center_exec)
+        .await;
     info!("Registered tool: get_screen_center");
 
     // Tool for getting information about all displays
@@ -105,12 +101,10 @@ pub async fn register_display_info_tools(
         beta_flag: None,
     };
 
-    let get_display_list_exec = move |_input: Value| {
-        async move {
-            get_display_list_impl().await
-        }
-    };
-    provider.register_async_tool(get_display_list_def, get_display_list_exec).await;
+    let get_display_list_exec = move |_input: Value| async move { get_display_list_impl().await };
+    provider
+        .register_async_tool(get_display_list_def, get_display_list_exec)
+        .await;
     info!("Registered tool: get_display_list");
 
     Ok(())
@@ -127,15 +121,22 @@ async fn get_screen_info_impl() -> Result<Value, String> {
                 let actual_height = bounds.size.height as u32;
 
                 // Get the standard resolution coordinates that the agent should use
-                let (standard_width, standard_height) = get_current_standard_resolution()
-                    .unwrap_or((actual_width, actual_height));
+                let (standard_width, standard_height) =
+                    get_current_standard_resolution().unwrap_or((actual_width, actual_height));
 
                 // Calculate center point in standard resolution coordinates
                 let center_x = standard_width / 2;
                 let center_y = standard_height / 2;
 
-                info!("Screen info: actual {}x{}, standard {}x{}, center ({}, {})",
-                    actual_width, actual_height, standard_width, standard_height, center_x, center_y);
+                info!(
+                    "Screen info: actual {}x{}, standard {}x{}, center ({}, {})",
+                    actual_width,
+                    actual_height,
+                    standard_width,
+                    standard_height,
+                    center_x,
+                    center_y
+                );
 
                 Ok(json!({
                     "resolution": {
@@ -173,13 +174,15 @@ async fn get_screen_info_impl() -> Result<Value, String> {
     #[cfg(not(target_os = "macos"))]
     {
         // Fallback for non-macOS platforms
-        let (width, height) = get_current_standard_resolution()
-            .unwrap_or((1366, 768)); // Common fallback resolution
+        let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768)); // Common fallback resolution
 
         let center_x = width / 2;
         let center_y = height / 2;
 
-        info!("Screen info (fallback): {}x{}, center ({}, {})", width, height, center_x, center_y);
+        info!(
+            "Screen info (fallback): {}x{}, center ({}, {})",
+            width, height, center_x, center_y
+        );
 
         Ok(json!({
             "resolution": {
@@ -214,14 +217,16 @@ async fn get_screen_center_impl() -> Result<Value, String> {
                 let actual_height = bounds.size.height as u32;
 
                 // Get the standard resolution coordinates
-                let (standard_width, standard_height) = get_current_standard_resolution()
-                    .unwrap_or((actual_width, actual_height));
+                let (standard_width, standard_height) =
+                    get_current_standard_resolution().unwrap_or((actual_width, actual_height));
 
                 let center_x = standard_width / 2;
                 let center_y = standard_height / 2;
 
-                info!("Screen center: ({}, {}) in standard resolution {}x{}",
-                    center_x, center_y, standard_width, standard_height);
+                info!(
+                    "Screen center: ({}, {}) in standard resolution {}x{}",
+                    center_x, center_y, standard_width, standard_height
+                );
 
                 Ok(json!({
                     "x": center_x,
@@ -242,13 +247,15 @@ async fn get_screen_center_impl() -> Result<Value, String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let (width, height) = get_current_standard_resolution()
-            .unwrap_or((1366, 768));
+        let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768));
 
         let center_x = width / 2;
         let center_y = height / 2;
 
-        info!("Screen center (fallback): ({}, {}) in {}x{}", center_x, center_y, width, height);
+        info!(
+            "Screen center (fallback): ({}, {}) in {}x{}",
+            center_x, center_y, width, height
+        );
 
         Ok(json!({
             "x": center_x,
@@ -277,8 +284,8 @@ async fn get_display_list_impl() -> Result<Value, String> {
 
                     // For multi-monitor setups, we might want to handle standard resolution per display
                     // For now, use the coordinate system's standard resolution
-                    let (standard_width, standard_height) = get_current_standard_resolution()
-                        .unwrap_or((actual_width, actual_height));
+                    let (standard_width, standard_height) =
+                        get_current_standard_resolution().unwrap_or((actual_width, actual_height));
 
                     display_list.push(json!({
                         "id": display.id,
@@ -323,8 +330,7 @@ async fn get_display_list_impl() -> Result<Value, String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let (width, height) = get_current_standard_resolution()
-            .unwrap_or((1366, 768));
+        let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768));
 
         let display_list = vec![json!({
             "id": 0,
@@ -345,7 +351,10 @@ async fn get_display_list_impl() -> Result<Value, String> {
             }
         })];
 
-        info!("Display list (fallback): single display {}x{}", width, height);
+        info!(
+            "Display list (fallback): single display {}x{}",
+            width, height
+        );
 
         Ok(json!({
             "displays": display_list,

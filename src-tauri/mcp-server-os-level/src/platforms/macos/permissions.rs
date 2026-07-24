@@ -1,28 +1,24 @@
 use crate::platforms::macos::ffi::{
-    AXIsProcessTrustedWithOptions,
-    CGPreflightScreenCaptureAccess,
-    CGRequestScreenCaptureAccess,
+    AXIsProcessTrustedWithOptions, CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess,
 }; // Import from ffi module
 use crate::AutomationError;
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
-use tracing::{debug, info, warn};
-use std::process::Command;
 #[cfg(test)]
 use once_cell::sync::Lazy;
+use std::process::Command;
 #[cfg(test)]
 use std::sync::Mutex;
+use tracing::{debug, info, warn};
 
 #[cfg(test)]
-static SCREEN_RECORDING_CHECK_OVERRIDE: Lazy<
-    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
-> = Lazy::new(|| Mutex::new(None));
+static SCREEN_RECORDING_CHECK_OVERRIDE: Lazy<Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>> =
+    Lazy::new(|| Mutex::new(None));
 #[cfg(test)]
-static SCREEN_RECORDING_REQUEST_OVERRIDE: Lazy<
-    Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>,
-> = Lazy::new(|| Mutex::new(None));
+static SCREEN_RECORDING_REQUEST_OVERRIDE: Lazy<Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 // Make the function public so it can be called from server.rs
 pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
@@ -59,8 +55,14 @@ pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, Automa
 }
 
 /// Enhanced permission checking that automatically opens system settings when denied
-pub fn check_accessibility_permissions_with_auto_redirect(show_prompt: bool, auto_open_settings: bool) -> Result<bool, AutomationError> {
-    debug!("checking accessibility permissions with auto-redirect option: {}", auto_open_settings);
+pub fn check_accessibility_permissions_with_auto_redirect(
+    show_prompt: bool,
+    auto_open_settings: bool,
+) -> Result<bool, AutomationError> {
+    debug!(
+        "checking accessibility permissions with auto-redirect option: {}",
+        auto_open_settings
+    );
 
     unsafe {
         // Create the options dictionary more safely
@@ -119,10 +121,17 @@ pub fn open_accessibility_settings() -> Result<(), String> {
             .map_err(|e| format!("Failed to execute open command: {}", e))?;
 
         if output.status.success() {
-            info!("Successfully opened System Settings for accessibility permissions using URL: {}", url);
+            info!(
+                "Successfully opened System Settings for accessibility permissions using URL: {}",
+                url
+            );
             return Ok(());
         } else {
-            debug!("Failed to open with URL {}: {}", url, String::from_utf8_lossy(&output.stderr));
+            debug!(
+                "Failed to open with URL {}: {}",
+                url,
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 
@@ -136,13 +145,19 @@ pub fn open_accessibility_settings() -> Result<(), String> {
         info!("Opened general Privacy & Security settings as fallback");
         Ok(())
     } else {
-        Err(format!("Failed to open System Settings: {}", String::from_utf8_lossy(&fallback_output.stderr)))
+        Err(format!(
+            "Failed to open System Settings: {}",
+            String::from_utf8_lossy(&fallback_output.stderr)
+        ))
     }
 }
 
 /// Open macOS System Settings for a specific permission type
 pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), String> {
-    debug!("Opening System Settings for permission type: {}", permission_type);
+    debug!(
+        "Opening System Settings for permission type: {}",
+        permission_type
+    );
 
     let urls = match permission_type {
         "accessibility" => vec![
@@ -185,10 +200,17 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
             .map_err(|e| format!("Failed to execute open command: {}", e))?;
 
         if output.status.success() {
-            info!("Successfully opened System Settings for {} permissions using URL: {}", permission_type, url);
+            info!(
+                "Successfully opened System Settings for {} permissions using URL: {}",
+                permission_type, url
+            );
             return Ok(());
         } else {
-            debug!("Failed to open with URL {}: {}", url, String::from_utf8_lossy(&output.stderr));
+            debug!(
+                "Failed to open with URL {}: {}",
+                url,
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 
@@ -199,10 +221,17 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
         .map_err(|e| format!("Failed to execute fallback open command: {}", e))?;
 
     if fallback_output.status.success() {
-        info!("Opened general Privacy & Security settings as fallback for {}", permission_type);
+        info!(
+            "Opened general Privacy & Security settings as fallback for {}",
+            permission_type
+        );
         Ok(())
     } else {
-        Err(format!("Failed to open System Settings for {}: {}", permission_type, String::from_utf8_lossy(&fallback_output.stderr)))
+        Err(format!(
+            "Failed to open System Settings for {}: {}",
+            permission_type,
+            String::from_utf8_lossy(&fallback_output.stderr)
+        ))
     }
 }
 
