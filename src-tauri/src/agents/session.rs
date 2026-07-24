@@ -77,6 +77,12 @@ impl AgentSessionId {
     }
 }
 
+impl Default for AgentSessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Display for AgentSessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -393,12 +399,16 @@ impl AgentSessionRegistry {
             let is_focused = focused.as_ref() == Some(id);
             out.push(session.snapshot(is_focused).await);
         }
-        out.sort_by(|a, b| a.started_at_ms.cmp(&b.started_at_ms));
+        out.sort_by_key(|info| info.started_at_ms);
         out
     }
 
     pub async fn len(&self) -> usize {
         self.sessions.lock().await.len()
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        self.sessions.lock().await.is_empty()
     }
 }
 
@@ -457,7 +467,13 @@ impl SessionHandle {
     /// (completed / cancelled / failed) so the roster UI can play its
     /// pulse / shake animations and the backend can decide whether to fire
     /// a system notification.
-    pub async fn mark_terminal(&self, status: AgentSessionStatus) {
+    ///
+    /// Returns whether the session was focused at the moment the terminal
+    /// snapshot was taken. Callers gating notifications on focus must use
+    /// this value rather than re-reading `is_focused()` — focus can change
+    /// between the two reads, making the notification gate disagree with
+    /// the emitted snapshot.
+    pub async fn mark_terminal(&self, status: AgentSessionStatus) -> bool {
         self.session.set_status(status).await;
         let focused = self.registry.focused().as_ref() == Some(self.session.id());
         let snapshot = self.session.snapshot(focused).await;
@@ -476,6 +492,7 @@ impl SessionHandle {
             }
         }
         broadcast_sessions_updated(&self.app_handle, &self.registry).await;
+        focused
     }
 
     /// True when this session is the currently focused one.
